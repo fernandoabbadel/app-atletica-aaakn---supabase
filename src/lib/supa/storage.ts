@@ -18,7 +18,8 @@ export interface UploadResult {
 const DEFAULT_BUCKET =
   process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET ||
   process.env.NEXT_PUBLIC_SUPABASE_BUCKET ||
-  "public";
+  // "public" e nome reservado no Supabase Storage; usamos "uploads" como padrao seguro.
+  "uploads";
 
 export function getStorage(): StorageInstance {
   return {

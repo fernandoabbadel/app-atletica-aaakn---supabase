@@ -1,44 +1,49 @@
-import { db } from "./backend"; 
-import { collection, addDoc, serverTimestamp } from "@/lib/supa/firestore";
+import { getSupabaseClient } from "./supabase";
 import { isPermissionError } from "./backendErrors";
 
-export type ActionType = 
-  | "CREATE" 
-  | "UPDATE" 
-  | "DELETE" 
-  | "LOGIN" 
-  | "ERROR" 
-  | "LIKE"       
-  | "QUIZ"       
-  | "FOLLOW"     
+export type ActionType =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE"
+  | "LOGIN"
+  | "ERROR"
+  | "LIKE"
+  | "QUIZ"
+  | "FOLLOW"
   | "UNFOLLOW"
   | "GAME_CYCLE";
 
-// 🦈 Correção: 'any' substituído por 'unknown' (Tipagem segura)
 export const logActivity = async (
   userId: string,
-  userName: string, 
+  userName: string,
   action: ActionType,
-  resource: string, 
-  details: unknown 
+  resource: string,
+  details: unknown
 ) => {
   try {
-    // Verifica se é objeto para stringificar, senão converte direto pra string
-    const detailsString = typeof details === 'object' && details !== null 
-        ? JSON.stringify(details) 
-        : String(details);
+    const supabase = getSupabaseClient();
+    const detailsString =
+      typeof details === "object" && details !== null ? JSON.stringify(details) : String(details);
 
-    await addDoc(collection(db, "activity_logs"), {
+    // Tabela opcional no bootstrap inicial. Se nao existir ainda, o catch evita quebrar o fluxo principal.
+    const { error } = await supabase.from("activity_logs").insert({
       userId,
-      userName: userName || "Anônimo",
+      userName: userName || "Anonimo",
       action,
       resource,
       details: detailsString,
-      timestamp: serverTimestamp(),
+      timestamp: new Date().toISOString(),
     });
-    
-    if (process.env.NODE_ENV === 'development') {
-        console.log(`🦈 [LOG]: ${userName} realizou ${action} em ${resource}`);
+
+    if (error) {
+      throw Object.assign(new Error(error.message), {
+        code: error.code ?? `db/${error.name ?? "insert-failed"}`,
+        cause: error,
+      });
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.log(`[LOG]: ${userName} realizou ${action} em ${resource}`);
     }
   } catch (error: unknown) {
     if (!isPermissionError(error)) {
@@ -46,4 +51,3 @@ export const logActivity = async (
     }
   }
 };
-

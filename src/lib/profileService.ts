@@ -10,13 +10,12 @@ import {
   query,
   runTransaction,
   serverTimestamp,
-  updateDoc,
   where,
 } from "@/lib/supa/firestore";
-import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
+import { getSupabaseClient } from "@/lib/supabase";
 
 import { compressImageFile } from "./imageCompression";
-import { db, functions, storage } from "./backend";
+import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { validateImageFile } from "./upload";
 
@@ -35,8 +34,6 @@ const MAX_TREINO_RESULTS = 8;
 const MAX_LIGA_RESULTS = 8;
 const MAX_FOLLOW_RESULTS = 260;
 
-const PROFILE_UPDATE_FIELDS_CALLABLE = "profileUserUpdateFields";
-const PROFILE_MARK_COMPLETE_CALLABLE = "profileMarkComplete";
 const PROFILE_TOGGLE_FOLLOW_CALLABLE = "profileToggleFollow";
 const PROFILE_ADMIN_RECOUNT_FOLLOWS_CALLABLE = "profileAdminRecountFollowStats";
 
@@ -817,6 +814,7 @@ export async function updateProfileFields(payload: {
 }): Promise<void> {
   const uid = payload.uid.trim();
   if (!uid) return;
+  const supabase = getSupabaseClient();
 
   const requestPayload = {
     uid,
@@ -832,17 +830,20 @@ export async function updateProfileFields(payload: {
     relacionamentoPublico: Boolean(payload.relacionamentoPublico),
   };
 
-  await callWithFallback<typeof requestPayload, { ok: boolean }>(
-    PROFILE_UPDATE_FIELDS_CALLABLE,
-    requestPayload,
-    async () => {
-      await updateDoc(doc(db, "users", uid), {
-        ...requestPayload,
-        updatedAt: serverTimestamp(),
-      });
-      return { ok: true };
-    }
-  );
+  const { error } = await supabase
+    .from("users")
+    .update({
+      ...requestPayload,
+      updatedAt: new Date().toISOString(),
+    })
+    .eq("uid", uid);
+
+  if (error) {
+    throw Object.assign(new Error(error.message), {
+      code: error.code ?? `db/${error.name ?? "update-failed"}`,
+      cause: error,
+    });
+  }
 
   clearProfileCachesForUser(uid);
 }
@@ -850,19 +851,43 @@ export async function updateProfileFields(payload: {
 export async function markProfileComplete(uidRaw: string): Promise<void> {
   const uid = uidRaw.trim();
   if (!uid) return;
+  const supabase = getSupabaseClient();
 
-  const requestPayload = { uid };
-  await callWithFallback<typeof requestPayload, { ok: boolean }>(
-    PROFILE_MARK_COMPLETE_CALLABLE,
-    requestPayload,
-    async () => {
-      await updateDoc(doc(db, "users", uid), {
-        "stats.profileComplete": 1,
-        updatedAt: serverTimestamp(),
-      });
-      return { ok: true };
-    }
-  );
+  const { data: row, error: readError } = await supabase
+    .from("users")
+    .select("stats")
+    .eq("uid", uid)
+    .maybeSingle();
+
+  if (readError) {
+    throw Object.assign(new Error(readError.message), {
+      code: readError.code ?? `db/${readError.name ?? "select-failed"}`,
+      cause: readError,
+    });
+  }
+
+  const currentStats =
+    typeof row?.stats === "object" && row.stats !== null
+      ? (row.stats as Record<string, unknown>)
+      : {};
+
+  const { error: updateError } = await supabase
+    .from("users")
+    .update({
+      stats: {
+        ...currentStats,
+        profileComplete: 1,
+      },
+      updatedAt: new Date().toISOString(),
+    })
+    .eq("uid", uid);
+
+  if (updateError) {
+    throw Object.assign(new Error(updateError.message), {
+      code: updateError.code ?? `db/${updateError.name ?? "update-failed"}`,
+      cause: updateError,
+    });
+  }
 
   clearProfileCachesForUser(uid);
 }
@@ -876,6 +901,11 @@ export async function uploadProfileImage(payload: {
   if (!uid) {
     throw new Error("Usuario invalido para upload.");
   }
+  const supabase = getSupabaseClient();
+  const bucket =
+    process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET ||
+    process.env.NEXT_PUBLIC_SUPABASE_BUCKET ||
+    "uploads";
 
   const sourceValidationError = validateImageFile(payload.file);
   if (sourceValidationError) {
@@ -899,10 +929,35 @@ export async function uploadProfileImage(payload: {
   const prefix =
     payload.kind === "capa" ? "cover" : payload.kind === "avatar" ? "avatar" : "profile";
   const path = `users/${uid}/${prefix}_${Date.now()}_${baseName}`;
+  const { error: uploadError } = await supabase.storage.from(bucket).upload(path, compressedFile, {
+    upsert: true,
+    contentType: compressedFile.type || "image/jpeg",
+  });
 
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, compressedFile);
-  return getDownloadURL(storageRef);
+  if (uploadError) {
+    throw Object.assign(new Error(uploadError.message), {
+      code: `storage/${uploadError.name ?? "upload-failed"}`,
+      cause: uploadError,
+    });
+  }
+
+  const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(path);
+  if (publicData?.publicUrl) {
+    return publicData.publicUrl;
+  }
+
+  const { data: signedData, error: signedError } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(path, 60 * 60 * 24 * 30);
+
+  if (signedError || !signedData?.signedUrl) {
+    throw Object.assign(new Error(signedError?.message || "Falha ao gerar URL do upload."), {
+      code: `storage/${signedError?.name ?? "signed-url-failed"}`,
+      cause: signedError,
+    });
+  }
+
+  return signedData.signedUrl;
 }
 
 export async function saveProfileImageUrl(payload: {
@@ -913,11 +968,22 @@ export async function saveProfileImageUrl(payload: {
   const uid = payload.uid.trim();
   const url = payload.url.trim();
   if (!uid || !url) return;
+  const supabase = getSupabaseClient();
 
-  await updateDoc(doc(db, "users", uid), {
-    [payload.field]: url,
-    updatedAt: serverTimestamp(),
-  });
+  const { error } = await supabase
+    .from("users")
+    .update({
+      [payload.field]: url,
+      updatedAt: new Date().toISOString(),
+    })
+    .eq("uid", uid);
+
+  if (error) {
+    throw Object.assign(new Error(error.message), {
+      code: error.code ?? `db/${error.name ?? "update-failed"}`,
+      cause: error,
+    });
+  }
 
   clearProfileCachesForUser(uid);
 }
