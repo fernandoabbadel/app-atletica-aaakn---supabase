@@ -6,7 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { logActivity } from "../lib/logger"; 
 import LoadingScreen from "../app/loading";
 import { DEFAULT_STATS, DEFAULT_USER_PROPS } from "../constants/userDefaults";
-import { isPermissionError } from "@/lib/backendErrors";
+import { getBackendErrorCode, isPermissionError } from "@/lib/backendErrors";
 
 // --- TIPAGEM ---
 export type UserRole = "guest" | "user" | "treinador" | "empresa" | "admin_treino" | "admin_geral" | "admin_gestor" | "master" | "vendas";
@@ -140,6 +140,58 @@ const asString = (value: unknown, fallback = ""): string =>
 
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const isDuplicateKeyError = (error: unknown): boolean => {
+  const code = getBackendErrorCode(error);
+  return code === "23505";
+};
+
+const formatBackendErrorForConsole = (error: unknown): unknown => {
+  if (error instanceof Error) {
+    const extra = error as Error & {
+      code?: unknown;
+      details?: unknown;
+      hint?: unknown;
+      status?: unknown;
+      statusText?: unknown;
+    };
+    return {
+      name: error.name,
+      message: error.message,
+      code: typeof extra.code === "string" ? extra.code : undefined,
+      details: typeof extra.details === "string" ? extra.details : undefined,
+      hint: typeof extra.hint === "string" ? extra.hint : undefined,
+      status: typeof extra.status === "number" ? extra.status : undefined,
+      statusText: typeof extra.statusText === "string" ? extra.statusText : undefined,
+    };
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const raw = error as Record<string, unknown>;
+    return {
+      code: typeof raw.code === "string" ? raw.code : undefined,
+      message: typeof raw.message === "string" ? raw.message : undefined,
+      details: typeof raw.details === "string" ? raw.details : undefined,
+      hint: typeof raw.hint === "string" ? raw.hint : undefined,
+      status: typeof raw.status === "number" ? raw.status : undefined,
+    };
+  }
+
+  return error;
+};
+
+const buildNewUserInsertPayload = (authUser: SupabaseAuthUser): Record<string, unknown> => ({
+  // Payload minimo para reduzir falha por drift de schema e deixar defaults do banco preencherem o resto.
+  uid: authUser.id,
+  nome: getAuthDisplayName(authUser),
+  email: authUser.email || "",
+  foto: getAuthAvatar(authUser),
+  role: "guest",
+  status: "ativo",
+  stats: { ...DEFAULT_STATS },
+  ultimoLoginDiario: new Date().toLocaleDateString("pt-BR"),
+  data_adesao: new Date().toISOString(),
+});
 
 const getAuthDisplayName = (authUser: SupabaseAuthUser): string => {
   const meta = asRecord(authUser.user_metadata) ?? {};
@@ -347,26 +399,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const newUserPayload: Record<string, unknown> = {
-          ...DEFAULT_USER_PROPS,
-          uid: authUser.id,
-          nome: getAuthDisplayName(authUser),
-          email: authUser.email || "",
-          foto: getAuthAvatar(authUser),
-          role: "guest",
-          status: "ativo",
-          stats: { ...DEFAULT_STATS },
-          ultimoLoginDiario: new Date().toLocaleDateString("pt-BR"),
-          data_adesao: new Date().toISOString(),
-        };
+        const newUserPayload = buildNewUserInsertPayload(authUser);
 
-        const { data: insertedRow, error: insertError } = await supabase
+        let insertedRow: Record<string, unknown> | null = null;
+        const { data: insertData, error: insertError } = await supabase
           .from("users")
           .insert(newUserPayload)
           .select("*")
           .single();
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          if (!isDuplicateKeyError(insertError)) {
+            throw insertError;
+          }
+
+          // Corrida comum: onAuthStateChange e getSession disparam em paralelo no primeiro login.
+          const { data: concurrentRow, error: concurrentSelectError } = await supabase
+            .from("users")
+            .select("*")
+            .eq("uid", authUser.id)
+            .maybeSingle();
+
+          if (concurrentSelectError) throw concurrentSelectError;
+          if (!concurrentRow) throw insertError;
+          insertedRow = concurrentRow as Record<string, unknown>;
+        } else {
+          insertedRow = (insertData as Record<string, unknown>) ?? null;
+        }
+
+        if (!insertedRow) {
+          throw new Error("Falha ao criar usuario no banco.");
+        }
         if (!active || currentToken !== syncToken) return;
 
         const normalized = normalizeUserRow(insertedRow, authUser);
@@ -376,7 +439,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void logActivity(normalized.uid, normalized.nome, "CREATE", "Usuarios", "Novo cadastro via Google");
       } catch (error: unknown) {
         if (!isPermissionError(error)) {
-          console.error("Erro ao sincronizar usuario:", error);
+          console.error("Erro ao sincronizar usuario:", formatBackendErrorForConsole(error));
         }
         if (!active || currentToken !== syncToken) return;
         setUser(null);
