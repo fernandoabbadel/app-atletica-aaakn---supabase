@@ -19,7 +19,7 @@ import {
   fetchFollowList,
   fetchPublicProfileBundle,
   toggleFollowProfile
-} from "../../../lib/profileService";
+} from "../../../lib/profilePublicService";
 import { getBackendErrorCode } from "@/lib/backendErrors";
 import Link from "next/link";
 import { getTurmaImage } from "../../../constants/turmaImages";

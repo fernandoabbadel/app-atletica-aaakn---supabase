@@ -1,19 +1,4 @@
-import { httpsCallable } from "@/lib/supa/functions";
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  writeBatch,
-} from "@/lib/supa/firestore";
-
-import { db, functions } from "./backend";
-import { getBackendErrorCode } from "./backendErrors";
+﻿import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -26,13 +11,6 @@ const MAX_ACHIEVEMENT_RESULTS = 260;
 const MAX_PATENTE_RESULTS = 60;
 const MAX_LOG_RESULTS = 150;
 const MAX_RANKING_RESULTS = 60;
-
-const UPSERT_ACHIEVEMENT_CALLABLE = "achievementsAdminUpsertConfig";
-const DELETE_ACHIEVEMENT_CALLABLE = "achievementsAdminDeleteConfig";
-const TOGGLE_ACHIEVEMENT_CALLABLE = "achievementsAdminToggleConfig";
-const UPSERT_PATENTE_CALLABLE = "achievementsAdminUpsertPatente";
-const DELETE_PATENTE_CALLABLE = "achievementsAdminDeletePatente";
-const SEED_PATENTES_CALLABLE = "achievementsAdminSeedPatentes";
 
 const achievementsConfigCache = new Map<string, CacheEntry<AchievementConfigRecord[]>>();
 const patentesConfigCache = new Map<string, CacheEntry<PatenteConfigRecord[]>>();
@@ -60,10 +38,7 @@ const boundedLimit = (requested: number, maxAllowed: number): number => {
   return Math.floor(requested);
 };
 
-const getCachedValue = <T>(
-  cache: Map<string, CacheEntry<T>>,
-  key: string
-): T | null => {
+const getCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
   const entry = cache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.cachedAt > READ_CACHE_TTL_MS) {
@@ -73,11 +48,7 @@ const getCachedValue = <T>(
   return entry.value;
 };
 
-const setCachedValue = <T>(
-  cache: Map<string, CacheEntry<T>>,
-  key: string,
-  value: T
-): void => {
+const setCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void => {
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
@@ -87,37 +58,6 @@ const clearReadCaches = (): void => {
   achievementLogsCache.clear();
   rankingCache.clear();
 };
-
-const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase();
-  if (!code) return true;
-
-  return (
-    code.includes("functions/not-found") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/internal") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/cancelled") ||
-    code.includes("functions/unknown")
-  );
-};
-
-async function callWithFallback<TReq, TRes>(
-  callableName: string,
-  payload: TReq,
-  fallbackFn: () => Promise<TRes>
-): Promise<TRes> {
-  try {
-    const callable = httpsCallable<TReq, TRes>(functions, callableName);
-    const response = await callable(payload);
-    return response.data;
-  } catch (error: unknown) {
-    if (shouldFallbackToClientWrites(error)) {
-      return fallbackFn();
-    }
-    throw error;
-  }
-}
 
 const toMillis = (value: unknown): number => {
   if (value instanceof Date) return value.getTime();
@@ -134,6 +74,13 @@ const toMillis = (value: unknown): number => {
     if (result instanceof Date) return result.getTime();
   }
   return 0;
+};
+
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
 };
 
 export interface AchievementConfigRecord {
@@ -175,10 +122,7 @@ export interface PatenteConfigRecord {
   text?: string;
 }
 
-const normalizeAchievementConfig = (
-  id: string,
-  raw: unknown
-): AchievementConfigRecord | null => {
+const normalizeAchievementConfig = (id: string, raw: unknown): AchievementConfigRecord | null => {
   const obj = asObject(raw);
   if (!obj) return null;
 
@@ -196,10 +140,7 @@ const normalizeAchievementConfig = (
   };
 };
 
-const normalizePatenteConfig = (
-  id: string,
-  raw: unknown
-): PatenteConfigRecord | null => {
+const normalizePatenteConfig = (id: string, raw: unknown): PatenteConfigRecord | null => {
   const obj = asObject(raw);
   if (!obj) return null;
 
@@ -215,9 +156,7 @@ const normalizePatenteConfig = (
   };
 };
 
-const normalizeAchievementPayload = (
-  payload: AchievementConfigRecord
-): AchievementConfigRecord => ({
+const normalizeAchievementPayload = (payload: AchievementConfigRecord): AchievementConfigRecord => ({
   id: payload.id.trim(),
   titulo: payload.titulo.trim().slice(0, 90) || "Conquista",
   desc: payload.desc.slice(0, 240),
@@ -230,9 +169,7 @@ const normalizeAchievementPayload = (
   repeatable: Boolean(payload.repeatable),
 });
 
-const normalizePatentePayload = (
-  payload: PatenteConfigRecord
-): PatenteConfigRecord => ({
+const normalizePatentePayload = (payload: PatenteConfigRecord): PatenteConfigRecord => ({
   id: payload.id.trim(),
   titulo: payload.titulo.trim().slice(0, 60) || "Patente",
   minXp: Number.isFinite(payload.minXp) ? Math.max(0, payload.minXp) : 0,
@@ -247,10 +184,8 @@ export async function fetchAchievementsConfig(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
 }): Promise<AchievementConfigRecord[]> {
-  const maxResults = boundedLimit(
-    options?.maxResults ?? 220,
-    MAX_ACHIEVEMENT_RESULTS
-  );
+  const supabase = getSupabaseClient();
+  const maxResults = boundedLimit(options?.maxResults ?? 220, MAX_ACHIEVEMENT_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const cacheKey = `${maxResults}`;
 
@@ -259,10 +194,11 @@ export async function fetchAchievementsConfig(options?: {
     if (cached) return cached;
   }
 
-  const q = query(collection(db, "achievements_config"), limit(maxResults));
-  const snap = await getDocs(q);
-  const rows = snap.docs
-    .map((row) => normalizeAchievementConfig(row.id, row.data()))
+  const { data, error } = await supabase.from("achievements_config").select("*").limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  const rows = (data ?? [])
+    .map((row) => normalizeAchievementConfig(asString((row as { id?: unknown }).id), row))
     .filter((row): row is AchievementConfigRecord => row !== null)
     .sort(
       (left, right) =>
@@ -278,10 +214,8 @@ export async function fetchPatentesConfig(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
 }): Promise<PatenteConfigRecord[]> {
-  const maxResults = boundedLimit(
-    options?.maxResults ?? 40,
-    MAX_PATENTE_RESULTS
-  );
+  const supabase = getSupabaseClient();
+  const maxResults = boundedLimit(options?.maxResults ?? 40, MAX_PATENTE_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const cacheKey = `${maxResults}`;
 
@@ -290,14 +224,15 @@ export async function fetchPatentesConfig(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "patentes_config"),
-    orderBy("minXp", "asc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  const rows = snap.docs
-    .map((row) => normalizePatenteConfig(row.id, row.data()))
+  const { data, error } = await supabase
+    .from("patentes_config")
+    .select("*")
+    .order("minXp", { ascending: true })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  const rows = (data ?? [])
+    .map((row) => normalizePatenteConfig(asString((row as { id?: unknown }).id), row))
     .filter((row): row is PatenteConfigRecord => row !== null)
     .sort((left, right) => left.minXp - right.minXp);
 
@@ -309,6 +244,7 @@ export async function fetchAchievementsLogs(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
 }): Promise<AchievementLogRecord[]> {
+  const supabase = getSupabaseClient();
   const maxResults = boundedLimit(options?.maxResults ?? 50, MAX_LOG_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const cacheKey = `${maxResults}`;
@@ -318,24 +254,21 @@ export async function fetchAchievementsLogs(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "achievements_logs"),
-    orderBy("timestamp", "desc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  const rows = snap.docs
-    .map((row) => {
-      const data = asObject(row.data());
-      if (!data) return null;
-      return {
-        id: row.id,
-        userName: asString(data.userName, "Usuario"),
-        achievementTitle: asString(data.achievementTitle, "Conquista"),
-        timestamp: data.timestamp,
-      } satisfies AchievementLogRecord;
-    })
-    .filter((row): row is AchievementLogRecord => row !== null)
+  const { data, error } = await supabase
+    .from("achievements_logs")
+    .select("id,userName,achievementTitle,timestamp")
+    .order("timestamp", { ascending: false })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  const rows = (data ?? [])
+    .map((row) => ({
+      id: asString((row as Record<string, unknown>).id),
+      userName: asString((row as Record<string, unknown>).userName, "Usuario"),
+      achievementTitle: asString((row as Record<string, unknown>).achievementTitle, "Conquista"),
+      timestamp: (row as Record<string, unknown>).timestamp,
+    }))
+    .filter((row) => row.id)
     .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
 
   setCachedValue(achievementLogsCache, cacheKey, rows);
@@ -346,10 +279,8 @@ export async function fetchXpRanking(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
 }): Promise<UserRankingRecord[]> {
-  const maxResults = boundedLimit(
-    options?.maxResults ?? 10,
-    MAX_RANKING_RESULTS
-  );
+  const supabase = getSupabaseClient();
+  const maxResults = boundedLimit(options?.maxResults ?? 10, MAX_RANKING_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const cacheKey = `${maxResults}`;
 
@@ -358,157 +289,109 @@ export async function fetchXpRanking(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "users"),
-    orderBy("xp", "desc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  const rows = snap.docs
-    .map((row) => {
-      const data = asObject(row.data());
-      if (!data) return null;
-      return {
-        id: row.id,
-        nome: asString(data.nome, "Sem nome"),
-        turma: asString(data.turma),
-        xp: asNumber(data.xp, 0),
-        foto: asString(data.foto),
-      } satisfies UserRankingRecord;
-    })
-    .filter((row): row is UserRankingRecord => row !== null);
+  const { data, error } = await supabase
+    .from("users")
+    .select("uid,nome,turma,xp,foto")
+    .order("xp", { ascending: false })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  const rows = (data ?? [])
+    .map((row) => ({
+      id: asString((row as Record<string, unknown>).uid),
+      nome: asString((row as Record<string, unknown>).nome, "Sem nome"),
+      turma: asString((row as Record<string, unknown>).turma),
+      xp: asNumber((row as Record<string, unknown>).xp, 0),
+      foto: asString((row as Record<string, unknown>).foto),
+    }))
+    .filter((row) => row.id);
 
   setCachedValue(rankingCache, cacheKey, rows);
   return rows;
 }
 
-export async function saveAchievementConfig(
-  payload: AchievementConfigRecord
-): Promise<void> {
+export async function saveAchievementConfig(payload: AchievementConfigRecord): Promise<void> {
+  const supabase = getSupabaseClient();
   const safePayload = normalizeAchievementPayload(payload);
   if (!safePayload.id) return;
 
-  await callWithFallback<typeof safePayload, { ok: boolean }>(
-    UPSERT_ACHIEVEMENT_CALLABLE,
-    safePayload,
-    async () => {
-      await setDoc(
-        doc(db, "achievements_config", safePayload.id),
-        { ...safePayload, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
-      return { ok: true };
-    }
+  const { error } = await supabase.from("achievements_config").upsert(
+    {
+      ...safePayload,
+      updatedAt: new Date().toISOString(),
+    },
+    { onConflict: "id" }
   );
+  if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
 
 export async function deleteAchievementConfig(id: string): Promise<void> {
+  const supabase = getSupabaseClient();
   const cleanId = id.trim();
   if (!cleanId) return;
 
-  await callWithFallback<{ id: string }, { ok: boolean }>(
-    DELETE_ACHIEVEMENT_CALLABLE,
-    { id: cleanId },
-    async () => {
-      await deleteDoc(doc(db, "achievements_config", cleanId));
-      return { ok: true };
-    }
-  );
+  const { error } = await supabase.from("achievements_config").delete().eq("id", cleanId);
+  if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
 
-export async function toggleAchievementActive(payload: {
-  id: string;
-  active: boolean;
-}): Promise<void> {
+export async function toggleAchievementActive(payload: { id: string; active: boolean }): Promise<void> {
+  const supabase = getSupabaseClient();
   const cleanId = payload.id.trim();
   if (!cleanId) return;
 
-  const safePayload = { id: cleanId, active: payload.active };
-  await callWithFallback<typeof safePayload, { ok: boolean }>(
-    TOGGLE_ACHIEVEMENT_CALLABLE,
-    safePayload,
-    async () => {
-      await setDoc(
-        doc(db, "achievements_config", cleanId),
-        { active: payload.active, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
-      return { ok: true };
-    }
-  );
+  const { error } = await supabase
+    .from("achievements_config")
+    .update({ active: payload.active, updatedAt: new Date().toISOString() })
+    .eq("id", cleanId);
+  if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
 
-export async function savePatenteConfig(
-  payload: PatenteConfigRecord
-): Promise<void> {
+export async function savePatenteConfig(payload: PatenteConfigRecord): Promise<void> {
+  const supabase = getSupabaseClient();
   const safePayload = normalizePatentePayload(payload);
   if (!safePayload.id) return;
 
-  await callWithFallback<typeof safePayload, { ok: boolean }>(
-    UPSERT_PATENTE_CALLABLE,
-    safePayload,
-    async () => {
-      await setDoc(
-        doc(db, "patentes_config", safePayload.id),
-        { ...safePayload, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
-      return { ok: true };
-    }
+  const { error } = await supabase.from("patentes_config").upsert(
+    {
+      ...safePayload,
+      updatedAt: new Date().toISOString(),
+    },
+    { onConflict: "id" }
   );
+  if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
 
 export async function deletePatenteConfig(id: string): Promise<void> {
+  const supabase = getSupabaseClient();
   const cleanId = id.trim();
   if (!cleanId) return;
 
-  await callWithFallback<{ id: string }, { ok: boolean }>(
-    DELETE_PATENTE_CALLABLE,
-    { id: cleanId },
-    async () => {
-      await deleteDoc(doc(db, "patentes_config", cleanId));
-      return { ok: true };
-    }
-  );
+  const { error } = await supabase.from("patentes_config").delete().eq("id", cleanId);
+  if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
 
-export async function seedPatentesConfig(
-  entries: PatenteConfigRecord[]
-): Promise<void> {
+export async function seedPatentesConfig(entries: PatenteConfigRecord[]): Promise<void> {
+  const supabase = getSupabaseClient();
   const safeEntries = entries
     .slice(0, MAX_PATENTE_RESULTS)
     .map((entry) => normalizePatentePayload(entry))
-    .filter((entry) => entry.id.length > 0);
+    .filter((entry) => entry.id.length > 0)
+    .map((entry) => ({ ...entry, updatedAt: new Date().toISOString() }));
 
   if (!safeEntries.length) return;
 
-  await callWithFallback<{ patentes: PatenteConfigRecord[] }, { ok: boolean }>(
-    SEED_PATENTES_CALLABLE,
-    { patentes: safeEntries },
-    async () => {
-      const batch = writeBatch(db);
-      safeEntries.forEach((entry) => {
-        batch.set(
-          doc(db, "patentes_config", entry.id),
-          { ...entry, updatedAt: serverTimestamp() },
-          { merge: true }
-        );
-      });
-      await batch.commit();
-      return { ok: true };
-    }
-  );
+  const { error } = await supabase.from("patentes_config").upsert(safeEntries, { onConflict: "id" });
+  if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
-

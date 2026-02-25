@@ -1,7 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "@/lib/supa/firestore";
-import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
-
-import { db, storage } from "./backend";
+﻿import { getSupabaseClient } from "./supabase";
 import { compressImageFile } from "./imageCompression";
 
 export interface CarteirinhaConfig {
@@ -22,6 +19,11 @@ const DEFAULT_CONFIG: CarteirinhaConfig = {
   backgrounds: {},
 };
 
+const DEFAULT_BUCKET =
+  process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET ||
+  process.env.NEXT_PUBLIC_SUPABASE_BUCKET ||
+  "uploads";
+
 const createDefaultConfig = (): CarteirinhaConfig => ({
   validade: DEFAULT_CONFIG.validade,
   backgrounds: {},
@@ -37,6 +39,9 @@ let memoryCache: CachedConfig | null = null;
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
 
+const asObject = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+
 const isBackgroundUrlAllowed = (value: string): boolean => {
   if (!value) return false;
   if (value.startsWith("data:")) return false;
@@ -48,14 +53,12 @@ const normalizeConfig = (raw: Record<string, unknown> | null): CarteirinhaConfig
 
   const rawValidade = asString(raw.validade, DEFAULT_CONFIG.validade).trim();
   const validade =
-    rawValidade.length > 24
-      ? rawValidade.slice(0, 24)
-      : rawValidade || DEFAULT_CONFIG.validade;
+    rawValidade.length > 24 ? rawValidade.slice(0, 24) : rawValidade || DEFAULT_CONFIG.validade;
 
   const normalizedBackgrounds: Record<string, string> = {};
-  const rawBackgrounds = raw.backgrounds;
+  const rawBackgrounds = asObject(raw.backgrounds);
 
-  if (typeof rawBackgrounds === "object" && rawBackgrounds !== null) {
+  if (rawBackgrounds) {
     for (const [turma, value] of Object.entries(rawBackgrounds)) {
       if (!VALID_TURMAS.has(turma)) continue;
       const url = asString(value).trim();
@@ -64,10 +67,7 @@ const normalizeConfig = (raw: Record<string, unknown> | null): CarteirinhaConfig
     }
   }
 
-  return {
-    validade,
-    backgrounds: normalizedBackgrounds,
-  };
+  return { validade, backgrounds: normalizedBackgrounds };
 };
 
 const setConfigCache = (config: CarteirinhaConfig): void => {
@@ -79,7 +79,7 @@ const setConfigCache = (config: CarteirinhaConfig): void => {
   try {
     window.sessionStorage.setItem(CACHE_KEY, JSON.stringify(cache));
   } catch {
-    // Sem cache persistente: segue apenas com cache em memória.
+    // Sem cache persistente: segue apenas com cache em memoria.
   }
 };
 
@@ -105,9 +105,7 @@ const getSessionCache = (): CarteirinhaConfig | null => {
     };
 
     const cachedAt =
-      typeof parsed.cachedAt === "number" && Number.isFinite(parsed.cachedAt)
-        ? parsed.cachedAt
-        : 0;
+      typeof parsed.cachedAt === "number" && Number.isFinite(parsed.cachedAt) ? parsed.cachedAt : 0;
     if (Date.now() - cachedAt > CACHE_TTL_MS) {
       window.sessionStorage.removeItem(CACHE_KEY);
       return null;
@@ -121,10 +119,18 @@ const getSessionCache = (): CarteirinhaConfig | null => {
   }
 };
 
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
+
 export async function fetchCarteirinhaConfig(options?: {
   forceRefresh?: boolean;
 }): Promise<CarteirinhaConfig> {
   const forceRefresh = options?.forceRefresh ?? false;
+  const supabase = getSupabaseClient();
 
   if (!forceRefresh) {
     const memory = getMemoryCache();
@@ -134,10 +140,21 @@ export async function fetchCarteirinhaConfig(options?: {
     if (session) return session;
   }
 
-  const configRef = doc(db, CONFIG_COLLECTION, CONFIG_DOC_ID);
-  const snap = await getDoc(configRef);
-  const normalized = snap.exists()
-    ? normalizeConfig(snap.data() as Record<string, unknown>)
+  const { data, error } = await supabase
+    .from(CONFIG_COLLECTION)
+    .select("validade,backgrounds,data")
+    .eq("id", CONFIG_DOC_ID)
+    .maybeSingle();
+
+  if (error) throwSupabaseError(error);
+
+  const raw = asObject(data) ?? null;
+  const normalized = raw
+    ? normalizeConfig({
+        validade: raw.validade,
+        backgrounds:
+          raw.backgrounds ?? (asObject(raw.data)?.backgrounds as Record<string, unknown> | undefined),
+      })
     : createDefaultConfig();
 
   setConfigCache(normalized);
@@ -146,30 +163,30 @@ export async function fetchCarteirinhaConfig(options?: {
 
 export async function saveCarteirinhaConfig(config: CarteirinhaConfig): Promise<void> {
   const normalized = normalizeConfig(config as unknown as Record<string, unknown>);
+  const supabase = getSupabaseClient();
 
-  await setDoc(
-    doc(db, CONFIG_COLLECTION, CONFIG_DOC_ID),
+  const { error } = await supabase.from(CONFIG_COLLECTION).upsert(
     {
-      ...normalized,
-      updatedAt: serverTimestamp(),
+      id: CONFIG_DOC_ID,
+      validade: normalized.validade,
+      backgrounds: normalized.backgrounds,
+      updatedAt: new Date().toISOString(),
     },
-    { merge: true }
+    { onConflict: "id" }
   );
 
+  if (error) throwSupabaseError(error);
   setConfigCache(normalized);
 }
 
-export async function uploadCarteirinhaBackground(
-  turma: string,
-  file: File
-): Promise<string> {
+export async function uploadCarteirinhaBackground(turma: string, file: File): Promise<string> {
   const turmaCode = turma.trim().toUpperCase();
   if (!VALID_TURMAS.has(turmaCode)) {
-    throw new Error("Turma inválida para upload.");
+    throw new Error("Turma invalida para upload.");
   }
 
   if (!file.type.startsWith("image/")) {
-    throw new Error("Apenas imagens são permitidas.");
+    throw new Error("Apenas imagens sao permitidas.");
   }
 
   if (file.size > MAX_SOURCE_FILE_BYTES) {
@@ -183,22 +200,44 @@ export async function uploadCarteirinhaBackground(
   });
 
   if (!optimized.type.startsWith("image/")) {
-    throw new Error("Formato de imagem não suportado.");
+    throw new Error("Formato de imagem nao suportado.");
   }
 
   if (optimized.size > MAX_UPLOAD_FILE_BYTES) {
-    throw new Error("Imagem ainda muito pesada após otimização. Use um arquivo menor.");
+    throw new Error("Imagem ainda muito pesada apos otimizacao. Use um arquivo menor.");
   }
 
-  const storageRef = ref(storage, `carteirinha/backgrounds/${turmaCode}`);
+  const supabase = getSupabaseClient();
+  const path = `carteirinha/backgrounds/${turmaCode}`;
 
-  await uploadBytes(storageRef, optimized, {
+  const { error: uploadError } = await supabase.storage.from(DEFAULT_BUCKET).upload(path, optimized, {
+    upsert: true,
     contentType: optimized.type,
-    cacheControl: "public,max-age=3600",
+    cacheControl: "3600",
   });
 
-  const url = await getDownloadURL(storageRef);
-  const version = Date.now();
-  return `${url}${url.includes("?") ? "&" : "?"}v=${version}`;
-}
+  if (uploadError) {
+    throw Object.assign(new Error(uploadError.message), {
+      code: `storage/${uploadError.name ?? "upload-failed"}`,
+      cause: uploadError,
+    });
+  }
 
+  const { data: publicData } = supabase.storage.from(DEFAULT_BUCKET).getPublicUrl(path);
+  const baseUrl = publicData?.publicUrl;
+
+  if (!baseUrl) {
+    const { data: signed, error: signedError } = await supabase.storage
+      .from(DEFAULT_BUCKET)
+      .createSignedUrl(path, 60 * 60 * 24 * 30);
+    if (signedError || !signed?.signedUrl) {
+      throw Object.assign(new Error(signedError?.message || "Falha ao gerar URL do upload."), {
+        code: `storage/${signedError?.name ?? "signed-url-failed"}`,
+        cause: signedError,
+      });
+    }
+    return `${signed.signedUrl}${signed.signedUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
+  }
+
+  return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
+}

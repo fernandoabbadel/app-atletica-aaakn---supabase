@@ -9,7 +9,7 @@ import {
   fetchAlbumUiConfig,
   saveAlbumUiConfig,
   type AlbumUiConfig,
-} from "../../../lib/albumService";
+} from "../../../lib/albumUiService";
 
 const menuItems = [
   {
@@ -192,4 +192,3 @@ export default function AdminAlbumMenuPage() {
     </div>
   );
 }
-

@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useToast } from "../../context/ToastContext";
-import { loginPartnerByEmail } from "../../lib/partnersService";
+import { loginPartnerByEmail } from "../../lib/partnersPublicService";
 
 export default function EmpresaLoginPage() {
   const router = useRouter();

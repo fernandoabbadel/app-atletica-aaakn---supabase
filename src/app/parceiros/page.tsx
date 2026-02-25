@@ -12,7 +12,7 @@ import {
   Star,
 } from "lucide-react";
 
-import { fetchPublicPartners, type PartnerRecord } from "../../lib/partnersService";
+import { fetchPublicPartners, type PartnerRecord } from "../../lib/partnersPublicService";
 
 interface TierSection {
   id: "ouro" | "prata" | "standard";

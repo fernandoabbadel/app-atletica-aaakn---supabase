@@ -1,0 +1,434 @@
+﻿import { getSupabaseClient } from "./supabase";
+
+type CacheEntry<T> = { cachedAt: number; value: T };
+
+type Row = Record<string, unknown>;
+
+const READ_CACHE_TTL_MS = 30_000;
+const DASHBOARD_EVENTS_LIMIT = 5;
+const DASHBOARD_PRODUCTS_LIMIT = 8;
+const DASHBOARD_POSTS_LIMIT = 2;
+const DASHBOARD_TREINOS_LIMIT = 4;
+const DASHBOARD_PARTNERS_LIMIT = 50;
+const DASHBOARD_LIGAS_LIMIT = 60;
+const DASHBOARD_ALBUM_LIMIT = 350;
+const DASHBOARD_LIKES_SAMPLE_PER_PRODUCT = 10;
+const DASHBOARD_USERS_IN_CHUNK = 10;
+const DASHBOARD_USERS_COUNT_FALLBACK_LIMIT = 2_000;
+
+const dashboardCache = new Map<string, CacheEntry<DashboardBundle>>();
+
+const asObject = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+const asString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
+const asNumber = (value: unknown, fallback = 0) =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+
+const toMillis = (value: unknown): number => {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  const obj = asObject(value);
+  const toDate = obj?.toDate;
+  if (typeof toDate === "function") {
+    const parsed = toDate.call(value) as Date;
+    if (parsed instanceof Date) return parsed.getTime();
+  }
+  return 0;
+};
+
+const getCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.cachedAt > READ_CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+
+const setCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void => {
+  cache.set(key, { cachedAt: Date.now(), value });
+};
+
+const chunkArray = <T>(rows: T[], chunkSize: number): T[][] => {
+  if (chunkSize < 1) return [rows];
+  const chunks: T[][] = [];
+  for (let i = 0; i < rows.length; i += chunkSize) chunks.push(rows.slice(i, i + chunkSize));
+  return chunks;
+};
+
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
+
+async function fetchRowsWithFallback(
+  table: string,
+  attempts: Array<{ orderBy?: { column: string; ascending: boolean }; limit: number; eq?: Record<string, string> }>
+): Promise<Row[]> {
+  const supabase = getSupabaseClient();
+  let lastError: unknown = null;
+
+  for (const attempt of attempts) {
+    try {
+      let q = supabase.from(table).select("*");
+      if (attempt.eq) {
+        for (const [key, value] of Object.entries(attempt.eq)) {
+          q = q.eq(key, value);
+        }
+      }
+      if (attempt.orderBy) {
+        q = q.order(attempt.orderBy.column, { ascending: attempt.orderBy.ascending });
+      }
+      q = q.limit(attempt.limit);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as Row[];
+    } catch (error: unknown) {
+      lastError = error;
+    }
+  }
+
+  if (lastError && typeof lastError === "object" && lastError !== null && "message" in lastError) {
+    throwSupabaseError(lastError as { message: string; code?: string | null; name?: string | null });
+  }
+  return [];
+}
+
+async function safeUsersCount(): Promise<number> {
+  const supabase = getSupabaseClient();
+  try {
+    const { count, error } = await supabase.from("users").select("uid", { count: "exact", head: true });
+    if (error) throw error;
+    return count ?? 0;
+  } catch {
+    const { data, error } = await supabase.from("users").select("uid").limit(DASHBOARD_USERS_COUNT_FALLBACK_LIMIT);
+    if (error) throwSupabaseError(error);
+    return (data ?? []).length;
+  }
+}
+
+const normalizeEvento = (id: string, raw: unknown): DashboardEvent | null => {
+  const data = asObject(raw);
+  if (!data) return null;
+  return {
+    id,
+    titulo: asString(data.titulo, "Evento"),
+    data: asString(data.data),
+    local: asString(data.local),
+    imagem: asString(data.imagem),
+    tipo: asString(data.tipo),
+    likesList: asStringArray(data.likesList),
+    participantes: asStringArray(data.participantes),
+    imagePositionY: asNumber(data.imagePositionY, 50),
+  };
+};
+
+const normalizeProduto = (id: string, raw: unknown): DashboardProduct | null => {
+  const data = asObject(raw);
+  if (!data) return null;
+  const precoRaw = data.preco;
+  const preco: string | number = typeof precoRaw === "string" || typeof precoRaw === "number" ? precoRaw : 0;
+  return {
+    id,
+    nome: asString(data.nome, "Produto"),
+    preco,
+    img: asString(data.img),
+    likes: asStringArray(data.likes),
+  };
+};
+
+const normalizeParceiro = (id: string, raw: unknown): DashboardPartner | null => {
+  const data = asObject(raw);
+  if (!data) return null;
+  return {
+    id,
+    nome: asString(data.nome, "Parceiro"),
+    imgLogo: asString(data.imgLogo),
+    imgCapa: asString(data.imgCapa) || undefined,
+    categoria: asString(data.categoria) || undefined,
+    plano: asString(data.plano) || undefined,
+    status: asString(data.status) || undefined,
+  };
+};
+
+const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
+  const data = asObject(raw);
+  if (!data) return null;
+  return {
+    id,
+    nome: asString(data.nome, "Liga"),
+    sigla: asString(data.sigla),
+    foto: asString(data.foto) || undefined,
+    logoBase64: asString(data.logoBase64) || undefined,
+    logo: asString(data.logo) || undefined,
+    bizu: asString(data.bizu) || undefined,
+  };
+};
+
+const normalizePost = (id: string, raw: unknown): DashboardPost | null => {
+  const data = asObject(raw);
+  if (!data) return null;
+  return {
+    id,
+    userId: asString(data.userId),
+    userName: asString(data.userName, "Usuario"),
+    avatar: asString(data.avatar),
+    createdAt: data.createdAt ?? null,
+    texto: asString(data.texto),
+    likes: asStringArray(data.likes),
+  };
+};
+
+const toTurmaKey = (raw: unknown): string | null => {
+  const digits = asString(raw).replace(/\D/g, "");
+  return digits ? digits : null;
+};
+
+async function fetchUsersTurmaMap(uids: string[]): Promise<Map<string, string>> {
+  const supabase = getSupabaseClient();
+  const uniqueIds = [...new Set(uids.filter((entry) => entry.trim().length > 0))];
+  const result = new Map<string, string>();
+  if (!uniqueIds.length) return result;
+
+  const chunks = chunkArray(uniqueIds, DASHBOARD_USERS_IN_CHUNK);
+  for (const chunk of chunks) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("uid,turma")
+      .in("uid", chunk)
+      .limit(chunk.length);
+    if (error) throwSupabaseError(error);
+    for (const row of data ?? []) {
+      const record = row as Record<string, unknown>;
+      const uid = asString(record.uid);
+      const turma = toTurmaKey(record.turma);
+      if (uid && turma) result.set(uid, turma);
+    }
+  }
+
+  return result;
+}
+
+async function buildProductTurmaStats(products: DashboardProduct[]): Promise<Record<string, DashboardTurmaStat[]>> {
+  const likesByProduct = new Map<string, string[]>();
+  const sampledUids: string[] = [];
+
+  for (const product of products) {
+    const sampled = product.likes.slice(0, DASHBOARD_LIKES_SAMPLE_PER_PRODUCT);
+    likesByProduct.set(product.id, sampled);
+    sampledUids.push(...sampled);
+  }
+
+  const turmaByUid = await fetchUsersTurmaMap(sampledUids);
+  const statsByProduct: Record<string, DashboardTurmaStat[]> = {};
+
+  for (const [productId, likes] of likesByProduct.entries()) {
+    const perTurma: Record<string, number> = {};
+    for (const uid of likes) {
+      const turma = turmaByUid.get(uid);
+      if (!turma) continue;
+      perTurma[turma] = (perTurma[turma] || 0) + 1;
+    }
+
+    statsByProduct[productId] = Object.entries(perTurma)
+      .map(([turma, count]) => ({ turma, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 3);
+  }
+
+  return statsByProduct;
+}
+
+async function toggleArrayMembership(params: {
+  table: string;
+  id: string;
+  column: string;
+  userId: string;
+  currentlyLiked: boolean;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from(params.table)
+    .select(`${params.column}`)
+    .eq("id", params.id)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const current = asStringArray(asObject(data)?.[params.column]);
+  const next = params.currentlyLiked
+    ? current.filter((entry) => entry !== params.userId)
+    : Array.from(new Set([...current, params.userId]));
+
+  const { error: updateError } = await supabase
+    .from(params.table)
+    .update({ [params.column]: next })
+    .eq("id", params.id);
+  if (updateError) throwSupabaseError(updateError);
+
+  dashboardCache.clear();
+}
+
+export interface DashboardTurmaStat {
+  turma: string;
+  count: number;
+}
+
+export interface DashboardEvent {
+  id: string;
+  titulo: string;
+  data: string;
+  local: string;
+  imagem: string;
+  tipo: string;
+  likesList: string[];
+  participantes: string[];
+  imagePositionY?: number;
+}
+
+export interface DashboardProduct {
+  id: string;
+  nome: string;
+  preco: string | number;
+  img: string;
+  likes: string[];
+}
+
+export interface DashboardLiga {
+  id: string;
+  nome: string;
+  sigla: string;
+  foto?: string;
+  logoBase64?: string;
+  logo?: string;
+  bizu?: string;
+}
+
+export interface DashboardPartner {
+  id: string;
+  nome: string;
+  imgLogo: string;
+  imgCapa?: string;
+  categoria?: string;
+  plano?: string;
+  status?: string;
+}
+
+export interface DashboardPost {
+  id: string;
+  userId: string;
+  userName: string;
+  avatar: string;
+  createdAt?: unknown;
+  texto: string;
+  likes: string[];
+}
+
+export interface DashboardBundle {
+  events: DashboardEvent[];
+  produtos: DashboardProduct[];
+  parceiros: DashboardPartner[];
+  ligas: DashboardLiga[];
+  mensagens: DashboardPost[];
+  treinos: string[];
+  totalCaca: number;
+  totalAlunos: number;
+  productTurmaStats: Record<string, DashboardTurmaStat[]>;
+}
+
+export async function fetchDashboardBundle(options?: { forceRefresh?: boolean }): Promise<DashboardBundle> {
+  const forceRefresh = options?.forceRefresh ?? false;
+  const cacheKey = "default";
+  if (!forceRefresh) {
+    const cached = getCachedValue(dashboardCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const [eventRows, productRows, partnerRows, ligaRows, albumRows, postRows, treinoRows, totalAlunos] =
+    await Promise.all([
+      fetchRowsWithFallback("eventos", [
+        { orderBy: { column: "data", ascending: true }, limit: DASHBOARD_EVENTS_LIMIT },
+        { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_EVENTS_LIMIT },
+        { limit: DASHBOARD_EVENTS_LIMIT },
+      ]),
+      fetchRowsWithFallback("produtos", [{ limit: DASHBOARD_PRODUCTS_LIMIT }]),
+      fetchRowsWithFallback("parceiros", [
+        { eq: { status: "active" }, limit: DASHBOARD_PARTNERS_LIMIT },
+        { limit: DASHBOARD_PARTNERS_LIMIT },
+      ]),
+      fetchRowsWithFallback("ligas_config", [{ limit: DASHBOARD_LIGAS_LIMIT }]),
+      fetchRowsWithFallback("album_rankings", [{ limit: DASHBOARD_ALBUM_LIMIT }]),
+      fetchRowsWithFallback("posts", [
+        { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_POSTS_LIMIT },
+        { limit: DASHBOARD_POSTS_LIMIT },
+      ]),
+      fetchRowsWithFallback("treinos", [
+        { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_TREINOS_LIMIT },
+        { limit: DASHBOARD_TREINOS_LIMIT },
+      ]),
+      safeUsersCount(),
+    ]);
+
+  const events = eventRows.map((row) => normalizeEvento(asString(row.id), row)).filter((row): row is DashboardEvent => row !== null);
+  const produtos = productRows.map((row) => normalizeProduto(asString(row.id), row)).filter((row): row is DashboardProduct => row !== null);
+  const parceiros = partnerRows
+    .map((row) => normalizeParceiro(asString(row.id), row))
+    .filter((row): row is DashboardPartner => row !== null)
+    .filter((partner) => (partner.status || "active") === "active");
+  const ligas = ligaRows.map((row) => normalizeLiga(asString(row.id), row)).filter((row): row is DashboardLiga => row !== null);
+  const mensagens = [...postRows]
+    .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt))
+    .map((row) => normalizePost(asString(row.id), row))
+    .filter((row): row is DashboardPost => row !== null);
+  const treinos = treinoRows.map((row) => asString(row.imagem)).filter((entry) => entry.length > 0);
+  const totalCaca = albumRows.reduce((acc, row) => acc + asNumber(row.totalColetado, 0), 0);
+  const productTurmaStats = await buildProductTurmaStats(produtos);
+
+  const bundle: DashboardBundle = {
+    events,
+    produtos,
+    parceiros,
+    ligas,
+    mensagens,
+    treinos,
+    totalCaca,
+    totalAlunos,
+    productTurmaStats,
+  };
+
+  setCachedValue(dashboardCache, cacheKey, bundle);
+  return bundle;
+}
+
+export async function toggleDashboardEventLike(payload: { eventId: string; userId: string; currentlyLiked: boolean }): Promise<void> {
+  const eventId = payload.eventId.trim();
+  const userId = payload.userId.trim();
+  if (!eventId || !userId) return;
+  await toggleArrayMembership({ table: "eventos", id: eventId, column: "likesList", userId, currentlyLiked: payload.currentlyLiked });
+}
+
+export async function toggleDashboardProductLike(payload: { productId: string; userId: string; currentlyLiked: boolean }): Promise<void> {
+  const productId = payload.productId.trim();
+  const userId = payload.userId.trim();
+  if (!productId || !userId) return;
+  await toggleArrayMembership({ table: "produtos", id: productId, column: "likes", userId, currentlyLiked: payload.currentlyLiked });
+}
+
+export async function toggleDashboardPostLike(payload: { postId: string; userId: string; currentlyLiked: boolean }): Promise<void> {
+  const postId = payload.postId.trim();
+  const userId = payload.userId.trim();
+  if (!postId || !userId) return;
+  await toggleArrayMembership({ table: "posts", id: postId, column: "likes", userId, currentlyLiked: payload.currentlyLiked });
+}
+
+export function clearDashboardCaches(): void {
+  dashboardCache.clear();
+}

@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 // addToast removido pois nao estava sendo usado, se precisar re-importe
 // import { useToast } from "../../context/ToastContext"; 
-import { fetchStoreProducts } from "../../lib/storeService";
+import { fetchStoreProducts } from "../../lib/storePublicService";
 // --- TIPAGEM EXATA DO SEU SUPABASE ---
 interface Variante {
   id: string;

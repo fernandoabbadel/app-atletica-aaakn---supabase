@@ -21,7 +21,7 @@ import {
     type DashboardPost,
     type DashboardProduct,
     type DashboardTurmaStat,
-} from '../../lib/dashboardService';
+} from '../../lib/dashboardPublicService';
 import { getTurmaImage } from "../../constants/turmaImages";
 
 // --- INTERFACES ESTRITAS ---

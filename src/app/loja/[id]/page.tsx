@@ -11,8 +11,7 @@ import {
   createStoreReview,
   fetchStoreProductDetail,
   toggleStoreProductLike,
-} from "../../../lib/storeService";
-import { Timestamp } from "@/lib/supa/firestore";
+} from "../../../lib/storePublicService";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -43,7 +42,7 @@ interface Review {
   userAvatar?: string;
   rating: number;
   comment: string;
-  createdAt: Timestamp | null;
+  createdAt: DateLike | null;
 }
 
 interface Order {
@@ -54,8 +53,12 @@ interface Order {
   productName: string;
   price: number;
   status: "pendente" | "approved" | "rejected" | "delivered" | "cancelado";
-  createdAt: Timestamp | null;
-  updatedAt?: Timestamp | null;
+  createdAt: DateLike | null;
+  updatedAt?: DateLike | null;
+}
+
+interface DateLike {
+  toDate: () => Date;
 }
 
 const orderStatusLabel = (status: Order["status"]): string => {

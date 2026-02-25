@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
-import { fetchPlanCatalog, type PlanRecord } from "@/lib/plansService";
+import { fetchPlanCatalog, type PlanRecord } from "@/lib/plansPublicService";
 
 // 🦈 2. Tipagem Correta do Mapa de Ícones
 const ICONS_MAP: Record<string, LucideIcon> = {

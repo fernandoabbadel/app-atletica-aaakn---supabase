@@ -10,7 +10,7 @@ import { getTurmaImageCandidates } from "../../constants/turmaImages";
 import {
   fetchAlbumUiConfig,
   type AlbumUiConfig,
-} from "../../lib/albumService";
+} from "../../lib/albumUiService";
 import { useAuth } from "../../context/AuthContext";
 
 const TURMAS = [
