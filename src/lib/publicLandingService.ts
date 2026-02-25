@@ -1,10 +1,8 @@
-import { collection, getCountFromServer, getDocs, limit, query } from "firebase/firestore";
-
 import {
   fetchLandingConfig,
   type LandingConfig,
 } from "./adminLandingService";
-import { db } from "./firebase";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -38,15 +36,33 @@ const setCachedValue = <T>(
 };
 
 async function fetchUsersCount(): Promise<number> {
-  try {
-    const snap = await getCountFromServer(collection(db, "users"));
-    return snap.data().count;
-  } catch {
-    const fallbackSnap = await getDocs(
-      query(collection(db, "users"), limit(USERS_COUNT_FALLBACK_LIMIT))
-    );
-    return fallbackSnap.size;
+  const supabase = getSupabaseClient();
+  let lastError: unknown = null;
+
+  // No plano free, tentamos contagem de metadata antes de usar exact count.
+  for (const mode of ["planned", "estimated", "exact"] as const) {
+    const { count, error } = await supabase
+      .from("users")
+      .select("*", { count: mode, head: true });
+
+    if (!error && typeof count === "number") {
+      return count;
+    }
+
+    lastError = error;
   }
+
+  // Fallback final com leitura limitada caso count esteja indisponivel.
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .limit(USERS_COUNT_FALLBACK_LIMIT);
+
+  if (error) {
+    throw error ?? lastError;
+  }
+
+  return Array.isArray(data) ? data.length : 0;
 }
 
 export interface PublicLandingData {

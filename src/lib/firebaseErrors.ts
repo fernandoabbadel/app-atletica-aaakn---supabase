@@ -1,3 +1,6 @@
+// Mantemos este helper durante a migracao para evitar quebrar imports antigos.
+// Ele continua util mesmo quando a origem do erro nao e exatamente Firebase.
+
 export function getFirebaseErrorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null || !("code" in error)) {
     return null;
@@ -20,8 +23,11 @@ export function isFirebasePermissionError(error: unknown): boolean {
   }
 
   if (error instanceof Error) {
-    return error.message.toLowerCase().includes("missing or insufficient permissions");
+    return error.message
+      .toLowerCase()
+      .includes("missing or insufficient permissions");
   }
 
   return false;
 }
+

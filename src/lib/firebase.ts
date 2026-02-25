@@ -1,8 +1,8 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
+import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getFunctions } from "firebase/functions";
 import { initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
-import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -13,30 +13,20 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// 1. Singleton do App (Evita erro de "App already exists" no Next.js)
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Mantemos a base Firebase ativa durante a migracao em commits pequenos.
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// 2. Autenticação
 const auth = getAuth(app);
 
-// 3. Banco de Dados (Configuração Tática Anti-Bloqueio) 🦈🛡️
-// Usamos initializeFirestore em vez de getFirestore para passar configurações personalizadas.
+// Configuracao antiga preservada para redes que bloqueiam websocket.
 const db = initializeFirestore(app, {
-  // Força o uso de Long Polling em vez de WebSockets.
-  // Essencial para rodar em Wi-Fi de faculdade/empresas que bloqueiam portas não-padrão.
   experimentalForceLongPolling: true,
-  
-  // (Opcional) Evita erros chatos se você tentar salvar algo como undefined
-  ignoreUndefinedProperties: true, 
+  ignoreUndefinedProperties: true,
 });
 
-// 4. Storage (Imagens)
 const storage = getStorage(app);
-
-// 5. Cloud Functions
 const functions = getFunctions(app);
-
-// 6. Provedor Google
 const googleProvider = new GoogleAuthProvider();
 
-export { app, auth, db, storage, functions, googleProvider };
+export { app, auth, db, functions, googleProvider, storage };
+

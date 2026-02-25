@@ -1,8 +1,4 @@
-import { httpsCallable } from "firebase/functions";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -11,14 +7,15 @@ type CacheEntry<T> = {
 
 const READ_CACHE_TTL_MS = 45_000;
 
-const ADMIN_LANDING_FETCH_CALLABLE = "adminLandingGetConfig";
-const ADMIN_LANDING_SAVE_CALLABLE = "adminLandingSaveConfig";
-
 const MAX_SOCIAL_LINKS = 20;
 const MAX_REVIEWS = 30;
 
 const MIN_STAT_VALUE = 0;
 const MAX_STAT_VALUE = 9_999_999;
+
+// Tabela/linha padrao para guardar JSON de configuracao no Supabase.
+const SITE_CONFIG_TABLE = "site_config";
+const LANDING_CONFIG_ROW_ID = "landing_page";
 
 let landingConfigCache: CacheEntry<LandingConfig> | null = null;
 
@@ -114,49 +111,6 @@ const isPlatform = (value: unknown): value is SocialPlatform =>
   value === "linkedin" ||
   value === "website";
 
-const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
-  if (!code) return true;
-
-  return (
-    code.includes("functions/not-found") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/internal") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/cancelled") ||
-    code.includes("functions/unknown")
-  );
-};
-
-const shouldUseCallable = (): boolean => {
-  if (typeof window === "undefined") return true;
-  if (process.env.NEXT_PUBLIC_FORCE_CALLABLES === "true") return true;
-
-  const host = window.location.hostname.toLowerCase();
-  return host !== "localhost" && host !== "127.0.0.1";
-};
-
-async function callWithFallback<TReq, TRes>(
-  callableName: string,
-  payload: TReq,
-  fallbackFn: () => Promise<TRes>
-): Promise<TRes> {
-  if (!shouldUseCallable()) {
-    return fallbackFn();
-  }
-
-  try {
-    const callable = httpsCallable<TReq, TRes>(functions, callableName);
-    const response = await callable(payload);
-    return response.data;
-  } catch (error: unknown) {
-    if (shouldFallbackToClientWrites(error)) {
-      return fallbackFn();
-    }
-    throw error;
-  }
-}
-
 const normalizeSocialLinks = (
   raw: unknown,
   fallback: SocialLink[]
@@ -203,12 +157,14 @@ const normalizeReviews = (raw: unknown, fallback: ReviewConfig[]): ReviewConfig[
   return normalized;
 };
 
+// Aceita tanto linha flat quanto JSON em colunas data/config/payload.
 const extractPayloadData = (raw: unknown): unknown => {
   const obj = asObject(raw);
   if (!obj) return raw;
 
   if ("config" in obj) return obj.config;
   if ("data" in obj) return obj.data;
+  if ("payload" in obj) return obj.payload;
   return raw;
 };
 
@@ -254,6 +210,68 @@ export function sanitizeLandingConfig(
   };
 }
 
+async function fetchLandingConfigRow(): Promise<unknown> {
+  const supabase = getSupabaseClient();
+  let lastError: unknown = null;
+
+  // Suporta schemas com chave primaria chamada id ou key.
+  for (const keyColumn of ["id", "key"] as const) {
+    const { data, error } = await supabase
+      .from(SITE_CONFIG_TABLE)
+      .select("*")
+      .eq(keyColumn, LANDING_CONFIG_ROW_ID)
+      .maybeSingle();
+
+    if (!error) {
+      return data;
+    }
+
+    lastError = error;
+  }
+
+  if (lastError) throw lastError;
+  return null;
+}
+
+async function saveLandingConfigRow(normalized: LandingConfig): Promise<void> {
+  const supabase = getSupabaseClient();
+  const nowIso = new Date().toISOString();
+
+  const attempts: Array<{ row: Record<string, unknown>; onConflict: string }> = [
+    {
+      row: { id: LANDING_CONFIG_ROW_ID, data: normalized, updated_at: nowIso },
+      onConflict: "id",
+    },
+    {
+      row: { key: LANDING_CONFIG_ROW_ID, data: normalized, updated_at: nowIso },
+      onConflict: "key",
+    },
+    {
+      row: { id: LANDING_CONFIG_ROW_ID, ...normalized, updated_at: nowIso },
+      onConflict: "id",
+    },
+    {
+      row: { key: LANDING_CONFIG_ROW_ID, ...normalized, updated_at: nowIso },
+      onConflict: "key",
+    },
+  ];
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    const { error } = await supabase
+      .from(SITE_CONFIG_TABLE)
+      .upsert(attempt.row, { onConflict: attempt.onConflict });
+
+    if (!error) {
+      return;
+    }
+
+    lastError = error;
+  }
+
+  if (lastError) throw lastError;
+}
+
 export async function fetchLandingConfig(options?: {
   forceRefresh?: boolean;
   fallbackConfig?: LandingConfig;
@@ -267,19 +285,8 @@ export async function fetchLandingConfig(options?: {
     }
   }
 
-  const rawConfig = await callWithFallback<Record<string, never>, unknown>(
-    ADMIN_LANDING_FETCH_CALLABLE,
-    {},
-    async () => {
-      const snap = await getDoc(doc(db, "site_config", "landing_page"));
-      return snap.exists() ? snap.data() : null;
-    }
-  );
-
-  const normalized = sanitizeLandingConfig(
-    extractPayloadData(rawConfig),
-    fallbackConfig
-  );
+  const rawConfig = await fetchLandingConfigRow();
+  const normalized = sanitizeLandingConfig(extractPayloadData(rawConfig), fallbackConfig);
 
   landingConfigCache = {
     cachedAt: Date.now(),
@@ -292,14 +299,7 @@ export async function fetchLandingConfig(options?: {
 export async function saveLandingConfig(config: LandingConfig): Promise<void> {
   const normalized = sanitizeLandingConfig(config, config);
 
-  await callWithFallback<{ config: LandingConfig }, { ok: boolean }>(
-    ADMIN_LANDING_SAVE_CALLABLE,
-    { config: normalized },
-    async () => {
-      await setDoc(doc(db, "site_config", "landing_page"), normalized);
-      return { ok: true };
-    }
-  );
+  await saveLandingConfigRow(normalized);
 
   landingConfigCache = {
     cachedAt: Date.now(),

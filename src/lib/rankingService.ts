@@ -1,15 +1,4 @@
-import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  where,
-  type QueryConstraint,
-} from "firebase/firestore";
-
-import { db } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -50,36 +39,6 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
-const isIndexRequired = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
-  if (code?.includes("failed-precondition")) return true;
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("index") && message.includes("query");
-  }
-  return false;
-};
-
-async function queryRows(path: string, attempts: QueryConstraint[][]): Promise<RawRow[]> {
-  const safeAttempts = attempts.filter((entry) => entry.length > 0);
-  if (!safeAttempts.length) return [];
-
-  let lastError: unknown = null;
-  for (let i = 0; i < safeAttempts.length; i += 1) {
-    try {
-      const snap = await getDocs(query(collection(db, path), ...safeAttempts[i]));
-      return snap.docs.map((entry) => ({ id: entry.id, ...(entry.data() as RawRow) }));
-    } catch (error: unknown) {
-      lastError = error;
-      const isLast = i === safeAttempts.length - 1;
-      if (!isIndexRequired(error) || isLast) throw error;
-    }
-  }
-
-  if (lastError) throw lastError;
-  return [];
-}
-
 export interface RankingUserRecord {
   id: string;
   nome: string;
@@ -90,13 +49,50 @@ export interface RankingUserRecord {
 }
 
 const normalizeUser = (raw: RawRow): RankingUserRecord => ({
-  id: asString(raw.id),
+  // Aceita tanto "id" quanto "uid" para facilitar a migracao de schema.
+  id: asString(raw.id) || asString(raw.uid),
   nome: asString(raw.nome, "Atleta Anonimo"),
   apelido: asString(raw.apelido),
   foto: asString(raw.foto, "https://github.com/shadcn.png"),
   turma: asString(raw.turma, "GERAL"),
   xp: Math.max(0, asNumber(raw.xp, 0)),
 });
+
+async function fetchRankingRows(options: {
+  turma?: string;
+  maxResults: number;
+}): Promise<RawRow[]> {
+  const supabase = getSupabaseClient();
+
+  // Tentativa 1: leitura enxuta (menos banda no Supabase Free).
+  let minimalQuery = supabase
+    .from("users")
+    .select("id, uid, nome, apelido, foto, turma, xp")
+    .order("xp", { ascending: false })
+    .limit(options.maxResults);
+
+  if (options.turma) {
+    minimalQuery = minimalQuery.eq("turma", options.turma);
+  }
+
+  const { data: minimalData, error: minimalError } = await minimalQuery;
+  if (!minimalError && Array.isArray(minimalData)) {
+    return minimalData as RawRow[];
+  }
+
+  // Tentativa 2: fallback sem select estrito para tolerar schema ainda em ajuste.
+  let fallbackQuery = supabase.from("users").select("*").limit(options.maxResults);
+  if (options.turma) {
+    fallbackQuery = fallbackQuery.eq("turma", options.turma);
+  }
+
+  const { data: fallbackData, error: fallbackError } = await fallbackQuery;
+  if (fallbackError) {
+    throw fallbackError;
+  }
+
+  return Array.isArray(fallbackData) ? (fallbackData as RawRow[]) : [];
+}
 
 export async function fetchGlobalRankingUsers(options?: {
   maxResults?: number;
@@ -111,10 +107,7 @@ export async function fetchGlobalRankingUsers(options?: {
     if (cached) return cached;
   }
 
-  const rows = await queryRows("users", [
-    [orderBy("xp", "desc"), limit(maxResults)],
-    [limit(maxResults)],
-  ]);
+  const rows = await fetchRankingRows({ maxResults });
   const users = rows
     .map((row) => normalizeUser(row))
     .sort((left, right) => right.xp - left.xp)
@@ -141,10 +134,10 @@ export async function fetchTurmaRankingUsers(options: {
     if (cached) return cached;
   }
 
-  const rows = await queryRows("users", [
-    [where("turma", "==", turma), orderBy("xp", "desc"), limit(maxResults)],
-    [where("turma", "==", turma), limit(maxResults)],
-  ]);
+  const rows = await fetchRankingRows({
+    turma,
+    maxResults,
+  });
 
   const users = rows
     .map((row) => normalizeUser(row))
