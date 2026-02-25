@@ -30,7 +30,7 @@ import {
   type TreinoUserDirectoryItem,
   upsertChamadaPresence,
   updateChamadaStatus,
-} from "@/lib/treinosService";
+} from "@/lib/treinosNativeService";
 import { isPermissionError } from "@/lib/backendErrors";
 
 const PAGE_SIZE = 10;

@@ -9,7 +9,7 @@ import {
   fetchTreinoRsvps,
   fetchTreinosByDateRange,
   setTreinoRsvp
-} from "../../lib/treinosService";
+} from "../../lib/treinosNativeService";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { getTurmaImage } from "../../constants/turmaImages";

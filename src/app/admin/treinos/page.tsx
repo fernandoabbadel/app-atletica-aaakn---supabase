@@ -32,7 +32,7 @@ import {
     upsertChamadaPresence,
     updateChamadaStatus,
     upsertTreino
-} from "../../../lib/treinosService";
+} from "../../../lib/treinosNativeService";
 
 // --- TIPAGEM ---
 type UserBase = TreinoUserDirectoryItem;

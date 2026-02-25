@@ -15,7 +15,7 @@ import {
   fetchTreinoChamada,
   fetchTreinoRsvps,
   setTreinoRsvp
-} from "../../../lib/treinosService";
+} from "../../../lib/treinosNativeService";
 import { getTurmaImage } from "../../../constants/turmaImages";
 
 // --- TIPAGENS (O Escudo do Código) ---
