@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
@@ -8,7 +8,7 @@ import {
   Dumbbell, Star, Rocket, Crown, Eye 
 } from "lucide-react";
 
-// ðŸ¦ˆ IMPORTS DO SISTEMA
+// Ã°Å¸Â¦Ë† IMPORTS DO SISTEMA
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { fetchPublicLandingData } from "../lib/publicLandingService";
@@ -16,9 +16,9 @@ import { type LandingConfig } from "../lib/adminLandingService";
 
 const DEFAULT_CONFIG: LandingConfig = {
   heroTitle: "SEJA UM",
-  heroSubtitle: "Centralize sua vida universitÃ¡ria. Carteirinha, Loja e Eventos.",
-  heroHighlight: "TUBARÃƒO REI",
-  tagline: "GESTÃƒO ESPORTIVA 2.0",
+  heroSubtitle: "Centralize sua vida universitaria. Carteirinha, Loja e Eventos.",
+  heroHighlight: "TUBARAO REI",
+  tagline: "GESTAO ESPORTIVA 2.0",
   taglineColor: "#10b981",
   titleColor: "#ffffff",
   gradientStart: "#34d399",
@@ -51,7 +51,7 @@ const useCounter = (end: number, duration: number = 2000) => {
   return count;
 };
 
-// --- COMPONENTE: Card de EstatÃ­stica ---
+// --- COMPONENTE: Card de EstatÃƒÂ­stica ---
 type StatColor = "emerald" | "blue" | "amber";
 
 interface StatCardProps {
@@ -88,12 +88,12 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"aluno" | "empresa">("aluno");
 
-  // ðŸ”’ Redirecionamento de SeguranÃ§a
+  // Ã°Å¸â€â€™ Redirecionamento de SeguranÃƒÂ§a
   useEffect(() => {
     if (!authLoading && user) router.push("/dashboard");
   }, [user, authLoading, router]);
 
-  // ðŸ“¡ Busca ConfiguraÃ§Ãµes Visuais
+  // Ã°Å¸â€œÂ¡ Busca ConfiguraÃƒÂ§ÃƒÂµes Visuais
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -112,14 +112,14 @@ export default function LandingPage() {
   }, []);
 
   const handleGoogleLogin = async () => { try { await loginGoogle(); } catch { addToast("Erro no login Google", "error"); } };
-  const handleGuest = () => { addToast("Modo Visitante Ativado! ðŸ¦ˆ", "info"); router.push("/dashboard"); };
+  const handleGuest = () => { addToast("Modo Visitante Ativado!", "info"); router.push("/dashboard"); };
 
   if (loading) return <div className="h-screen bg-[#030a08] flex items-center justify-center text-emerald-500 font-bold animate-pulse">CARREGANDO CARDUME...</div>;
 
   return (
     <div className="min-h-screen bg-[#030a08] text-white selection:bg-emerald-500/30 overflow-x-hidden font-sans">
       
-      {/* ðŸŒŠ Background Layers */}
+      {/* Ã°Å¸Å’Å  Background Layers */}
       <div className="fixed inset-0 pointer-events-none z-0">
          <div className="absolute top-[-10%] left-[-20%] w-[80%] h-[80%] bg-emerald-500/5 rounded-full blur-[120px] animate-pulse-slow" />
          <div className="absolute bottom-[-10%] right-[-20%] w-[80%] h-[80%] bg-teal-600/5 rounded-full blur-[120px] animate-pulse-slow delay-700" />
@@ -128,7 +128,7 @@ export default function LandingPage() {
       {/* ================= HERO SECTION ================= */}
       <main className="relative z-10 container mx-auto px-4 pt-10 pb-20 lg:pt-20 lg:flex lg:items-center lg:gap-16">
         
-        {/* ESQUERDA: Texto DinÃ¢mico */}
+        {/* ESQUERDA: Texto DinÃƒÂ¢mico */}
         <div className="flex-1 text-center lg:text-left space-y-8">
             <div className="relative w-48 h-48 lg:w-64 lg:h-64 mx-auto lg:mx-0 animate-float-slow group">
                 <div className="absolute inset-0 bg-emerald-500/20 blur-[50px] rounded-full scale-75" />
@@ -161,9 +161,9 @@ export default function LandingPage() {
                 </p>
             </div>
 
-            {/* Stats Bar - ðŸ¦ˆ RANKING REMOVIDO DAQUI */}
+            {/* Stats Bar - Ã°Å¸Â¦Ë† RANKING REMOVIDO DAQUI */}
             <div className="grid grid-cols-3 gap-4 w-full max-w-lg mx-auto lg:mx-0">
-                <StatCard icon={Users} value={realStats.users || config.statUsers} label="SÃ³cios" color="emerald" />
+                <StatCard icon={Users} value={realStats.users || config.statUsers} label="Socios" color="emerald" />
                 <StatCard icon={Dumbbell} value={config.statPosts} label="Treinos" color="blue" />
                 <StatCard icon={Rocket} value={config.statPartners} label="Parceiros" color="amber" />
             </div>
@@ -188,14 +188,14 @@ export default function LandingPage() {
                        </button>
                    </div>
                 ) : (
-                   <div className="text-center py-8 text-zinc-500 text-xs">Ãrea restrita a parceiros.</div>
+                   <div className="text-center py-8 text-zinc-500 text-xs">Area restrita a parceiros.</div>
                 )}
             </div>
         </div>
       </main>
 
       {/* ================= PLANOS REMOVIDOS ================= */}
-      {/* A seÃ§Ã£o de planos foi totalmente removida conforme solicitado pelo TubarÃ£o */}
+      {/* A seÃƒÂ§ÃƒÂ£o de planos foi totalmente removida conforme solicitado pelo TubarÃƒÂ£o */}
 
       {/* ================= DEPOIMENTOS ================= */}
       <section className="py-20 container mx-auto px-4 border-t border-white/5 bg-zinc-950/30">
@@ -238,7 +238,7 @@ export default function LandingPage() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
                 <div className="space-y-4">
                     <div className="flex items-center gap-2"><Crown className="text-emerald-500 w-5 h-5" /><span className="font-black text-xl text-white">AAAKN</span></div>
-                    <p className="text-zinc-500 text-xs leading-relaxed">Plataforma Oficial da AtlÃ©tica.</p>
+                    <p className="text-zinc-500 text-xs leading-relaxed">Plataforma oficial da Atletica.</p>
                 </div>
 
                 <div>
@@ -260,7 +260,7 @@ export default function LandingPage() {
             </div>
             <div className="pt-8 border-t border-zinc-900 text-center text-[10px] text-zinc-600">
                 <p>&copy; {new Date().getFullYear()} AAAKN. Todos os direitos reservados.</p>
-                <p className="mt-1">O TubarÃ£o jÃ¡ subiu para a base. ðŸ¦ˆ</p>
+                <p className="mt-1">O Tubarao ja subiu para a base.</p>
             </div>
         </div>
       </footer>

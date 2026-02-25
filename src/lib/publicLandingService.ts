@@ -1,4 +1,5 @@
 import {
+  DEFAULT_LANDING_CONFIG,
   fetchLandingConfig,
   type LandingConfig,
 } from "./adminLandingService";
@@ -76,19 +77,28 @@ export async function fetchPublicLandingData(options?: {
 }): Promise<PublicLandingData> {
   const forceRefresh = options?.forceRefresh ?? false;
   const cacheKey = "default";
+  const fallbackConfig = options?.fallbackConfig ?? DEFAULT_LANDING_CONFIG;
 
   if (!forceRefresh) {
     const cached = getCachedValue(publicLandingCache, cacheKey);
     if (cached) return cached;
   }
 
-  const [config, usersCount] = await Promise.all([
+  const [configResult, usersCountResult] = await Promise.allSettled([
     fetchLandingConfig({
       forceRefresh,
-      fallbackConfig: options?.fallbackConfig,
+      fallbackConfig,
     }),
     fetchUsersCount(),
   ]);
+
+  const config = configResult.status === "fulfilled"
+    ? configResult.value
+    : fallbackConfig;
+
+  const usersCount = usersCountResult.status === "fulfilled"
+    ? usersCountResult.value
+    : fallbackConfig.statUsers;
 
   const data: PublicLandingData = {
     config,
