@@ -12,17 +12,20 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { db } from "@/lib/backend";
 import {
+  addEventPollOption,
+  createEventComment,
   cancelEventTicketRequest,
+  deleteEventComment,
   fetchEventDetailsBundle,
-} from "../../../lib/eventsService";
+  reportEventComment,
+  setEventCommentHidden,
+  setEventRsvpDetailed,
+  toggleEventCommentLike,
+  voteEventPollOption,
+  type DateLike,
+} from "../../../lib/eventsNativeService";
 import { getTurmaImage } from "../../../constants/turmaImages";
-import { 
-  doc, collection, runTransaction, serverTimestamp, 
-  increment, addDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc,
-  Timestamp
-} from "@/lib/supa/firestore";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
 
@@ -72,7 +75,7 @@ interface Rsvp {
   userAvatar: string;
   userTurma: string;
   status: 'going' | 'maybe';
-  timestamp?: Timestamp | null;
+  timestamp?: DateLike | null;
 }
 
 interface Comentario {
@@ -89,7 +92,7 @@ interface Comentario {
   likes: string[];
   reports: string[];
   hidden: boolean;
-  createdAt: Timestamp | null;
+  createdAt: DateLike | null;
 }
 
 interface EnqueteOption {
@@ -107,7 +110,7 @@ interface Enquete {
   options: EnqueteOption[];
   voters: string[];
   userVotes?: Record<string, number[]>;
-  createdAt: Timestamp | null;
+  createdAt: DateLike | null;
 }
 
 interface PatenteConfig {
@@ -321,32 +324,13 @@ export default function DetalhesEventoPage() {
   const handleRSVP = async (status: "going" | "maybe") => {
       if (!user || !evento) return addToast("Faca login para confirmar!", "error");
       try {
-          await runTransaction(db, async (t) => {
-              const ref = doc(db, "eventos", evento.id, "rsvps", user.uid);
-              const eventRef = doc(db, "eventos", evento.id);
-              
-              const docSnap = await t.get(ref);
-              const old = docSnap.exists() ? (docSnap.data() as Rsvp).status : null;
-
-              if (old === status) {
-                  t.delete(ref);
-                  t.update(eventRef, { 
-                      [`stats.${status === 'going' ? 'confirmados' : 'talvez'}`]: increment(-1),
-                      interessados: arrayRemove(user.uid) 
-                  });
-              } else {
-                  if (old) {
-                      t.update(eventRef, { [`stats.${old === 'going' ? 'confirmados' : 'talvez'}`]: increment(-1) });
-                  }
-                  t.set(ref, {
-                      userId: user.uid, status, userName: user.nome || "Anonimo", 
-                      userAvatar: user.foto || "", userTurma: user.turma || "Geral", timestamp: serverTimestamp()
-                  });
-                  t.update(eventRef, { 
-                      [`stats.${status === 'going' ? 'confirmados' : 'talvez'}`]: increment(1),
-                      interessados: arrayUnion(user.uid) 
-                  });
-              }
+          await setEventRsvpDetailed({
+              eventId: evento.id,
+              userId: user.uid,
+              status,
+              userName: user.nome || "Anonimo",
+              userAvatar: user.foto || "",
+              userTurma: user.turma || "Geral",
           });
           addToast("Lista atualizada!", "success");
           await refreshEventData();
@@ -361,11 +345,10 @@ export default function DetalhesEventoPage() {
           userAvatar: user.foto || "", userTurma: user.turma || "Geral",
           userPlanoCor: user.plano_cor || "zinc", userPlanoIcon: user.plano_icon || "ghost",
           userPatente: user.patente || "Pl�ncton", role: user.role || 'user',
-          createdAt: serverTimestamp(), likes: [], reports: [], hidden: false
+          likes: [], reports: [], hidden: false
       };
       try {
-          await addDoc(collection(db, "eventos", evento.id, "comentarios"), newCommentData);
-          await updateDoc(doc(db, "users", user.uid), { "stats.commentsCount": increment(1) });
+          await createEventComment({ eventId: evento.id, data: newCommentData });
           setNewComment("");
           addToast("Comentario enviado!", "success");
           await refreshEventData();
@@ -374,17 +357,15 @@ export default function DetalhesEventoPage() {
 
   const handleLikeComment = async (comId: string, currentLikes: string[], authorId: string) => {
       if (!user || !evento) return;
-      const ref = doc(db, "eventos", evento.id, "comentarios", comId);
       const safeLikes = Array.isArray(currentLikes) ? currentLikes : [];
-      const hasLiked = safeLikes.includes(user.uid);
       try {
-          if (hasLiked) { await updateDoc(ref, { likes: arrayRemove(user.uid) }); } 
-          else { await updateDoc(ref, { likes: arrayUnion(user.uid) }); }
-          if (user.uid !== authorId) {
-              const incrementVal = hasLiked ? -1 : 1;
-              await updateDoc(doc(db, "users", authorId), { "stats.likesReceived": increment(incrementVal) });
-              await updateDoc(doc(db, "users", user.uid), { "stats.likesGiven": increment(incrementVal) });
-          }
+          void safeLikes;
+          void authorId;
+          await toggleEventCommentLike({
+              eventId: evento.id,
+              commentId: comId,
+              userId: user.uid,
+          });
           await refreshEventData();
       } catch (error) { console.error(error); }
   };
@@ -392,7 +373,7 @@ export default function DetalhesEventoPage() {
   const handleDeleteComment = async (comId: string) => {
       if (!evento || !confirm("Apagar este comentario?")) return;
       try {
-          await deleteDoc(doc(db, "eventos", evento.id, "comentarios", comId));
+          await deleteEventComment({ eventId: evento.id, commentId: comId });
           addToast("Comentario apagado.", "info");
           await refreshEventData();
       } catch {
@@ -402,45 +383,27 @@ export default function DetalhesEventoPage() {
 
   const handleReportComment = async (comId: string) => {
       if (!user || !evento) return;
-      await updateDoc(doc(db, "eventos", evento.id, "comentarios", comId), { reports: arrayUnion(user.uid) });
+      await reportEventComment({ eventId: evento.id, commentId: comId, userId: user.uid });
       addToast("Comentario denunciado.", "info");
       await refreshEventData();
   };
 
   const handleToggleHideComment = async (comId: string, currentStatus: boolean) => {
       if(!evento) return;
-      await updateDoc(doc(db, "eventos", evento.id, "comentarios", comId), { hidden: !currentStatus });
+      await setEventCommentHidden({ eventId: evento.id, commentId: comId, hidden: !currentStatus });
       addToast(currentStatus ? "Comentario restaurado." : "Comentario ocultado.", "info");
       await refreshEventData();
   };
 
   const handleVotePoll = async (pollId: string, optionIndex: number) => {
       if (!user || !evento) return addToast("Login necessario.", "error");
-      const pollRef = doc(db, "eventos", evento.id, "enquetes", pollId);
       try {
-        await runTransaction(db, async (t) => {
-            const pollDoc = await t.get(pollRef);
-            if (!pollDoc.exists()) throw "Enquete nao existe";
-            const data = pollDoc.data() as Enquete;
-            const newOptions = [...data.options];
-            const userVotes = data.userVotes || {}; 
-            const myVotes = userVotes[user.uid] || [];
-            if (myVotes.includes(optionIndex)) {
-                newOptions[optionIndex].votes = Math.max(0, (newOptions[optionIndex].votes || 0) - 1);
-                const userTurma = user.turma || "Geral";
-                if(newOptions[optionIndex].votesByTurma && newOptions[optionIndex].votesByTurma![userTurma] > 0) { newOptions[optionIndex].votesByTurma![userTurma]--; }
-                const newMyVotes = myVotes.filter(v => v !== optionIndex);
-                userVotes[user.uid] = newMyVotes;
-                t.update(pollRef, { options: newOptions, userVotes: userVotes });
-            } else {
-                if (myVotes.length >= 3) { throw "Voce ja escolheu 3 opcoes!"; }
-                newOptions[optionIndex].votes = (newOptions[optionIndex].votes || 0) + 1;
-                const userTurma = user.turma || "Geral";
-                if(!newOptions[optionIndex].votesByTurma) newOptions[optionIndex].votesByTurma = {};
-                newOptions[optionIndex].votesByTurma![userTurma] = (newOptions[optionIndex].votesByTurma![userTurma] || 0) + 1;
-                userVotes[user.uid] = [...myVotes, optionIndex];
-                t.update(pollRef, { options: newOptions, userVotes: userVotes, voters: arrayUnion(user.uid) });
-            }
+        await voteEventPollOption({
+            eventId: evento.id,
+            pollId,
+            userId: user.uid,
+            userTurma: user.turma || "Geral",
+            optionIndex,
         });
         await refreshEventData();
       } catch (e: unknown) { 
@@ -469,11 +432,17 @@ export default function DetalhesEventoPage() {
           return;
       }
 
-      const pollRef = doc(db, "eventos", evento.id, "enquetes", pollId);
-      await updateDoc(pollRef, {
-          options: arrayUnion({ 
-              text: cleanOptionText, votes: 0, creatorId: user.uid, creatorName: user.nome?.split(" ")[0] || "Anonimo", creatorAvatar: user.foto || "", votesByTurma: {} 
-          })
+      await addEventPollOption({
+          eventId: evento.id,
+          pollId,
+          option: { 
+              text: cleanOptionText,
+              votes: 0,
+              creatorId: user.uid,
+              creatorName: user.nome?.split(" ")[0] || "Anonimo",
+              creatorAvatar: user.foto || "",
+              votesByTurma: {},
+          },
       });
       setNewPollOption("");
       addToast("Opcao adicionada!", "success");

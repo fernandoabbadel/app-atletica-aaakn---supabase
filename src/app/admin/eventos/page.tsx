@@ -11,7 +11,6 @@ import Link from "next/link";
 import Image from "next/image"; 
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
-import { db } from "@/lib/backend";
 import { uploadImage } from "../../../lib/upload";
 import {
   createAdminEventPoll,
@@ -20,13 +19,14 @@ import {
   fetchAdminEventParticipants,
   fetchAdminEventPolls,
   fetchEventsFeed,
+  incrementEventPurchaseUserStats,
   setAdminEventLowStock,
   setAdminEventStatus,
   setAdminTicketPayment,
   updateAdminEventPollOptions,
   upsertAdminEvent,
-} from "../../../lib/eventsService";
-import { doc, increment, serverTimestamp, Timestamp, updateDoc } from "@/lib/supa/firestore";
+  type DateLike,
+} from "../../../lib/eventsNativeService";
 
 // --- TIPAGEM ---
 type StatusLote = "ativo" | "encerrado" | "agendado";
@@ -66,7 +66,7 @@ interface Participante {
   lote?: string;
   quantidade?: number;
   valorTotal?: string;
-  dataAprovacao?: Timestamp | Date | null; 
+  dataAprovacao?: DateLike | Date | null; 
   aprovadoPor?: string | null; 
   tipo: 'rsvp' | 'venda';
   origemVenda?: boolean; // 🦈 Adicionado para evitar @ts-ignore
@@ -113,9 +113,12 @@ const calculateTimeLeft = (dateStr: string, timeStr: string) => {
     return `${String(days).padStart(2, '0')}D ${String(hours).padStart(2, '0')}H ${String(minutes).padStart(2, '0')}M`;
 };
 
-const formatTimestamp = (timestamp: Timestamp | Date | null | undefined, type: 'date' | 'time') => {
+const formatTimestamp = (timestamp: DateLike | Date | null | undefined, type: 'date' | 'time') => {
     if (!timestamp) return "-";
-    const date = (timestamp as Timestamp).toDate ? (timestamp as Timestamp).toDate() : new Date(timestamp as Date);
+    const date =
+      typeof (timestamp as { toDate?: unknown }).toDate === "function"
+        ? ((timestamp as DateLike).toDate())
+        : new Date(timestamp as Date);
     if (type === 'date') return date.toLocaleDateString('pt-BR');
     if (type === 'time') return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     return "-";
@@ -221,7 +224,7 @@ export default function AdminEventosPage() {
               lote: String(raw.loteNome || "-"),
               quantidade: Number(raw.quantidade || 1),
               valorTotal: String(raw.valorTotal || "-"),
-              dataAprovacao: raw.dataAprovacao as Timestamp | Date | null | undefined,
+              dataAprovacao: raw.dataAprovacao as DateLike | Date | null | undefined,
               aprovadoPor: String(raw.aprovadoPor || ""),
               tipo: "venda",
               origemVenda: true,
@@ -343,7 +346,7 @@ export default function AdminEventosPage() {
         ...novoEvento,
         lotes: novoEvento.lotes || [],
         status: novoEvento.status || "ativo",
-        updatedAt: serverTimestamp(),
+        updatedAt: new Date().toISOString(),
     };
 
     try {
@@ -473,9 +476,10 @@ export default function AdminEventosPage() {
           });
 
           if (!isNaN(valorGasto) && p.userId) {
-              await updateDoc(doc(db, "users", p.userId), {
-                  "stats.eventsBought": increment(isApproving ? 1 : -1),
-                  "stats.totalSpentEvents": increment(isApproving ? valorGasto : -valorGasto)
+              await incrementEventPurchaseUserStats({
+                  userId: p.userId,
+                  isApproving,
+                  valorGasto,
               });
           }
 

@@ -13,16 +13,15 @@ import {
   RotateCcw,
   Users,
 } from "lucide-react";
-import { doc, getDoc } from "@/lib/supa/firestore";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
-import { db } from "@/lib/backend";
 import {
+  fetchEventTitleById,
   fetchAdminEventRsvpsPage,
   fetchAdminEventSalesPage,
   setAdminTicketPayment,
-} from "@/lib/eventsService";
+} from "@/lib/eventsNativeService";
 
 interface RsvpItem {
   id: string;
@@ -174,10 +173,8 @@ export default function AdminEventoListaPage() {
 
   const loadHeader = useCallback(async () => {
     if (!eventId) return;
-    const snap = await getDoc(doc(db, "eventos", eventId));
-    if (!snap.exists()) return;
-    const data = snap.data() as Record<string, unknown>;
-    setEventTitle(asString(data.titulo, "Evento"));
+    const title = await fetchEventTitleById(eventId);
+    if (title) setEventTitle(asString(title, "Evento"));
   }, [eventId]);
 
   const loadInitial = useCallback(async () => {

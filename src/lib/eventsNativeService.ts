@@ -1,0 +1,991 @@
+import { getSupabaseClient } from "./supabase";
+import {
+  asObject,
+  asStringArray,
+  boundedLimit,
+  incrementUserStats,
+  normalizeRowTimestamps,
+  throwSupabaseError,
+  toggleArrayValue,
+  type DateLike,
+  type Row,
+} from "./supabaseData";
+
+type CacheEntry<T> = { cachedAt: number; value: T };
+
+const TTL_MS = 90_000;
+const MAX_EVENTS = 80;
+const MAX_RSVPS = 2000;
+const MAX_POLLS = 200;
+const MAX_COMMENTS = 300;
+const MAX_TICKETS = 2000;
+
+const feedCache = new Map<string, CacheEntry<Row[]>>();
+const detailsCache = new Map<string, CacheEntry<EventDetailsBundle>>();
+const adminParticipantsCache = new Map<string, CacheEntry<{ rsvps: Row[]; vendas: Row[] }>>();
+const adminRsvpsPageCache = new Map<string, CacheEntry<AdminEventParticipantsPage>>();
+const adminSalesPageCache = new Map<string, CacheEntry<AdminEventParticipantsPage>>();
+const adminPollsCache = new Map<string, CacheEntry<Row[]>>();
+const financeiroCache = new Map<string, CacheEntry<Row | null>>();
+
+const nowIso = (): string => new Date().toISOString();
+
+const asNum = (value: unknown, fallback = 0): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.cachedAt > TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+
+const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void => {
+  cache.set(key, { cachedAt: Date.now(), value });
+};
+
+const normalizeRows = (rows: Row[]): Row[] => rows.map((row) => normalizeRowTimestamps(row));
+
+const invalidateEventCaches = (eventId?: string): void => {
+  feedCache.clear();
+  financeiroCache.clear();
+
+  if (!eventId) {
+    detailsCache.clear();
+    adminParticipantsCache.clear();
+    adminRsvpsPageCache.clear();
+    adminSalesPageCache.clear();
+    adminPollsCache.clear();
+    return;
+  }
+
+  for (const cache of [detailsCache, adminParticipantsCache, adminRsvpsPageCache, adminSalesPageCache, adminPollsCache]) {
+    cache.forEach((_, key) => {
+      if (key.startsWith(`${eventId}:`)) cache.delete(key);
+    });
+  }
+};
+
+async function selectRows(
+  table: string,
+  options?: {
+    eq?: Record<string, string>;
+    orderBy?: { column: string; ascending?: boolean };
+    limit?: number;
+    offset?: number;
+  }
+): Promise<Row[]> {
+  const supabase = getSupabaseClient();
+  let query = supabase.from(table).select("*");
+
+  if (options?.eq) {
+    for (const [column, value] of Object.entries(options.eq)) {
+      query = query.eq(column, value);
+    }
+  }
+  if (options?.orderBy) {
+    query = query.order(options.orderBy.column, { ascending: options.orderBy.ascending ?? true });
+  }
+  if (typeof options?.offset === "number" && typeof options?.limit === "number") {
+    query = query.range(options.offset, options.offset + options.limit - 1);
+  } else if (options?.limit) {
+    query = query.limit(options.limit);
+  }
+
+  const { data, error } = await query;
+  if (error) throwSupabaseError(error);
+  return (data ?? []) as Row[];
+}
+
+async function selectEventById(eventId: string): Promise<Row | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("eventos")
+    .select("*")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (error) throwSupabaseError(error);
+  return data ? (normalizeRowTimestamps(data as Row) as Row) : null;
+}
+
+async function updateEventRow(eventId: string, patch: Row): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("eventos")
+    .update({ ...patch, updatedAt: nowIso() })
+    .eq("id", eventId);
+  if (error) throwSupabaseError(error);
+}
+
+async function updateEventStatsAndLists(payload: {
+  eventId: string;
+  mutate: (current: {
+    stats: Row;
+    interessados: string[];
+    likesList: string[];
+  }) => { stats?: Row; interessados?: string[]; likesList?: string[] };
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { data: row, error: selectError } = await supabase
+    .from("eventos")
+    .select("stats, interessados, \"likesList\"")
+    .eq("id", payload.eventId)
+    .maybeSingle();
+
+  if (selectError) throwSupabaseError(selectError);
+  if (!row) return;
+
+  const current = {
+    stats: asObject(row.stats) ?? {},
+    interessados: asStringArray(row.interessados),
+    likesList: asStringArray((row as Row).likesList),
+  };
+
+  const next = payload.mutate(current);
+  const updatePayload: Row = { updatedAt: nowIso() };
+  if (next.stats) updatePayload.stats = next.stats;
+  if (next.interessados) updatePayload.interessados = next.interessados;
+  if (next.likesList) updatePayload.likesList = next.likesList;
+
+  const { error: updateError } = await supabase
+    .from("eventos")
+    .update(updatePayload)
+    .eq("id", payload.eventId);
+  if (updateError) throwSupabaseError(updateError);
+}
+
+function parseOffsetCursor(cursorId?: string | null): number {
+  if (!cursorId) return 0;
+  const parsed = Number(cursorId);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+}
+
+function nextOffsetCursor(offset: number, pageSize: number, hasMore: boolean): string | null {
+  if (!hasMore) return null;
+  return String(offset + pageSize);
+}
+
+export async function fetchEventsFeed(options?: {
+  maxResults?: number;
+  forceRefresh?: boolean;
+}): Promise<Row[]> {
+  const maxResults = boundedLimit(options?.maxResults ?? 60, MAX_EVENTS);
+  const forceRefresh = options?.forceRefresh ?? false;
+  const cacheKey = `${maxResults}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(feedCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  let rows: Row[] = [];
+  try {
+    rows = await selectRows("eventos", {
+      orderBy: { column: "createdAt", ascending: false },
+      limit: maxResults,
+    });
+  } catch {
+    rows = await selectRows("eventos", { limit: maxResults });
+  }
+
+  const normalized = normalizeRows(rows);
+  setCache(feedCache, cacheKey, normalized);
+  return normalized;
+}
+
+async function fetchFinanceiroConfig(forceRefresh = false): Promise<Row | null> {
+  const cacheKey = "financeiro";
+  if (!forceRefresh) {
+    const cached = getCache(financeiroCache, cacheKey);
+    if (cached !== null) return cached;
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("app_config")
+    .select("*")
+    .eq("id", "financeiro")
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const row = data ? (normalizeRowTimestamps(data as Row) as Row) : null;
+  setCache(financeiroCache, cacheKey, row);
+  return row;
+}
+
+export async function fetchAdminEventParticipants(options: {
+  eventId: string;
+  rsvpsLimit?: number;
+  vendasLimit?: number;
+  forceRefresh?: boolean;
+}): Promise<{ rsvps: Row[]; vendas: Row[] }> {
+  const eventId = options.eventId.trim();
+  if (!eventId) return { rsvps: [], vendas: [] };
+
+  const rsvpsLimit = boundedLimit(options.rsvpsLimit ?? 300, MAX_RSVPS);
+  const vendasLimit = boundedLimit(options.vendasLimit ?? 300, MAX_TICKETS);
+  const forceRefresh = options.forceRefresh ?? false;
+  const cacheKey = `${eventId}:${rsvpsLimit}:${vendasLimit}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(adminParticipantsCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const [rsvpsRaw, vendasRaw] = await Promise.all([
+    selectRows("eventos_rsvps", {
+      eq: { eventoId: eventId },
+      limit: rsvpsLimit,
+    }),
+    selectRows("solicitacoes_ingressos", {
+      eq: { eventoId: eventId },
+      orderBy: { column: "dataSolicitacao", ascending: false },
+      limit: vendasLimit,
+    }),
+  ]);
+
+  const result = {
+    rsvps: normalizeRows(rsvpsRaw),
+    vendas: normalizeRows(vendasRaw),
+  };
+  setCache(adminParticipantsCache, cacheKey, result);
+  return result;
+}
+
+export interface AdminEventParticipantsPage {
+  rows: Row[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export async function fetchAdminEventRsvpsPage(options: {
+  eventId: string;
+  pageSize?: number;
+  cursorId?: string | null;
+  forceRefresh?: boolean;
+}): Promise<AdminEventParticipantsPage> {
+  const eventId = options.eventId.trim();
+  if (!eventId) return { rows: [], nextCursor: null, hasMore: false };
+
+  const pageSize = boundedLimit(options.pageSize ?? 10, MAX_RSVPS);
+  const offset = parseOffsetCursor(options.cursorId);
+  const forceRefresh = options.forceRefresh ?? false;
+  const cacheKey = `${eventId}:${pageSize}:${offset}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(adminRsvpsPageCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const rowsRaw = await selectRows("eventos_rsvps", {
+    eq: { eventoId: eventId },
+    orderBy: { column: "timestamp", ascending: false },
+    offset,
+    limit: pageSize + 1,
+  });
+
+  const hasMore = rowsRaw.length > pageSize;
+  const pageRows = normalizeRows(rowsRaw.slice(0, pageSize));
+  const result: AdminEventParticipantsPage = {
+    rows: pageRows,
+    hasMore,
+    // Cursor por offset: simples e barato no plano free.
+    nextCursor: nextOffsetCursor(offset, pageSize, hasMore),
+  };
+  setCache(adminRsvpsPageCache, cacheKey, result);
+  return result;
+}
+
+export async function fetchAdminEventSalesPage(options: {
+  eventId: string;
+  pageSize?: number;
+  cursorId?: string | null;
+  forceRefresh?: boolean;
+}): Promise<AdminEventParticipantsPage> {
+  const eventId = options.eventId.trim();
+  if (!eventId) return { rows: [], nextCursor: null, hasMore: false };
+
+  const pageSize = boundedLimit(options.pageSize ?? 10, MAX_TICKETS);
+  const offset = parseOffsetCursor(options.cursorId);
+  const forceRefresh = options.forceRefresh ?? false;
+  const cacheKey = `${eventId}:${pageSize}:${offset}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(adminSalesPageCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const rowsRaw = await selectRows("solicitacoes_ingressos", {
+    eq: { eventoId: eventId },
+    orderBy: { column: "dataSolicitacao", ascending: false },
+    offset,
+    limit: pageSize + 1,
+  });
+
+  const hasMore = rowsRaw.length > pageSize;
+  const pageRows = normalizeRows(rowsRaw.slice(0, pageSize));
+  const result: AdminEventParticipantsPage = {
+    rows: pageRows,
+    hasMore,
+    nextCursor: nextOffsetCursor(offset, pageSize, hasMore),
+  };
+  setCache(adminSalesPageCache, cacheKey, result);
+  return result;
+}
+
+export async function fetchAdminEventPolls(options: {
+  eventId: string;
+  maxResults?: number;
+  forceRefresh?: boolean;
+}): Promise<Row[]> {
+  const eventId = options.eventId.trim();
+  if (!eventId) return [];
+
+  const maxResults = boundedLimit(options.maxResults ?? 40, MAX_POLLS);
+  const forceRefresh = options.forceRefresh ?? false;
+  const cacheKey = `${eventId}:${maxResults}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(adminPollsCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const rows = normalizeRows(
+    await selectRows("eventos_enquetes", {
+      eq: { eventoId: eventId },
+      orderBy: { column: "createdAt", ascending: false },
+      limit: maxResults,
+    })
+  );
+  setCache(adminPollsCache, cacheKey, rows);
+  return rows;
+}
+
+export interface EventDetailsBundle {
+  evento: Row | null;
+  rsvps: Row[];
+  comentarios: Row[];
+  enquetes: Row[];
+  patentes: Row[];
+  financeiro: Row | null;
+  meusPedidos: Row[];
+}
+
+export async function fetchEventDetailsBundle(options: {
+  eventId: string;
+  userId?: string | null;
+  rsvpsLimit?: number;
+  commentsLimit?: number;
+  pollsLimit?: number;
+  pedidosLimit?: number;
+  forceRefresh?: boolean;
+}): Promise<EventDetailsBundle> {
+  const eventId = options.eventId.trim();
+  if (!eventId) {
+    return {
+      evento: null,
+      rsvps: [],
+      comentarios: [],
+      enquetes: [],
+      patentes: [],
+      financeiro: null,
+      meusPedidos: [],
+    };
+  }
+
+  const userId = options.userId?.trim() || "";
+  const rsvpsLimit = boundedLimit(options.rsvpsLimit ?? 450, MAX_RSVPS);
+  const commentsLimit = boundedLimit(options.commentsLimit ?? 120, MAX_COMMENTS);
+  const pollsLimit = boundedLimit(options.pollsLimit ?? 40, MAX_POLLS);
+  const pedidosLimit = boundedLimit(options.pedidosLimit ?? 50, MAX_TICKETS);
+  const forceRefresh = options.forceRefresh ?? false;
+  const cacheKey = `${eventId}:${userId}:${rsvpsLimit}:${commentsLimit}:${pollsLimit}:${pedidosLimit}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(detailsCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const supabase = getSupabaseClient();
+  const [evento, rsvpsRaw, comentariosRaw, enquetesRaw, patentesRaw, financeiro, meusPedidosRaw] =
+    await Promise.all([
+      selectEventById(eventId),
+      selectRows("eventos_rsvps", { eq: { eventoId: eventId }, limit: rsvpsLimit }),
+      selectRows("eventos_comentarios", {
+        eq: { eventoId: eventId },
+        orderBy: { column: "createdAt", ascending: false },
+        limit: commentsLimit,
+      }),
+      selectRows("eventos_enquetes", {
+        eq: { eventoId: eventId },
+        orderBy: { column: "createdAt", ascending: false },
+        limit: pollsLimit,
+      }),
+      selectRows("patentes_config", {
+        orderBy: { column: "minXp", ascending: true },
+        limit: 25,
+      }),
+      fetchFinanceiroConfig(forceRefresh),
+      userId
+        ? (async () => {
+            const { data, error } = await supabase
+              .from("solicitacoes_ingressos")
+              .select("*")
+              .eq("userId", userId)
+              .eq("eventoId", eventId)
+              .order("dataSolicitacao", { ascending: false })
+              .limit(pedidosLimit);
+            if (error) throwSupabaseError(error);
+            return (data ?? []) as Row[];
+          })()
+        : Promise.resolve([] as Row[]),
+    ]);
+
+  const bundle: EventDetailsBundle = {
+    evento,
+    rsvps: normalizeRows(rsvpsRaw),
+    comentarios: normalizeRows(comentariosRaw),
+    enquetes: normalizeRows(enquetesRaw),
+    patentes: normalizeRows(patentesRaw),
+    financeiro,
+    meusPedidos: normalizeRows(meusPedidosRaw),
+  };
+
+  setCache(detailsCache, cacheKey, bundle);
+  return bundle;
+}
+
+export async function cancelEventTicketRequest(requestId: string): Promise<void> {
+  const cleanId = requestId.trim();
+  if (!cleanId) return;
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("solicitacoes_ingressos").delete().eq("id", cleanId);
+  if (error) throwSupabaseError(error);
+
+  detailsCache.clear();
+  adminParticipantsCache.clear();
+  adminSalesPageCache.clear();
+}
+
+export async function upsertAdminEvent(payload: {
+  eventId?: string;
+  data: Row;
+}): Promise<Row | null> {
+  const eventId = payload.eventId?.trim() || "";
+  const supabase = getSupabaseClient();
+
+  if (eventId) {
+    const { error: updateError } = await supabase
+      .from("eventos")
+      .update({
+        ...payload.data,
+        updatedAt: nowIso(),
+      })
+      .eq("id", eventId);
+    if (updateError) throwSupabaseError(updateError);
+
+    const updated = await selectEventById(eventId);
+    invalidateEventCaches(eventId);
+    return updated;
+  }
+
+  const { data, error } = await supabase
+    .from("eventos")
+    .insert({
+      ...payload.data,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    })
+    .select("*")
+    .single();
+
+  if (error) throwSupabaseError(error);
+  const created = normalizeRowTimestamps(data as Row);
+  invalidateEventCaches(String(created.id || ""));
+  return created;
+}
+
+export async function deleteAdminEventById(eventId: string): Promise<void> {
+  const cleanId = eventId.trim();
+  if (!cleanId) return;
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("eventos").delete().eq("id", cleanId);
+  if (error) throwSupabaseError(error);
+  invalidateEventCaches(cleanId);
+}
+
+export async function setAdminEventStatus(payload: {
+  eventId: string;
+  status: string;
+}): Promise<void> {
+  await updateEventRow(payload.eventId.trim(), { status: payload.status });
+  invalidateEventCaches(payload.eventId.trim());
+}
+
+export async function setAdminEventLowStock(payload: {
+  eventId: string;
+  isLowStock: boolean;
+}): Promise<void> {
+  await updateEventRow(payload.eventId.trim(), { isLowStock: payload.isLowStock });
+  invalidateEventCaches(payload.eventId.trim());
+}
+
+export async function setAdminTicketPayment(payload: {
+  ticketRequestId: string;
+  isApproving: boolean;
+  approvedBy: string;
+}): Promise<void> {
+  const ticketRequestId = payload.ticketRequestId.trim();
+  if (!ticketRequestId) return;
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("solicitacoes_ingressos")
+    .update({
+      status: payload.isApproving ? "aprovado" : "pendente",
+      dataAprovacao: payload.isApproving ? nowIso() : null,
+      aprovadoPor: payload.isApproving ? payload.approvedBy : null,
+    })
+    .eq("id", ticketRequestId);
+  if (error) throwSupabaseError(error);
+
+  adminParticipantsCache.clear();
+  adminSalesPageCache.clear();
+  detailsCache.clear();
+}
+
+export async function createAdminEventPoll(payload: {
+  eventId: string;
+  question: string;
+  allowUserOptions: boolean;
+}): Promise<{ id: string }> {
+  const eventId = payload.eventId.trim();
+  if (!eventId) return { id: "" };
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("eventos_enquetes")
+    .insert({
+      eventoId: eventId,
+      question: payload.question.trim(),
+      allowUserOptions: payload.allowUserOptions,
+      options: [],
+      voters: [],
+      userVotes: {},
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    })
+    .select("id")
+    .single();
+  if (error) throwSupabaseError(error);
+
+  invalidateEventCaches(eventId);
+  return { id: String(data?.id || "") };
+}
+
+export async function deleteAdminEventPoll(payload: {
+  eventId: string;
+  pollId: string;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("eventos_enquetes")
+    .delete()
+    .eq("id", payload.pollId)
+    .eq("eventoId", payload.eventId);
+  if (error) throwSupabaseError(error);
+  invalidateEventCaches(payload.eventId);
+}
+
+export async function updateAdminEventPollOptions(payload: {
+  eventId: string;
+  pollId: string;
+  options: unknown[];
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("eventos_enquetes")
+    .update({
+      options: payload.options,
+      updatedAt: nowIso(),
+    })
+    .eq("id", payload.pollId)
+    .eq("eventoId", payload.eventId);
+  if (error) throwSupabaseError(error);
+  invalidateEventCaches(payload.eventId);
+}
+
+export async function fetchEventTitleById(eventId: string): Promise<string | null> {
+  const row = await selectEventById(eventId);
+  if (!row) return null;
+  return typeof row.titulo === "string" ? row.titulo : null;
+}
+
+export async function toggleEventLike(payload: {
+  eventId: string;
+  userId: string;
+  currentlyLiked: boolean;
+}): Promise<void> {
+  const eventId = payload.eventId.trim();
+  const userId = payload.userId.trim();
+  if (!eventId || !userId) return;
+
+  await updateEventStatsAndLists({
+    eventId,
+    mutate: ({ stats, likesList }) => {
+      const nextLikesList = toggleArrayValue(likesList, userId);
+      const currentLikes = asNum((stats as Row).likes, 0);
+      const nextLikes = Math.max(0, currentLikes + (nextLikesList.includes(userId) ? 1 : -1));
+      return {
+        likesList: nextLikesList,
+        stats: { ...stats, likes: nextLikes },
+      };
+    },
+  });
+
+  invalidateEventCaches(eventId);
+}
+
+export async function setEventRsvpDetailed(payload: {
+  eventId: string;
+  userId: string;
+  status: "going" | "maybe";
+  userName: string;
+  userAvatar: string;
+  userTurma: string;
+}): Promise<void> {
+  const eventId = payload.eventId.trim();
+  const userId = payload.userId.trim();
+  if (!eventId || !userId) return;
+
+  const supabase = getSupabaseClient();
+  const { data: existing, error: existingError } = await supabase
+    .from("eventos_rsvps")
+    .select("id, status")
+    .eq("eventoId", eventId)
+    .eq("userId", userId)
+    .maybeSingle();
+
+  if (existingError) throwSupabaseError(existingError);
+
+  const oldStatus =
+    existing?.status === "going" || existing?.status === "maybe"
+      ? (existing.status as "going" | "maybe")
+      : null;
+
+  // Mantemos comportamento antigo: clicar na mesma opcao remove o RSVP.
+  if (oldStatus === payload.status) {
+    const { error: deleteError } = await supabase
+      .from("eventos_rsvps")
+      .delete()
+      .eq("eventoId", eventId)
+      .eq("userId", userId);
+    if (deleteError) throwSupabaseError(deleteError);
+
+    await updateEventStatsAndLists({
+      eventId,
+      mutate: ({ stats, interessados }) => ({
+        interessados: interessados.filter((entry) => entry !== userId),
+        stats: {
+          ...stats,
+          [payload.status === "going" ? "confirmados" : "talvez"]: Math.max(
+            0,
+            asNum((stats as Row)[payload.status === "going" ? "confirmados" : "talvez"], 0) - 1
+          ),
+        },
+      }),
+    });
+  } else {
+    const { error: upsertError } = await supabase.from("eventos_rsvps").upsert(
+      {
+        eventoId: eventId,
+        userId,
+        status: payload.status,
+        userName: payload.userName,
+        userAvatar: payload.userAvatar,
+        userTurma: payload.userTurma,
+        timestamp: nowIso(),
+      },
+      {
+        onConflict: "eventoId,userId",
+      }
+    );
+    if (upsertError) throwSupabaseError(upsertError);
+
+    await updateEventStatsAndLists({
+      eventId,
+      mutate: ({ stats, interessados }) => {
+        const nextStats: Row = { ...stats };
+        if (oldStatus) {
+          const oldKey = oldStatus === "going" ? "confirmados" : "talvez";
+          nextStats[oldKey] = Math.max(0, asNum(nextStats[oldKey], 0) - 1);
+        }
+        const nextKey = payload.status === "going" ? "confirmados" : "talvez";
+        nextStats[nextKey] = asNum(nextStats[nextKey], 0) + 1;
+        const nextInteressados = interessados.includes(userId)
+          ? interessados
+          : [...interessados, userId];
+
+        return {
+          stats: nextStats,
+          interessados: nextInteressados,
+        };
+      },
+    });
+  }
+
+  invalidateEventCaches(eventId);
+}
+
+export async function createEventComment(payload: {
+  eventId: string;
+  data: Row;
+}): Promise<{ id: string }> {
+  const eventId = payload.eventId.trim();
+  if (!eventId) return { id: "" };
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("eventos_comentarios")
+    .insert({
+      eventoId: eventId,
+      ...payload.data,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    })
+    .select("id")
+    .single();
+  if (error) throwSupabaseError(error);
+
+  const userId = typeof payload.data.userId === "string" ? payload.data.userId.trim() : "";
+  if (userId) {
+    await incrementUserStats(userId, { commentsCount: 1 });
+  }
+
+  invalidateEventCaches(eventId);
+  return { id: String(data?.id || "") };
+}
+
+export async function toggleEventCommentLike(payload: {
+  eventId: string;
+  commentId: string;
+  userId: string;
+}): Promise<string[]> {
+  const supabase = getSupabaseClient();
+  const { data: row, error: selectError } = await supabase
+    .from("eventos_comentarios")
+    .select("id, likes, userId")
+    .eq("id", payload.commentId)
+    .eq("eventoId", payload.eventId)
+    .maybeSingle();
+  if (selectError) throwSupabaseError(selectError);
+  if (!row) return [];
+
+  const currentLikes = asStringArray(row.likes);
+  const nextLikes = toggleArrayValue(currentLikes, payload.userId);
+  const changed = nextLikes.length !== currentLikes.length;
+  if (!changed) return currentLikes;
+
+  const { error: updateError } = await supabase
+    .from("eventos_comentarios")
+    .update({ likes: nextLikes, updatedAt: nowIso() })
+    .eq("id", payload.commentId)
+    .eq("eventoId", payload.eventId);
+  if (updateError) throwSupabaseError(updateError);
+
+  const authorId = typeof row.userId === "string" ? row.userId : "";
+  const diff = nextLikes.includes(payload.userId) ? 1 : -1;
+  if (authorId && authorId !== payload.userId) {
+    await incrementUserStats(authorId, { likesReceived: diff });
+    await incrementUserStats(payload.userId, { likesGiven: diff });
+  }
+
+  invalidateEventCaches(payload.eventId);
+  return nextLikes;
+}
+
+export async function deleteEventComment(payload: {
+  eventId: string;
+  commentId: string;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("eventos_comentarios")
+    .delete()
+    .eq("id", payload.commentId)
+    .eq("eventoId", payload.eventId);
+  if (error) throwSupabaseError(error);
+  invalidateEventCaches(payload.eventId);
+}
+
+export async function reportEventComment(payload: {
+  eventId: string;
+  commentId: string;
+  userId: string;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { data: row, error: selectError } = await supabase
+    .from("eventos_comentarios")
+    .select("reports")
+    .eq("id", payload.commentId)
+    .eq("eventoId", payload.eventId)
+    .maybeSingle();
+  if (selectError) throwSupabaseError(selectError);
+  if (!row) return;
+
+  const currentReports = asStringArray(row.reports);
+  if (currentReports.includes(payload.userId)) return;
+
+  const { error: updateError } = await supabase
+    .from("eventos_comentarios")
+    .update({
+      reports: [...currentReports, payload.userId],
+      updatedAt: nowIso(),
+    })
+    .eq("id", payload.commentId)
+    .eq("eventoId", payload.eventId);
+  if (updateError) throwSupabaseError(updateError);
+  invalidateEventCaches(payload.eventId);
+}
+
+export async function setEventCommentHidden(payload: {
+  eventId: string;
+  commentId: string;
+  hidden: boolean;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("eventos_comentarios")
+    .update({ hidden: payload.hidden, updatedAt: nowIso() })
+    .eq("id", payload.commentId)
+    .eq("eventoId", payload.eventId);
+  if (error) throwSupabaseError(error);
+  invalidateEventCaches(payload.eventId);
+}
+
+export async function voteEventPollOption(payload: {
+  eventId: string;
+  pollId: string;
+  userId: string;
+  userTurma: string;
+  optionIndex: number;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { data: pollRow, error: selectError } = await supabase
+    .from("eventos_enquetes")
+    .select("options, userVotes, voters")
+    .eq("id", payload.pollId)
+    .eq("eventoId", payload.eventId)
+    .maybeSingle();
+  if (selectError) throwSupabaseError(selectError);
+  if (!pollRow) throw new Error("Enquete nao existe");
+
+  const options = Array.isArray(pollRow.options) ? [...pollRow.options] : [];
+  const index = payload.optionIndex;
+  if (index < 0 || index >= options.length) {
+    throw new Error("Opcao invalida");
+  }
+
+  const userVotesMap =
+    asObject(pollRow.userVotes) ?? {};
+  const userVoteEntry = userVotesMap[payload.userId];
+  const myVotes = Array.isArray(userVoteEntry)
+    ? userVoteEntry.filter((v): v is number => typeof v === "number")
+    : [];
+
+  const optionObj = asObject(options[index]) ?? {};
+  const votesByTurma = asObject(optionObj.votesByTurma) ?? {};
+  const turmaKey = (payload.userTurma || "Geral").trim() || "Geral";
+
+  if (myVotes.includes(index)) {
+    optionObj.votes = Math.max(0, asNum(optionObj.votes, 0) - 1);
+    const turmaVotes = Math.max(0, asNum(votesByTurma[turmaKey], 0) - 1);
+    votesByTurma[turmaKey] = turmaVotes;
+    optionObj.votesByTurma = votesByTurma;
+    options[index] = optionObj;
+    userVotesMap[payload.userId] = myVotes.filter((v) => v !== index);
+  } else {
+    if (myVotes.length >= 3) {
+      throw new Error("Voce ja escolheu 3 opcoes!");
+    }
+    optionObj.votes = asNum(optionObj.votes, 0) + 1;
+    votesByTurma[turmaKey] = asNum(votesByTurma[turmaKey], 0) + 1;
+    optionObj.votesByTurma = votesByTurma;
+    options[index] = optionObj;
+    userVotesMap[payload.userId] = [...myVotes, index];
+  }
+
+  const voters = asStringArray(pollRow.voters);
+  const nextVoters = voters.includes(payload.userId) ? voters : [...voters, payload.userId];
+
+  // Sem RPC/Edge Function, usamos read-modify-write no cliente para manter o plano free.
+  const { error: updateError } = await supabase
+    .from("eventos_enquetes")
+    .update({
+      options,
+      userVotes: userVotesMap,
+      voters: nextVoters,
+      updatedAt: nowIso(),
+    })
+    .eq("id", payload.pollId)
+    .eq("eventoId", payload.eventId);
+  if (updateError) throwSupabaseError(updateError);
+
+  invalidateEventCaches(payload.eventId);
+}
+
+export async function addEventPollOption(payload: {
+  eventId: string;
+  pollId: string;
+  option: Row;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { data: row, error: selectError } = await supabase
+    .from("eventos_enquetes")
+    .select("options")
+    .eq("id", payload.pollId)
+    .eq("eventoId", payload.eventId)
+    .maybeSingle();
+  if (selectError) throwSupabaseError(selectError);
+  if (!row) return;
+
+  const currentOptions = Array.isArray(row.options) ? row.options : [];
+  const { error: updateError } = await supabase
+    .from("eventos_enquetes")
+    .update({
+      options: [...currentOptions, payload.option],
+      updatedAt: nowIso(),
+    })
+    .eq("id", payload.pollId)
+    .eq("eventoId", payload.eventId);
+  if (updateError) throwSupabaseError(updateError);
+
+  invalidateEventCaches(payload.eventId);
+}
+
+export async function incrementEventPurchaseUserStats(payload: {
+  userId: string;
+  isApproving: boolean;
+  valorGasto: number;
+}): Promise<void> {
+  const userId = payload.userId.trim();
+  if (!userId || !Number.isFinite(payload.valorGasto)) return;
+
+  const diff = payload.isApproving ? 1 : -1;
+  await incrementUserStats(userId, {
+    eventsBought: diff,
+    totalSpentEvents: payload.isApproving ? payload.valorGasto : -payload.valorGasto,
+  });
+}
+
+export function clearEventsNativeCaches(): void {
+  invalidateEventCaches();
+}
+
+export type { DateLike };
