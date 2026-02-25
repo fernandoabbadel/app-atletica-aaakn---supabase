@@ -1,20 +1,11 @@
-import {
-  collection,
-  getCountFromServer,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  type QueryConstraint,
-} from "firebase/firestore";
-
-import { db } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
   value: T;
 };
+
+type Row = Record<string, unknown>;
 
 const READ_CACHE_TTL_MS = 30_000;
 const MAX_RECENT_USERS_RESULTS = 20;
@@ -85,57 +76,66 @@ const sortRowsByFieldDesc = <T extends Record<string, unknown>>(
 ): T[] =>
   [...rows].sort((left, right) => toMillis(right[field]) - toMillis(left[field]));
 
-const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
-  if (code?.includes("failed-precondition")) return true;
+const sortRowsByDateCandidatesDesc = (rows: Row[], fields: string[]): Row[] =>
+  [...rows].sort((left, right) => {
+    const rightValue = fields.map((field) => toMillis(right[field])).find((v) => v > 0) ?? 0;
+    const leftValue = fields.map((field) => toMillis(left[field])).find((v) => v > 0) ?? 0;
+    return rightValue - leftValue;
+  });
 
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("index") && message.includes("query");
-  }
-  return false;
-};
+async function safeCount(
+  tableName: string
+): Promise<{ count: number; fallbackUsed: boolean }> {
+  const supabase = getSupabaseClient();
 
-async function fetchCollectionRowsWithFallback(
-  collectionName: string,
-  attempts: QueryConstraint[][]
-): Promise<Record<string, unknown>[]> {
-  const normalizedAttempts = attempts.filter((entry) => entry.length > 0);
-  if (!normalizedAttempts.length) return [];
+  // Preferimos counts por metadata para reduzir custo de leitura no plano free.
+  for (const mode of ["planned", "estimated", "exact"] as const) {
+    const { count, error } = await supabase
+      .from(tableName)
+      .select("*", { count: mode, head: true });
 
-  let lastError: unknown = null;
-  for (let index = 0; index < normalizedAttempts.length; index += 1) {
-    try {
-      const constraints = normalizedAttempts[index];
-      const snap = await getDocs(query(collection(db, collectionName), ...constraints));
-      return snap.docs.map((row) => ({
-        id: row.id,
-        ...(row.data() as Record<string, unknown>),
-      }));
-    } catch (error: unknown) {
-      lastError = error;
-      const isLastAttempt = index === normalizedAttempts.length - 1;
-      if (!isIndexRequiredError(error) || isLastAttempt) {
-        throw error;
-      }
+    if (!error && typeof count === "number") {
+      return { count, fallbackUsed: false };
     }
   }
 
-  if (lastError) {
-    throw lastError;
-  }
-  return [];
+  return { count: 0, fallbackUsed: true };
 }
 
-async function safeCount(
-  collectionName: string
-): Promise<{ count: number; fallbackUsed: boolean }> {
-  try {
-    const snap = await getCountFromServer(collection(db, collectionName));
-    return { count: snap.data().count, fallbackUsed: false };
-  } catch {
-    return { count: 0, fallbackUsed: true };
+async function fetchRowsWithOrderFallback(options: {
+  tableName: string;
+  maxResults: number;
+  orderFields: string[];
+}): Promise<Row[]> {
+  const supabase = getSupabaseClient();
+  let lastError: unknown = null;
+
+  // Tentamos diferentes campos de ordenacao para tolerar schema antigo/novo.
+  for (const field of options.orderFields) {
+    const { data, error } = await supabase
+      .from(options.tableName)
+      .select("*")
+      .order(field, { ascending: false })
+      .limit(options.maxResults);
+
+    if (!error && Array.isArray(data)) {
+      return data as Row[];
+    }
+
+    lastError = error;
   }
+
+  // Fallback final sem order para nao quebrar se a coluna ainda nao existir.
+  const { data, error } = await supabase
+    .from(options.tableName)
+    .select("*")
+    .limit(options.maxResults);
+
+  if (error) {
+    throw error ?? lastError;
+  }
+
+  return Array.isArray(data) ? (data as Row[]) : [];
 }
 
 export interface AdminDashboardStats {
@@ -226,20 +226,20 @@ export async function fetchAdminDashboardBundle(options?: {
       safeCount("users"),
       safeCount("eventos"),
       safeCount("store_orders"),
-      fetchCollectionRowsWithFallback("users", [
-        [orderBy("data_adesao", "desc"), limit(usersLimit)],
-        [orderBy("createdAt", "desc"), limit(usersLimit)],
-        [limit(usersLimit)],
-      ]),
-      fetchCollectionRowsWithFallback("activity_logs", [
-        [orderBy("timestamp", "desc"), limit(logsLimit)],
-        [orderBy("createdAt", "desc"), limit(logsLimit)],
-        [limit(logsLimit)],
-      ]),
+      fetchRowsWithOrderFallback({
+        tableName: "users",
+        maxResults: usersLimit,
+        orderFields: ["data_adesao", "createdAt", "created_at"],
+      }),
+      fetchRowsWithOrderFallback({
+        tableName: "activity_logs",
+        maxResults: logsLimit,
+        orderFields: ["timestamp", "createdAt", "created_at"],
+      }),
     ]);
 
-  const recentUsers = usersRows
-    .map((row) => normalizeRecentUser(asString(row.id), row))
+  const recentUsers = sortRowsByDateCandidatesDesc(usersRows, ["data_adesao", "createdAt", "created_at"])
+    .map((row) => normalizeRecentUser(asString(row.id) || asString(row.uid), row))
     .filter((row): row is AdminDashboardRecentUser => row !== null);
 
   const recentActivity = sortRowsByFieldDesc(logsRows, "timestamp")
