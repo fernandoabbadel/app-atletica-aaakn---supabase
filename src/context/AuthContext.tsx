@@ -169,11 +169,24 @@ const formatBackendErrorForConsole = (error: unknown): unknown => {
   if (typeof error === "object" && error !== null) {
     const raw = error as Record<string, unknown>;
     return {
+      constructor:
+        typeof (error as { constructor?: unknown }).constructor === "function"
+          ? ((error as { constructor: { name?: unknown } }).constructor.name as string | undefined)
+          : undefined,
+      ownKeys: Object.getOwnPropertyNames(error),
       code: typeof raw.code === "string" ? raw.code : undefined,
       message: typeof raw.message === "string" ? raw.message : undefined,
       details: typeof raw.details === "string" ? raw.details : undefined,
       hint: typeof raw.hint === "string" ? raw.hint : undefined,
       status: typeof raw.status === "number" ? raw.status : undefined,
+      stringified: (() => {
+        try {
+          return JSON.stringify(error);
+        } catch {
+          return undefined;
+        }
+      })(),
+      asString: String(error),
     };
   }
 
@@ -287,6 +300,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [patentesCache, setPatentesCache] = useState<PatenteConfig[]>([]); 
   const [planosCache, setPlanosCache] = useState<PlanoConfig[]>([]);
   const lastMaintenanceUid = useRef<string | null>(null);
+  const syncingAuthUidRef = useRef<string | null>(null);
 
   const router = useRouter();
   const pathname = usePathname(); 
@@ -380,6 +394,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const syncAuthenticatedUser = async (authUser: SupabaseAuthUser): Promise<void> => {
       const currentToken = ++syncToken;
+      const authUid = authUser.id;
+
+      // Evita corrida local entre `onAuthStateChange` e `getSession` no primeiro login.
+      if (syncingAuthUidRef.current === authUid) {
+        return;
+      }
+      syncingAuthUidRef.current = authUid;
 
       try {
         const { data: existingRow, error: selectError } = await supabase
@@ -442,9 +463,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.error("Erro ao sincronizar usuario:", formatBackendErrorForConsole(error));
         }
         if (!active || currentToken !== syncToken) return;
-        setUser(null);
+
+        // Fallback local: mantem sessao autenticada ativa mesmo se a sincronizacao SQL falhar.
+        // Isso evita loop de "faca login" enquanto corrigimos schema/RLS no Supabase.
+        const fallbackUser = normalizeUserRow(
+          {
+            ...DEFAULT_USER_PROPS,
+            uid: authUser.id,
+            nome: getAuthDisplayName(authUser),
+            email: authUser.email || "",
+            foto: getAuthAvatar(authUser),
+            role: "guest",
+            status: "ativo",
+            stats: { ...DEFAULT_STATS },
+          },
+          authUser
+        );
+
+        setUser(fallbackUser);
         setIsAdmin(false);
         setLoading(false);
+      } finally {
+        if (syncingAuthUidRef.current === authUid) {
+          syncingAuthUidRef.current = null;
+        }
       }
     };
 
