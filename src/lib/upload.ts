@@ -1,6 +1,4 @@
-import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
-
-import { storage } from "./backend";
+import { getSupabaseClient } from "./supabase";
 
 export interface UploadResult {
   url: string | null;
@@ -44,11 +42,28 @@ export async function uploadImage(file: File, path: string): Promise<UploadResul
   }
 
   try {
+    const supabase = getSupabaseClient();
+    const bucket = (process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET || "uploads").trim() || "uploads";
     const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, "_").toLowerCase();
     const filename = `${Date.now()}-${cleanName}`;
-    const storageRef = ref(storage, `${path}/${filename}`);
-    const snapshot = await uploadBytes(storageRef, file);
-    const url = await getDownloadURL(snapshot.ref);
+    const objectPath = `${path}/${filename}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(objectPath, file, {
+        upsert: false,
+        cacheControl: "3600",
+        contentType: file.type || undefined,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+    const url = publicUrl || null;
 
     return { url, error: null };
   } catch (error: unknown) {
