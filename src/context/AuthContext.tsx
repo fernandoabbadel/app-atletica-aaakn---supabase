@@ -460,7 +460,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void logActivity(normalized.uid, normalized.nome, "CREATE", "Usuarios", "Novo cadastro via Google");
       } catch (error: unknown) {
         if (!isPermissionError(error)) {
-          console.error("Erro ao sincronizar usuario:", formatBackendErrorForConsole(error));
+          console.warn("Falha na sincronizacao do usuario (fallback ativo):", formatBackendErrorForConsole(error));
         }
         if (!active || currentToken !== syncToken) return;
 
