@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   arrayUnion,
   collection,
@@ -17,10 +17,10 @@ import {
   type QueryConstraint,
   type QueryDocumentSnapshot,
   where,
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 
 const DEFAULT_AVATAR_URL = "https://github.com/shadcn.png";
 const ALBUM_SCAN_CALLABLE = "albumRegisterCapture";
@@ -172,7 +172,7 @@ export interface AlbumCaptureResult {
 }
 
 const shouldFallbackToClientCapture = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase() || "";
+  const code = getBackendErrorCode(error)?.toLowerCase() || "";
   if (
     code.includes("functions/not-found") ||
     code.includes("functions/unavailable") ||
@@ -195,7 +195,7 @@ const shouldFallbackToClientCapture = (error: unknown): boolean => {
 };
 
 const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase() || "";
+  const code = getBackendErrorCode(error)?.toLowerCase() || "";
   if (code.includes("failed-precondition")) return true;
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
@@ -805,3 +805,4 @@ export async function registerAlbumCapture(payload: {
     throw error;
   }
 }
+

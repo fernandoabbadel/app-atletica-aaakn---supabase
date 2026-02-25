@@ -1,6 +1,6 @@
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
-import { storage } from "./firebase";
+import { storage } from "./backend";
 
 export interface UploadResult {
   url: string | null;
@@ -56,3 +56,4 @@ export async function uploadImage(file: File, path: string): Promise<UploadResul
     return { url: null, error: "Falha ao subir imagem. Tente novamente." };
   }
 }
+

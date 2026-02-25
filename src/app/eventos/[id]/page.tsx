@@ -1,4 +1,4 @@
-﻿// src/app/eventos/[id]/page.tsx
+// src/app/eventos/[id]/page.tsx
 "use client";
 import Image from "next/image";
 import React, { useCallback, useEffect, useState, useMemo } from "react";
@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { db } from "../../../lib/firebase";
+import { db } from "@/lib/backend";
 import {
   cancelEventTicketRequest,
   fetchEventDetailsBundle,
@@ -22,7 +22,7 @@ import {
   doc, collection, runTransaction, serverTimestamp, 
   increment, addDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc,
   Timestamp
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
 
@@ -125,11 +125,11 @@ const ICON_COMPONENTS: Record<string, React.ElementType> = {
 };
 
 const DEFAULT_PATENTES: PatenteConfig[] = [
-    { titulo: "Plâncton", minXp: 0, cor: "text-zinc-400", iconName: "Fish" },
-    { titulo: "Peixe Palhaço", minXp: 500, cor: "text-orange-400", iconName: "Fish" },
+    { titulo: "Pl�ncton", minXp: 0, cor: "text-zinc-400", iconName: "Fish" },
+    { titulo: "Peixe Palha�o", minXp: 500, cor: "text-orange-400", iconName: "Fish" },
     { titulo: "Barracuda", minXp: 2000, cor: "text-blue-400", iconName: "Swords" },
-    { titulo: "Tubarão Martelo", minXp: 5000, cor: "text-purple-400", iconName: "Fish" },
-    { titulo: "Tubarão Branco", minXp: 15000, cor: "text-emerald-400", iconName: "Fish" },
+    { titulo: "Tubar�o Martelo", minXp: 5000, cor: "text-purple-400", iconName: "Fish" },
+    { titulo: "Tubar�o Branco", minXp: 15000, cor: "text-emerald-400", iconName: "Fish" },
     { titulo: "MEGALODON", minXp: 50000, cor: "text-red-600", iconName: "Crown" },
 ];
 
@@ -207,7 +207,7 @@ const UserBadges = ({ data, patentesConfig }: { data: Comentario, patentesConfig
     const isAdminUser = data.role === 'admin_geral' || data.role === 'master';
     const PlanIcon = ICON_COMPONENTS[data.userPlanoIcon || 'Ghost'] || Ghost;
     const planColor = PLAN_COLORS[data.userPlanoCor || 'zinc'];
-    const patenteName = data.userPatente || "Plâncton";
+    const patenteName = data.userPatente || "Pl�ncton";
     const patenteConfig = patentesConfig.find(p => p.titulo === patenteName) || patentesConfig[0] || DEFAULT_PATENTES[0];
     const PatenteIcon = ICON_COMPONENTS[patenteConfig.iconName] || Fish;
     const patenteColor = patenteConfig.cor || "text-zinc-400";
@@ -360,7 +360,7 @@ export default function DetalhesEventoPage() {
           text: commentText, userId: user.uid, userName: user.nome || "Anonimo",
           userAvatar: user.foto || "", userTurma: user.turma || "Geral",
           userPlanoCor: user.plano_cor || "zinc", userPlanoIcon: user.plano_icon || "ghost",
-          userPatente: user.patente || "Plâncton", role: user.role || 'user',
+          userPatente: user.patente || "Pl�ncton", role: user.role || 'user',
           createdAt: serverTimestamp(), likes: [], reports: [], hidden: false
       };
       try {
@@ -949,4 +949,5 @@ export default function DetalhesEventoPage() {
     </div>
   );
 }
+
 

@@ -34,7 +34,7 @@ export default function FidelidadePage() {
   const [historico, setHistorico] = useState<HistoricoItem[]>([]);
   const [config, setConfig] = useState<ConfigFidelidade>({ xpPerStamp: 100, rules: [] });
 
-  // 1. CARREGAR DADOS DO FIREBASE
+  // 1. CARREGAR DADOS DO SUPABASE
   useEffect(() => {
     if (!user) {
       setLoading(false);

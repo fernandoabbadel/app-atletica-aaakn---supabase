@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Power, Loader2, ArrowLeft, Copy, Save } from "lucide-react";

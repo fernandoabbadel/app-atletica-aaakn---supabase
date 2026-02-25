@@ -7,7 +7,7 @@ import Image from "next/image"; // 🦈 Importando Image do Next.js
 import { fetchGlobalRankingUsers } from "../../lib/rankingService";
 import { getTurmaImage } from "../../constants/turmaImages";
 
-// Interface para o Usuário vindo do Firebase
+// Interface para o Usuário vindo do Supabase
 interface RankingUser {
   id: string;
   nome: string;

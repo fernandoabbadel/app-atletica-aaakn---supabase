@@ -2,8 +2,8 @@
 
 import React, { useState } from "react";
 import { ShieldAlert, Lock, LogOut, MessageCircle, AlertTriangle } from "lucide-react";
-import { signOut } from "firebase/auth";
-import { auth } from "../../lib/firebase";
+import { signOut } from "@/lib/supa/auth";
+import { auth } from "@/lib/backend";
 import { useRouter } from "next/navigation";
 
 export default function BannedPage() {

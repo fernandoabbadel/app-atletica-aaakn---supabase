@@ -1,7 +1,7 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { doc, getDoc, serverTimestamp, setDoc } from "@/lib/supa/firestore";
+import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
-import { db, storage } from "./firebase";
+import { db, storage } from "./backend";
 import { compressImageFile } from "./imageCompression";
 
 export interface CarteirinhaConfig {
@@ -201,3 +201,4 @@ export async function uploadCarteirinhaBackground(
   const version = Date.now();
   return `${url}${url.includes("?") ? "&" : "?"}v=${version}`;
 }
+

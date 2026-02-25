@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { ArrowLeft, BarChart3, Building2, ClipboardList, History } from "lucide-react";

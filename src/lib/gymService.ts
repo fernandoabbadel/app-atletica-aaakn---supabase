@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   addDoc,
   arrayRemove,
@@ -13,12 +13,12 @@ import {
   serverTimestamp,
   updateDoc,
   type QueryConstraint,
-} from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+} from "@/lib/supa/firestore";
+import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { compressImageFile } from "./imageCompression";
-import { db, functions, storage } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions, storage } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 import { validateImageFile } from "./upload";
 
 type CacheEntry<T> = {
@@ -68,7 +68,7 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
 };
 
 const isIndexRequired = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (code?.includes("failed-precondition")) return true;
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
@@ -78,7 +78,7 @@ const isIndexRequired = (error: unknown): boolean => {
 };
 
 const shouldFallbackToClient = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
   return (
     code.includes("functions/not-found") ||
@@ -303,3 +303,4 @@ export async function submitGymCheckin(payload: {
 export function clearGymCaches(): void {
   feedCache.clear();
 }
+

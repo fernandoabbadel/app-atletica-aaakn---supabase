@@ -12,7 +12,7 @@ import {
   fetchStoreProductDetail,
   toggleStoreProductLike,
 } from "../../../lib/storeService";
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "@/lib/supa/firestore";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -518,3 +518,4 @@ export default function DetalheProdutoPage() {
     </div>
   );
 }
+

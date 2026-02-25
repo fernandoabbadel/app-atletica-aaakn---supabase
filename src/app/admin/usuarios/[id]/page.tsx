@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
-import { isFirebasePermissionError } from "@/lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 import {
   deleteAdminUser,
   fetchAdminUserProfile,
@@ -96,7 +96,7 @@ export default function AdminUsuarioDetalhePage() {
       setProfile(result);
       setForm(toInitialForm(result));
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) { console.error(error); }
+      if (!isPermissionError(error)) { console.error(error); }
       addToast("Erro ao carregar usuario.", "error");
     } finally {
       setLoading(false);
@@ -137,7 +137,7 @@ export default function AdminUsuarioDetalhePage() {
 
       addToast("Usuario atualizado.", "success");
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) { console.error(error); }
+      if (!isPermissionError(error)) { console.error(error); }
       addToast("Erro ao salvar.", "error");
     } finally {
       setSaving(false);
@@ -162,7 +162,7 @@ export default function AdminUsuarioDetalhePage() {
         "success"
       );
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) { console.error(error); }
+      if (!isPermissionError(error)) { console.error(error); }
       addToast("Erro ao alterar status.", "error");
     } finally {
       setChangingStatus(false);
@@ -183,7 +183,7 @@ export default function AdminUsuarioDetalhePage() {
       addToast("Usuario excluido.", "success");
       router.replace("/admin/usuarios");
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) { console.error(error); }
+      if (!isPermissionError(error)) { console.error(error); }
       addToast("Erro ao excluir usuario.", "error");
       setDeleting(false);
     }
@@ -379,4 +379,5 @@ export default function AdminUsuarioDetalhePage() {
     </div>
   );
 }
+
 

@@ -29,7 +29,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { logActivity } from "@/lib/logger";
 import { APP_PAGES } from "@/lib/appRoutes";
-import { isFirebasePermissionError } from "@/lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 import {
   fetchPermissionMatrix,
   fetchPermissionUsers,
@@ -94,7 +94,7 @@ export default function AdminPermissoesPage() {
           setPermissionMatrix(defaultMatrix);
         }
       } catch (error: unknown) {
-        if (isFirebasePermissionError(error)) {
+        if (isPermissionError(error)) {
           addToast("Sem permissao para abrir o painel de permissoes.", "error");
           router.push("/sem-permissao");
           return;
@@ -130,7 +130,7 @@ export default function AdminPermissoesPage() {
         setUsersList(users);
         setUsersLoaded(true);
       } catch (error: unknown) {
-        if (isFirebasePermissionError(error)) {
+        if (isPermissionError(error)) {
           addToast("Sem permissao para listar usuarios.", "error");
           router.push("/sem-permissao");
           return;
@@ -174,7 +174,7 @@ export default function AdminPermissoesPage() {
 
       addToast(`Cargo atualizado para ${newRole.toUpperCase()}!`, "success");
     } catch (error: unknown) {
-      if (isFirebasePermissionError(error)) {
+      if (isPermissionError(error)) {
         addToast("Sem permissao para alterar cargo.", "error");
         return;
       }
@@ -220,7 +220,7 @@ export default function AdminPermissoesPage() {
 
       addToast("As leis do oceano foram atualizadas!", "success");
     } catch (error: unknown) {
-      if (isFirebasePermissionError(error)) {
+      if (isPermissionError(error)) {
         addToast("Sem permissao para salvar a matriz.", "error");
         return;
       }
@@ -474,3 +474,4 @@ export default function AdminPermissoesPage() {
     </div>
   );
 }
+

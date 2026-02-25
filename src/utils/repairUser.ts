@@ -1,5 +1,5 @@
-import { db } from "@/lib/firebase"; // Ajuste se seu path for diferente
-import { doc, updateDoc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/backend"; // Ajuste se seu path for diferente
+import { doc, updateDoc, getDoc } from "@/lib/supa/firestore";
 
 // Definição dos valores padrão para referência (Hardcoded para segurança do script)
 const DEFAULT_VALUES = {
@@ -47,7 +47,7 @@ export const repairUserProfile = async (uid: string) => {
       return false;
     }
 
-    const currentData = userSnap.data();
+    const currentData = userSnap.data() as Record<string, unknown>;
     
     // 🦈 CORREÇÃO: Substituindo 'any' por 'Record<string, unknown>'
     const updates: Record<string, unknown> = {};
@@ -102,3 +102,4 @@ export const repairUserProfile = async (uid: string) => {
     return false;
   }
 };
+

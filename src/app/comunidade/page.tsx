@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // 🦈 Importando Image
-import { db, storage } from "../../lib/firebase";
+import { db, storage } from "@/lib/backend";
 import {
   collection,
   addDoc,
@@ -21,8 +21,8 @@ import {
   deleteDoc,
   Timestamp,
   increment,
-} from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+} from "@/lib/supa/firestore";
+import { ref, uploadBytes, getDownloadURL } from "@/lib/supa/storage";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { Security } from "../../lib/security";
@@ -1011,6 +1011,7 @@ export default function ComunidadePage() {
     </div>
   );
 }
+
 
 
 

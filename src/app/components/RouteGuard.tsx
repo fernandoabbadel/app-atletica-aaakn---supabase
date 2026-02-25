@@ -15,7 +15,7 @@ import {
   fetchPermissionMatrix,
   type PermissionMatrix,
 } from "@/lib/adminSecurityService";
-import { isFirebasePermissionError } from "@/lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 
 const ADMIN_FALLBACK_ROLES = new Set([
   "master",
@@ -108,7 +108,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
           localStorage.removeItem("shark_permissions");
         }
       } catch (error: unknown) {
-        if (!isFirebasePermissionError(error)) {
+        if (!isPermissionError(error)) {
           console.warn("RouteGuard: usando regras locais (offline/permissao).");
         }
 
@@ -266,3 +266,4 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
   return <>{children}</>;
 }
+

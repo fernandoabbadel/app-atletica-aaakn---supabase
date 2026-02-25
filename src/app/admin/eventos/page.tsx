@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useCallback, useState, useRef, useEffect, useMemo } from "react";
 import { 
@@ -11,7 +11,7 @@ import Link from "next/link";
 import Image from "next/image"; 
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
-import { db } from "../../../lib/firebase";
+import { db } from "@/lib/backend";
 import { uploadImage } from "../../../lib/upload";
 import {
   createAdminEventPoll,
@@ -26,7 +26,7 @@ import {
   updateAdminEventPollOptions,
   upsertAdminEvent,
 } from "../../../lib/eventsService";
-import { doc, increment, serverTimestamp, Timestamp, updateDoc } from "firebase/firestore";
+import { doc, increment, serverTimestamp, Timestamp, updateDoc } from "@/lib/supa/firestore";
 
 // --- TIPAGEM ---
 type StatusLote = "ativo" | "encerrado" | "agendado";
@@ -69,7 +69,7 @@ interface Participante {
   dataAprovacao?: Timestamp | Date | null; 
   aprovadoPor?: string | null; 
   tipo: 'rsvp' | 'venda';
-  origemVenda?: boolean; // ðŸ¦ˆ Adicionado para evitar @ts-ignore
+  origemVenda?: boolean; // 🦈 Adicionado para evitar @ts-ignore
 }
 
 interface Evento {
@@ -90,22 +90,22 @@ interface Evento {
   stats?: { confirmados: number; talvez: number; likes: number; };
   vendasTotais?: { vendidos: number; total: number; receita?: number; };
   
-  // ðŸ¦ˆ ID 12: Campos Financeiros EspecÃ­ficos do Evento
+  // 🦈 ID 12: Campos Financeiros Específicos do Evento
   pixChave?: string;
   pixBanco?: string;
   pixTitular?: string;
   contatoComprovante?: string;
 }
 
-// LÃ“GICA DO CONTADOR COOL
+// LÓGICA DO CONTADOR COOL
 const calculateTimeLeft = (dateStr: string, timeStr: string) => {
     if (!dateStr || !timeStr) return "DATA INDEFINIDA";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return "FORMATO ANTIGO";
     const eventDate = new Date(`${dateStr}T${timeStr}:00`);
-    if (isNaN(eventDate.getTime())) return "DATA INVÃLIDA";
+    if (isNaN(eventDate.getTime())) return "DATA INVÁLIDA";
     const now = new Date();
     const diff = eventDate.getTime() - now.getTime();
-    if (diff < 0 && diff > -1000 * 60 * 60 * 4) return "AO VIVO ðŸ”´"; 
+    if (diff < 0 && diff > -1000 * 60 * 60 * 4) return "AO VIVO 🔴"; 
     if (diff < 0) return "ENCERRADO";
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -143,7 +143,7 @@ export default function AdminEventosPage() {
   const [novoEvento, setNovoEvento] = useState<Partial<Evento>>({
     titulo: "", data: "", hora: "", local: "", tipo: "Festa", destaque: "", mapsUrl: "", imagem: "", descricao: "", lotes: [],
     imagePositionY: 50,
-    // ðŸ¦ˆ InicializaÃ§Ã£o dos novos campos
+    // 🦈 Inicialização dos novos campos
     pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: ""
   });
   const [novoLote, setNovoLote] = useState<{ nome: string; preco: string; status: StatusLote }>({ nome: "", preco: "", status: "ativo" });
@@ -411,7 +411,7 @@ export default function AdminEventosPage() {
 
   const exportarCSV = () => {
       if(!showGestaoModal) return;
-      const headers = ["Nome", "Turma", "Status PresenÃ§a", "Pagamento", "Lote", "Qtd", "Valor", "Data Aprov.", "Hora Aprov.", "Aprovado Por"];
+      const headers = ["Nome", "Turma", "Status Presença", "Pagamento", "Lote", "Qtd", "Valor", "Data Aprov.", "Hora Aprov.", "Aprovado Por"];
       const rows = participantesReais.map(p => [
           p.userName, p.userTurma, p.status, p.pagamento || "pendente", p.lote || "-", p.quantidade || "1", p.valorTotal || "-",
           formatTimestamp(p.dataAprovacao, 'date'), formatTimestamp(p.dataAprovacao, 'time'), p.aprovadoPor || "-"
@@ -493,7 +493,7 @@ export default function AdminEventosPage() {
       }
   };
 
-  // --- GESTÃƒO DE ENQUETES ---
+  // --- GESTÃO DE ENQUETES ---
   const handleCreatePoll = async () => {
       if (!showPollModal || !novaEnquete.question) return;
       try {
@@ -550,7 +550,7 @@ export default function AdminEventosPage() {
       <header className="p-6 sticky top-0 z-30 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/admin" className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400" /></Link>
-          <h1 className="text-lg font-black text-white uppercase tracking-tighter">GestÃ£o de Eventos</h1>
+          <h1 className="text-lg font-black text-white uppercase tracking-tighter">Gestão de Eventos</h1>
         </div>
         <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
           <Plus size={16} /> Novo Evento
@@ -577,7 +577,7 @@ export default function AdminEventosPage() {
                         <Image src={evento.imagem} alt={evento.titulo} fill className="object-cover opacity-80 group-hover:opacity-100 transition" style={{ objectPosition: `50% ${evento.imagePositionY || 50}%` }} unoptimized/>
                         <div className="absolute top-2 left-2 flex gap-1 z-10"><span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-black/60 text-white backdrop-blur-sm border border-white/10">{evento.tipo}</span></div>
                         <div className="absolute bottom-2 right-2 bg-black/80 backdrop-blur-md px-2 py-1 rounded text-[10px] font-mono font-bold text-emerald-400 border border-emerald-500/30 z-10">{calculateTimeLeft(evento.data, evento.hora)}</div>
-                        <button onClick={(e) => { e.stopPropagation(); toggleLowStock(evento); }} className={`absolute top-2 right-2 p-1.5 rounded-lg border transition shadow-lg z-10 ${evento.isLowStock ? 'bg-yellow-500 text-black border-yellow-400' : 'bg-black/50 text-zinc-400 border-zinc-700 hover:text-white'}`} title="Alternar 'Ãšltimas Vagas'"><Star size={14} className={evento.isLowStock ? 'fill-black' : ''}/></button>
+                        <button onClick={(e) => { e.stopPropagation(); toggleLowStock(evento); }} className={`absolute top-2 right-2 p-1.5 rounded-lg border transition shadow-lg z-10 ${evento.isLowStock ? 'bg-yellow-500 text-black border-yellow-400' : 'bg-black/50 text-zinc-400 border-zinc-700 hover:text-white'}`} title="Alternar 'Últimas Vagas'"><Star size={14} className={evento.isLowStock ? 'fill-black' : ''}/></button>
                     </div>
                     <div className="p-4 flex-1 flex flex-col">
                         <h3 className="font-bold text-white text-lg leading-tight mb-1">{evento.titulo}</h3>
@@ -596,17 +596,17 @@ export default function AdminEventosPage() {
         </div>
       </main>
 
-      {/* MODAL GESTÃƒO LISTA (MANTIDO IGUAL AO ANTERIOR) */}
+      {/* MODAL GESTÃO LISTA (MANTIDO IGUAL AO ANTERIOR) */}
       {showGestaoModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={(e) => e.stopPropagation()}>
               <div className="bg-zinc-900 w-full max-w-7xl h-[90vh] rounded-2xl border border-zinc-800 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                   <div className="p-6 border-b border-zinc-800 flex justify-between items-center bg-black/40">
-                      <div><h2 className="font-black text-white text-xl uppercase tracking-tighter flex items-center gap-2"><Tag size={20} className="text-emerald-500"/> GestÃ£o: {showGestaoModal.titulo}</h2></div>
+                      <div><h2 className="font-black text-white text-xl uppercase tracking-tighter flex items-center gap-2"><Tag size={20} className="text-emerald-500"/> Gestão: {showGestaoModal.titulo}</h2></div>
                       <button onClick={() => setShowGestaoModal(null)} className="p-2 hover:bg-zinc-800 rounded-full transition"><X size={20}/></button>
                   </div>
                   <div className="flex-1 p-6 overflow-hidden flex flex-col">
                       <div className="flex justify-between items-center mb-4">
-                          <h3 className="text-sm font-bold text-zinc-400 uppercase">Lista de PresenÃ§a ({participantesReais.length})</h3>
+                          <h3 className="text-sm font-bold text-zinc-400 uppercase">Lista de Presença ({participantesReais.length})</h3>
                           <div className="flex items-center gap-4">
                               {(loadingList || loadingAllParticipants) && (
                                 <span className="text-xs text-zinc-500 flex items-center gap-2">
@@ -628,7 +628,7 @@ export default function AdminEventosPage() {
                           <table className="w-full text-left text-xs whitespace-nowrap">
                               <thead className="text-zinc-500 border-b border-zinc-800 bg-zinc-950 sticky top-0 z-10">
                                   <tr>
-                                      <th className="p-3">UsuÃ¡rio</th><th className="p-3">Turma</th><th className="p-3">RSVP</th><th className="p-3">Pagamento</th><th className="p-3 text-center">AÃ§Ã£o</th>
+                                      <th className="p-3">Usuário</th><th className="p-3">Turma</th><th className="p-3">RSVP</th><th className="p-3">Pagamento</th><th className="p-3 text-center">Ação</th>
                                       <th className="p-3 text-center">Data Aprov.</th><th className="p-3 text-center">Hora Aprov.</th><th className="p-3">Aprovado Por</th><th className="p-3">Valor</th><th className="p-3">Lote</th><th className="p-3 text-center">Qtd</th>
                                   </tr>
                               </thead>
@@ -638,8 +638,8 @@ export default function AdminEventosPage() {
                                           <td className="p-3 font-bold"><Link href={`/admin/usuarios/${p.userId}`} className="flex items-center gap-2 hover:text-emerald-400 transition" target="_blank"><div className="relative w-6 h-6 rounded-full overflow-hidden bg-zinc-800"><Image src={p.userAvatar || "https://github.com/shadcn.png"} alt="Avatar" fill className="object-cover" unoptimized/></div>{p.userName}</Link></td>
                                           <td className="p-3 text-zinc-400">{p.userTurma || "-"}</td>
                                           <td className="p-3"><span className={`px-2 py-0.5 rounded font-bold uppercase ${p.status === 'going' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-yellow-500/10 text-yellow-500'}`}>{p.status === 'going' ? 'Vou' : 'Talvez'}</span></td>
-                                          <td className="p-3"><span className={`px-2 py-0.5 rounded font-bold uppercase ${p.pagamento === 'pago' ? 'bg-blue-500/10 text-blue-500' : p.pagamento === 'analise' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-zinc-800 text-zinc-500'}`}>{p.pagamento === 'pago' ? 'Pago' : p.pagamento === 'analise' ? 'Em AnÃ¡lise' : 'Pendente'}</span></td>
-                                          <td className="p-3 text-center">{p.tipo === 'venda' ? (<div className="flex justify-center gap-2">{p.pagamento !== 'pago' ? (<button onClick={() => handleTogglePayment(p)} className="bg-emerald-600 hover:bg-emerald-500 text-white p-1.5 rounded-lg transition" title="Aprovar Pagamento"><Check size={14}/></button>) : (<button onClick={() => handleTogglePayment(p)} className="bg-zinc-800 hover:bg-red-500/20 hover:text-red-500 text-zinc-500 p-1.5 rounded-lg transition" title="Desfazer AprovaÃ§Ã£o"><RotateCcw size={14}/></button>)}</div>) : (<span className="text-zinc-600">-</span>)}</td>
+                                          <td className="p-3"><span className={`px-2 py-0.5 rounded font-bold uppercase ${p.pagamento === 'pago' ? 'bg-blue-500/10 text-blue-500' : p.pagamento === 'analise' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-zinc-800 text-zinc-500'}`}>{p.pagamento === 'pago' ? 'Pago' : p.pagamento === 'analise' ? 'Em Análise' : 'Pendente'}</span></td>
+                                          <td className="p-3 text-center">{p.tipo === 'venda' ? (<div className="flex justify-center gap-2">{p.pagamento !== 'pago' ? (<button onClick={() => handleTogglePayment(p)} className="bg-emerald-600 hover:bg-emerald-500 text-white p-1.5 rounded-lg transition" title="Aprovar Pagamento"><Check size={14}/></button>) : (<button onClick={() => handleTogglePayment(p)} className="bg-zinc-800 hover:bg-red-500/20 hover:text-red-500 text-zinc-500 p-1.5 rounded-lg transition" title="Desfazer Aprovação"><RotateCcw size={14}/></button>)}</div>) : (<span className="text-zinc-600">-</span>)}</td>
                                           <td className="p-3 text-center text-zinc-400">{formatTimestamp(p.dataAprovacao, 'date')}</td>
                                           <td className="p-3 text-center text-zinc-400">{formatTimestamp(p.dataAprovacao, 'time')}</td>
                                           <td className="p-3 text-zinc-400 italic text-[10px] truncate max-w-[100px]">{p.aprovadoPor || "-"}</td>
@@ -659,7 +659,7 @@ export default function AdminEventosPage() {
       {/* MODAL ENQUETES (MANTIDO) */}
       {showPollModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={(e) => e.stopPropagation()}>
-              {/* ConteÃºdo do Modal de Enquetes */}
+              {/* Conteúdo do Modal de Enquetes */}
               <div className="bg-zinc-900 w-full max-w-lg rounded-2xl border border-zinc-800 flex flex-col h-[80vh]">
                   <div className="p-6 border-b border-zinc-800 flex justify-between items-center bg-black/40">
                       <div><h2 className="font-black text-white text-lg uppercase flex items-center gap-2"><MessageCircle size={20} className="text-purple-500"/> Enquetes</h2></div>
@@ -738,7 +738,7 @@ export default function AdminEventosPage() {
                     <input type="text" placeholder="Local" className="flex-1 bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={novoEvento.local} onChange={(e) => setNovoEvento({ ...novoEvento, local: e.target.value })} />
                 </div>
 
-                {/* ðŸ¦ˆ NOVO: SEÃ‡ÃƒO FINANCEIRA (PIX) */}
+                {/* 🦈 NOVO: SEÇÃO FINANCEIRA (PIX) */}
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
                     <div className="flex items-center gap-2 mb-1">
                         <Wallet size={16} className="text-emerald-500"/>
@@ -756,12 +756,12 @@ export default function AdminEventosPage() {
                     <input type="text" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.contatoComprovante} onChange={e => setNovoEvento({...novoEvento, contatoComprovante: e.target.value})} />
                 </div>
                 
-                {/* GestÃ£o de Lotes */}
+                {/* Gestão de Lotes */}
                 <div className="bg-black/40 border border-zinc-800 rounded-xl p-4">
                     <label className="text-xs text-zinc-500 font-bold uppercase mb-3 block border-b border-zinc-800 pb-2">Configurar Lotes</label>
                     <div className="grid grid-cols-2 gap-2 mb-2">
                         <input type="text" placeholder="Nome (ex: Lote 1)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.nome} onChange={e => setNovoLote({...novoLote, nome: e.target.value})} />
-                        <input type="text" placeholder="PreÃ§o (R$)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.preco} onChange={e => setNovoLote({...novoLote, preco: e.target.value})} />
+                        <input type="text" placeholder="Preço (R$)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.preco} onChange={e => setNovoLote({...novoLote, preco: e.target.value})} />
                     </div>
                     <button onClick={handleAddLote} className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold text-xs uppercase hover:bg-emerald-500">Adicionar Lote</button>
                     <div className="space-y-1 mt-2 max-h-24 overflow-y-auto custom-scrollbar">
@@ -780,7 +780,7 @@ export default function AdminEventosPage() {
                 </div>
             </div>
 
-            <div><label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">DescriÃ§Ã£o Completa</label><textarea className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" value={novoEvento.descricao} onChange={(e) => setNovoEvento({ ...novoEvento, descricao: e.target.value })}></textarea></div>
+            <div><label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Descrição Completa</label><textarea className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" value={novoEvento.descricao} onChange={(e) => setNovoEvento({ ...novoEvento, descricao: e.target.value })}></textarea></div>
 
             <div className="flex gap-3 pt-2 border-t border-zinc-800">
               <button onClick={() => setShowModal(false)} className="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-400 font-bold text-xs uppercase hover:bg-zinc-800 transition">Cancelar</button>
@@ -792,4 +792,5 @@ export default function AdminEventosPage() {
     </div>
   );
 }
+
 

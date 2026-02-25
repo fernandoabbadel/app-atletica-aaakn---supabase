@@ -11,7 +11,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useToast } from "../../../context/ToastContext";
 import { uploadImage } from "../../../lib/upload";
-import { isFirebasePermissionError } from "../../../lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 import {
     addUserToChamada,
     createRecurringTreinos,
@@ -151,7 +151,7 @@ export default function AdminTreinosPage() {
           const lista = await fetchTreinosAdminList({ maxResults: 220, forceRefresh });
           setTreinos(lista);
       } catch (error: unknown) {
-          if (!isFirebasePermissionError(error)) {
+          if (!isPermissionError(error)) {
             console.error(error);
           }
           addToast("Erro ao carregar treinos.", "error");
@@ -163,7 +163,7 @@ export default function AdminTreinosPage() {
           const users = await fetchUserDirectory({ maxResults: 420, forceRefresh });
           setAllUsers(users);
       } catch (error: unknown) {
-          if (!isFirebasePermissionError(error)) {
+          if (!isPermissionError(error)) {
             console.error(error);
           }
           addToast("Erro ao carregar usuarios.", "error");
@@ -187,7 +187,7 @@ export default function AdminTreinosPage() {
               setModalidades(mods);
               setNovoTreino(prev => ({...prev, modalidade: mods[0] || "Futsal"}));
           } catch (error: unknown) {
-              if (!isFirebasePermissionError(error)) {
+              if (!isPermissionError(error)) {
                 console.error(error);
               }
               setModalidades(["Futsal", "Volei"]); 
@@ -215,7 +215,7 @@ export default function AdminTreinosPage() {
           try {
               await loadExpandedData(expandedRow, true);
           } catch (error: unknown) {
-              if (!isFirebasePermissionError(error)) {
+              if (!isPermissionError(error)) {
                 console.error(error);
               }
               addToast("Erro ao carregar chamada.", "error");
@@ -824,3 +824,4 @@ export default function AdminTreinosPage() {
     </div>
   );
 }
+

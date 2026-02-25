@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { ArrowLeft, CreditCard, ShoppingBag, Ticket } from "lucide-react";

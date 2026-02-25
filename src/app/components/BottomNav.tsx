@@ -12,7 +12,7 @@ import {
   Skull, Rocket, Heart, ThumbsUp, LayoutGrid, UserPlus, Sparkles, ScanLine // 🦈 Adicionado Sparkles
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
-import { isFirebasePermissionError } from "../../lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 import { getTurmaImage } from "../../constants/turmaImages";
 import {
   fetchBottomNavBannedAppealsCount,
@@ -162,7 +162,7 @@ export default function BottomNavbar() {
         setNotifications(feed.notifications);
         setUnreadCount(feed.unreadCount);
       } catch (error: unknown) {
-        if (!isFirebasePermissionError(error)) {
+        if (!isPermissionError(error)) {
           console.error("Erro ao carregar notificações:", error);
         }
         setNotifications([]);
@@ -180,7 +180,7 @@ export default function BottomNavbar() {
         const count = await fetchBottomNavBannedAppealsCount({ forceRefresh });
         setBannedMessagesCount(count);
       } catch (error: unknown) {
-        if (!isFirebasePermissionError(error)) {
+        if (!isPermissionError(error)) {
           console.error("Erro ao carregar recursos de banimento:", error);
         }
         setBannedMessagesCount(0);
@@ -249,7 +249,7 @@ export default function BottomNavbar() {
           );
           setUnreadCount((prev) => Math.max(0, prev - 1));
         } catch (error: unknown) {
-          if (!isFirebasePermissionError(error)) {
+          if (!isPermissionError(error)) {
             console.error("Erro ao marcar notificação como lida:", error);
           }
         }
@@ -491,5 +491,6 @@ export default function BottomNavbar() {
     </>
   );
 }
+
 
 

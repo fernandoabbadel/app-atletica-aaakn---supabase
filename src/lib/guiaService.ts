@@ -1,4 +1,4 @@
-﻿import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   addDoc,
   collection,
@@ -10,12 +10,12 @@ import {
   updateDoc,
   where,
   type QueryConstraint,
-} from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+} from "@/lib/supa/firestore";
+import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { compressImageFile } from "./imageCompression";
-import { db, functions, storage } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions, storage } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 import { validateImageFile } from "./upload";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
@@ -59,7 +59,7 @@ const boundedLimit = (requested: number, maxAllowed: number): number => {
 };
 
 const shouldFallbackToClient = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -95,7 +95,7 @@ async function queryRows(path: string, attempts: QueryConstraint[][]): Promise<R
       const snap = await getDocs(query(collection(db, path), ...constraints));
       return snap.docs.map((entry) => ({ id: entry.id, ...(entry.data() as Row) }));
     } catch (error: unknown) {
-      const code = getFirebaseErrorCode(error)?.toLowerCase();
+      const code = getBackendErrorCode(error)?.toLowerCase();
       const isIndexError = code?.includes("failed-precondition");
       if (!isIndexError) throw error;
     }
@@ -230,3 +230,4 @@ export async function uploadGuidePhoto(file: File): Promise<string> {
 export function clearGuideCaches(): void {
   guideCache.clear();
 }
+

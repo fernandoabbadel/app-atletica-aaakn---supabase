@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   addDoc,
   collection,
@@ -13,11 +13,11 @@ import {
   setDoc,
   updateDoc,
   writeBatch,
-} from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+} from "@/lib/supa/firestore";
+import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
-import { db, functions, storage } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions, storage } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 import { validateImageFile } from "./upload";
 
 type CacheEntry<T> = {
@@ -79,7 +79,7 @@ const clearReadCaches = (): void => {
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -341,3 +341,4 @@ export async function seedHistoricEvents(
 
   clearReadCaches();
 }
+

@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   collection,
   doc,
@@ -7,10 +7,10 @@ import {
   orderBy,
   query,
   updateDoc,
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -65,7 +65,7 @@ const setCachedValue = <T>(
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -208,3 +208,4 @@ export async function setSharkroundLeagueActive(payload: {
 export function clearSharkroundCache(): void {
   leaguesCache.clear();
 }
+

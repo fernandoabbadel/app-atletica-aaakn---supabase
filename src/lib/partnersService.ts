@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   addDoc,
   collection,
@@ -16,11 +16,11 @@ import {
   updateDoc,
   where,
   type QueryConstraint,
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 
 import { compressImageFile } from "./imageCompression";
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -334,7 +334,7 @@ const clearAdminPartnersCaches = (): void => {
 };
 
 const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (code?.includes("failed-precondition")) return true;
 
   if (error instanceof Error) {
@@ -345,7 +345,7 @@ const isIndexRequiredError = (error: unknown): boolean => {
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -1040,7 +1040,7 @@ export async function upsertPartner(payload: {
         await updateDoc(doc(db, "parceiros", partnerId), sanitized);
         const updated = await getDoc(doc(db, "parceiros", partnerId));
         if (!updated.exists()) return null;
-        return { id: updated.id, ...updated.data() };
+        return { id: updated.id, ...(updated.data() as Record<string, unknown>) };
       }
 
       const created = await addDoc(collection(db, "parceiros"), {
@@ -1294,3 +1294,5 @@ export function clearPartnersCaches(): void {
   partnerScansCache.clear();
   scannerFieldsCache.clear();
 }
+
+

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -13,11 +13,11 @@ import {
   RotateCcw,
   Users,
 } from "lucide-react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "@/lib/supa/firestore";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
-import { db } from "@/lib/firebase";
+import { db } from "@/lib/backend";
 import {
   fetchAdminEventRsvpsPage,
   fetchAdminEventSalesPage,
@@ -176,7 +176,8 @@ export default function AdminEventoListaPage() {
     if (!eventId) return;
     const snap = await getDoc(doc(db, "eventos", eventId));
     if (!snap.exists()) return;
-    setEventTitle(asString(snap.data().titulo, "Evento"));
+    const data = snap.data() as Record<string, unknown>;
+    setEventTitle(asString(data.titulo, "Evento"));
   }, [eventId]);
 
   const loadInitial = useCallback(async () => {
@@ -416,7 +417,7 @@ export default function AdminEventoListaPage() {
 
       <main className="px-6 py-6 space-y-4">
         <div className="text-xs text-zinc-500 uppercase font-black">
-          RSVP carregados: {rsvps.length} • Vendas carregadas: {sales.length}
+          RSVP carregados: {rsvps.length} � Vendas carregadas: {sales.length}
         </div>
 
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -490,7 +491,7 @@ export default function AdminEventoListaPage() {
                       <td className="p-4">{row.lote || "-"}</td>
                       <td className="p-4">{row.valorTotal || "-"}</td>
                       <td className="p-4 text-zinc-400">
-                        {row.aprovadoPor ? `${parseDateTime(row.dataAprovacao)} • ${row.aprovadoPor}` : "-"}
+                        {row.aprovadoPor ? `${parseDateTime(row.dataAprovacao)} � ${row.aprovadoPor}` : "-"}
                       </td>
                       <td className="p-4">
                         <div className="flex justify-end">
@@ -564,3 +565,5 @@ export default function AdminEventoListaPage() {
     </div>
   );
 }
+
+

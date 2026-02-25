@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Dumbbell, LifeBuoy, MessageCircle } from "lucide-react";

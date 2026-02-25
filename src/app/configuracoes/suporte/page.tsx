@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useEffect, useState } from "react";
 import {
@@ -14,7 +14,7 @@ import Link from "next/link";
 
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
-import { isFirebasePermissionError } from "../../../lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 import {
   fetchUserSupportRequests,
   submitSupportRequest,
@@ -59,7 +59,7 @@ export default function SupportPage() {
         const tickets = await fetchUserSupportRequests(user.uid, 20);
         if (mounted) setHistory(tickets);
       } catch (error: unknown) {
-        if (!isFirebasePermissionError(error)) {
+        if (!isPermissionError(error)) {
           console.error(error);
         }
         if (mounted) setHistory([]);
@@ -109,7 +109,7 @@ export default function SupportPage() {
       const refreshed = await fetchUserSupportRequests(user.uid, 20);
       setHistory(refreshed);
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) {
+      if (!isPermissionError(error)) {
         console.error(error);
       }
       addToast("Erro ao enviar chamado.", "error");
@@ -252,4 +252,5 @@ export default function SupportPage() {
     </div>
   );
 }
+
 

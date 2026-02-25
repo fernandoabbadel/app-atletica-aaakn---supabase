@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
-import { isFirebasePermissionError } from "@/lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 import {
   deleteAdminUser,
   fetchAdminUsersPage,
@@ -93,7 +93,7 @@ export default function AdminUsuariosPage() {
         setHasMore(page.hasMore);
         setNextCursor(page.nextCursor);
       } catch (error: unknown) {
-        if (!isFirebasePermissionError(error)) { console.error(error); }
+        if (!isPermissionError(error)) { console.error(error); }
         addToast("Erro ao carregar usuarios.", "error");
       } finally {
         if (reset) setLoading(false);
@@ -146,7 +146,7 @@ export default function AdminUsuariosPage() {
         "success"
       );
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) { console.error(error); }
+      if (!isPermissionError(error)) { console.error(error); }
       addToast("Erro ao atualizar status.", "error");
     }
   };
@@ -162,7 +162,7 @@ export default function AdminUsuariosPage() {
       setRows((prev) => prev.filter((row) => row.id !== userId));
       addToast("Usuario removido.", "success");
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) { console.error(error); }
+      if (!isPermissionError(error)) { console.error(error); }
       addToast("Erro ao remover usuario.", "error");
     }
   };
@@ -206,7 +206,7 @@ export default function AdminUsuariosPage() {
         );
       }
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) {
+      if (!isPermissionError(error)) {
         console.error(error);
       }
       addToast("Erro ao recontar followers/following.", "error");
@@ -411,4 +411,5 @@ export default function AdminUsuariosPage() {
     </div>
   );
 }
+
 

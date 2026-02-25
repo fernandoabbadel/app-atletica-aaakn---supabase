@@ -1,4 +1,4 @@
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "@/lib/supa/firestore";
 
 // ==========================================
 // 🦈 USUÁRIO (PERFIL COMPLETO)
@@ -119,7 +119,7 @@ export interface AchievementLog {
   achievementId: string;
   achievementTitle: string;
   xpEarned: number;
-  // 🦈 Correção: Tipagem para suportar Timestamp do Firebase ou ISO string
+  // 🦈 Correção: Tipagem para suportar Timestamp do Supabase ou ISO string
   timestamp: Timestamp | string | number;
 }
 

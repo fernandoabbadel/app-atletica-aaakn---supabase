@@ -1,11 +1,11 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
 import { fetchSupportReports, type AdminReportRecord } from "../../../../lib/reportsService";
-import { isFirebasePermissionError } from "../../../../lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 
 const PAGE_SIZE = 20;
 
@@ -22,7 +22,7 @@ export default function AdminDenunciasSuportePage() {
         if (!mounted) return;
         setRows(reports);
       } catch (error: unknown) {
-        if (!isFirebasePermissionError(error) && mounted) {
+        if (!isPermissionError(error) && mounted) {
           setRows([]);
         }
       } finally {
@@ -88,3 +88,4 @@ export default function AdminDenunciasSuportePage() {
     </div>
   );
 }
+

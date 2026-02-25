@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   collection,
   doc,
@@ -12,12 +12,12 @@ import {
   serverTimestamp,
   updateDoc,
   where,
-} from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+} from "@/lib/supa/firestore";
+import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { compressImageFile } from "./imageCompression";
-import { db, functions, storage } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions, storage } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 import { validateImageFile } from "./upload";
 
 type CacheEntry<T> = {
@@ -175,7 +175,7 @@ const dropSessionCacheIf = (predicate: (cacheKey: string) => boolean): void => {
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -189,7 +189,7 @@ const shouldFallbackToClientWrites = (error: unknown): boolean => {
 };
 
 const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (code?.includes("failed-precondition")) return true;
 
   if (error instanceof Error) {
@@ -1052,3 +1052,4 @@ export function clearProfileServiceCaches(): void {
   publicBundleCache.clear();
   followListCache.clear();
 }
+

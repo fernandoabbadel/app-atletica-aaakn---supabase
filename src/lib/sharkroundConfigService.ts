@@ -1,8 +1,8 @@
-import { httpsCallable } from "firebase/functions";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { httpsCallable } from "@/lib/supa/functions";
+import { doc, getDoc, setDoc, serverTimestamp } from "@/lib/supa/firestore";
 
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -133,7 +133,7 @@ const shouldUseCallable = (): boolean => {
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
   return (
     code.includes("functions/not-found") ||
@@ -237,3 +237,4 @@ export function clearSharkroundAppConfigCache(): void {
   configCache.clear();
   inflightConfig = null;
 }
+

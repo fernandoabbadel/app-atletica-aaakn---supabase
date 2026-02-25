@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   arrayRemove,
   arrayUnion,
@@ -13,10 +13,10 @@ import {
   serverTimestamp,
   updateDoc,
   where,
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -62,7 +62,7 @@ const boundedPreviewLimit = (requested: number): number => {
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -308,3 +308,4 @@ export async function setEventRsvp(payload: {
 export function clearEventCardCaches(): void {
   eventCardStateCache.clear();
 }
+

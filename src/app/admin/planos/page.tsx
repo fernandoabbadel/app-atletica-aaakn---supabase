@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { ArrowLeft, FileClock, ListChecks, Megaphone, PencilRuler, ShieldCheck, Users } from "lucide-react";

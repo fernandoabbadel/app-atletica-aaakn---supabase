@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   addDoc,
   collection,
@@ -12,10 +12,10 @@ import {
   query,
   serverTimestamp,
   updateDoc,
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -95,7 +95,7 @@ const clearUsersCache = (): void => {
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -712,3 +712,4 @@ export async function addLeagueQuizHistory(payload: {
 
   clearUsersCache();
 }
+

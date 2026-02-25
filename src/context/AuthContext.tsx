@@ -4,17 +4,17 @@ import {
   onAuthStateChanged, 
   signInWithPopup, 
   signOut, 
-  User as FirebaseUser 
-} from "firebase/auth";
+  User as AuthProviderUser 
+} from "@/lib/supa/auth";
 import { 
   doc, setDoc, updateDoc, onSnapshot, collection, query, orderBy, getDocs, increment 
-} from "firebase/firestore"; 
-import { auth, db, googleProvider } from "../lib/firebase"; 
+} from "@/lib/supa/firestore"; 
+import { auth, db, googleProvider } from "@/lib/backend"; 
 import { useRouter, usePathname } from "next/navigation"; 
 import { logActivity } from "../lib/logger"; 
 import LoadingScreen from "../app/loading";
 import { DEFAULT_STATS, DEFAULT_USER_PROPS } from "../constants/userDefaults";
-import { isFirebasePermissionError } from "../lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 
 // --- TIPAGEM ---
 export type UserRole = "guest" | "user" | "treinador" | "empresa" | "admin_treino" | "admin_geral" | "admin_gestor" | "master" | "vendas";
@@ -165,13 +165,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const qPatentes = query(collection(db, "patentes_config"), orderBy("minXp", "desc"));
         const snapPatentes = await getDocs(qPatentes);
         if (!snapPatentes.empty) {
-          setPatentesCache(snapPatentes.docs.map((d) => d.data() as PatenteConfig));
+          setPatentesCache(snapPatentes.docs.map((d) => d.data() as unknown as PatenteConfig));
         } else {
           setPatentesCache(DEFAULT_PATENTES);
         }
       } catch (error: unknown) {
         setPatentesCache(DEFAULT_PATENTES);
-        if (!isFirebasePermissionError(error)) {
+        if (!isPermissionError(error)) {
           console.error("Erro ao carregar patentes:", error);
         }
       }
@@ -179,10 +179,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const snapPlanos = await getDocs(collection(db, "planos"));
         if (!snapPlanos.empty) {
-          setPlanosCache(snapPlanos.docs.map((d) => d.data() as PlanoConfig));
+          setPlanosCache(snapPlanos.docs.map((d) => d.data() as unknown as PlanoConfig));
         }
       } catch (error: unknown) {
-        if (!isFirebasePermissionError(error)) {
+        if (!isPermissionError(error)) {
           console.error("Erro ao carregar planos:", error);
         }
       }
@@ -213,11 +213,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-    // 3. MONITORAR AUTH (FIREBASE)
+    // 3. MONITORAR AUTH (SUPABASE)
   useEffect(() => {
     let unsubscribeUserDoc: (() => void) | null = null;
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (fbUser: AuthProviderUser | null) => {
       if (unsubscribeUserDoc) {
         unsubscribeUserDoc();
         unsubscribeUserDoc = null;
@@ -253,7 +253,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               } as User;
 
               void setDoc(userRef, newUser).catch((error: unknown) => {
-                if (!isFirebasePermissionError(error)) {
+                if (!isPermissionError(error)) {
                   console.error("Erro ao criar perfil inicial:", error);
                 }
               });
@@ -266,7 +266,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setLoading(false);
           },
           (error: unknown) => {
-            if (!isFirebasePermissionError(error)) {
+            if (!isPermissionError(error)) {
               console.error("Erro ao sincronizar usuário:", error);
             }
             setUser(null);
@@ -376,7 +376,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
                 await updateDoc(userRef, updates);
             } catch (err: unknown) {
-                if (!isFirebasePermissionError(err)) {
+                if (!isPermissionError(err)) {
                     console.warn("Erro ao atualizar manutenção do usuário:", err);
                 }
             }
@@ -488,7 +488,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, data);
     } catch (error: unknown) {
-      if (!isFirebasePermissionError(error)) {
+      if (!isPermissionError(error)) {
         console.error("Erro ao atualizar:", error);
       }
     }
@@ -512,6 +512,9 @@ export const useAuth = () => {
   if (!context) throw new Error("useAuth deve ser usado dentro de um AuthProvider");
   return context;
 };
+
+
+
 
 
 

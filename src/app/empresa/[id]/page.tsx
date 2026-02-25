@@ -102,7 +102,7 @@ export default function EmpresaDashboard() {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const processingScanRef = useRef(false);
 
-  // --- CARREGAR DADOS DO FIREBASE ---
+  // --- CARREGAR DADOS DO SUPABASE ---
   useEffect(() => {
     const fetchCompanyData = async () => {
         if (!empresaId) return;

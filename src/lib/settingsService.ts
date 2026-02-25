@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   addDoc,
   collection,
@@ -14,10 +14,10 @@ import {
   setDoc,
   updateDoc,
   where,
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -137,7 +137,7 @@ const setMapCachedValue = <T>(
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -151,7 +151,7 @@ const shouldFallbackToClientWrites = (error: unknown): boolean => {
 };
 
 const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (code?.includes("failed-precondition")) return true;
 
   if (error instanceof Error) {
@@ -543,3 +543,4 @@ export async function softDeleteAccount(payload: {
     }
   );
 }
+

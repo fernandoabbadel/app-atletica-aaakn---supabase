@@ -8,8 +8,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // 🦈 Importando Image
-import { db } from "../../../lib/firebase";
-import { doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
+import { db } from "@/lib/backend";
+import { doc, updateDoc, deleteDoc, Timestamp } from "@/lib/supa/firestore";
 import { useToast } from "../../../context/ToastContext";
 import {
   fetchCommunityAdminPosts,
@@ -65,7 +65,7 @@ export default function AdminComunidadePage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Dados do Firebase
+  // Dados do Supabase
   const [config, setConfig] = useState<AppConfig>({ titulo: "", subtitulo: "", capaUrl: "", limitMessages: true });
   const [posts, setPosts] = useState<PostData[]>([]);
   const [denuncias, setDenuncias] = useState<DenunciaData[]>([]);
@@ -542,6 +542,7 @@ export default function AdminComunidadePage() {
     </div>
   );
 }
+
 
 
 

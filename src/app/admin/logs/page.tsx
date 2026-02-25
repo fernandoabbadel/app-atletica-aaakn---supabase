@@ -18,7 +18,7 @@ import {
 import Link from "next/link";
 
 import { useToast } from "@/context/ToastContext";
-import { isFirebasePermissionError } from "@/lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 import {
   fetchAdminActivityLogsPage,
   type AdminActivityLogRecord,
@@ -84,7 +84,7 @@ export default function AdminLogsPage() {
       setCursor(result.nextCursor);
       setHasMore(result.hasMore);
     } catch (error: unknown) {
-      if (isFirebasePermissionError(error)) {
+      if (isPermissionError(error)) {
         addToast("Sem permissao para acessar os logs.", "error");
       } else {
         console.error(error);
@@ -287,3 +287,4 @@ export default function AdminLogsPage() {
     </div>
   );
 }
+

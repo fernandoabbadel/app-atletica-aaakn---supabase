@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { SubscriptionListPage } from "../_components/SubscriptionsPage";
 

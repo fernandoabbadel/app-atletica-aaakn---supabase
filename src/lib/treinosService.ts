@@ -1,4 +1,4 @@
-﻿import { httpsCallable } from "firebase/functions";
+import { httpsCallable } from "@/lib/supa/functions";
 import {
   addDoc,
   arrayRemove,
@@ -19,10 +19,10 @@ import {
   where,
   writeBatch,
   type QueryConstraint,
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 
-import { db, functions } from "./firebase";
-import { getFirebaseErrorCode } from "./firebaseErrors";
+import { db, functions } from "./backend";
+import { getBackendErrorCode } from "./backendErrors";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -147,7 +147,7 @@ const setSessionCachedModalidades = (modalidades: string[]): void => {
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
 
   return (
@@ -161,7 +161,7 @@ const shouldFallbackToClientWrites = (error: unknown): boolean => {
 };
 
 const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getFirebaseErrorCode(error)?.toLowerCase();
+  const code = getBackendErrorCode(error)?.toLowerCase();
   if (code?.includes("failed-precondition")) return true;
 
   if (error instanceof Error) {
@@ -489,7 +489,7 @@ export async function fetchTreinoSettings(options?: {
     async () => {
       const snap = await getDoc(doc(db, "settings", "treinos"));
       const modalidades = snap.exists()
-        ? normalizeModalidades(snap.data().modalidades)
+        ? normalizeModalidades((snap.data() as { modalidades?: unknown }).modalidades)
         : [...DEFAULT_MODALIDADES];
       return { modalidades };
     }
@@ -1233,3 +1233,5 @@ export function clearTreinosServiceCaches(): void {
   userDirectoryCache.clear();
   modalidadesCache = null;
 }
+
+

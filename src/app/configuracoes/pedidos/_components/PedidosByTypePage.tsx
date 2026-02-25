@@ -1,8 +1,8 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, Clock, Package, XCircle } from "lucide-react";
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "@/lib/supa/firestore";
 
 import { useAuth } from "../../../../context/AuthContext";
 import { fetchUserOrdersByTab } from "../../../../lib/settingsService";
@@ -191,3 +191,4 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
     </main>
   );
 }
+

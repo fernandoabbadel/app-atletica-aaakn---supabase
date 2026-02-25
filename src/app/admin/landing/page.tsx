@@ -17,7 +17,7 @@ import {
   type SocialLink,
 } from "@/lib/adminLandingService";
 import { logActivity } from "@/lib/logger"; 
-import { isFirebasePermissionError } from "@/lib/firebaseErrors";
+import { isPermissionError } from "@/lib/backendErrors";
 
 // --- TYPES & INTERFACES (Clean Code) ---
 
@@ -63,7 +63,7 @@ export default function AdminLandingPage() {
           reviews: data.reviews || INITIAL_CONFIG.reviews || [],
         });
       } catch (error: unknown) {
-        if (isFirebasePermissionError(error)) {
+        if (isPermissionError(error)) {
           addToast("Sem permissão para carregar a configuração da landing.", "error");
         } else {
           console.error("Erro ao carregar config:", error);
@@ -94,7 +94,7 @@ export default function AdminLandingPage() {
 
       addToast("AÃ­ sim! O TubarÃ£o atualizou a vitrine! ðŸ¦ˆâœ…", "success");
     } catch (error: unknown) {
-      if (isFirebasePermissionError(error)) {
+      if (isPermissionError(error)) {
         addToast("Sem permissão para salvar a landing.", "error");
       } else {
         console.error(error);
@@ -415,3 +415,4 @@ export default function AdminLandingPage() {
     </div>
   );
 }
+

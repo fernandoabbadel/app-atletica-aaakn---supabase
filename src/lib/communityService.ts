@@ -6,9 +6,9 @@ import {
   limit,
   orderBy,
   query,
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 
-import { db } from "./firebase";
+import { db } from "./backend";
 
 type RawData = Record<string, unknown>;
 
@@ -90,3 +90,4 @@ export async function fetchCommunityComments(
   const snap = await getDocs(q);
   return snap.docs.map((row) => ({ id: row.id, data: row.data() as RawData }));
 }
+

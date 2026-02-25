@@ -10,11 +10,11 @@ import {
 } from 'lucide-react';
 import Image from "next/image";
 import { useToast } from "../../context/ToastContext";
-import { db } from "../../lib/firebase";
+import { db } from "@/lib/backend";
 import { 
   collection, updateDoc, doc, 
   serverTimestamp, setDoc, addDoc
-} from "firebase/firestore";
+} from "@/lib/supa/firestore";
 import { logActivity } from "../../lib/logger"; 
 import {
   createEventPoll,
@@ -905,3 +905,4 @@ export default function LigasAdminPage() {
       </div>
   );
 }
+

@@ -191,7 +191,7 @@ O App detectou que as seguintes chaves ('statKeys') estão faltando no banco de 
 
 ${missing.map(k => `- ${k}`).join('\n')}
 
-Por favor, analise onde essas chaves deveriam ser atualizadas (ex: ao fazer login, ao postar, ao confirmar treino) e me forneça o código para corrigir/implementar esses incrementos no Firebase.
+Por favor, analise onde essas chaves deveriam ser atualizadas (ex: ao fazer login, ao postar, ao confirmar treino) e me forneça o código para corrigir/implementar esses incrementos no Supabase.
       `.trim();
 
       navigator.clipboard.writeText(promptText);

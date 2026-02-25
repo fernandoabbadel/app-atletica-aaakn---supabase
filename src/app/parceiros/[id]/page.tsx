@@ -43,7 +43,7 @@ export default function ParceiroDetalhePage() {
   const [activeCupom, setActiveCupom] = useState<Cupom | null>(null);
   const [countdown, setCountdown] = useState(300);
 
-  // BUSCA DADOS NO FIREBASE
+  // BUSCA DADOS NO SUPABASE
   useEffect(() => {
       const fetchParceiro = async () => {
           if(!parceiroId) return;

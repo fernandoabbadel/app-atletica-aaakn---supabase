@@ -20,7 +20,7 @@ import {
   fetchPublicProfileBundle,
   toggleFollowProfile
 } from "../../../lib/profileService";
-import { getFirebaseErrorCode } from "../../../lib/firebaseErrors";
+import { getBackendErrorCode } from "@/lib/backendErrors";
 import Link from "next/link";
 import { getTurmaImage } from "../../../constants/turmaImages";
 
@@ -314,7 +314,7 @@ export default function PerfilPublicoPage() {
           addToast(result.isFollowing ? "Seguindo!" : "Deixou de seguir.", result.isFollowing ? "success" : "info");
       } catch (error: unknown) {
           console.error(error);
-          const code = getFirebaseErrorCode(error)?.toLowerCase() || "";
+          const code = getBackendErrorCode(error)?.toLowerCase() || "";
           const message = error instanceof Error ? error.message.toLowerCase() : "";
           if (
             code.includes("functions/not-found") ||
@@ -604,3 +604,4 @@ export default function PerfilPublicoPage() {
     </div>
   );
 }
+

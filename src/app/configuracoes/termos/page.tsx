@@ -44,7 +44,7 @@ export default function TermosLegaisPage() {
   const [activeDocId, setActiveDocId] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
-  // 🦈 BUSCA DADOS NO FIREBASE (Blindado contra Loops)
+  // 🦈 BUSCA DADOS NO SUPABASE (Blindado contra Loops)
   useEffect(() => {
     let alive = true;
 

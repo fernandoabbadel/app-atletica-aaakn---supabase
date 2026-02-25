@@ -1,6 +1,6 @@
-import { db } from "./firebase";
-import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { isFirebasePermissionError } from "./firebaseErrors";
+import { db } from "./backend";
+import { doc, getDoc, updateDoc, serverTimestamp } from "@/lib/supa/firestore";
+import { isPermissionError } from "./backendErrors";
 
 const RULES = {
   POST_COOLDOWN: 60 * 1000,
@@ -9,6 +9,24 @@ const RULES = {
 };
 
 type SecurityResult = { allowed: boolean; reason?: string };
+
+const toDateSafe = (value: unknown): Date | null => {
+  if (value instanceof Date) return value;
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    const date = (value as { toDate: () => Date }).toDate();
+    return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
+  }
+  return null;
+};
 
 export const Security = {
   async canUserPost(userId: string): Promise<SecurityResult> {
@@ -20,7 +38,8 @@ export const Security = {
         return { allowed: false, reason: "Usuario nao encontrado." };
       }
 
-      const lastPost = snap.data().lastPostTime?.toDate().getTime() || 0;
+      const userData = snap.data() as { lastPostTime?: unknown };
+      const lastPost = toDateSafe(userData.lastPostTime)?.getTime() || 0;
       const now = Date.now();
 
       if (now - lastPost < RULES.POST_COOLDOWN) {
@@ -31,7 +50,7 @@ export const Security = {
       await updateDoc(userRef, { lastPostTime: serverTimestamp() });
       return { allowed: true };
     } catch (error: unknown) {
-      if (isFirebasePermissionError(error)) {
+      if (isPermissionError(error)) {
         return { allowed: false, reason: "Sem permissao para essa acao agora." };
       }
       throw error;
@@ -47,7 +66,8 @@ export const Security = {
         return { allowed: false };
       }
 
-      const lastCheckIn = snap.data().lastGymCheckIn?.toDate() || new Date(0);
+      const userData = snap.data() as { lastGymCheckIn?: unknown };
+      const lastCheckIn = toDateSafe(userData.lastGymCheckIn) || new Date(0);
       const today = new Date();
 
       if (
@@ -60,7 +80,7 @@ export const Security = {
 
       return { allowed: true };
     } catch (error: unknown) {
-      if (isFirebasePermissionError(error)) {
+      if (isPermissionError(error)) {
         return { allowed: false, reason: "Sem permissao para validar check-in." };
       }
       throw error;
@@ -71,3 +91,4 @@ export const Security = {
     return Date.now() - lastClickTime > RULES.LIKE_DEBOUNCE;
   },
 };
+

@@ -34,9 +34,9 @@ import {
 } from "../../../lib/albumService";
 import { getTurmaImage } from "../../../constants/turmaImages";
 import {
-  getFirebaseErrorCode,
-  isFirebasePermissionError,
-} from "../../../lib/firebaseErrors";
+  getBackendErrorCode,
+  isPermissionError,
+} from "@/lib/backendErrors";
 
 type TurmaKey = "T1" | "T2" | "T3" | "T4" | "T5" | "T6" | "T7" | "T8";
 
@@ -199,7 +199,7 @@ export default function AlbumTurmaPage() {
         setMeuAlbum(collectedIds);
       } catch (error: unknown) {
         if (!mounted) return;
-        if (!isFirebasePermissionError(error)) {
+        if (!isPermissionError(error)) {
           addToast("Erro ao carregar seu album.", "error");
         }
         setMeuAlbum([]);
@@ -243,7 +243,7 @@ export default function AlbumTurmaPage() {
           setUsersCursorId(usersResult.value.nextCursorId);
           setHasMoreUsers(usersResult.value.hasMore);
         } else {
-          if (!isFirebasePermissionError(usersResult.reason)) {
+          if (!isPermissionError(usersResult.reason)) {
             addToast("Erro ao carregar turma.", "error");
           }
           setUsuarios([]);
@@ -357,7 +357,7 @@ export default function AlbumTurmaPage() {
         setMeuAlbum((prev) => (prev.includes(targetId) ? prev : [...prev, targetId]));
         addToast(`Captura confirmada: ${result.targetName || "Integrante"}.`, "success");
       } catch (error: unknown) {
-        const errorCode = getFirebaseErrorCode(error)?.toLowerCase() || "";
+        const errorCode = getBackendErrorCode(error)?.toLowerCase() || "";
         const message = error instanceof Error ? error.message.toLowerCase() : "";
 
         if (
@@ -373,7 +373,7 @@ export default function AlbumTurmaPage() {
           message.includes("access-control-allow-origin")
         ) {
           addToast("Funcao de captura sem CORS. Rode deploy das Functions.", "error");
-        } else if (isFirebasePermissionError(error)) {
+        } else if (isPermissionError(error)) {
           addToast("Sem permissao para registrar captura. Revise as regras do Firestore.", "error");
         } else {
           addToast("Erro ao registrar captura.", "error");
@@ -786,3 +786,6 @@ export default function AlbumTurmaPage() {
     </div>
   );
 }
+
+
+

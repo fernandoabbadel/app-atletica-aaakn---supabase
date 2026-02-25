@@ -1,4 +1,4 @@
-﻿// src/app/loja/page.tsx
+// src/app/loja/page.tsx
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
@@ -11,7 +11,7 @@ import {
 // addToast removido pois nao estava sendo usado, se precisar re-importe
 // import { useToast } from "../../context/ToastContext"; 
 import { fetchStoreProducts } from "../../lib/storeService";
-// --- TIPAGEM EXATA DO SEU FIREBASE ---
+// --- TIPAGEM EXATA DO SEU SUPABASE ---
 interface Variante {
   id: string;
   cor: string;
@@ -59,7 +59,7 @@ export default function LojaPage() {
   const [filtroCategoria, setFiltroCategoria] = useState("Todos");
   const [cartCount, setCartCount] = useState(0);
 
-    // 1. CARREGAR DADOS DO FIREBASE
+    // 1. CARREGAR DADOS DO SUPABASE
   useEffect(() => {
     let mounted = true;
 
