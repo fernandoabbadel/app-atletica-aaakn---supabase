@@ -8,15 +8,18 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // 🦈 Importando Image
-import { db } from "@/lib/backend";
-import { doc, updateDoc, deleteDoc, Timestamp } from "@/lib/supa/firestore";
 import { useToast } from "../../../context/ToastContext";
 import {
+  deleteCommunityPost,
+  deleteCommunityReport,
   fetchCommunityAdminPosts,
   fetchCommunityComments,
   fetchCommunityConfig,
   fetchCommunityReports,
+  saveCommunityConfig,
+  setCommunityPostPatch,
 } from "../../../lib/communityService";
+import type { DateLike } from "../../../lib/supabaseData";
 
 // --- TIPAGENS (O Escudo do Código) ---
 interface AppConfig {
@@ -32,7 +35,7 @@ interface PostData {
   handle: string;
   avatar: string;
   texto: string;
-  createdAt: Timestamp;
+  createdAt: DateLike;
   blocked?: boolean;
   fixado?: boolean;
   commentsDisabled?: boolean;
@@ -46,7 +49,7 @@ interface DenunciaData {
   postText: string;
   reporterId: string;
   reason: string;
-  timestamp: Timestamp;
+  timestamp: DateLike;
 }
 
 interface CommentData {
@@ -54,7 +57,7 @@ interface CommentData {
   userName: string;
   avatar: string;
   texto: string;
-  createdAt: Timestamp;
+  createdAt: DateLike;
 }
 
 export default function AdminComunidadePage() {
@@ -166,7 +169,7 @@ export default function AdminComunidadePage() {
   const handleSaveConfig = async () => {
     try { 
         // 🦈 Correção: Usando Partial<AppConfig> para evitar 'any' e garantir segurança de tipo
-        await updateDoc(doc(db, "app_config", "comunidade"), config as Partial<AppConfig>); 
+        await saveCommunityConfig(config as unknown as Record<string, unknown>); 
         
         addToast("Configurações da Resenha salvas!", "success"); 
         
@@ -180,7 +183,7 @@ export default function AdminComunidadePage() {
   const toggleBlockPost = async (id: string, currentStatus: boolean) => {
       try {
           const nextStatus = !currentStatus;
-          await updateDoc(doc(db, "posts", id), { blocked: nextStatus });
+          await setCommunityPostPatch(id, { blocked: nextStatus });
           setPosts((prev) =>
               prev.map((post) => (post.id === id ? { ...post, blocked: nextStatus } : post))
           );
@@ -194,7 +197,7 @@ export default function AdminComunidadePage() {
   const toggleCommentsLock = async (id: string, currentStatus: boolean) => {
       try {
           const nextStatus = !currentStatus;
-          await updateDoc(doc(db, "posts", id), { commentsDisabled: nextStatus });
+          await setCommunityPostPatch(id, { commentsDisabled: nextStatus });
           setPosts((prev) =>
               prev.map((post) =>
                   post.id === id ? { ...post, commentsDisabled: nextStatus } : post
@@ -210,7 +213,7 @@ export default function AdminComunidadePage() {
   const togglePin = async (id: string, current: boolean) => {
       try {
           const nextStatus = !current;
-          await updateDoc(doc(db, "posts", id), { fixado: nextStatus });
+          await setCommunityPostPatch(id, { fixado: nextStatus });
           setPosts((prev) =>
               prev.map((post) => (post.id === id ? { ...post, fixado: nextStatus } : post))
           );
@@ -224,7 +227,7 @@ export default function AdminComunidadePage() {
   const deletePost = async (id: string) => {
       if (!confirm("Tem certeza que deseja EXCLUIR permanentemente este post?")) return;
       try {
-          await deleteDoc(doc(db, "posts", id));
+          await deleteCommunityPost(id);
           setPosts((prev) => prev.filter((post) => post.id !== id));
           addToast("Post removido do banco de dados.", "info");
       } catch (error: unknown) {
@@ -237,7 +240,7 @@ export default function AdminComunidadePage() {
   const resolveDenuncia = async (denunciaId: string, postId: string, action: "ban" | "ignore" | "lock") => {
       try {
           if (action === "ban") {
-              await updateDoc(doc(db, "posts", postId), { blocked: true });
+              await setCommunityPostPatch(postId, { blocked: true });
               setPosts((prev) =>
                   prev.map((post) => (post.id === postId ? { ...post, blocked: true } : post))
               );
@@ -245,7 +248,7 @@ export default function AdminComunidadePage() {
           }
 
           if (action === "lock") {
-              await updateDoc(doc(db, "posts", postId), { commentsDisabled: true });
+              await setCommunityPostPatch(postId, { commentsDisabled: true });
               setPosts((prev) =>
                   prev.map((post) =>
                       post.id === postId ? { ...post, commentsDisabled: true } : post
@@ -254,7 +257,7 @@ export default function AdminComunidadePage() {
               addToast("Comentarios trancados por precaucao!", "info");
           }
 
-          await deleteDoc(doc(db, "denuncias", denunciaId));
+          await deleteCommunityReport(denunciaId);
           setDenuncias((prev) => prev.filter((denuncia) => denuncia.id !== denunciaId));
 
           if (action === "ignore") addToast("Denuncia ignorada/removida.", "info");

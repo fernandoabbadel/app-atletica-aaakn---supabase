@@ -9,30 +9,25 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // 🦈 Importando Image
-import { db, storage } from "@/lib/backend";
-import {
-  collection,
-  addDoc,
-  serverTimestamp,
-  updateDoc,
-  doc,
-  arrayUnion,
-  arrayRemove,
-  deleteDoc,
-  Timestamp,
-  increment,
-} from "@/lib/supa/firestore";
-import { ref, uploadBytes, getDownloadURL } from "@/lib/supa/storage";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { Security } from "../../lib/security";
 import { compressImageFile } from "../../lib/imageCompression";
-import { validateImageFile } from "../../lib/upload";
+import { uploadImage, validateImageFile } from "../../lib/upload";
 import {
+  createCommunityComment,
+  createCommunityPost,
+  createCommunityReport,
+  deleteCommunityComment,
+  deleteCommunityPost,
   fetchCommunityComments,
   fetchCommunityConfig,
   fetchCommunityFeed,
+  setCommunityPostPatch,
+  toggleCommunityCommentLike,
+  toggleCommunityPostReaction,
 } from "../../lib/communityService";
+import { nowDateLike, type DateLike } from "../../lib/supabaseData";
 
 // --- TIPAGEM ---
 
@@ -70,7 +65,7 @@ interface PostData {
     fixado?: boolean;
     isTreinador?: boolean;
     commentsDisabled?: boolean;
-    createdAt: Timestamp | null;
+    createdAt: DateLike | null;
     isRecent?: boolean; 
 }
 
@@ -90,7 +85,7 @@ interface CommentData {
     patente_cor?: string; 
     
     role?: string;
-    createdAt: Timestamp | null;
+    createdAt: DateLike | null;
 }
 
 // --- CONSTANTES ---
@@ -111,7 +106,12 @@ const PLAN_COLORS: Record<string, string> = {
 
 // --- FUNÇÕES AUXILIARES ---
 
-const formatCustomDate = (timestamp: Timestamp | null | undefined) => {
+const isDateLike = (value: unknown): value is DateLike =>
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { toDate?: unknown }).toDate === "function";
+
+const formatCustomDate = (timestamp: DateLike | null | undefined) => {
     if (!timestamp) return "env...";
     const date = timestamp.toDate();
     const now = new Date();
@@ -271,7 +271,7 @@ export default function ComunidadePage() {
 
         const now = Date.now();
         data = data.map((post) => {
-          const createdAt = post.createdAt instanceof Timestamp ? post.createdAt : null;
+          const createdAt = isDateLike(post.createdAt) ? post.createdAt : null;
           const likes = Array.isArray(post.likes)
             ? post.likes.filter((item): item is string => typeof item === "string")
             : [];
@@ -314,8 +314,8 @@ export default function ComunidadePage() {
       if (activeFilter === "recent") {
           ordered.sort(
               (a, b) =>
-                  (b.createdAt instanceof Timestamp ? b.createdAt.toMillis() : 0) -
-                  (a.createdAt instanceof Timestamp ? a.createdAt.toMillis() : 0)
+                  (isDateLike(b.createdAt) ? b.createdAt.toMillis() : 0) -
+                  (isDateLike(a.createdAt) ? a.createdAt.toMillis() : 0)
           );
       }
       if (activeFilter === "likes") {
@@ -356,7 +356,7 @@ export default function ComunidadePage() {
                       : [];
 
                   const rawCreatedAt = raw.createdAt;
-                  const createdAt = rawCreatedAt instanceof Timestamp ? rawCreatedAt : null;
+                  const createdAt = isDateLike(rawCreatedAt) ? rawCreatedAt : null;
 
                   return {
                       id: row.id,
@@ -426,9 +426,12 @@ export default function ComunidadePage() {
           quality: 0.82,
         });
 
-        const storageRef = ref(storage, `posts/${Date.now()}_${user.uid}`);
-        await uploadBytes(storageRef, optimizedImage);
-        imageUrl = await getDownloadURL(storageRef);
+        const uploaded = await uploadImage(optimizedImage, "posts");
+        if (uploaded.error || !uploaded.url) {
+          addToast(uploaded.error || "Falha no upload da imagem.", "error");
+          return;
+        }
+        imageUrl = uploaded.url;
       }
 
       const safeUser = {
@@ -448,7 +451,7 @@ export default function ComunidadePage() {
         role: user.role ? String(user.role) : "user",
       };
 
-      const createdDoc = await addDoc(collection(db, "posts"), {
+      const createdDoc = await createCommunityPost({
         ...safeUser,
         texto: newPostText,
         imagem: imageUrl,
@@ -459,14 +462,7 @@ export default function ComunidadePage() {
         categoria: activeTab,
         blocked: false,
         commentsDisabled: false,
-        createdAt: serverTimestamp(),
       });
-
-      if (user.uid) {
-        await updateDoc(doc(db, "users", user.uid), {
-          "stats.postsCount": increment(1),
-        });
-      }
 
       const optimisticPost: PostData = {
         id: createdDoc.id,
@@ -480,7 +476,7 @@ export default function ComunidadePage() {
         categoria: activeTab,
         blocked: false,
         commentsDisabled: false,
-        createdAt: Timestamp.now(),
+        createdAt: nowDateLike(),
         isRecent: true,
       };
 
@@ -532,29 +528,21 @@ export default function ComunidadePage() {
               role: user.role ? String(user.role) : "user",
           };
 
-          const createdCommentRef = await addDoc(collection(db, `posts/${commentModal}/comments`), {
-              ...safeUser,
-              texto: newComment,
-              likes: [],
-              createdAt: serverTimestamp(),
+          const createdCommentRef = await createCommunityComment({
+              postId: commentModal,
+              data: {
+                  ...safeUser,
+                  texto: newComment,
+                  likes: [],
+              },
           });
-
-          await updateDoc(doc(db, "posts", commentModal), {
-              comentarios: increment(1),
-          });
-
-          if (user.uid) {
-              await updateDoc(doc(db, "users", user.uid), {
-                  "stats.commentsCount": increment(1),
-              });
-          }
 
           const optimisticComment: CommentData = {
               id: createdCommentRef.id,
               ...safeUser,
               texto: newComment,
               likes: [],
-              createdAt: Timestamp.now(),
+              createdAt: nowDateLike(),
           };
 
           setCommentsList((prev) => {
@@ -586,7 +574,7 @@ export default function ComunidadePage() {
       if (!confirm("Tem certeza que quer apagar essa mensagem?")) return;
 
       try {
-          await deleteDoc(doc(db, "posts", post.id));
+          await deleteCommunityPost(post.id);
           setAllPostsRaw((prev) => prev.filter((item) => item.id !== post.id));
           addToast("Mensagem apagada.", "info");
           setMenuOpen(null);
@@ -599,8 +587,7 @@ export default function ComunidadePage() {
       if (!user || !commentModal) return;
       if (!confirm("Excluir comentario?")) return;
       try {
-          await deleteDoc(doc(db, `posts/${commentModal}/comments`, commentId));
-          await updateDoc(doc(db, "posts", commentModal), { comentarios: increment(-1) });
+          await deleteCommunityComment(commentModal, commentId);
 
           setCommentsList((prev) => prev.filter((comment) => comment.id !== commentId));
           setAllPostsRaw((prev) =>
@@ -629,21 +616,15 @@ export default function ComunidadePage() {
       const textoSalvo = postAlvo ? postAlvo.texto : "Conteudo reportado";
 
       try {
-          await addDoc(collection(db, "denuncias"), {
+          await createCommunityReport({
               targetId: reportModal,
               targetType: reportTargetType,
               postText: textoSalvo,
               reporterId: user.uid,
               reason: finalReason,
-              timestamp: serverTimestamp(),
-              status: "pendente",
           });
 
           if (reportTargetType === "post" && postAlvo) {
-              await updateDoc(doc(db, "posts", reportModal), {
-                  denunciasCount: increment(1),
-              });
-
               setAllPostsRaw((prev) =>
                   prev.map((post) =>
                       post.id === reportModal
@@ -669,7 +650,7 @@ export default function ComunidadePage() {
 
       try {
           const nextStatus = !post.fixado;
-          await updateDoc(doc(db, "posts", post.id), { fixado: nextStatus });
+          await setCommunityPostPatch(post.id, { fixado: nextStatus });
           setAllPostsRaw((prev) =>
               prev.map((item) =>
                   item.id === post.id ? { ...item, fixado: nextStatus } : item
@@ -683,45 +664,25 @@ export default function ComunidadePage() {
       }
   };
 
-  const toggleAction = async (postId: string, field: "likes" | "hype", list: string[]) => {
+  const toggleAction = async (postId: string, field: "likes" | "hype") => {
     if (!user) return;
     if (!user.uid) return;
 
-    const postRef = doc(db, "posts", postId);
-    const hasInteracted = list.includes(user.uid);
-
-    const postData = posts.find((post) => post.id === postId);
-    const authorId = postData?.userId;
-
     try {
-      await updateDoc(postRef, { [field]: hasInteracted ? arrayRemove(user.uid) : arrayUnion(user.uid) });
-
-      if (authorId && authorId !== user.uid) {
-          const statField = field === "likes" ? "stats.likesReceived" : "stats.hypesReceived";
-          await updateDoc(doc(db, "users", authorId), {
-              [statField]: increment(hasInteracted ? -1 : 1),
-          });
-      }
-
-      const myStatField = field === "likes" ? "stats.likesGiven" : "stats.hypesGiven";
-      await updateDoc(doc(db, "users", user.uid), {
-          [myStatField]: increment(hasInteracted ? -1 : 1),
+      const result = await toggleCommunityPostReaction({
+          postId,
+          field,
+          userId: user.uid,
       });
 
       setAllPostsRaw((prev) =>
           prev.map((post) => {
               if (post.id !== postId) return post;
               if (field === "likes") {
-                  const nextLikes = hasInteracted
-                      ? (post.likes || []).filter((id) => id !== user.uid)
-                      : [...(post.likes || []), user.uid];
-                  return { ...post, likes: nextLikes };
+                  return { ...post, likes: result.values };
               }
 
-              const nextHype = hasInteracted
-                  ? (post.hype || []).filter((id) => id !== user.uid)
-                  : [...(post.hype || []), user.uid];
-              return { ...post, hype: nextHype };
+              return { ...post, hype: result.values };
           })
       );
     } catch (error: unknown) {
@@ -733,32 +694,17 @@ export default function ComunidadePage() {
       if (!user || !commentModal) return;
       if (!user.uid) return;
 
-      const commentRef = doc(db, `posts/${commentModal}/comments`, comment.id);
-      const hasLiked = comment.likes?.includes(user.uid);
-      const authorId = comment.userId;
-
       try {
-          await updateDoc(commentRef, { likes: hasLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
-
-          if (authorId && authorId !== user.uid) {
-              await updateDoc(doc(db, "users", authorId), {
-                  "stats.likesReceived": increment(hasLiked ? -1 : 1),
-              });
-          }
-
-          await updateDoc(doc(db, "users", user.uid), {
-              "stats.likesGiven": increment(hasLiked ? -1 : 1),
+          const result = await toggleCommunityCommentLike({
+              postId: commentModal,
+              commentId: comment.id,
+              userId: user.uid,
           });
 
           setCommentsList((prev) => {
               const updated = prev.map((item) => {
                   if (item.id !== comment.id) return item;
-
-                  const nextLikes = hasLiked
-                      ? (item.likes || []).filter((id) => id !== user.uid)
-                      : [...(item.likes || []), user.uid];
-
-                  return { ...item, likes: nextLikes };
+                  return { ...item, likes: result.values };
               });
 
               updated.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
