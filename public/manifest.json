@@ -1,0 +1,17 @@
+{
+  "name": "AAAKN - Atlética Keiiti Nakamura",
+  "short_name": "AAAKN",
+  "description": "App Oficial da Atlética AAAKN",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

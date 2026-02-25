@@ -1,0 +1,217 @@
+// src/app/login/page.tsx
+"use client";
+
+import Image from "next/image";
+import type React from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Eye, EyeOff, LogIn, Waves } from "lucide-react";
+import { useToast } from "@/context/ToastContext";
+import { useAuth } from "@/context/AuthContext";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const { addToast } = useToast();
+  const { loginAsGuest, loginGoogle, user, loading } = useAuth();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) return;
+
+    setIsLoading(false);
+    const blocked = user.status === "banned" || user.status === "bloqueado";
+    router.replace(blocked ? "/banned" : "/dashboard");
+  }, [loading, user, router]);
+
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setIsLoading(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    if (password.length < 6) {
+      setIsLoading(false);
+      addToast("Senha incorreta ou muito curta", "error");
+      return;
+    }
+
+    addToast("Bem-vindo de volta, Tubarao!", "success");
+    setIsLoading(false);
+    router.push("/dashboard");
+  };
+
+  const handleGuestLogin = async () => {
+    try {
+      setIsLoading(true);
+      addToast("Gerando cracha de visitante...", "info");
+      await loginAsGuest();
+      router.push("/dashboard");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao entrar como visitante.", "error");
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      setIsLoading(true);
+      await loginGoogle();
+      router.replace("/dashboard");
+    } catch {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#030a08] relative overflow-hidden flex flex-col items-center justify-center px-4">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute inset-0 bg-gradient-to-b from-[#041f15] via-[#030a08] to-[#020504]" />
+      </div>
+
+      <div className="relative z-10 mb-8 animate-float-slow text-center">
+        <div className="relative inline-block">
+          <Image
+            src="/logo.png"
+            alt="AAAKN Logo"
+            width={192}
+            height={192}
+            className="w-40 h-40 md:w-48 md:h-48 object-contain drop-shadow-[0_0_30px_rgba(16,185,129,0.3)] mx-auto"
+            priority
+          />
+          <div className="absolute inset-0 bg-emerald-500/20 blur-3xl rounded-full -z-10 scale-75" />
+        </div>
+
+        <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight mt-4">
+          BEM-VINDO, <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">TUBARAO!</span>
+        </h1>
+        <p className="text-zinc-400 text-sm mt-2 flex items-center justify-center gap-2">
+          <Waves className="w-4 h-4 text-emerald-500" />
+          Entre para o cardume mais feroz
+          <Waves className="w-4 h-4 text-emerald-500" />
+        </p>
+      </div>
+
+      <div className="relative z-10 w-full max-w-sm">
+        <div className="bg-zinc-900/80 backdrop-blur-xl rounded-3xl border border-emerald-900/30 p-6 shadow-[0_0_60px_rgba(16,185,129,0.1)]">
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider ml-1">E-mail Institucional</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="seu.email@faculdade.edu.br"
+                className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 rounded-xl text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition text-sm"
+                maxLength={120}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider ml-1">Senha</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="********"
+                  className="w-full px-4 py-3 bg-zinc-950/50 border border-zinc-800 rounded-xl text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition pr-12 text-sm"
+                  maxLength={64}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-emerald-400 transition"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button type="button" className="text-xs text-emerald-500 hover:text-emerald-400 font-medium transition">
+                Esqueci minha senha
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm uppercase tracking-wider rounded-xl transition transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+            >
+              {isLoading ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>
+                  <LogIn className="w-4 h-4" />
+                  Entrar no Cardume
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="flex items-center gap-3 my-6">
+            <div className="flex-1 h-px bg-zinc-800" />
+            <span className="text-xs text-zinc-600 font-medium">ou entre com</span>
+            <div className="flex-1 h-px bg-zinc-800" />
+          </div>
+
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={isLoading}
+              className="w-full py-3 bg-white text-black font-bold text-sm rounded-xl transition hover:bg-zinc-200 flex items-center justify-center gap-2"
+            >
+              <Image
+                src="https://www.svgrepo.com/show/475656/google-color.svg"
+                width={20}
+                height={20}
+                className="w-5 h-5"
+                alt="Google Logo"
+              />
+              Entrar com Google
+            </button>
+
+            <button
+              type="button"
+              onClick={handleGuestLogin}
+              disabled={isLoading}
+              className="w-full py-3 bg-transparent hover:bg-zinc-800/50 text-zinc-400 hover:text-white font-bold text-xs uppercase tracking-wider rounded-xl transition border border-dashed border-zinc-700 hover:border-emerald-500/50 mt-2"
+            >
+              Apenas dar uma espiadinha (Visitante)
+            </button>
+          </div>
+        </div>
+
+        <p className="text-center text-zinc-600 text-[10px] mt-6">
+          Ao entrar, voce concorda com nossos <button type="button" className="text-emerald-500 hover:underline">Termos</button> e{" "}
+          <button type="button" className="text-emerald-500 hover:underline">Privacidade</button>
+        </p>
+      </div>
+
+      <style jsx>{`
+        .animate-float-slow {
+          animation: float-slow 4s ease-in-out infinite;
+        }
+
+        @keyframes float-slow {
+          0%,
+          100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-15px);
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
