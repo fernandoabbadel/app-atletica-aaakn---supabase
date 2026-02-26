@@ -79,7 +79,7 @@ const orderStatusClass = (status: Order["status"]): string => {
   return "bg-yellow-500/10 text-yellow-400 border-yellow-500/30";
 };
 
-const orderMillis = (value?: Timestamp | null): number => {
+const orderMillis = (value?: DateLike | null): number => {
   if (!value) return 0;
   if (typeof value.toDate === "function") {
     return value.toDate().getTime();
@@ -87,7 +87,7 @@ const orderMillis = (value?: Timestamp | null): number => {
   return 0;
 };
 
-const formatOrderDateTime = (value?: Timestamp | null): string => {
+const formatOrderDateTime = (value?: DateLike | null): string => {
   if (!value || typeof value.toDate !== "function") return "--";
   const date = value.toDate();
   return `${date.toLocaleDateString("pt-BR")} ${date.toLocaleTimeString("pt-BR", {

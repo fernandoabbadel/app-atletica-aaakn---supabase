@@ -36,6 +36,19 @@ export const logActivity = async (
     });
 
     if (error) {
+      const errorCode = typeof error.code === "string" ? error.code : "";
+      const errorMessage = typeof error.message === "string" ? error.message.toLowerCase() : "";
+      const missingOptionalTable =
+        errorCode.toUpperCase() === "PGRST205" ||
+        (errorMessage.includes("activity_logs") && errorMessage.includes("schema cache"));
+
+      if (missingOptionalTable) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("Tabela opcional public.activity_logs ainda nao existe. Pulando auditoria.");
+        }
+        return;
+      }
+
       throw Object.assign(new Error(error.message), {
         code: error.code ?? `db/${error.name ?? "insert-failed"}`,
         cause: error,

@@ -853,9 +853,9 @@ export default function ComunidadePage() {
                                     <MessageCircle size={18}/> {post.comentarios || 0}
                                     {post.commentsDisabled && <Lock size={12} className="text-red-500 ml-1"/>}
                                 </button>
-                                <button onClick={() => toggleAction(post.id, "likes", post.likes || [])} className={`flex items-center gap-1.5 transition ${post.likes?.includes(user?.uid || "") ? 'text-red-500' : 'hover:text-red-500'}`}><Heart size={18} className={post.likes?.includes(user?.uid || "") ? "fill-red-500" : ""} /> {post.likes?.length || 0}</button>
+                                <button onClick={() => toggleAction(post.id, "likes")} className={`flex items-center gap-1.5 transition ${post.likes?.includes(user?.uid || "") ? 'text-red-500' : 'hover:text-red-500'}`}><Heart size={18} className={post.likes?.includes(user?.uid || "") ? "fill-red-500" : ""} /> {post.likes?.length || 0}</button>
                                 <div className="group relative">
-                                    <button onClick={() => toggleAction(post.id, "hype", post.hype || [])} className={`flex items-center gap-1.5 transition ${post.hype?.includes(user?.uid || "") ? 'text-orange-500' : 'hover:text-orange-500'}`}>
+                                    <button onClick={() => toggleAction(post.id, "hype")} className={`flex items-center gap-1.5 transition ${post.hype?.includes(user?.uid || "") ? 'text-orange-500' : 'hover:text-orange-500'}`}>
                                         <Flame size={18} className={post.hype?.includes(user?.uid || "") ? "fill-orange-500" : ""}/> <span className="text-[10px]">{post.hype?.length || 0}</span>
                                     </button>
                                     <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-orange-500 text-black text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap">Dar um Hype!</span>

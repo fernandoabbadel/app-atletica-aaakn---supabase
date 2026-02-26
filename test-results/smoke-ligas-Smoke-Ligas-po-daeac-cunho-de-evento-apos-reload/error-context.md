@@ -1,0 +1,213 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e7] [cursor=pointer]:
+    - img [ref=e8]
+  - alert [ref=e11]
+  - main [ref=e12]:
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - generic [ref=e16]:
+            - heading "LAmei" [level=1] [ref=e17]:
+              - img [ref=e18]
+              - text: LAmei
+            - paragraph [ref=e20]: Painel de Gestão
+          - button [ref=e21] [cursor=pointer]:
+            - img [ref=e22]
+        - generic [ref=e25]:
+          - button "1. Informações" [ref=e26] [cursor=pointer]
+          - button "2. Membros" [ref=e27] [cursor=pointer]
+          - button "3. Eventos" [ref=e28] [cursor=pointer]
+          - button "4. Shark Round" [ref=e29] [cursor=pointer]
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - generic [ref=e32]:
+            - heading "Eventos da Liga" [level=3] [ref=e33]
+            - paragraph [ref=e34]: Criar eventos para aparecer no App.
+          - button "Criar Evento" [ref=e35] [cursor=pointer]:
+            - img [ref=e36]
+            - text: Criar Evento
+        - generic [ref=e39]:
+          - button [ref=e40] [cursor=pointer]:
+            - img [ref=e41]
+          - img "Lamei" [ref=e44]
+          - generic [ref=e45]:
+            - heading "Lamei" [level=4] [ref=e46]
+            - generic [ref=e47]:
+              - generic [ref=e48]: 2026-03-22 - 21:00
+              - generic [ref=e49]: •
+            - button "Editar Evento" [ref=e51] [cursor=pointer]:
+              - img [ref=e52]
+              - text: Editar Evento
+      - button "SALVAR TUDO" [ref=e54] [cursor=pointer]:
+        - img [ref=e55]
+        - text: SALVAR TUDO
+      - generic [ref=e60]:
+        - generic [ref=e61]:
+          - heading "Evento da Liga" [level=2] [ref=e62]
+          - button [ref=e63] [cursor=pointer]:
+            - img [ref=e64]
+        - generic [ref=e68] [cursor=pointer]:
+          - img [ref=e69]
+          - text: Capa
+        - textbox "Título do Evento" [ref=e73]: Evento Smoke 825133
+        - generic [ref=e74]:
+          - textbox [ref=e75]: 2026-03-15
+          - textbox [ref=e76]: 20:00
+        - textbox "Local" [ref=e77]: Quadra Central
+        - generic [ref=e78]:
+          - generic [ref=e79]: Descrição do Evento
+          - textbox "Detalhes, regras, atrações..." [ref=e80]: Rascunho para validar persistencia apos reload.
+        - generic [ref=e81]:
+          - generic [ref=e82]:
+            - img [ref=e83]
+            - text: Pergunta da Enquete (Opcional)
+          - 'textbox "Ex: Qual tema vocês preferem?" [ref=e85]'
+        - generic [ref=e86]:
+          - generic [ref=e87]: Lotes de Ingressos
+          - generic [ref=e88]:
+            - textbox "Nome" [ref=e89]
+            - textbox "R$" [ref=e90]
+          - button "Adicionar" [ref=e91] [cursor=pointer]
+        - generic [ref=e92]:
+          - button "Cancelar" [ref=e93] [cursor=pointer]
+          - button "Salvar Evento" [ref=e94] [cursor=pointer]
+  - generic [ref=e95]:
+    - generic [ref=e96]:
+      - generic [ref=e97]:
+        - img "Logo" [ref=e99]
+        - generic [ref=e100]:
+          - heading "AAAKN" [level=2] [ref=e101]
+          - paragraph [ref=e102]: App Oficial
+      - generic [ref=e103]:
+        - button [ref=e104] [cursor=pointer]:
+          - img [ref=e105]
+        - button [ref=e108] [cursor=pointer]:
+          - img [ref=e109]
+    - generic [ref=e112]:
+      - generic [ref=e113] [cursor=pointer]:
+        - img "User" [ref=e116]
+        - generic [ref=e117]:
+          - paragraph [ref=e118]: Smoke
+          - generic [ref=e119]:
+            - generic "Nível 1" [ref=e120]:
+              - img [ref=e121]
+              - generic [ref=e127]: Nv.1
+            - generic [ref=e129]:
+              - img [ref=e131]
+              - img [ref=e135]
+        - img [ref=e141]
+      - button "VIRE SÓCIO LENDA Domine o Oceano" [ref=e143] [cursor=pointer]:
+        - generic [ref=e145]:
+          - generic [ref=e146]:
+            - img [ref=e148]
+            - generic [ref=e150]:
+              - heading "VIRE SÓCIO LENDA" [level=4] [ref=e151]
+              - paragraph [ref=e152]: Domine o Oceano
+          - img [ref=e153]
+      - heading "Menu Principal" [level=3] [ref=e156]:
+        - img [ref=e157]
+        - text: Menu Principal
+      - generic [ref=e159]:
+        - button "Lojinha" [ref=e160] [cursor=pointer]:
+          - img [ref=e162]
+          - generic [ref=e165]: Lojinha
+        - button "Eventos" [ref=e166] [cursor=pointer]:
+          - img [ref=e168]
+          - generic [ref=e170]: Eventos
+        - button "Carteirinha" [ref=e171] [cursor=pointer]:
+          - img [ref=e173]
+          - generic [ref=e175]: Carteirinha
+        - button "Parceiros" [ref=e176] [cursor=pointer]:
+          - img [ref=e178]
+          - generic [ref=e183]: Parceiros
+        - button "Comunidade" [ref=e184] [cursor=pointer]:
+          - img [ref=e186]
+          - generic [ref=e188]: Comunidade
+        - button "Álbum da Galera" [ref=e189] [cursor=pointer]:
+          - img [ref=e191]
+          - generic [ref=e194]: Álbum da Galera
+      - heading "Área do Atleta" [level=3] [ref=e196]:
+        - img [ref=e197]
+        - text: Área do Atleta
+      - generic [ref=e203]:
+        - button "Treinos" [ref=e204] [cursor=pointer]:
+          - generic [ref=e205]:
+            - img [ref=e207]
+            - generic [ref=e209]: Treinos
+        - button "Arena Games Vem Aí ✨" [disabled] [ref=e210]:
+          - generic [ref=e211]:
+            - img [ref=e213]
+            - generic [ref=e215]: Arena Games
+          - generic [ref=e216]:
+            - img [ref=e217]
+            - text: Vem Aí ✨
+        - button "Shark Round" [disabled] [ref=e220]:
+          - generic [ref=e221]:
+            - img [ref=e223]
+            - generic [ref=e227]: Shark Round
+          - img [ref=e228]
+        - button "Ranking Vem Aí ✨" [disabled] [ref=e231]:
+          - generic [ref=e232]:
+            - img [ref=e234]
+            - generic [ref=e240]: Ranking
+          - generic [ref=e241]:
+            - img [ref=e242]
+            - text: Vem Aí ✨
+        - button "Treinando com Tubarão Vem Aí ✨" [disabled] [ref=e245]:
+          - generic [ref=e246]:
+            - img [ref=e248]
+            - generic [ref=e254]: Treinando com Tubarão
+          - generic [ref=e255]:
+            - img [ref=e256]
+            - text: Vem Aí ✨
+      - heading "Central de Info" [level=3] [ref=e260]:
+        - img [ref=e261]
+        - text: Central de Info
+      - generic [ref=e264]:
+        - button "Área das Ligas" [ref=e265] [cursor=pointer]:
+          - img [ref=e267]
+          - generic [ref=e272]: Área das Ligas
+        - button "Avaliação Profs" [disabled] [ref=e273]:
+          - img [ref=e275]
+          - generic [ref=e278]: Avaliação Profs
+          - img [ref=e279]
+        - button "Conquistas" [disabled] [ref=e282]:
+          - img [ref=e284]
+          - generic [ref=e290]: Conquistas
+          - img [ref=e291]
+        - button "Fidelidade" [disabled] [ref=e294]:
+          - img [ref=e296]
+          - generic [ref=e298]: Fidelidade
+          - img [ref=e299]
+        - button "Guia" [ref=e302] [cursor=pointer]:
+          - img [ref=e304]
+          - generic [ref=e307]: Guia
+        - button "Nossa História" [ref=e308] [cursor=pointer]:
+          - img [ref=e310]
+          - generic [ref=e313]: Nossa História
+    - generic [ref=e315]:
+      - button "Ajustes" [ref=e316] [cursor=pointer]:
+        - img [ref=e317]
+        - generic [ref=e320]: Ajustes
+      - button "Sair" [ref=e321] [cursor=pointer]:
+        - img [ref=e322]
+        - generic [ref=e325]: Sair
+  - navigation [ref=e327]:
+    - button "Início" [ref=e329] [cursor=pointer]:
+      - img [ref=e330]
+      - generic [ref=e333]: Início
+    - button "Eventos" [ref=e335] [cursor=pointer]:
+      - img [ref=e336]
+      - generic [ref=e338]: Eventos
+    - button [ref=e341] [cursor=pointer]:
+      - img [ref=e342]
+    - button "Carteira" [ref=e348] [cursor=pointer]:
+      - img [ref=e349]
+      - generic [ref=e352]: Carteira
+    - button "Menu" [ref=e354] [cursor=pointer]:
+      - img [ref=e355]
+      - generic [ref=e356]: Menu
+```

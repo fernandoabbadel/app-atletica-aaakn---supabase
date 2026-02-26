@@ -257,7 +257,13 @@ export default function SharkLegendsPage() {
   const handleSaveName = async () => {
       if(!tempName.trim()) return addToast("Nome vazio!", "error");
       setHeroName(tempName); setIsEditingName(false);
-      if(updateUser) await updateUser({ apelido: tempName });
+      if (updateUser) {
+          try {
+              await updateUser({ apelido: tempName });
+          } catch {
+              addToast("Nao foi possivel salvar o apelido agora.", "error");
+          }
+      }
   };
 
   const startBattle = (opponent: Combatant) => {

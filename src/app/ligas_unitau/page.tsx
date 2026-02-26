@@ -13,7 +13,8 @@ import { logActivity } from "../../lib/logger";
 import {
   addLeagueQuizHistory,
   changeLeagueLikeCount,
-  fetchLeagues,
+  fetchLeagueById,
+  fetchLeagueSummaries,
   type LeagueRecord,
 } from "../../lib/leaguesService";
 
@@ -37,6 +38,7 @@ export default function LigasUnitauPage() {
   const [leagues, setLeagues] = useState<League[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLeague, setSelectedLeague] = useState<League | null>(null);
+  const [loadingSelectedLeague, setLoadingSelectedLeague] = useState(false);
   const [likedLeagues, setLikedLeagues] = useState<string[]>([]);
   const [isJoined, setIsJoined] = useState(false); 
 
@@ -52,10 +54,10 @@ export default function LigasUnitauPage() {
     const loadLeagues = async () => {
       setLoading(true);
       try {
-        const data = await fetchLeagues({
+        const data = await fetchLeagueSummaries({
           orderByField: "likes",
           orderDirection: "desc",
-          maxResults: 120,
+          maxResults: 60,
         });
         if (!mounted) return;
         setLeagues(data as League[]);
@@ -71,6 +73,21 @@ export default function LigasUnitauPage() {
       mounted = false;
     };
   }, []);
+
+  const openLeagueDetails = async (league: League): Promise<void> => {
+      setSelectedLeague(league);
+      setLoadingSelectedLeague(true);
+      try {
+          const fullLeague = await fetchLeagueById(league.id, { forceRefresh: true });
+          if (fullLeague) {
+              setSelectedLeague(fullLeague as League);
+          }
+      } catch (error: unknown) {
+          console.error(error);
+      } finally {
+          setLoadingSelectedLeague(false);
+      }
+  };
 
   const handleLike = async (e: React.MouseEvent, leagueId: string) => {
       e.stopPropagation();
@@ -187,7 +204,7 @@ export default function LigasUnitauPage() {
                 <div className="space-y-4 animate-in fade-in">
                     <div className="flex justify-between items-center"><h2 className="text-xl font-black italic flex items-center gap-2"><Trophy className="text-yellow-500"/> Seus Matches</h2><button onClick={() => {setQuizStep(0); setShowQuizResult(false);}} className="text-xs text-zinc-500 hover:text-white flex items-center gap-1"><RotateCcw size={12}/> Refazer</button></div>
                     {topMatches.length === 0 ? <p className="text-xs text-zinc-500 italic">Nenhuma liga encontrada com esse perfil.</p> : topMatches.map((l, i) => (
-                        <div key={l.id} onClick={() => setSelectedLeague(l)} className="flex items-center gap-4 bg-black/40 p-3 rounded-xl border border-indigo-500/30 cursor-pointer hover:bg-indigo-900/20 transition group">
+                        <div key={l.id} onClick={() => { void openLeagueDetails(l); }} className="flex items-center gap-4 bg-black/40 p-3 rounded-xl border border-indigo-500/30 cursor-pointer hover:bg-indigo-900/20 transition group">
                             <span className="font-black text-lg text-indigo-800 w-6 text-center group-hover:text-indigo-500">{i+1}</span>
                             <Image
                               src={l.logoBase64 || "https://github.com/shadcn.png"}
@@ -207,7 +224,7 @@ export default function LigasUnitauPage() {
 
         {/* LISTA DE LIGAS */}
         {leagues.map((l, i) => (
-            <div key={l.id} onClick={() => setSelectedLeague(l)} className={`relative rounded-3xl p-1 border transition hover:scale-[1.02] cursor-pointer flex flex-col h-[320px] shadow-2xl ${getRankStyle(i)}`}>
+            <div key={l.id} onClick={() => { void openLeagueDetails(l); }} className={`relative rounded-3xl p-1 border transition hover:scale-[1.02] cursor-pointer flex flex-col h-[320px] shadow-2xl ${getRankStyle(i)}`}>
                 <div className="h-40 w-full bg-black rounded-t-[20px] overflow-hidden relative shrink-0">
                     <Image
                       src={l.logoBase64 || "https://github.com/shadcn.png"}
@@ -223,7 +240,7 @@ export default function LigasUnitauPage() {
                 <div className="p-4 bg-[#050505] rounded-b-[20px] flex-1 flex flex-col justify-between">
                     <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed">{l.descricao || "Sem descrição disponível."}</p>
                     <div className="flex justify-between items-center border-t border-zinc-800 pt-3 mt-auto">
-                        <div className="flex items-center gap-1 text-zinc-400"><Users size={14} className="text-emerald-500"/><span className="text-[10px] font-bold uppercase">Membros: {l.membros?.length || 0}</span></div>
+                        <div className="flex items-center gap-1 text-zinc-400"><Users size={14} className="text-emerald-500"/><span className="text-[10px] font-bold uppercase">Membros: {l.membrosIds?.length || l.membros?.length || 0}</span></div>
                         <button onClick={(e) => handleLike(e, l.id)} className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-500 hover:text-red-500 hover:border-red-500/50 transition active:scale-95"><Heart size={14} className={likedLeagues.includes(l.id) ? "fill-current text-red-500" : ""}/><span className="text-xs font-black">{l.likes || 0}</span></button>
                     </div>
                 </div>
@@ -255,6 +272,13 @@ export default function LigasUnitauPage() {
                   </div>
 
                   <div className="p-6 overflow-y-auto custom-scrollbar space-y-6">
+                      {loadingSelectedLeague && (
+                          <div className="bg-zinc-900/70 border border-zinc-800 rounded-xl p-3 flex items-center gap-2 text-zinc-400 text-xs">
+                              <Loader2 size={14} className="animate-spin text-emerald-500" />
+                              Carregando detalhes da liga...
+                          </div>
+                      )}
+
                       {/* BIZU */}
                       {selectedLeague.bizu && (
                           <div className="bg-yellow-900/10 border-l-4 border-yellow-500 p-4 rounded-r-xl">

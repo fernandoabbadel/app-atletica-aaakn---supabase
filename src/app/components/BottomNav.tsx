@@ -21,6 +21,13 @@ import {
   type BottomNavNotification,
 } from "../../lib/bottomNavService";
 
+const FOCUS_REFETCH_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
+const shouldEnableFocusRefetch = (): boolean => {
+  if (typeof window === "undefined") return false;
+  return process.env.NEXT_PUBLIC_ENABLE_FOCUS_REFETCH === "true";
+};
+
 // --- 🦈 UTILITÁRIO LOCAL ---
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
@@ -118,6 +125,8 @@ export default function BottomNavbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
+  const lastNotificationsFocusRefreshAtRef = useRef(0);
+  const lastBannedAppealsFocusRefreshAtRef = useRef(0);
   const currentUser = user as unknown as UserData;
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -194,9 +203,18 @@ export default function BottomNavbar() {
         return;
       }
 
+      lastNotificationsFocusRefreshAtRef.current = Date.now();
       void loadNotifications(false);
+      if (!shouldEnableFocusRefetch()) {
+        return;
+      }
       const refreshNotifications = () => {
         if (document.visibilityState !== "visible") return;
+        const now = Date.now();
+        if (now - lastNotificationsFocusRefreshAtRef.current < FOCUS_REFETCH_COOLDOWN_MS) {
+          return;
+        }
+        lastNotificationsFocusRefreshAtRef.current = now;
         void loadNotifications(true);
       };
 
@@ -218,11 +236,17 @@ export default function BottomNavbar() {
   }, [canLoadNotifications, loadNotifications, showNotifications]);
 
   useEffect(() => {
+      lastBannedAppealsFocusRefreshAtRef.current = Date.now();
       void loadBannedAppealsCount(false);
-      if (!isAdmin) return;
+      if (!isAdmin || !shouldEnableFocusRefetch()) return;
 
       const refreshBanned = () => {
         if (document.visibilityState !== "visible") return;
+        const now = Date.now();
+        if (now - lastBannedAppealsFocusRefreshAtRef.current < FOCUS_REFETCH_COOLDOWN_MS) {
+          return;
+        }
+        lastBannedAppealsFocusRefreshAtRef.current = now;
         void loadBannedAppealsCount(true);
       };
 

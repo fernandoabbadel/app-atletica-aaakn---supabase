@@ -14,10 +14,11 @@ import {
   createPartnerScan,
   fetchPartnerById,
   fetchPartnerScans,
-  preparePartnerImageBase64,
+  uploadPartnerImageToStorage,
   updatePartnerProfile,
   type PartnerRecord,
 } from "../../../lib/partnersService";
+import { logActivity } from "../../../lib/logger";
 
 // --- TIPAGEM ---
 interface Cupom {
@@ -95,6 +96,9 @@ export default function EmpresaDashboard() {
   // Edição
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState<EditFormState>({});
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [uploadingProfileImageField, setUploadingProfileImageField] =
+    useState<"imgLogo" | "imgCapa" | null>(null);
   
   // Refs
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -265,6 +269,8 @@ export default function EmpresaDashboard() {
   }, [addToast, handleDecodedQr, showScanner]);
 
   const handleSaveProfile = async () => {
+      if (!partner) return;
+      setSavingProfile(true);
       try {
           await updatePartnerProfile({
             partnerId: empresaId,
@@ -272,22 +278,50 @@ export default function EmpresaDashboard() {
           });
           setPartner(prev => prev ? ({...prev, ...editForm}) : null);
           setShowEditModal(false);
-          addToast("Perfil atualizado!", "success");
+          addToast("Aí sim! O Tubarão aprovou! 🦈 Perfil atualizado.", "success");
+          await logActivity(
+            empresaId,
+            partner.nome || "Parceiro",
+            "UPDATE",
+            "parceiros",
+            { tipo: "perfil", campos: Object.keys(editForm) }
+          );
       } catch {
-          addToast("Erro ao salvar.", "error");
+          addToast("Deu ruim no plantão! 🚨 Erro ao salvar.", "error");
+      } finally {
+          setSavingProfile(false);
       }
   };
 
-  // Upload Simples
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, field: string) => {
-      if (e.target.files?.[0]) {
-          try {
-              const b64 = await preparePartnerImageBase64(e.target.files[0]);
-              setEditForm((prev) => ({...prev, [field]: b64}));
-          } catch (error: unknown) {
-              console.error(error);
-              addToast("Imagem muito grande ou inválida.", "error");
-          }
+  const handleFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: "imgLogo" | "imgCapa"
+  ) => {
+      const file = e.target.files?.[0];
+      if (!file || !partner) return;
+
+      setUploadingProfileImageField(field);
+      try {
+          const imageUrl = await uploadPartnerImageToStorage({
+            file,
+            kind: field === "imgCapa" ? "capa" : "logo",
+            partnerId: empresaId,
+          });
+          setEditForm((prev) => ({ ...prev, [field]: imageUrl }));
+          addToast("Aí sim! O Tubarão aprovou! 🦈 Imagem enviada.", "success");
+          await logActivity(
+            empresaId,
+            partner.nome || "Parceiro",
+            "UPDATE",
+            "parceiros_uploads",
+            { campo: field, origem: "empresa_dashboard" }
+          );
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Deu ruim no plantão! 🚨 Imagem inválida ou upload falhou.", "error");
+      } finally {
+          setUploadingProfileImageField(null);
+          e.target.value = "";
       }
   };
 
@@ -422,8 +456,22 @@ export default function EmpresaDashboard() {
                         <div><label className="text-[10px] text-zinc-500 uppercase font-bold">WhatsApp</label><input type="text" className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-white text-sm" value={editForm.whats || ""} onChange={e => setEditForm({...editForm, whats: e.target.value})}/></div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                        <button onClick={() => logoInputRef.current?.click()} className="bg-zinc-800 p-3 rounded-lg text-xs text-zinc-300 hover:bg-zinc-700 border border-zinc-700">Alterar Logo</button>
-                        <button onClick={() => coverInputRef.current?.click()} className="bg-zinc-800 p-3 rounded-lg text-xs text-zinc-300 hover:bg-zinc-700 border border-zinc-700">Alterar Capa</button>
+                        <button
+                          onClick={() => logoInputRef.current?.click()}
+                          disabled={uploadingProfileImageField !== null}
+                          className="bg-zinc-800 p-3 rounded-lg text-xs text-zinc-300 hover:bg-zinc-700 border border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                        >
+                          {uploadingProfileImageField === "imgLogo" ? <Loader2 size={14} className="animate-spin" /> : null}
+                          {uploadingProfileImageField === "imgLogo" ? "Enviando logo..." : "Alterar Logo"}
+                        </button>
+                        <button
+                          onClick={() => coverInputRef.current?.click()}
+                          disabled={uploadingProfileImageField !== null}
+                          className="bg-zinc-800 p-3 rounded-lg text-xs text-zinc-300 hover:bg-zinc-700 border border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                        >
+                          {uploadingProfileImageField === "imgCapa" ? <Loader2 size={14} className="animate-spin" /> : null}
+                          {uploadingProfileImageField === "imgCapa" ? "Enviando capa..." : "Alterar Capa"}
+                        </button>
                         <input type="file" hidden ref={logoInputRef} onChange={e => handleFileChange(e, 'imgLogo')}/>
                         <input type="file" hidden ref={coverInputRef} onChange={e => handleFileChange(e, 'imgCapa')}/>
                     </div>
@@ -431,7 +479,14 @@ export default function EmpresaDashboard() {
 
                 <div className="mt-6 flex justify-end gap-2">
                     <button onClick={() => setShowEditModal(false)} className="px-4 py-2 rounded-lg text-zinc-400 hover:text-white text-xs font-bold">Cancelar</button>
-                    <button onClick={handleSaveProfile} className="px-6 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500">Salvar Alterações</button>
+                    <button
+                      onClick={handleSaveProfile}
+                      disabled={savingProfile || uploadingProfileImageField !== null}
+                      className="px-6 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                    >
+                      {savingProfile ? <Loader2 size={14} className="animate-spin" /> : null}
+                      {savingProfile ? "Salvando..." : "Salvar Alterações"}
+                    </button>
                 </div>
             </div>
         </div>

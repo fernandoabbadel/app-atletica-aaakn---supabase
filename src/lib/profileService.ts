@@ -866,6 +866,12 @@ export async function markProfileComplete(uidRaw: string): Promise<void> {
     });
   }
 
+  if (!row) {
+    throw Object.assign(new Error("Usuario nao encontrado em public.users."), {
+      code: "db/user-not-found",
+    });
+  }
+
   const currentStats =
     typeof row?.stats === "object" && row.stats !== null
       ? (row.stats as Record<string, unknown>)

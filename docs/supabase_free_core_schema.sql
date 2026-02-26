@@ -542,6 +542,22 @@ create table if not exists public.achievements_logs (
 );
 create index if not exists idx_ach_logs_user_timestamp on public.achievements_logs ("userId", timestamp desc);
 
+-- AUDITORIA / LOGS ADMIN
+create table if not exists public.activity_logs (
+  id text primary key default gen_random_uuid()::text,
+  "userId" text,
+  "userName" text not null default 'Sistema',
+  action text not null default 'UNKNOWN',
+  resource text not null default 'app',
+  details text not null default '',
+  timestamp timestamptz not null default now(),
+  "createdAt" timestamptz not null default now(),
+  "updatedAt" timestamptz not null default now(),
+  data jsonb not null default '{}'::jsonb
+);
+create index if not exists idx_activity_logs_timestamp_desc on public.activity_logs (timestamp desc);
+create index if not exists idx_activity_logs_user_timestamp_desc on public.activity_logs ("userId", timestamp desc);
+
 -- ALBUM + DASHBOARD DEPENDÊNCIAS
 create table if not exists public.album_config (
   id text primary key,

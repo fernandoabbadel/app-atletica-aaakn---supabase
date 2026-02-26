@@ -193,6 +193,60 @@ const singularize = (value: string): string => {
 const getCollectionNames = (segments: string[]): string[] =>
   segments.filter((_, index) => index % 2 === 0);
 
+type PrimaryKeyColumn = "id" | "uid" | "userId";
+
+type CompatTableConfig = {
+  primaryKey: PrimaryKeyColumn;
+};
+
+const COMPAT_TABLE_CONFIG: Readonly<Record<string, CompatTableConfig>> = {
+  achievements_logs: { primaryKey: "id" },
+  activity_logs: { primaryKey: "id" },
+  album_config: { primaryKey: "id" },
+  album_rankings: { primaryKey: "id" },
+  album_summary: { primaryKey: "userId" },
+  app_config: { primaryKey: "id" },
+  arena_matches: { primaryKey: "id" },
+  assinaturas: { primaryKey: "id" },
+  banned_appeals: { primaryKey: "id" },
+  categorias: { primaryKey: "id" },
+  denuncias: { primaryKey: "id" },
+  eventos: { primaryKey: "id" },
+  eventos_enquetes: { primaryKey: "id" },
+  eventos_rsvps: { primaryKey: "id" },
+  guia_data: { primaryKey: "id" },
+  historic_events: { primaryKey: "id" },
+  legal_docs: { primaryKey: "id" },
+  ligas_config: { primaryKey: "id" },
+  notifications: { primaryKey: "id" },
+  orders: { primaryKey: "id" },
+  parceiros: { primaryKey: "id" },
+  planos: { primaryKey: "id" },
+  posts: { primaryKey: "id" },
+  produtos: { primaryKey: "id" },
+  quiz_history: { primaryKey: "id" },
+  reviews: { primaryKey: "id" },
+  scans: { primaryKey: "id" },
+  settings: { primaryKey: "id" },
+  site_config: { primaryKey: "id" },
+  solicitacoes_adesao: { primaryKey: "id" },
+  solicitacoes_ingressos: { primaryKey: "id" },
+  store_rewards: { primaryKey: "id" },
+  store_redemptions: { primaryKey: "id" },
+  support_requests: { primaryKey: "id" },
+  treinos: { primaryKey: "id" },
+  treinos_chamada: { primaryKey: "id" },
+  treinos_rsvps: { primaryKey: "id" },
+  users: { primaryKey: "uid" },
+  users_albumColado: { primaryKey: "id" },
+  users_followers: { primaryKey: "id" },
+  users_following: { primaryKey: "id" },
+} as const;
+
+const COLLECTION_PATH_TABLE_ALIASES: Readonly<Record<string, string>> = {
+  "users/*/quiz_history": "quiz_history",
+} as const;
+
 const getParentDocs = (segments: string[]): Array<{ collection: string; id: string }> => {
   const parents: Array<{ collection: string; id: string }> = [];
   for (let i = 0; i < segments.length - 1; i += 2) {
@@ -201,34 +255,44 @@ const getParentDocs = (segments: string[]): Array<{ collection: string; id: stri
   return parents;
 };
 
-const getTableFromCollectionSegments = (segments: string[]): string =>
-  getCollectionNames(segments).join("_");
+const getCollectionPathPattern = (segments: string[]): string =>
+  segments
+    .map((segment, index) => (index % 2 === 0 ? segment : "*"))
+    .join("/");
+
+const getTableFromCollectionSegments = (segments: string[]): string => {
+  const pattern = getCollectionPathPattern(segments);
+  const aliasTable = COLLECTION_PATH_TABLE_ALIASES[pattern];
+  if (aliasTable) return aliasTable;
+  return getCollectionNames(segments).join("_");
+};
+
+const getCompatTableConfig = (table: string): CompatTableConfig => {
+  const config = COMPAT_TABLE_CONFIG[table];
+  if (config) return config;
+
+  const message =
+    `Compat Firestore sem mapeamento explicito para a tabela "${table}". ` +
+    "Adicione a tabela em COMPAT_TABLE_CONFIG (src/lib/supa/firestore.ts) antes de usar.";
+  console.error(message);
+  throw new Error(message);
+};
 
 const getPrimaryIdCandidates = (ref: DocumentReference): string[] => {
   const table = ref.parent.table;
-  const base = ["id", "uid", "doc_id"];
-
-  if (table === "users") {
-    return ["uid", "id", "doc_id"];
-  }
-
-  const singular = singularize(ref.parent.collectionName);
-  const extra = [`${singular}_id`, `${singular}Id`];
-  return [...new Set([...base, ...extra])];
+  return [getCompatTableConfig(table).primaryKey];
 };
+
+const getParentForeignKeyColumn = (collectionName: string): string =>
+  `${singularize(collectionName)}Id`;
 
 const buildParentMetadata = (collectionRef: CollectionReference): Row => {
   if (!collectionRef.parentDocs.length) return {};
 
-  const metadata: Row = {
-    parent_path: collectionRef.parentDocs.map((p) => `${p.collection}/${p.id}`).join("/"),
-    parent_id: collectionRef.parentDocs[collectionRef.parentDocs.length - 1]?.id ?? null,
-  };
+  const metadata: Row = {};
 
   for (const parent of collectionRef.parentDocs) {
-    metadata[`${parent.collection}_id`] = parent.id;
-    metadata[`${parent.collection}Id`] = parent.id;
-    metadata[`${singularize(parent.collection)}Id`] = parent.id;
+    metadata[getParentForeignKeyColumn(parent.collection)] = parent.id;
   }
 
   return metadata;
@@ -514,7 +578,7 @@ const addParentFiltersToBuilder = (
   collectionRef: CollectionReference
 ): void => {
   for (const parent of collectionRef.parentDocs) {
-    builder.eq(`${parent.collection}_id`, parent.id);
+    builder.eq(getParentForeignKeyColumn(parent.collection), parent.id);
   }
 };
 
@@ -604,6 +668,7 @@ const findExistingRow = async (ref: DocumentReference): Promise<Row | null> => {
   const supabase = getSupabaseClient();
   const candidates = getPrimaryIdCandidates(ref);
   let lastError: unknown = null;
+  let hadSuccessfulAttempt = false;
 
   for (const idColumn of candidates) {
     let builder = supabase.from(ref.parent.table).select("*");
@@ -612,12 +677,25 @@ const findExistingRow = async (ref: DocumentReference): Promise<Row | null> => {
 
     const { data, error } = await builder;
     if (error) {
+      // Coluna candidata ausente (ex.: users tem uid, mas nao id/doc_id) nao deve quebrar leitura.
+      if (isMissingColumnError(error)) {
+        continue;
+      }
       lastError = error;
       continue;
     }
+    hadSuccessfulAttempt = true;
 
     const rows = Array.isArray(data) ? (data as Row[]) : [];
-    if (!rows.length) continue;
+    if (!rows.length) {
+      // Para tabelas padrao com chave "id", uma consulta bem-sucedida sem resultado
+      // ja e suficiente para considerar "documento inexistente" e evita tentativas em
+      // colunas candidatas que nao existem (ex.: uid/doc_id/setting_id).
+      if (idColumn === "id" && ref.parent.table !== "users") {
+        return null;
+      }
+      continue;
+    }
 
     const row = rows[0];
     if (row.id === undefined && idColumn !== "id") {
@@ -629,7 +707,8 @@ const findExistingRow = async (ref: DocumentReference): Promise<Row | null> => {
     return row;
   }
 
-  if (lastError) {
+  // Se pelo menos uma consulta executou com sucesso e nao encontrou linha, tratamos como "doc inexistente".
+  if (lastError && !hadSuccessfulAttempt) {
     throw wrapBackendError(lastError, "firestore/get-doc-failed");
   }
 
@@ -646,17 +725,21 @@ const upsertDocumentRow = async (ref: DocumentReference, row: Row): Promise<void
   const payload: Row = {
     ...parentMetadata,
     ...normalizeForWrite(row) as Row,
-    __path: ref.path,
   };
 
   if (payload.id === undefined && payload.uid === undefined) {
     payload[primaryIdColumn] = ref.id;
-    if (primaryIdColumn !== "id") {
+    if (primaryIdColumn !== "id" && ref.parent.table !== "users") {
       payload.id = ref.id;
     }
     if (primaryIdColumn !== "uid" && ref.parent.table === "users") {
       payload.uid = ref.id;
     }
+  }
+
+  // A tabela users no schema atual usa PK "uid" (sem coluna "id").
+  if (ref.parent.table === "users" && "id" in payload) {
+    delete payload.id;
   }
 
   let lastError: unknown = null;
@@ -671,7 +754,9 @@ const upsertDocumentRow = async (ref: DocumentReference, row: Row): Promise<void
       return;
     }
 
-    lastError = response.error;
+    if (!isMissingColumnError(response.error)) {
+      lastError = response.error;
+    }
   }
 
   // Fallback final: insert simples (quando nao existe PK/constraint definida como esperado).
@@ -727,10 +812,30 @@ const wrapBackendError = (error: unknown, fallbackCode: string): Error & { code:
     return Object.assign(error, { code });
   }
 
-  return Object.assign(new Error("Operacao de dados falhou."), {
+  const errorObj = isObject(error) ? error : null;
+  const detailParts = [
+    typeof errorObj?.message === "string" ? errorObj.message : null,
+    typeof errorObj?.details === "string" ? errorObj.details : null,
+  ].filter((part): part is string => Boolean(part));
+
+  const message = detailParts.length
+    ? detailParts.join(" | ")
+    : "Operacao de dados falhou.";
+
+  return Object.assign(new Error(message), {
     code: fallbackCode,
     cause: error,
   });
+};
+
+const isMissingColumnError = (error: unknown): boolean => {
+  if (!isObject(error)) return false;
+
+  const code = typeof error.code === "string" ? error.code : "";
+  if (code === "42703") return true; // postgres undefined_column
+
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return message.includes("column") && message.includes("does not exist");
 };
 
 const inferDocRefFromRow = (collectionRef: CollectionReference, row: Row): DocumentReference => {
@@ -772,6 +877,7 @@ export function doc(
   dbOrCollection: FirestoreInstance | CollectionReference,
   ...segments: string[]
 ): DocumentReference;
+export function doc(collectionRef: CollectionReference): DocumentReference;
 export function doc(collectionRef: CollectionReference, id: string): DocumentReference;
 export function doc(
   dbOrCollection: FirestoreInstance | CollectionReference,
@@ -779,8 +885,11 @@ export function doc(
 ): DocumentReference {
   if ((dbOrCollection as CollectionReference).kind === "collection") {
     const collectionRef = dbOrCollection as CollectionReference;
+    if (segments.length === 0) {
+      return buildDocRef([...collectionRef.segments, crypto.randomUUID()]);
+    }
     if (segments.length !== 1) {
-      throw new Error("doc(collectionRef, id) exige exatamente um id.");
+      throw new Error("doc(collectionRef, id?) aceita zero (auto-id) ou exatamente um id.");
     }
     return buildDocRef([...collectionRef.segments, segments[0]]);
   }

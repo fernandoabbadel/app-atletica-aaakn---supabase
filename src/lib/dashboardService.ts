@@ -52,6 +52,9 @@ const asString = (value: unknown, fallback = ""): string =>
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
+const asBoolean = (value: unknown, fallback = false): boolean =>
+  typeof value === "boolean" ? value : fallback;
+
 const asStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
@@ -264,7 +267,13 @@ const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
     foto: asString(data.foto) || undefined,
     logoBase64: asString(data.logoBase64) || undefined,
     logo: asString(data.logo) || undefined,
+    descricao: asString(data.descricao) || undefined,
     bizu: asString(data.bizu) || undefined,
+    ativa: asBoolean(data.ativa, false),
+    visivel: asBoolean(data.visivel, false),
+    status: asString(data.status) || undefined,
+    createdAt: data.createdAt ?? null,
+    updatedAt: data.updatedAt ?? null,
   };
 };
 
@@ -375,7 +384,13 @@ export interface DashboardLiga {
   foto?: string;
   logoBase64?: string;
   logo?: string;
+  descricao?: string;
   bizu?: string;
+  ativa?: boolean;
+  visivel?: boolean;
+  status?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
 }
 
 export interface DashboardPartner {

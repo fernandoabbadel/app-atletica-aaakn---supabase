@@ -13,12 +13,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { markProfileComplete, uploadProfileImage } from "../../lib/profileService";
 import { validateImageFile } from "../../lib/upload";
+import { isPermissionError } from "../../lib/backendErrors";
 import { useToast } from "../../context/ToastContext"; 
 import { getTurmaImage } from "../../constants/turmaImages";
 
 // --- DADOS ---
 const TURMAS = [
-  { id: "T1", nome: "Turma I - JacarÃ©", img: getTurmaImage("T1") },
+  { id: "T1", nome: "Turma I - Jacare", img: getTurmaImage("T1") },
   { id: "T2", nome: "Turma II - Cavalo Marinho", img: getTurmaImage("T2") },
   { id: "T3", nome: "Turma III - Tartaruga", img: getTurmaImage("T3") },
   { id: "T4", nome: "Turma IV - Baleia", img: getTurmaImage("T4") },
@@ -29,36 +30,36 @@ const TURMAS = [
   { id: "T9", nome: "Turma IX", img: getTurmaImage("T9") },
 ];
 
-const STATUS_RELACIONAMENTO = ["Solteiro(a)", "Namorando", "Casado(a)", "Enrolado(a)", "No QG da AtlÃ©tica ðŸ¦ˆ"];
+const STATUS_RELACIONAMENTO = ["Solteiro(a)", "Namorando", "Casado(a)", "Enrolado(a)", "No QG da Atletica"];
 
 const ESPORTES_OPTIONS = [
-    { id: "futebol", label: "Futebol", icon: "âš½" },
-    { id: "futsal", label: "Futsal", icon: "ðŸ‘Ÿ" },
-    { id: "volei", label: "VÃ´lei", icon: "ðŸ" },
-    { id: "basquete", label: "Basquete", icon: "ðŸ€" },
-    { id: "handball", label: "Handball", icon: "ðŸ¤¾" },
-    { id: "rugby", label: "Rugby", icon: "ðŸ‰" },
-    { id: "baseball", label: "Baseball", icon: "âš¾" },
-    { id: "futevolei", label: "FutevÃ´lei", icon: "ðŸ¦¶" },
-    { id: "beach_tennis", label: "Beach Tennis", icon: "ðŸ–ï¸" },
-    { id: "tenis", label: "TÃªnis", icon: "ðŸŽ¾" },
-    { id: "frescobol", label: "Frescobol", icon: "ðŸ“" },
-    { id: "taco", label: "Taco (Bets)", icon: "ðŸ" },
-    { id: "peteca", label: "Peteca", icon: "ðŸ¸" },
-    { id: "surf", label: "Surf", icon: "ðŸ„" },
-    { id: "natacao", label: "NataÃ§Ã£o", icon: "ðŸŠ" },
-    { id: "canoagem", label: "Canoagem", icon: "ðŸ›¶" },
-    { id: "skate", label: "Skate", icon: "ðŸ›¹" },
-    { id: "dog_walking", label: "Dog Walking", icon: "ðŸ•" },
-    { id: "truco", label: "Truco", icon: "ðŸƒ" },
-    { id: "sinuca", label: "Sinuca", icon: "ðŸŽ±" },
+    { id: "futebol", label: "Futebol", icon: "\u26BD" },
+    { id: "futsal", label: "Futsal", icon: "\uD83D\uDC5F" },
+    { id: "volei", label: "Volei", icon: "\uD83C\uDFD0" },
+    { id: "basquete", label: "Basquete", icon: "\uD83C\uDFC0" },
+    { id: "handball", label: "Handball", icon: "\uD83E\uDD3E" },
+    { id: "rugby", label: "Rugby", icon: "\uD83C\uDFC9" },
+    { id: "baseball", label: "Baseball", icon: "\u26BE" },
+    { id: "futevolei", label: "Futevolei", icon: "\uD83C\uDFD0" },
+    { id: "beach_tennis", label: "Beach Tennis", icon: "\uD83C\uDFD6\uFE0F" },
+    { id: "tenis", label: "Tenis", icon: "\uD83C\uDFBE" },
+    { id: "frescobol", label: "Frescobol", icon: "\uD83C\uDFD3" },
+    { id: "taco", label: "Taco (Bets)", icon: "\uD83C\uDFCF" },
+    { id: "peteca", label: "Peteca", icon: "\uD83C\uDFF8" },
+    { id: "surf", label: "Surf", icon: "\uD83C\uDFC4" },
+    { id: "natacao", label: "Natacao", icon: "\uD83C\uDFCA" },
+    { id: "canoagem", label: "Canoagem", icon: "\uD83D\uDEF6" },
+    { id: "skate", label: "Skate", icon: "\uD83D\uDEF9" },
+    { id: "dog_walking", label: "Dog Walking", icon: "\uD83D\uDC15" },
+    { id: "truco", label: "Truco", icon: "\uD83C\uDCCF" },
+    { id: "sinuca", label: "Sinuca", icon: "\uD83C\uDFB1" },
 ];
 
 const PETS_OPTIONS = [
-    { id: "cachorro", label: "Cachorro", icon: "ðŸ¶" },
-    { id: "gato", label: "Gato", icon: "ðŸ±" },
-    { id: "ambos", label: "Ambos", icon: "ðŸ¶ðŸ±" },
-    { id: "nenhum", label: "Sem Pet", icon: "ðŸš«" },
+    { id: "cachorro", label: "Cachorro", icon: "\uD83D\uDC36" },
+    { id: "gato", label: "Gato", icon: "\uD83D\uDC31" },
+    { id: "ambos", label: "Ambos", icon: "\uD83D\uDC36\uD83D\uDC31" },
+    { id: "nenhum", label: "Sem Pet", icon: "\uD83D\uDEAB" },
 ];
 
 // ðŸ¦ˆ ID 3: Interfaces para remover 'any'
@@ -95,7 +96,7 @@ interface UserFormData {
 }
 
 export default function CadastroPage() {
-  const { user, updateUser, loading: authLoading } = useAuth();
+  const { user, updateUser, logout, loading: authLoading } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
   
@@ -110,6 +111,13 @@ export default function CadastroPage() {
   
   // ðŸ¦ˆ ID 1: Estado para travar localizaÃ§Ã£o se jÃ¡ existir
   const [locationLocked, setLocationLocked] = useState(false);
+
+  const normalizePhoneToBrE164 = (value: string): string => {
+    const digits = value.replace(/\D/g, "");
+    const withoutCountry = digits.startsWith("55") ? digits.slice(2) : digits;
+    const localDigits = withoutCountry.slice(0, 11);
+    return localDigits ? `+55${localDigits}` : "";
+  };
 
   // ðŸ¦ˆ ESTADO TIPADO
   const [formData, setFormData] = useState<UserFormData>({
@@ -165,7 +173,7 @@ export default function CadastroPage() {
         matricula: String(user.matricula || ""),
         turma: String(user.turma || ""),
         instagram: String(user.instagram || "").replace("@", ""),
-        telefone: String(user.telefone || ""),
+        telefone: normalizePhoneToBrE164(String(user.telefone || "")),
         whatsappPublico: Boolean(user.whatsappPublico ?? true),
         bio: String(user.bio || ""),
         dataNascimento: String(user.dataNascimento || ""),
@@ -204,7 +212,7 @@ export default function CadastroPage() {
           });
 
           setFormData(prev => ({ ...prev, foto: downloadURL }));
-          addToast("Foto carregada com sucesso! ðŸ¦ˆ", "success");
+          addToast("Foto carregada com sucesso! \uD83E\uDD88", "success");
 
       } catch (error: unknown) {
           console.error("Erro upload:", error);
@@ -215,10 +223,7 @@ export default function CadastroPage() {
   };
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, ""); 
-    if (value.length > 11) value = value.slice(0, 11); 
-    if (value.length > 2) value = `(${value.slice(0, 2)}) ${value.slice(2)}`;
-    if (value.length > 9) value = `${value.slice(0, 9)}-${value.slice(9)}`;
+    const value = normalizePhoneToBrE164(e.target.value);
     setFormData({ ...formData, telefone: value });
   };
 
@@ -235,14 +240,15 @@ export default function CadastroPage() {
     setLoading(true);
     setError("");
 
-    if (!formData.apelido.trim()) { setLoading(false); return setError("O 'Apelido' Ã© obrigatÃ³rio, soldado!"); }
-    if (!formData.matricula.trim()) { setLoading(false); return setError("A matrÃ­cula Ã© obrigatÃ³ria!"); }
-    if (!formData.dataNascimento) { setLoading(false); return setError("Data de nascimento Ã© necessÃ¡ria!"); }
+    if (!formData.apelido.trim()) { setLoading(false); return setError("O 'Apelido' e obrigatorio, soldado!"); }
+    if (!formData.matricula.trim()) { setLoading(false); return setError("A matricula e obrigatoria!"); }
+    if (!formData.dataNascimento) { setLoading(false); return setError("Data de nascimento e necessaria!"); }
     if (!formData.cidadeOrigem) { setLoading(false); return setError("Selecione sua cidade de origem!"); }
-    if (!formData.telefone) { setLoading(false); return setError("Telefone Ã© obrigatÃ³rio para contato!"); }
+    if (!formData.telefone) { setLoading(false); return setError("Telefone e obrigatorio para contato!"); }
+    if (!/^\+55\d{10,11}$/.test(formData.telefone)) { setLoading(false); return setError("Telefone deve estar no formato +5512912345678."); }
     if (!formData.turma) { setLoading(false); return setError("Selecione sua turma!"); }
     
-    if (!formData.foto) { setLoading(false); return setError("A foto de perfil Ã© obrigatÃ³ria!"); }
+    if (!formData.foto) { setLoading(false); return setError("A foto de perfil e obrigatoria!"); }
 
     try {
       // 1. Atualiza dados do usuÃ¡rio
@@ -270,11 +276,31 @@ export default function CadastroPage() {
         await markProfileComplete(user.uid);
       }
 
-      addToast("Perfil atualizado! Bem-vindo ao cardume. ðŸ¦ˆ", "success");
+      addToast("Perfil atualizado! Bem-vindo ao cardume. \uD83E\uDD88", "success");
       router.push("/perfil"); 
-    } catch (err) {
-      console.error(err);
-      setError("Erro ao salvar no QG.");
+    } catch (err: unknown) {
+      const errLog =
+        err instanceof Error
+          ? `${err.name}: ${err.message}`
+          : (() => {
+              try {
+                return JSON.stringify(err);
+              } catch {
+                return String(err);
+              }
+            })();
+      const safeErrLog =
+        errLog === "{}" ? "empty-object error (provavel RLS/policy em public.users)" : errLog;
+      console.error(`Erro ao salvar cadastro: ${safeErrLog}`);
+      if (isPermissionError(err)) {
+        setError("Sem permissao para salvar. Ajuste as policies (RLS) da tabela users no Supabase.");
+      } else if (err instanceof Error && err.message.includes("public.users")) {
+        setError("Usuario ainda nao encontrado em public.users. Verifique insert/RLS da tabela users.");
+      } else if (typeof err === "object" && err !== null && Object.getOwnPropertyNames(err).length === 0) {
+        setError("Falha ao salvar no banco (erro vazio {}). Geralmente e policy/RLS da tabela users.");
+      } else {
+        setError("Erro ao salvar no QG.");
+      }
     } finally {
       setLoading(false);
     }
@@ -295,6 +321,13 @@ export default function CadastroPage() {
             <Link href="/perfil" className="bg-zinc-900 border border-zinc-800 p-3 rounded-full hover:bg-zinc-800 transition text-zinc-400 hover:text-white flex items-center gap-2 text-xs font-bold uppercase">
                 <ArrowLeft size={18}/> Voltar ao Perfil
             </Link>
+            <button
+                type="button"
+                onClick={() => { void logout(); }}
+                className="ml-2 bg-zinc-900 border border-zinc-800 p-3 rounded-full hover:bg-zinc-800 transition text-zinc-400 hover:text-white text-xs font-bold uppercase"
+            >
+                Sair
+            </button>
         </div>
 
         <div className="w-full max-w-3xl bg-zinc-900/90 backdrop-blur-xl border border-zinc-800 p-6 md:p-10 rounded-[2.5rem] shadow-2xl relative z-10">
@@ -331,15 +364,15 @@ export default function CadastroPage() {
                     </label>
                 </div>
 
-                <h1 className="text-3xl font-black uppercase italic tracking-tighter">Ficha do <span className="text-emerald-500">TubarÃ£o</span></h1>
+                <h1 className="text-3xl font-black uppercase italic tracking-tighter">Ficha do <span className="text-emerald-500">Tubarao</span></h1>
                 
                 {/* AVISO DE FOTO */}
                 <div className="mt-4 bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl max-w-sm mx-auto">
                     <p className="text-[10px] text-yellow-400 font-bold uppercase tracking-wide flex items-center justify-center gap-2">
-                        <ShieldAlert size={14}/> AtenÃ§Ã£o: Use sua foto real!
+                        <ShieldAlert size={14}/> Atencao: Use sua foto real!
                     </p>
                     <p className="text-[10px] text-zinc-400 mt-1">
-                        Perfis com fotos fake, desenhos ou conteÃºdo imprÃ³prio serÃ£o <span className="text-red-400 font-bold underline">bloqueados</span> sem aviso.
+                        Perfis com fotos fake, desenhos ou conteudo improprio serao <span className="text-red-400 font-bold underline">bloqueados</span> sem aviso.
                     </p>
                 </div>
             </div>
@@ -355,7 +388,7 @@ export default function CadastroPage() {
                     {/* NOME COMPLETO (TRAVADO) */}
                     <div className="relative group opacity-60">
                         <User className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                        <input type="text" placeholder="Nome Completo" className="input-field pl-14 cursor-not-allowed bg-zinc-950" value={formData.nome} readOnly title="Nome oficial nÃ£o pode ser alterado aqui." />
+                        <input type="text" placeholder="Nome Completo" className="input-field pl-14 cursor-not-allowed bg-zinc-950" value={formData.nome} readOnly title="Nome oficial nao pode ser alterado aqui." />
                         <div className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600">
                             <Lock size={14}/> 
                         </div>
@@ -369,7 +402,7 @@ export default function CadastroPage() {
 
                         <div className="relative group">
                             <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-emerald-500 transition" size={18} />
-                            <input type="text" placeholder="NÂº MatrÃ­cula" className="input-field pl-14" value={formData.matricula} onChange={e => setFormData({...formData, matricula: e.target.value.replace(/\D/g, "")})} required />
+                            <input type="text" placeholder="No. Matricula" className="input-field pl-14" value={formData.matricula} onChange={e => setFormData({...formData, matricula: e.target.value.replace(/\D/g, "")})} required />
                         </div>
                     </div>
 
@@ -383,7 +416,7 @@ export default function CadastroPage() {
                                 type="button" 
                                 onClick={() => setFormData({...formData, idadePublica: !formData.idadePublica})} 
                                 className={`w-14 rounded-xl border flex items-center justify-center transition-all ${formData.idadePublica ? "bg-zinc-800 border-zinc-700 text-zinc-500" : "bg-zinc-800 border-red-500/50 text-red-400"}`}
-                                title={formData.idadePublica ? "Idade VisÃ­vel" : "Idade Oculta"}
+                                title={formData.idadePublica ? "Idade Visivel" : "Idade Oculta"}
                             >
                                 {formData.idadePublica ? <Eye size={20} /> : <EyeOff size={20} />}
                             </button>
@@ -408,7 +441,7 @@ export default function CadastroPage() {
                             {/* Estado Locked */}
                             <div className="relative group opacity-60">
                                 <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                                <input type="text" value={formData.estadoOrigem} className="input-field pl-14 cursor-not-allowed bg-zinc-950" readOnly title="Estado de origem jÃ¡ registrado." />
+                                <input type="text" value={formData.estadoOrigem} className="input-field pl-14 cursor-not-allowed bg-zinc-950" readOnly title="Estado de origem ja registrado." />
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600">
                                     <Lock size={14}/> 
                                 </div>
@@ -416,7 +449,7 @@ export default function CadastroPage() {
                             {/* Cidade Locked */}
                             <div className="relative group opacity-60">
                                 <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                                <input type="text" value={formData.cidadeOrigem} className="input-field pl-14 cursor-not-allowed bg-zinc-950" readOnly title="Cidade de origem jÃ¡ registrada." />
+                                <input type="text" value={formData.cidadeOrigem} className="input-field pl-14 cursor-not-allowed bg-zinc-950" readOnly title="Cidade de origem ja registrada." />
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600">
                                     <Lock size={14}/> 
                                 </div>
@@ -443,7 +476,16 @@ export default function CadastroPage() {
                         <div className="flex gap-2">
                             <div className="relative flex-1 group">
                                 <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                                <input type="tel" placeholder="Telefone" className="input-field pl-14" value={formData.telefone} onChange={handlePhoneChange} required />
+                                <input
+                                    type="tel"
+                                    placeholder="+5512912345678"
+                                    className="input-field pl-14"
+                                    value={formData.telefone}
+                                    onChange={handlePhoneChange}
+                                    inputMode="numeric"
+                                    autoComplete="tel"
+                                    required
+                                />
                             </div>
                             <button type="button" onClick={() => setFormData({...formData, whatsappPublico: !formData.whatsappPublico})} className={`w-14 rounded-xl border flex items-center justify-center transition-all ${formData.whatsappPublico ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-500" : "bg-zinc-800 border-zinc-700 text-zinc-500"}`}>
                                 {formData.whatsappPublico ? <Eye size={20} /> : <EyeOff size={20} />}
@@ -537,10 +579,10 @@ export default function CadastroPage() {
 
                 {/* BIO */}
                 <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Grito de Guerra (Bio do Ãlbum)</label>
+                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Grito de Guerra (Bio do Album)</label>
                     <div className="relative group">
                         <FileText className="absolute left-4 top-4 text-zinc-500" size={18} />
-                        <textarea placeholder="Conte algo sobre vocÃª..." className="input-field pl-14 h-24 py-3 resize-none" value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} maxLength={100} />
+                        <textarea placeholder="Conte algo sobre voce..." className="input-field pl-14 h-24 py-3 resize-none" value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} maxLength={100} />
                         <span className="absolute right-4 bottom-2 text-[10px] text-zinc-700 font-bold">{formData.bio.length}/100</span>
                     </div>
                 </div>

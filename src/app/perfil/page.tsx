@@ -247,6 +247,36 @@ export default function MeuPerfilPage() {
     if (authLoading) return;
     if (!user) { router.push("/login"); return; }
 
+    const statsRecord =
+      typeof user.stats === "object" && user.stats !== null
+        ? (user.stats as Record<string, unknown>)
+        : null;
+    const profileCompleteFlag = statsRecord?.profileComplete;
+    const hasExplicitIncompleteFlag =
+      typeof profileCompleteFlag === "number" &&
+      Number.isFinite(profileCompleteFlag) &&
+      profileCompleteFlag < 1;
+    const hasMissingRequiredProfileField = [
+      user.apelido,
+      user.matricula,
+      user.turma,
+      user.telefone,
+      user.dataNascimento,
+      user.cidadeOrigem,
+      user.estadoOrigem,
+      user.foto,
+    ].some((value) => String(value ?? "").trim().length === 0);
+
+    if (
+      String(user.role ?? "guest") === "guest" ||
+      hasMissingRequiredProfileField ||
+      hasExplicitIncompleteFlag
+    ) {
+      router.replace("/cadastro");
+      setLoading(false);
+      return;
+    }
+
     const fetchProfile = async () => {
         try {
             const bundle = await fetchOwnProfileBundle(user.uid, { forceRefresh: false });
@@ -285,7 +315,10 @@ export default function MeuPerfilPage() {
 
                 setMyTreinos((bundle.treinos as TreinoPerfil[]).slice(0, 5));
 
-            } else { addToast("Perfil não encontrado.", "error"); }
+            } else {
+                addToast("Cadastro pendente. Complete sua ficha para abrir o perfil.", "info");
+                router.replace("/cadastro");
+            }
         } catch (error: unknown) { console.error(error); } 
         finally { setLoading(false); }
     };

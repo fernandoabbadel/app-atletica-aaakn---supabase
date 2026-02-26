@@ -18,9 +18,9 @@ import {
   type QueryConstraint,
 } from "@/lib/supa/firestore";
 
-import { compressImageFile } from "./imageCompression";
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { uploadImage } from "./upload";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -106,11 +106,12 @@ export interface AdminPartnersTierCounts {
   standard: number;
 }
 
+export type PartnerStorageImageKind = "logo" | "capa";
+
 const READ_CACHE_TTL_MS = 30_000;
 const MAX_PARTNERS_RESULTS = 600;
 const MAX_SCANS_RESULTS = 1_200;
 const MAX_SCANNER_SAMPLE_DOCS = 80;
-const MAX_BASE64_CHARS = 550_000;
 
 const PARTNERS_CREATE_LEAD_CALLABLE = "partnersCreateLead";
 const PARTNERS_LOGIN_CALLABLE = "partnersLogin";
@@ -458,6 +459,41 @@ const sanitizePartnerWritePayload = (
 
   return sanitized;
 };
+
+const sanitizeStorageSegment = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "item";
+
+const getSafeFileExtension = (file: File): string => {
+  const nameMatch = file.name.toLowerCase().match(/\.([a-z0-9]+)$/);
+  if (nameMatch?.[1]) return nameMatch[1];
+  if (file.type === "image/png") return "png";
+  if (file.type === "image/webp") return "webp";
+  return "jpg";
+};
+
+export async function uploadPartnerImageToStorage(options: {
+  file: File;
+  kind: PartnerStorageImageKind;
+  partnerId?: string;
+}): Promise<string> {
+  const partnerSegment = sanitizeStorageSegment(options.partnerId || "temp");
+  const folder = options.kind === "capa" ? "capas" : "logos";
+  const fileBase = sanitizeStorageSegment(options.file.name.replace(/\.[^.]+$/, ""));
+  const extension = getSafeFileExtension(options.file);
+  const objectPath = `parceiros/${partnerSegment}/${folder}/${Date.now()}-${fileBase}.${extension}`;
+
+  const { url, error } = await uploadImage(options.file, objectPath);
+  if (!url || error) {
+    throw new Error(error || "Falha ao subir imagem do parceiro.");
+  }
+
+  return url;
+}
 
 export async function fetchAdminPartnersBundle(options?: {
   partnersLimit?: number;
@@ -1216,35 +1252,6 @@ export async function updatePartnerProfile(payload: {
   partnerByIdCache.delete(partnerId);
   clearAdminPartnersCaches();
   publicPartnersCache.clear();
-}
-
-const fileToDataUrl = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(asString(reader.result));
-    reader.onerror = () => reject(new Error("Falha ao converter imagem"));
-  });
-
-export async function preparePartnerImageBase64(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) {
-    throw new Error("Apenas imagens sao permitidas");
-  }
-
-  const compressed = await compressImageFile(file, {
-    maxWidth: 1280,
-    maxHeight: 1280,
-    quality: 0.78,
-  });
-
-  const base64 = await fileToDataUrl(compressed);
-  if (!base64) {
-    throw new Error("Imagem invalida");
-  }
-  if (base64.length > MAX_BASE64_CHARS) {
-    throw new Error("Imagem muito grande para salvar no documento");
-  }
-  return base64;
 }
 
 export async function scanFirestoreCollectionFields(options: {

@@ -9,6 +9,7 @@ const RULES = {
 };
 
 type SecurityResult = { allowed: boolean; reason?: string };
+const localPostCooldownFallback = new Map<string, number>();
 
 const toDateSafe = (value: unknown): Date | null => {
   if (value instanceof Date) return value;
@@ -28,6 +29,19 @@ const toDateSafe = (value: unknown): Date | null => {
   return null;
 };
 
+const isMissingSchemaColumnError = (error: unknown, columnName: string): boolean => {
+  if (typeof error !== "object" || error === null) return false;
+
+  const raw = error as { message?: unknown };
+  const message = typeof raw.message === "string" ? raw.message.toLowerCase() : "";
+  const normalizedColumn = columnName.toLowerCase();
+
+  return (
+    message.includes(normalizedColumn) &&
+    (message.includes("schema cache") || (message.includes("column") && message.includes("does not exist")))
+  );
+};
+
 export const Security = {
   async canUserPost(userId: string): Promise<SecurityResult> {
     try {
@@ -39,7 +53,9 @@ export const Security = {
       }
 
       const userData = snap.data() as { lastPostTime?: unknown };
-      const lastPost = toDateSafe(userData.lastPostTime)?.getTime() || 0;
+      const persistedLastPost = toDateSafe(userData.lastPostTime)?.getTime() || 0;
+      const localLastPost = localPostCooldownFallback.get(userId) || 0;
+      const lastPost = Math.max(persistedLastPost, localLastPost);
       const now = Date.now();
 
       if (now - lastPost < RULES.POST_COOLDOWN) {
@@ -47,7 +63,17 @@ export const Security = {
         return { allowed: false, reason: `Calma tubarao! Espere ${waitTime}s para postar novamente.` };
       }
 
-      await updateDoc(userRef, { lastPostTime: serverTimestamp() });
+      try {
+        await updateDoc(userRef, { lastPostTime: serverTimestamp() });
+      } catch (error: unknown) {
+        if (!isMissingSchemaColumnError(error, "lastPostTime")) {
+          throw error;
+        }
+        // Fallback local para manter cooldown funcionando nesta sessao enquanto a coluna nao existe.
+        localPostCooldownFallback.set(userId, now);
+      }
+
+      localPostCooldownFallback.set(userId, now);
       return { allowed: true };
     } catch (error: unknown) {
       if (isPermissionError(error)) {

@@ -23,6 +23,7 @@ import {
   fetchLeagueById,
   fetchLeagues,
   fetchLeagueUsers,
+  uploadLeagueImageToStorage,
   updateEventPollOptions,
   type LeaguePollRecord,
 } from "../../lib/leaguesService";
@@ -39,6 +40,7 @@ interface UserSearch {
 interface PerguntaLiga { 
     id: string; 
     texto: string; 
+    imageUrl?: string;
     imagemBase64?: string; 
     alternativas: string[]; 
     correta: number; 
@@ -57,6 +59,12 @@ interface Lote {
     nome: string; 
     preco: string; 
     status: "ativo" | "encerrado" | "agendado"; 
+}
+
+interface NovoLoteDraft {
+    nome: string;
+    preco: string;
+    status: "ativo" | "encerrado" | "agendado";
 }
 
 interface PollOption {
@@ -86,6 +94,8 @@ interface LeagueEvent {
     pollQuestion?: string; 
 }
 
+type LigaAdminTab = 'visual' | 'members' | 'events' | 'shark';
+
 interface LigaData {
     id: string; 
     nome: string; 
@@ -94,6 +104,7 @@ interface LigaData {
     bizu?: string; 
     likes?: number; 
     senha: string; 
+    logoUrl?: string;
     logoBase64?: string;
     ativa?: boolean; 
     perguntas: PerguntaLiga[]; 
@@ -102,14 +113,103 @@ interface LigaData {
     membrosIds?: string[];
 }
 
-// --- HELPER PARA BASE64 ---
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = error => reject(error);
-  });
+interface LigaEditorDraftSnapshot {
+    version: 1;
+    savedAt: number;
+    ligaSenha: string;
+    activeTab: LigaAdminTab;
+    sendNotification: boolean;
+    ligaDraft: Omit<LigaData, "senha">;
+    eventModal: boolean;
+    editingEventIdx: number | null;
+    currentEvent: Partial<LeagueEvent>;
+    novoLote: NovoLoteDraft;
+}
+
+const LIGA_EDITOR_DRAFT_VERSION = 1;
+const LIGA_EDITOR_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LIGA_EDITOR_LAST_SELECTED_KEY = "aaakn:ligas:last-selected";
+
+const getLigaEditorDraftKey = (ligaId: string): string => `aaakn:ligas:draft:${ligaId}`;
+
+const isLigaAdminTab = (value: unknown): value is LigaAdminTab => (
+    value === "visual" || value === "members" || value === "events" || value === "shark"
+);
+
+const readSessionStorageValue = (key: string): string | null => {
+    if (typeof window === "undefined") return null;
+    try {
+        return window.sessionStorage.getItem(key);
+    } catch {
+        return null;
+    }
+};
+
+const writeSessionStorageValue = (key: string, value: string): void => {
+    if (typeof window === "undefined") return;
+    try {
+        window.sessionStorage.setItem(key, value);
+    } catch {
+        // Ignora falhas de quota/privacidade sem quebrar o fluxo do editor.
+    }
+};
+
+const removeSessionStorageValue = (key: string): void => {
+    if (typeof window === "undefined") return;
+    try {
+        window.sessionStorage.removeItem(key);
+    } catch {
+        // Sem ação; limpeza é best-effort.
+    }
+};
+
+const readLigaEditorDraft = (ligaId: string): LigaEditorDraftSnapshot | null => {
+    const raw = readSessionStorageValue(getLigaEditorDraftKey(ligaId));
+    if (!raw) return null;
+
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return null;
+
+        const snapshot = parsed as Partial<LigaEditorDraftSnapshot>;
+        if (snapshot.version !== LIGA_EDITOR_DRAFT_VERSION) return null;
+        if (typeof snapshot.savedAt !== "number") return null;
+        if (Date.now() - snapshot.savedAt > LIGA_EDITOR_DRAFT_TTL_MS) return null;
+        if (!isLigaAdminTab(snapshot.activeTab)) return null;
+        if (!snapshot.ligaDraft || typeof snapshot.ligaDraft !== "object") return null;
+
+        return {
+            version: LIGA_EDITOR_DRAFT_VERSION,
+            savedAt: snapshot.savedAt,
+            ligaSenha: typeof snapshot.ligaSenha === "string" ? snapshot.ligaSenha : "",
+            activeTab: snapshot.activeTab,
+            sendNotification: Boolean(snapshot.sendNotification),
+            ligaDraft: snapshot.ligaDraft as Omit<LigaData, "senha">,
+            eventModal: Boolean(snapshot.eventModal),
+            editingEventIdx: typeof snapshot.editingEventIdx === "number" ? snapshot.editingEventIdx : null,
+            currentEvent: snapshot.currentEvent && typeof snapshot.currentEvent === "object" ? snapshot.currentEvent : {},
+            novoLote: snapshot.novoLote && typeof snapshot.novoLote === "object"
+                ? {
+                    nome: typeof snapshot.novoLote.nome === "string" ? snapshot.novoLote.nome : "",
+                    preco: typeof snapshot.novoLote.preco === "string" ? snapshot.novoLote.preco : "",
+                    status:
+                        snapshot.novoLote.status === "encerrado" || snapshot.novoLote.status === "agendado"
+                            ? snapshot.novoLote.status
+                            : "ativo",
+                }
+                : { nome: "", preco: "", status: "ativo" },
+        };
+    } catch {
+        return null;
+    }
+};
+
+const writeLigaEditorDraft = (ligaId: string, snapshot: LigaEditorDraftSnapshot): void => {
+    writeSessionStorageValue(getLigaEditorDraftKey(ligaId), JSON.stringify(snapshot));
+};
+
+const clearLigaEditorDraft = (ligaId: string): void => {
+    removeSessionStorageValue(getLigaEditorDraftKey(ligaId));
 };
 
 export default function LigasAdminPage() {
@@ -118,7 +218,7 @@ export default function LigasAdminPage() {
   // --- ESTADOS DE CONTROLE ---
   const [loading, setLoading] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [activeTab, setActiveTab] = useState<'visual' | 'members' | 'events' | 'shark'>('visual');
+  const [activeTab, setActiveTab] = useState<LigaAdminTab>('visual');
   
   // Login
   const [ligasDisponiveis, setLigasDisponiveis] = useState<{id: string, nome: string}[]>([]);
@@ -140,13 +240,85 @@ export default function LigasAdminPage() {
   const [editingEventIdx, setEditingEventIdx] = useState<number | null>(null);
   const [currentEvent, setCurrentEvent] = useState<Partial<LeagueEvent>>({});
   const eventFileRef = useRef<HTMLInputElement>(null);
+  const [uploadingLeagueAsset, setUploadingLeagueAsset] = useState(false);
   const [uploadingEventImg, setUploadingEventImg] = useState(false);
-  const [novoLote, setNovoLote] = useState({ nome: "", preco: "", status: "ativo" as const });
+  const [novoLote, setNovoLote] = useState<NovoLoteDraft>({ nome: "", preco: "", status: "ativo" });
 
   // --- 🦈 MODAL DE GESTÃO DE ENQUETES (NOVO) ---
   const [pollModal, setPollModal] = useState<string | null>(null); 
   const [polls, setPolls] = useState<Poll[]>([]);
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
+
+  useEffect(() => {
+      const lastSelected = readSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY);
+      if (lastSelected) {
+          setSelectedLigaId(lastSelected);
+      }
+  }, []);
+
+  useEffect(() => {
+      if (isLoggedIn || ligaData) return;
+
+      const lastSelected = readSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY);
+      if (!lastSelected) return;
+      const restoredDraft = readLigaEditorDraft(lastSelected);
+      if (!restoredDraft || !restoredDraft.ligaSenha) return;
+
+      setLigaData({
+          ...(restoredDraft.ligaDraft as Omit<LigaData, "senha">),
+          senha: restoredDraft.ligaSenha,
+      } as LigaData);
+      setSelectedLigaId(lastSelected);
+      setSenhaInput(restoredDraft.ligaSenha);
+      setActiveTab(restoredDraft.activeTab);
+      setSendNotification(restoredDraft.sendNotification);
+      setEventModal(restoredDraft.eventModal);
+      setEditingEventIdx(restoredDraft.editingEventIdx);
+      setCurrentEvent(restoredDraft.currentEvent);
+      setNovoLote(restoredDraft.novoLote);
+      setIsLoggedIn(true);
+      addToast("Bizu do Tubarão... 📝 Sessão da liga restaurada.", "info");
+  }, [addToast, isLoggedIn, ligaData]);
+
+  useEffect(() => {
+      if (!selectedLigaId) return;
+      writeSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY, selectedLigaId);
+  }, [selectedLigaId]);
+
+  useEffect(() => {
+      if (!isLoggedIn || !ligaData) return;
+
+      const persist = () => {
+          const { senha: _senha, ...ligaDraft } = ligaData;
+          writeLigaEditorDraft(ligaData.id, {
+              version: LIGA_EDITOR_DRAFT_VERSION,
+              savedAt: Date.now(),
+              ligaSenha: ligaData.senha,
+              activeTab,
+              sendNotification,
+              ligaDraft,
+              eventModal,
+              editingEventIdx,
+              currentEvent,
+              novoLote,
+          });
+      };
+
+      const timer = window.setTimeout(persist, 120);
+      return () => {
+          window.clearTimeout(timer);
+          persist();
+      };
+  }, [
+      activeTab,
+      currentEvent,
+      editingEventIdx,
+      eventModal,
+      isLoggedIn,
+      ligaData,
+      novoLote,
+      sendNotification,
+  ]);
 
   // 1. CARREGAMENTO INICIAL
   useEffect(() => {
@@ -224,7 +396,7 @@ export default function LigasAdminPage() {
           const target = await fetchLeagueById(selectedLigaId, { forceRefresh: false });
           
           if (target && target.senha === senhaInput) {
-              setLigaData({
+              const baseLigaData: LigaData = {
                   id: target.id,
                   nome: target.nome,
                   sigla: target.sigla || "",
@@ -232,15 +404,45 @@ export default function LigasAdminPage() {
                   bizu: target.bizu || "",
                   likes: target.likes || 0,
                   senha: target.senha,
-                  logoBase64: target.logoBase64,
+                  logoUrl: target.logoUrl || target.logoBase64,
+                  logoBase64: target.logoBase64 || target.logoUrl,
                   ativa: target.ativa,
                   perguntas: (target.perguntas || []) as PerguntaLiga[],
                   membros: (target.membros || []) as Member[],
                   eventos: (target.eventos || []) as LeagueEvent[],
                   membrosIds: target.membrosIds,
-              });
+              };
+              const restoredDraft = readLigaEditorDraft(target.id);
+              const mergedLigaData: LigaData = restoredDraft
+                  ? {
+                      ...baseLigaData,
+                      ...restoredDraft.ligaDraft,
+                      id: baseLigaData.id,
+                      senha: baseLigaData.senha,
+                  }
+                  : baseLigaData;
+
+              setLigaData(mergedLigaData);
+              if (restoredDraft) {
+                  setActiveTab(restoredDraft.activeTab);
+                  setSendNotification(restoredDraft.sendNotification);
+                  setEventModal(restoredDraft.eventModal);
+                  setEditingEventIdx(restoredDraft.editingEventIdx);
+                  setCurrentEvent(restoredDraft.currentEvent);
+                  setNovoLote(restoredDraft.novoLote);
+              } else {
+                  setActiveTab("visual");
+                  setSendNotification(false);
+                  setEventModal(false);
+                  setEditingEventIdx(null);
+                  setCurrentEvent({});
+                  setNovoLote({ nome: "", preco: "", status: "ativo" });
+              }
               setIsLoggedIn(true);
               addToast("Acesso autorizado!", "success");
+              if (restoredDraft) {
+                  addToast("Bizu do Tubarão... 📝 Rascunho recuperado.", "info");
+              }
               
               // LOG CORRIGIDO: ORDEM (ID, NOME, AÇÃO, RECURSO, DETALHES)
               logActivity(
@@ -262,41 +464,92 @@ export default function LigasAdminPage() {
       }
   };
 
+  const handleLeaguePanelLogout = () => {
+      if (ligaData?.id) {
+          clearLigaEditorDraft(ligaData.id);
+      }
+      setEventModal(false);
+      setEditingEventIdx(null);
+      setCurrentEvent({});
+      setNovoLote({ nome: "", preco: "", status: "ativo" });
+      setSendNotification(false);
+      setLigaData(null);
+      setIsLoggedIn(false);
+  };
+
   // --- UPLOADS ---
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'pergunta' | 'membro', index?: number) => {
       const file = e.target.files?.[0];
       if (!file || !ligaData) return;
-      if (file.size > 2 * 1024 * 1024) return addToast("Máximo 2MB.", "error");
 
+      setUploadingLeagueAsset(true);
       try {
-          const base64 = await fileToBase64(file);
+          const imageUrl = await uploadLeagueImageToStorage({
+              file,
+              kind: type === 'logo' ? 'logo' : type === 'pergunta' ? 'question' : 'member',
+              leagueId: ligaData.id,
+              entityId: typeof index === 'number' ? String(index) : undefined,
+          });
+
           if (type === 'logo') {
-              setLigaData({ ...ligaData, logoBase64: base64 });
+              setLigaData({ ...ligaData, logoUrl: imageUrl, logoBase64: imageUrl });
           } else if (type === 'pergunta' && index !== undefined) {
-              const novas = [...ligaData.perguntas]; 
-              novas[index].imagemBase64 = base64; 
+              const novas = [...ligaData.perguntas];
+              novas[index].imageUrl = imageUrl;
+              novas[index].imagemBase64 = imageUrl;
               setLigaData({ ...ligaData, perguntas: novas });
           } else if (type === 'membro' && index !== undefined && ligaData.membros) {
-              const novos = [...ligaData.membros]; 
-              novos[index].foto = base64; 
+              const novos = [...ligaData.membros];
+              novos[index].foto = imageUrl;
               setLigaData({ ...ligaData, membros: novos });
           }
-          addToast("Imagem carregada!", "success");
-      } catch { 
-          addToast("Erro na imagem.", "error"); 
+
+          addToast("Aí sim! O Tubarão aprovou! 🦈 Imagem enviada.", "success");
+          await logActivity(
+              ligaData.id,
+              ligaData.nome,
+              "UPDATE",
+              "ligas_uploads",
+              { tipo: type, index: index ?? null }
+          );
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Deu ruim no plantão! 🚨 Erro na imagem.", "error");
+      } finally {
+          setUploadingLeagueAsset(false);
+          e.target.value = "";
       }
   };
 
   const handleEventImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) {
-          setUploadingEventImg(true);
-          const base64 = await fileToBase64(file);
-          setCurrentEvent(prev => ({ ...prev, imagem: base64 }));
+      if (!file || !ligaData) return;
+
+      setUploadingEventImg(true);
+      try {
+          const imageUrl = await uploadLeagueImageToStorage({
+              file,
+              kind: 'event',
+              leagueId: ligaData.id,
+              entityId: currentEvent.id || undefined,
+          });
+          setCurrentEvent(prev => ({ ...prev, imagem: imageUrl }));
+          addToast("Aí sim! O Tubarão aprovou! 🦈 Capa do evento enviada.", "success");
+          await logActivity(
+              ligaData.id,
+              ligaData.nome,
+              "UPDATE",
+              "ligas_eventos_uploads",
+              { eventId: currentEvent.id || null }
+          );
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Deu ruim no plantão! 🚨 Falha no upload da capa.", "error");
+      } finally {
           setUploadingEventImg(false);
+          e.target.value = "";
       }
   };
-
   // --- MEMBROS ---
   const filteredUsers = searchTerm.length > 0 
       ? allUsers.filter(u => (u.nome || "").toLowerCase().includes(searchTerm.toLowerCase())) 
@@ -392,7 +645,7 @@ export default function LigasAdminPage() {
                       local: ev.local,
                       tipo: "Liga", 
                       destaque: ev.destaque,
-                      imagem: ev.imagem || ligaData.logoBase64,
+                      imagem: ev.imagem || ligaData.logoUrl || ligaData.logoBase64,
                       imagePositionY: ev.imagePositionY,
                       lotes: ev.lotes,
                       descricao: ev.descricao, 
@@ -435,6 +688,7 @@ export default function LigasAdminPage() {
           }
 
           addToast("Salvo e Sincronizado!", "success");
+          clearLigaEditorDraft(ligaData.id);
           
           // LOG CORRIGIDO
           await logActivity(
@@ -510,7 +764,7 @@ export default function LigasAdminPage() {
                     </h1>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Painel de Gestão</p>
                 </div>
-                <button onClick={() => setIsLoggedIn(false)} className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition">
+                <button onClick={handleLeaguePanelLogout} className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition">
                     <LogOut size={18}/>
                 </button>
             </div>
@@ -534,9 +788,9 @@ export default function LigasAdminPage() {
                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Logo da Liga</label>
                       <div className="flex items-center gap-4 mt-2">
                           <label className="w-20 h-20 bg-black rounded-xl border-2 border-dashed border-zinc-700 flex items-center justify-center cursor-pointer hover:border-emerald-500 overflow-hidden relative group transition-colors">
-                              {ligaData.logoBase64 ? (
+                              {ligaData.logoUrl || ligaData.logoBase64 ? (
                                 <Image
-                                  src={ligaData.logoBase64}
+                                  src={ligaData.logoUrl || ligaData.logoBase64 || ""}
                                   alt="Logo"
                                   fill
                                   sizes="80px"
@@ -546,7 +800,7 @@ export default function LigasAdminPage() {
                               ) : (
                                 <Upload size={20} className="text-zinc-500"/>
                               )}
-                              <input type="file" className="hidden" onChange={(e) => handleImageUpload(e, 'logo')}/>
+                              <input type="file" className="hidden" disabled={uploadingLeagueAsset} onChange={(e) => handleImageUpload(e, 'logo')}/>
                           </label>
                           <span className="text-xs text-zinc-500 max-w-[150px]">Clique para alterar a logo.<br/>Recomendado: Quadrado.</span>
                       </div>
@@ -613,7 +867,7 @@ export default function LigasAdminPage() {
                   </div>
                   <div className="space-y-3">
                       {ligaData.eventos?.map((ev, idx) => {
-                          const eventImage = ev.imagem || ligaData.logoBase64;
+                          const eventImage = ev.imagem || ligaData.logoUrl || ligaData.logoBase64;
                           return (
                               <div key={idx} className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 relative flex flex-col md:flex-row gap-4 items-start md:items-center">
                                   <button onClick={() => {const n=[...ligaData.eventos!]; n.splice(idx,1); setLigaData({...ligaData, eventos:n})}} className="absolute top-2 right-2 text-zinc-600 hover:text-red-500"><Trash2 size={14}/></button>
@@ -833,7 +1087,7 @@ export default function LigasAdminPage() {
                       <div className="flex justify-between items-center"><h2 className="font-bold text-white text-lg">Evento da Liga</h2><button onClick={() => setEventModal(false)}><X size={20} className="text-zinc-500"/></button></div>
                       
                       <div onClick={() => eventFileRef.current?.click()} className="h-32 border-2 border-dashed border-zinc-700 rounded-xl flex items-center justify-center cursor-pointer bg-black/20 relative group overflow-hidden">
-                          <input type="file" ref={eventFileRef} className="hidden" onChange={handleEventImageUpload}/>
+                          <input type="file" ref={eventFileRef} className="hidden" disabled={uploadingEventImg} onChange={handleEventImageUpload}/>
                           {uploadingEventImg ? (
                               <span className="text-xs text-emerald-500 animate-pulse">Enviando...</span>
                           ) : currentEvent.imagem ? (

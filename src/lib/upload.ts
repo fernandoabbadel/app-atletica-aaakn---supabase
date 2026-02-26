@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { compressImageFile } from "./imageCompression";
 
 export interface UploadResult {
   url: string | null;
@@ -42,18 +43,30 @@ export async function uploadImage(file: File, path: string): Promise<UploadResul
   }
 
   try {
+    // Canvas compression reduces Storage usage and egress while keeping quality acceptable.
+    const optimizedFile = await compressImageFile(file, {
+      maxWidth: 1600,
+      maxHeight: 1600,
+      quality: 0.82,
+    });
+
+    const optimizedError = validateImageFile(optimizedFile);
+    if (optimizedError) {
+      return { url: null, error: optimizedError };
+    }
+
     const supabase = getSupabaseClient();
     const bucket = (process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET || "uploads").trim() || "uploads";
-    const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, "_").toLowerCase();
+    const cleanName = optimizedFile.name.replace(/[^a-zA-Z0-9.]/g, "_").toLowerCase();
     const filename = `${Date.now()}-${cleanName}`;
     const objectPath = `${path}/${filename}`;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
-      .upload(objectPath, file, {
+      .upload(objectPath, optimizedFile, {
         upsert: false,
         cacheControl: "3600",
-        contentType: file.type || undefined,
+        contentType: optimizedFile.type || undefined,
       });
 
     if (uploadError) {

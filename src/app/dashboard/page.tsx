@@ -32,6 +32,8 @@ type Liga = DashboardLiga;
 type Parceiro = DashboardPartner;
 type PostComunidade = DashboardPost;
 
+const WEEKLY_BIZU_ACTIVE_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
+
 interface UserData {
     uid: string;
     nome: string;
@@ -364,7 +366,16 @@ export default function DashboardPage() {
   };
   const parceirosOuro = parceiros.filter(p => p.categoria === 'ouro' || p.plano === 'ouro');
   const parceirosComuns = parceiros.filter(p => p.categoria !== 'ouro' && p.plano !== 'ouro');
-  const ligasComBizu = ligas.filter(l => l.bizu && l.bizu.trim() !== "");
+  const getLigaBizuAtivo = (liga: Liga): string | null => {
+    const bizu = (liga.bizu || "").trim();
+    if (!bizu) return null;
+    const referenceDate = toDateValue(liga.updatedAt ?? liga.createdAt);
+    if (!referenceDate) return null;
+    const ageMs = Date.now() - referenceDate.getTime();
+    if (ageMs < 0 || ageMs > WEEKLY_BIZU_ACTIVE_WINDOW_MS) return null;
+    return bizu;
+  };
+  const ligasNoDashboard = ligas.filter((l) => l.visivel === true);
 
   if (loading || loadingData) return <div className="h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500 w-10 h-10" /></div>;
 
@@ -531,11 +542,11 @@ export default function DashboardPage() {
       )}
 
       {/* --- BIZU DAS LIGAS (Reels + Letreiro) --- */}
-      {ligasComBizu.length > 0 && (
+      {ligasNoDashboard.length > 0 && (
           <div className="space-y-4">
                <SectionHeader 
-                  title="BIZU DAS LIGAS" 
-                  icon={Lightbulb} 
+                  title="Ligas Acadêmicas" 
+                  icon={Users} 
                   link="/ligas_unitau" 
                   colorClass="text-yellow-500"
                   onPrev={() => scroll(ligasScrollRef, 'left')} 
@@ -544,7 +555,10 @@ export default function DashboardPage() {
                
                <div className="relative group/ligas">
                    <div ref={ligasScrollRef} className="flex gap-4 overflow-x-auto scrollbar-hide snap-x px-1 py-2">
-                       {ligasComBizu.map(liga => (
+                       {ligasNoDashboard.map(liga => {
+                           const bizuAtivo = getLigaBizuAtivo(liga);
+                           const textoCard = (bizuAtivo || liga.descricao || "Liga acadêmica em destaque.").trim();
+                           return (
                            <Link href={`/ligas_unitau`} key={liga.id} className="min-w-[160px] flex flex-col items-center gap-4 snap-start group cursor-pointer relative bg-gradient-to-b from-zinc-900 to-black p-5 rounded-[24px] border border-zinc-800 hover:border-yellow-500/50 transition-all shadow-xl active:scale-95">
                                
                                <div className="relative w-24 h-24">
@@ -558,24 +572,33 @@ export default function DashboardPage() {
                                             unoptimized
                                        />
                                    </div>
-                                   <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-black p-1.5 rounded-full z-20 border-2 border-black">
-                                       <Lightbulb size={12} fill="black"/>
-                                   </div>
+                                   {bizuAtivo && (
+                                       <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-black p-1.5 rounded-full z-20 border-2 border-black">
+                                           <Lightbulb size={12} fill="black"/>
+                                       </div>
+                                   )}
                                </div>
                                
                                <div className="text-center w-full overflow-hidden">
                                    <span className="text-[11px] font-black text-emerald-500 uppercase tracking-widest block mb-2 group-hover:text-yellow-500 transition">{liga.sigla}</span>
                                    
                                    <div className="w-full bg-zinc-900/50 py-2 px-3 rounded-lg border border-zinc-800/50 relative overflow-hidden">
-                                       <div className="w-full overflow-hidden whitespace-nowrap">
-                                           <p className="text-[10px] text-zinc-300 italic inline-block animate-marquee pl-[100%] leading-relaxed">
-                                               &quot;{liga.bizu}&quot;
+                                       {bizuAtivo ? (
+                                           <div className="w-full overflow-hidden whitespace-nowrap">
+                                               <p className="text-[10px] text-zinc-300 italic inline-block animate-marquee pl-[100%] leading-relaxed">
+                                                   &quot;{textoCard}&quot;
+                                               </p>
+                                           </div>
+                                       ) : (
+                                           <p className="text-[10px] text-zinc-400 leading-relaxed line-clamp-2">
+                                               {textoCard}
                                            </p>
-                                       </div>
+                                       )}
                                    </div>
                                </div>
                            </Link>
-                       ))}
+                           );
+                       })}
                    </div>
                </div>
           </div>

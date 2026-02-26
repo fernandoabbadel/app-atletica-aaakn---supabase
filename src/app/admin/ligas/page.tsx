@@ -9,13 +9,13 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { useToast } from "../../../context/ToastContext";
-import { uploadImage } from "../../../lib/upload";
 import {
   deleteLeagueConfig,
   fetchLeagueUsers,
   fetchLeagues,
   saveLeagueConfig,
   setLeagueVisibility,
+  uploadLeagueImageToStorage,
   type LeagueRecord,
   type LeagueUserRecord,
 } from "../../../lib/leaguesService";
@@ -202,10 +202,28 @@ export default function AdminLigasPage() {
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setUploading(true);
-      const { url } = await uploadImage(file, "ligas");
-      if (url) setFormData(prev => ({ ...prev, foto: url, logoBase64: url })); 
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const imageUrl = await uploadLeagueImageToStorage({
+        file,
+        kind: "logo",
+        leagueId: editingId || undefined,
+      });
+
+      setFormData((prev) => ({
+        ...prev,
+        foto: imageUrl,
+        logoUrl: imageUrl,
+        // Compat legado enquanto telas antigas ainda leem logoBase64.
+        logoBase64: imageUrl,
+      }));
+      addToast("Logo enviada com sucesso.", "success");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao enviar logo.", "error");
+    } finally {
       setUploading(false);
     }
   };

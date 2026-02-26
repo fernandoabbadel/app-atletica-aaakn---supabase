@@ -16,6 +16,10 @@ import {
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { clearDashboardCaches as clearAuthenticatedDashboardCaches } from "./dashboardService";
+import { clearDashboardCaches as clearPublicDashboardCaches } from "./dashboardPublicService";
+import { getSupabaseClient } from "./supabase";
+import { uploadImage } from "./upload";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -38,6 +42,7 @@ const LEAGUE_POLL_UPDATE_CALLABLE = "leaguePollUpdateOptions";
 const LEAGUE_QUIZ_CALLABLE = "leagueRegisterQuizResult";
 
 const leaguesCache = new Map<string, CacheEntry<LeagueRecord[]>>();
+const leagueSummariesCache = new Map<string, CacheEntry<LeagueRecord[]>>();
 const usersCache = new Map<string, CacheEntry<LeagueUserRecord[]>>();
 const leagueByIdCache = new Map<string, CacheEntry<LeagueRecord | null>>();
 const pollsCache = new Map<string, CacheEntry<LeaguePollRecord[]>>();
@@ -86,8 +91,15 @@ const setCacheValue = <T>(
 
 const clearLeagueCaches = (): void => {
   leaguesCache.clear();
+  leagueSummariesCache.clear();
   leagueByIdCache.clear();
   pollsCache.clear();
+};
+
+const clearLeagueDependentCaches = (): void => {
+  clearLeagueCaches();
+  clearAuthenticatedDashboardCaches();
+  clearPublicDashboardCaches();
 };
 
 const clearUsersCache = (): void => {
@@ -128,6 +140,8 @@ async function callWithFallback<TReq, TRes>(
 export interface LeagueQuestionRecord {
   id: string;
   texto: string;
+  imageUrl?: string;
+  // Compatibilidade temporaria com dados legados enquanto as telas migram.
   imagemBase64?: string;
   alternativas: string[];
   correta: number;
@@ -173,6 +187,8 @@ export interface LeagueRecord {
   descricao: string;
   senha: string;
   foto: string;
+  logoUrl?: string;
+  // Compatibilidade temporaria com dados legados enquanto as telas migram.
   logoBase64?: string;
   visivel?: boolean;
   ativa?: boolean;
@@ -207,6 +223,8 @@ export interface LeaguePollRecord {
   voters: string[];
 }
 
+export type LeagueStorageImageKind = "logo" | "member" | "event" | "question";
+
 const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
   const data = asObject(raw);
   if (!data) return null;
@@ -238,11 +256,12 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
                 (item): item is string => typeof item === "string"
               )
             : [];
-          const imagemBase64 = asString(question.imagemBase64) || undefined;
+          const imageUrl =
+            asString(question.imageUrl) || asString(question.imagemBase64) || undefined;
           return {
             id: asString(question.id),
             texto: asString(question.texto),
-            ...(imagemBase64 ? { imagemBase64 } : {}),
+            ...(imageUrl ? { imageUrl, imagemBase64: imageUrl } : {}),
             alternativas: alternatives.slice(0, 4),
             correta: Math.max(0, Math.min(3, asNumber(question.correta, 0))),
           } as LeagueQuestionRecord;
@@ -303,6 +322,8 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     ? data.membrosIds.filter((item): item is string => typeof item === "string")
     : undefined;
 
+  const logoUrl = asString(data.logoUrl) || asString(data.logoBase64) || undefined;
+
   return {
     id,
     nome: asString(data.nome, "Liga"),
@@ -311,7 +332,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     descricao: asString(data.descricao),
     senha: asString(data.senha),
     foto: asString(data.foto),
-    logoBase64: asString(data.logoBase64) || undefined,
+    ...(logoUrl ? { logoUrl, logoBase64: logoUrl } : {}),
     visivel: asBoolean(data.visivel, false),
     ativa: asBoolean(data.ativa, false),
     membros,
@@ -370,25 +391,85 @@ const normalizePoll = (id: string, raw: unknown): LeaguePollRecord | null => {
 
 const normalizeLeaguePayload = (
   payload: Partial<LeagueRecord>
-): Record<string, unknown> => ({
-  nome: asString(payload.nome, "Liga").trim().slice(0, 120),
-  sigla: asString(payload.sigla).trim().slice(0, 20),
-  presidente: asString(payload.presidente).trim().slice(0, 120),
-  descricao: asString(payload.descricao).slice(0, 4_000),
-  senha: asString(payload.senha).slice(0, 120),
-  foto: asString(payload.foto),
-  logoBase64: asString(payload.logoBase64) || undefined,
-  visivel: Boolean(payload.visivel),
-  ativa: Boolean(payload.ativa),
-  membros: Array.isArray(payload.membros) ? payload.membros : [],
-  eventos: Array.isArray(payload.eventos) ? payload.eventos : [],
-  perguntas: Array.isArray(payload.perguntas) ? payload.perguntas : [],
-  bizu: asString(payload.bizu).slice(0, 500),
-  likes: Math.max(0, asNumber(payload.likes, 0)),
-  membrosIds: Array.isArray(payload.membrosIds)
-    ? payload.membrosIds.filter((item): item is string => typeof item === "string")
-    : undefined,
-});
+): Record<string, unknown> => {
+  const logoUrl = asString(payload.logoUrl) || asString(payload.logoBase64) || undefined;
+  const perguntas = Array.isArray(payload.perguntas)
+    ? payload.perguntas.map((question) => {
+        const imageUrl =
+          asString(question.imageUrl) || asString(question.imagemBase64) || undefined;
+        return {
+          ...question,
+          ...(imageUrl ? { imageUrl, imagemBase64: imageUrl } : {}),
+        };
+      })
+    : [];
+
+  return {
+    nome: asString(payload.nome, "Liga").trim().slice(0, 120),
+    sigla: asString(payload.sigla).trim().slice(0, 20),
+    presidente: asString(payload.presidente).trim().slice(0, 120),
+    descricao: asString(payload.descricao).slice(0, 4_000),
+    senha: asString(payload.senha).slice(0, 120),
+    foto: asString(payload.foto),
+    ...(logoUrl ? { logoUrl, logoBase64: logoUrl } : { logoUrl: undefined, logoBase64: undefined }),
+    visivel: Boolean(payload.visivel),
+    ativa: Boolean(payload.ativa),
+    membros: Array.isArray(payload.membros) ? payload.membros : [],
+    eventos: Array.isArray(payload.eventos) ? payload.eventos : [],
+    perguntas,
+    bizu: asString(payload.bizu).slice(0, 500),
+    likes: Math.max(0, asNumber(payload.likes, 0)),
+    membrosIds: Array.isArray(payload.membrosIds)
+      ? payload.membrosIds.filter((item): item is string => typeof item === "string")
+      : undefined,
+  };
+};
+
+const sanitizeStorageSegment = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "item";
+
+const getSafeFileExtension = (file: File): string => {
+  const nameMatch = file.name.toLowerCase().match(/\.([a-z0-9]+)$/);
+  if (nameMatch?.[1]) return nameMatch[1];
+  if (file.type === "image/png") return "png";
+  if (file.type === "image/webp") return "webp";
+  return "jpg";
+};
+
+const leagueImageFolderByKind: Record<LeagueStorageImageKind, string> = {
+  logo: "logos",
+  member: "membros",
+  event: "eventos",
+  question: "perguntas",
+};
+
+export async function uploadLeagueImageToStorage(options: {
+  file: File;
+  kind: LeagueStorageImageKind;
+  leagueId?: string;
+  entityId?: string;
+}): Promise<string> {
+  const leagueSegment = sanitizeStorageSegment(options.leagueId || "temp");
+  const entitySegment = options.entityId
+    ? `/${sanitizeStorageSegment(options.entityId)}`
+    : "";
+  const folder = leagueImageFolderByKind[options.kind];
+  const fileBase = sanitizeStorageSegment(options.file.name.replace(/\.[^.]+$/, ""));
+  const extension = getSafeFileExtension(options.file);
+  const objectPath = `ligas/${leagueSegment}/${folder}${entitySegment}/${Date.now()}-${fileBase}.${extension}`;
+
+  const { url, error } = await uploadImage(options.file, objectPath);
+  if (!url || error) {
+    throw new Error(error || "Falha ao subir imagem da liga.");
+  }
+
+  return url;
+}
 
 export async function fetchLeagues(options?: {
   orderByField?: "nome" | "likes";
@@ -418,6 +499,47 @@ export async function fetchLeagues(options?: {
     .filter((row): row is LeagueRecord => row !== null);
 
   setCacheValue(leaguesCache, cacheKey, leagues);
+  return leagues;
+}
+
+export async function fetchLeagueSummaries(options?: {
+  orderByField?: "nome" | "likes";
+  orderDirection?: "asc" | "desc";
+  maxResults?: number;
+  forceRefresh?: boolean;
+}): Promise<LeagueRecord[]> {
+  const orderByField = options?.orderByField ?? "nome";
+  const orderDirection = options?.orderDirection ?? "asc";
+  const maxResults = boundedLimit(options?.maxResults ?? 40, MAX_LEAGUE_RESULTS);
+  const forceRefresh = options?.forceRefresh ?? false;
+  const cacheKey = `${orderByField}:${orderDirection}:${maxResults}`;
+
+  if (!forceRefresh) {
+    const cached = getCacheValue(leagueSummariesCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("ligas_config")
+    .select(
+      "id,nome,sigla,descricao,foto,logoUrl,logoBase64,bizu,likes,membrosIds,visivel,ativa,status,createdAt,updatedAt"
+    )
+    .order(orderByField, { ascending: orderDirection === "asc" })
+    .limit(maxResults);
+
+  if (error) {
+    throw Object.assign(new Error(error.message || "Falha ao carregar ligas."), {
+      code: error.code ? `db/${error.code}` : "db/leagues-summaries-failed",
+      cause: error,
+    });
+  }
+
+  const leagues = (data ?? [])
+    .map((row) => normalizeLeague(asString((row as Record<string, unknown>).id), row))
+    .filter((row): row is LeagueRecord => row !== null);
+
+  setCacheValue(leagueSummariesCache, cacheKey, leagues);
   return leagues;
 }
 
@@ -500,7 +622,7 @@ export async function saveLeagueConfig(payload: {
     }
   );
 
-  clearLeagueCaches();
+  clearLeagueDependentCaches();
   return result;
 }
 
@@ -517,7 +639,7 @@ export async function deleteLeagueConfig(id: string): Promise<void> {
     }
   );
 
-  clearLeagueCaches();
+  clearLeagueDependentCaches();
 }
 
 export async function setLeagueVisibility(payload: {
@@ -540,7 +662,7 @@ export async function setLeagueVisibility(payload: {
     }
   );
 
-  clearLeagueCaches();
+  clearLeagueDependentCaches();
 }
 
 export async function changeLeagueLikeCount(payload: {
@@ -562,7 +684,7 @@ export async function changeLeagueLikeCount(payload: {
     }
   );
 
-  clearLeagueCaches();
+  clearLeagueDependentCaches();
 }
 
 export async function fetchEventPolls(

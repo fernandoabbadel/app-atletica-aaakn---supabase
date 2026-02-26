@@ -243,6 +243,39 @@ const normalizeUserRow = (row: unknown, authUser?: SupabaseAuthUser | null): Use
   };
 };
 
+const hasCadastroPendente = (user: User): boolean => {
+  if (user.isAnonymous) return false;
+
+  const stats = asRecord(user.stats);
+  const profileCompleteFlag = stats?.profileComplete;
+  const hasExplicitIncompleteFlag =
+    typeof profileCompleteFlag === "number" && Number.isFinite(profileCompleteFlag) && profileCompleteFlag < 1;
+
+  const requiredFields = [
+    user.apelido,
+    user.matricula,
+    user.turma,
+    user.telefone,
+    user.dataNascimento,
+    user.cidadeOrigem,
+    user.estadoOrigem,
+    user.foto,
+  ];
+
+  const hasMissingRequiredField = requiredFields.some((value) => asString(value).trim().length === 0);
+  return asString(user.role, "guest") === "guest" || hasMissingRequiredField || hasExplicitIncompleteFlag;
+};
+
+const isCadastroBypassPath = (pathname: string): boolean => {
+  return (
+    pathname === "/cadastro" ||
+    pathname === "/banned" ||
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname.startsWith("/auth")
+  );
+};
+
 // Converte patch local (incluindo chaves "stats.x") para payload SQL e estado local final.
 const buildUserPatchPayload = (
   currentUser: User,
@@ -491,6 +524,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const handleAuthChange = async (authUser: SupabaseAuthUser | null): Promise<void> => {
+      if (authUser && syncingAuthUidRef.current === authUser.id) {
+        // Ja existe uma sincronizacao em andamento para este usuario; evita invalidar o token e travar loading.
+        return;
+      }
+
       syncToken += 1;
 
       if (isLocalGuest) {
@@ -546,9 +584,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .update(dbPatch)
         .eq("uid", currentUser.uid)
         .select("*")
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+
+      if (!data) {
+        const recoveryPayload: Record<string, unknown> = {
+          ...DEFAULT_USER_PROPS,
+          uid: currentUser.uid,
+          nome: asString(currentUser.nome, "Sem Nome"),
+          email: asString(currentUser.email, ""),
+          foto: asString(currentUser.foto, "https://github.com/shadcn.png"),
+          role: asString(currentUser.role, "guest"),
+          status: asString(currentUser.status, "ativo"),
+          stats: { ...DEFAULT_STATS, ...(currentUser.stats || {}) },
+          ultimoLoginDiario:
+            asString(currentUser.ultimoLoginDiario) || new Date().toLocaleDateString("pt-BR"),
+          data_adesao: asString(currentUser.data_adesao) || new Date().toISOString(),
+          ...dbPatch,
+        };
+
+        const { data: recoveredRow, error: recoveryError } = await supabase
+          .from("users")
+          .upsert(recoveryPayload, { onConflict: "uid" })
+          .select("*")
+          .single();
+
+        if (recoveryError) throw recoveryError;
+
+        const recoveredNormalized = normalizeUserRow(recoveredRow);
+        setUser(recoveredNormalized);
+        setIsAdmin(["master", "admin_geral", "admin_gestor"].includes(String(recoveredNormalized.role)));
+        return recoveredNormalized;
+      }
 
       const normalized = normalizeUserRow(data);
       setUser(normalized);
@@ -661,6 +729,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
   }, [user, pathname, loading, router]); 
 
+  useEffect(() => {
+      if (loading || !user || isLocalGuest) return;
+      if (user.status === "banned" || user.status === "bloqueado") return;
+      if (isCadastroBypassPath(pathname)) return;
+
+      if (hasCadastroPendente(user)) {
+          router.replace("/cadastro");
+      }
+  }, [user, loading, pathname, router, isLocalGuest]);
+
   // --- FUNÃƒâ€¡Ãƒâ€¢ES PÃƒÅ¡BLICAS ---
 
   const loginGoogle = async () => {
@@ -763,8 +841,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await persistUserPatch(user, data as Record<string, unknown>);
     } catch (error: unknown) {
       if (!isPermissionError(error)) {
-        console.error("Erro ao atualizar:", error);
+        const formatted = formatBackendErrorForConsole(error);
+        const printable =
+          typeof formatted === "string"
+            ? formatted
+            : (() => {
+                try {
+                  return JSON.stringify(formatted);
+                } catch {
+                  return String(formatted);
+                }
+              })();
+        const safePrintable =
+          printable === "{}" ? "empty-object error (provavel RLS/policy em public.users)" : printable;
+        console.error(`Erro ao atualizar: ${safePrintable}; raw=${String(error)}`);
       }
+      throw error;
     }
   };
 
