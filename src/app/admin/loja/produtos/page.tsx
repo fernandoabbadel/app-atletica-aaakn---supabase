@@ -580,7 +580,7 @@ export default function AdminLojaProdutosPage() {
               {form.img.trim() && (
                 <div className="md:col-span-2 rounded-xl border border-zinc-800 bg-black/20 p-3 flex items-center gap-3">
                   <div className="relative w-14 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-700 shrink-0">
-                    <Image src={form.img} alt="Preview do produto" fill sizes="56px" className="object-cover" unoptimized />
+                    <Image src={form.img} alt="Preview do produto" fill sizes="56px" className="object-cover"  />
                   </div>
                   <p className="text-[11px] text-zinc-400 break-all">{form.img}</p>
                 </div>
@@ -691,7 +691,7 @@ export default function AdminLojaProdutosPage() {
             {rows.map((row) => (
               <article key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center gap-4">
                 <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-black border border-zinc-700">
-                  <Image src={row.img || "https://placehold.co/200x200/111/333?text=Produto"} alt={row.nome || "Produto"} fill unoptimized className="object-cover" />
+                  <Image src={row.img || "https://placehold.co/200x200/111/333?text=Produto"} alt={row.nome || "Produto"} fill  className="object-cover" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 min-w-0">

@@ -27,7 +27,7 @@ import {
 import { getTurmaImage } from "../../../constants/turmaImages";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
-import { resolvePlanIcon, resolvePlanTextClass } from "../../../constants/planVisuals";
+import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../../constants/planVisuals";
 
 // --- INTERFACES ---
 interface Lote {
@@ -87,7 +87,9 @@ interface Comentario {
   userTurma: string;
   userPlanoCor?: string;
   userPlanoIcon?: string;
-  userPatente?: string; 
+  userPatente?: string;
+  userPatenteIcon?: string;
+  userPatenteCor?: string;
   role?: string;
   likes: string[];
   reports: string[];
@@ -196,22 +198,49 @@ function EventCountdown({ dateStr, timeStr }: { dateStr: string, timeStr: string
 // --- BADGES DO USUARIO ---
 const UserBadges = ({ data, patentesConfig }: { data: Comentario, patentesConfig: PatenteConfig[] }) => {
     const isAdminUser = data.role === "admin_geral" || data.role === "master";
-    const normalizeIcon = (value: string | undefined) =>
-      String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-
-    const planIconName = normalizeIcon(data.userPlanoIcon || "ghost");
-    const PlanIcon = resolvePlanIcon(data.userPlanoIcon || "ghost", Ghost);
-    const planColor = resolvePlanTextClass(data.userPlanoCor || "zinc");
-    const patenteName = data.userPatente || "Plâncton";
-    const patenteConfig = patentesConfig.find((p) => p.titulo === patenteName) || patentesConfig[0] || DEFAULT_PATENTES[0];
-    const PatenteIcon = resolvePlanIcon(patenteConfig.iconName, Fish);
-    const patenteColor = resolvePlanTextClass(patenteConfig.cor || "text-zinc-400");
+    const normalizeLabel = (value: string | undefined): string =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const isDisplayLabel = (value: string | undefined): value is string => {
+      const normalized = normalizeLabel(value);
+      return normalized.length > 0 && normalized !== "visitante" && normalized !== "visitor";
+    };
+    const hasPlanIcon = typeof data.userPlanoIcon === "string" && data.userPlanoIcon.trim().length > 0;
+    const PlanIcon = hasPlanIcon ? resolveUserPlanIcon(data.userPlanoIcon, undefined, Ghost) : null;
+    const planColor = resolvePlanTextClass(data.userPlanoCor, "text-zinc-400");
+    const normalizedPatenteLabel = normalizeLabel(data.userPatente);
+    const patenteFromList = normalizedPatenteLabel
+      ? patentesConfig.find((p) => normalizeLabel(p.titulo) === normalizedPatenteLabel)
+      : undefined;
+    const patenteIconName =
+      (typeof data.userPatenteIcon === "string" ? data.userPatenteIcon.trim() : "") ||
+      (patenteFromList?.iconName || "");
+    const patenteColorRaw =
+      (typeof data.userPatenteCor === "string" ? data.userPatenteCor.trim() : "") ||
+      (patenteFromList?.cor || "");
+    const PatenteIcon = patenteIconName ? resolvePlanIcon(patenteIconName, Fish) : null;
+    const patenteColor = resolvePlanTextClass(patenteColorRaw, "text-zinc-400");
+    const patenteTitle = isDisplayLabel(data.userPatente)
+      ? data.userPatente
+      : isDisplayLabel(patenteFromList?.titulo)
+      ? patenteFromList?.titulo
+      : "";
 
     return (
         <div className="flex items-center gap-1.5 ml-1">
             {isAdminUser && <span title="Admin"><ShieldAlert size={12} className="text-red-500 fill-red-500/20" /></span>}
-            {planIconName && planIconName !== "ghost" && <PlanIcon size={12} className={planColor} />}
-            <div title={`Patente: ${patenteConfig.titulo}`} className="flex items-center justify-center"><PatenteIcon size={12} className={patenteColor} /></div>
+            {PlanIcon && <PlanIcon size={12} className={planColor} />}
+            {PatenteIcon && (
+              <div title={patenteTitle ? `Patente: ${patenteTitle}` : undefined} className="flex items-center justify-center">
+                <PatenteIcon size={12} className={patenteColor} />
+              </div>
+            )}
         </div>
     );
 };
@@ -334,8 +363,10 @@ export default function DetalhesEventoPage() {
       const newCommentData = {
           text: commentText, userId: user.uid, userName: user.nome || "Anônimo",
           userAvatar: user.foto || "", userTurma: user.turma || "Geral",
-          userPlanoCor: user.plano_cor || "zinc", userPlanoIcon: user.plano_icon || "ghost",
-          userPatente: user.patente || "Plâncton", role: user.role || "user",
+          userPlanoCor: typeof user.plano_cor === "string" ? user.plano_cor : undefined,
+          userPlanoIcon: typeof user.plano_icon === "string" ? user.plano_icon : undefined,
+          userPatente: typeof user.patente === "string" ? user.patente : undefined,
+          role: user.role || "user",
           likes: [], reports: [], hidden: false
       };
       try {
@@ -755,7 +786,7 @@ export default function DetalhesEventoPage() {
 
             <div className="space-y-4">
                 {orderedComments.map((c) => {
-                    const nameColorClass = resolvePlanTextClass(c.userPlanoCor || "zinc", "text-zinc-300");
+                    const nameColorClass = resolvePlanTextClass(c.userPlanoCor, "text-zinc-300");
                     const likesArray = Array.isArray(c.likes) ? c.likes : [];
 
                 return (!c.hidden || isAdmin) && (
@@ -791,7 +822,7 @@ export default function DetalhesEventoPage() {
                 height={12}
                 className="rounded-full object-cover border border-zinc-800"
             />
-            <span className="text-[9px] text-zinc-300 font-mono">{c.userTurma || "Visitante"}</span>
+            <span className="text-[9px] text-zinc-300 font-mono">{c.userTurma || "Sem turma"}</span>
         </div>
                                     </div>
 
@@ -885,7 +916,7 @@ export default function DetalhesEventoPage() {
                 className="rounded-full object-cover border-2 border-zinc-800 group-hover:border-emerald-500 transition-colors"
             />
             <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-zinc-800 rounded-full flex items-center justify-center text-[9px] font-black text-white border border-black">
-                {u.userTurma || "?"}
+                {(u.userTurma || "").trim() || "Sem turma"}
             </div>
         </div>
                               <div className="flex-1">

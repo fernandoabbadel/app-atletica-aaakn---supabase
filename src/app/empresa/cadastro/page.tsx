@@ -202,7 +202,7 @@ export default function CompanyRegisterPage() {
                         alt="AAAKN" 
                         fill
                         className="object-contain relative z-10 drop-shadow-2xl transition transform group-hover:scale-105" 
-                        unoptimized
+                        
                     />
                 </div>
                 <h1 className="text-2xl font-black text-white uppercase tracking-tighter">Parceria Tubarão</h1>

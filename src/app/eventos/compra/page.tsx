@@ -158,7 +158,7 @@ function CompraContent() {
                         alt={evento.titulo} 
                         fill
                         className="object-cover opacity-80" 
-                        unoptimized
+                        
                     />
                 ) : (
                     <Ticket size={32} className="text-purple-500"/>

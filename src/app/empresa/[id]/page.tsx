@@ -340,7 +340,7 @@ export default function EmpresaDashboard() {
           <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-black border border-zinc-700 flex items-center justify-center overflow-hidden relative">
                   {/* 🦈 CORREÇÃO: Image Otimizado */}
-                  {partner.imgLogo ? <Image src={partner.imgLogo} alt={partner.nome} fill className="object-cover" unoptimized/> : <Store size={20} className="text-zinc-500"/>}
+                  {partner.imgLogo ? <Image src={partner.imgLogo} alt={partner.nome} fill className="object-cover" /> : <Store size={20} className="text-zinc-500"/>}
               </div>
               <div>
                   <h2 className="text-lg font-black uppercase text-white leading-none">{partner.nome}</h2>

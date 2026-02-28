@@ -41,7 +41,7 @@ export default function SharkLoader() {
                 priority
                 className="object-contain drop-shadow-2xl animate-pulse"
                 onError={() => setImgError(true)}
-                unoptimized
+                
               />
             </div>
           ) : (

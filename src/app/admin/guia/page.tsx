@@ -346,7 +346,7 @@ export default function AdminGuiaPage() {
         <div className="flex gap-4 w-full">
           <div className="w-16 h-16 bg-black rounded-lg overflow-hidden shrink-0 border border-zinc-700 relative">
             {item.foto ? (
-              <Image src={item.foto} alt={item.nome || "Turismo"} fill unoptimized className="object-cover" />
+              <Image src={item.foto} alt={item.nome || "Turismo"} fill  className="object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-zinc-600">
                 <ImageIcon size={20} />
@@ -562,7 +562,7 @@ export default function AdminGuiaPage() {
                 <>
                   <div className="bg-black/40 p-4 rounded-xl border border-zinc-800 border-dashed hover:border-emerald-500/50 transition text-center relative group h-40 flex items-center justify-center overflow-hidden">
                     {previewImage ? (
-                      <Image src={previewImage} alt="Preview" fill unoptimized className="object-cover rounded-lg" />
+                      <Image src={previewImage} alt="Preview" fill  className="object-cover rounded-lg" />
                     ) : (
                       <div className="flex flex-col items-center gap-2 text-zinc-500">
                         <ImageIcon size={32} />

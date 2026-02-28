@@ -347,7 +347,7 @@ export default function AdminLigasPage() {
                       alt={liga.nome}
                       fill
                       className="object-cover"
-                      unoptimized
+                      
                     />
                   </div>
                   <div>
@@ -417,7 +417,7 @@ export default function AdminLigasPage() {
                     <div className="space-y-3">
                         <div className="flex justify-center mb-4">
                             <label className="relative w-24 h-24 rounded-full bg-zinc-900 border-2 border-dashed border-zinc-700 flex items-center justify-center cursor-pointer hover:border-emerald-500 overflow-hidden group">
-                                {formData.foto ? <Image src={formData.foto} alt="Logo" fill className="object-cover" unoptimized/> : <UploadCloud className="text-zinc-500 group-hover:text-emerald-500"/>}
+                                {formData.foto ? <Image src={formData.foto} alt="Logo" fill className="object-cover" /> : <UploadCloud className="text-zinc-500 group-hover:text-emerald-500"/>}
                                 <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={handleUpload}/>
                                 {uploading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>}
                             </label>
@@ -456,7 +456,7 @@ export default function AdminLigasPage() {
                         {formData.membros?.map((m, idx) => (
                             <div key={idx} className="flex items-center gap-3 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
                                 <div className="w-10 h-10 rounded-full overflow-hidden relative">
-                                    <Image src={m.foto || "https://github.com/shadcn.png"} alt={m.nome} fill className="object-cover" unoptimized/>
+                                    <Image src={m.foto || "https://github.com/shadcn.png"} alt={m.nome} fill className="object-cover" />
                                 </div>
                                 <div className="flex-1">
                                     <p className="text-sm font-bold text-white">{m.nome}</p>
@@ -522,7 +522,7 @@ export default function AdminLigasPage() {
                         <div key={u.id} className="flex items-center justify-between p-3 bg-black/50 rounded-lg cursor-pointer hover:bg-zinc-800 transition" onClick={() => addMemberFromSearch(u)}>
                             <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded-full overflow-hidden relative">
-                                    <Image src={u.foto || "https://github.com/shadcn.png"} alt={u.nome || "User"} fill className="object-cover" unoptimized/>
+                                    <Image src={u.foto || "https://github.com/shadcn.png"} alt={u.nome || "User"} fill className="object-cover" />
                                 </div>
                                 <div><p className="text-xs font-bold text-white">{u.nome}</p><p className="text-[10px] text-zinc-500">{u.turma || "Sem turma"}</p></div>
                             </div>

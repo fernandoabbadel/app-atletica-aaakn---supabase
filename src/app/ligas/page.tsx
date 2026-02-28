@@ -803,7 +803,7 @@ export default function LigasAdminPage() {
                                   fill
                                   sizes="80px"
                                   className="object-cover"
-                                  unoptimized
+                                  
                                 />
                               ) : (
                                 <Upload size={20} className="text-zinc-500"/>
@@ -886,7 +886,7 @@ export default function LigasAdminPage() {
                                         width={64}
                                         height={64}
                                         className="w-16 h-16 rounded-lg object-cover bg-black"
-                                        unoptimized
+                                        
                                       />
                                   ) : (
                                       <div className="w-16 h-16 rounded-lg bg-black" />
@@ -1106,7 +1106,7 @@ export default function LigasAdminPage() {
                                 sizes="100vw"
                                 className="object-cover"
                                 style={{ objectPosition: `50% ${currentEvent.imagePositionY || 50}%` }}
-                                unoptimized
+                                
                               />
                           ) : (
                               <div className="text-center text-zinc-500"><ImageIcon/><span className="text-xs">Capa</span></div>

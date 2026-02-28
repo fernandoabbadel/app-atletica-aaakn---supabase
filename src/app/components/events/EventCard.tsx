@@ -191,7 +191,7 @@ export function EventCard({ evento }: EventCardProps) {
           src={evento.imagem || "https://placehold.co/600x400"}
           alt={evento.titulo}
           fill
-          unoptimized
+          
           className="object-cover group-hover:scale-110 transition duration-700 ease-in-out"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-black/20 to-transparent"></div>
@@ -248,7 +248,7 @@ export function EventCard({ evento }: EventCardProps) {
                     fill
                     className="object-cover"
                     alt="Avatar Participante"
-                    unoptimized
+                    
                   />
                 </div>
               ))

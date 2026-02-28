@@ -130,7 +130,7 @@ export default function SettingsPage() {
                             fill
                             sizes="80px"
                             className="object-cover rounded-full border-4 border-[#050505]"
-                            unoptimized
+                            
                         />
                     </div>
                     <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-black p-1.5 rounded-full border-4 border-[#050505] z-10">

@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "./supabase";
 import {
   asObject,
+  asString,
   asStringArray,
   boundedLimit,
   incrementUserStats,
@@ -10,6 +11,7 @@ import {
   type DateLike,
   type Row,
 } from "./supabaseData";
+import { fetchCanonicalUserVisuals } from "./userVisualsService";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 
@@ -25,6 +27,7 @@ const detailsCache = new Map<string, CacheEntry<EventDetailsBundle>>();
 const adminParticipantsCache = new Map<string, CacheEntry<{ rsvps: Row[]; vendas: Row[] }>>();
 const adminRsvpsPageCache = new Map<string, CacheEntry<AdminEventParticipantsPage>>();
 const adminSalesPageCache = new Map<string, CacheEntry<AdminEventParticipantsPage>>();
+const adminPresencePageCache = new Map<string, CacheEntry<AdminEventParticipantsPage>>();
 const adminPollsCache = new Map<string, CacheEntry<Row[]>>();
 const financeiroCache = new Map<string, CacheEntry<Row | null>>();
 
@@ -49,6 +52,40 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
 
 const normalizeRows = (rows: Row[]): Row[] => rows.map((row) => normalizeRowTimestamps(row));
 
+const applyEventCommentAuthorVisuals = async (rows: Row[]): Promise<Row[]> => {
+  if (rows.length === 0) return rows;
+
+  const userIds = rows
+    .map((row) => asString(row.userId).trim())
+    .filter((value): value is string => value.length > 0);
+
+  if (userIds.length === 0) return rows;
+
+  const visuals = await fetchCanonicalUserVisuals(userIds);
+  if (visuals.size === 0) return rows;
+
+  return rows.map((row) => {
+    const userId = asString(row.userId).trim();
+    if (!userId) return row;
+
+    const visual = visuals.get(userId);
+    if (!visual) return row;
+
+    const next: Row = { ...row };
+    next.userName = visual.nome || asString(row.userName).trim();
+    next.userAvatar = visual.foto || asString(row.userAvatar).trim();
+    next.userTurma = visual.turma || asString(row.userTurma).trim();
+    next.role = visual.role || asString(row.role).trim();
+    next.userPlanoCor = visual.plano_cor;
+    next.userPlanoIcon = visual.plano_icon;
+    next.userPatente = visual.patente;
+    next.userPatenteIcon = visual.patente_icon;
+    next.userPatenteCor = visual.patente_cor;
+
+    return next;
+  });
+};
+
 const invalidateEventCaches = (eventId?: string): void => {
   feedCache.clear();
   financeiroCache.clear();
@@ -58,11 +95,12 @@ const invalidateEventCaches = (eventId?: string): void => {
     adminParticipantsCache.clear();
     adminRsvpsPageCache.clear();
     adminSalesPageCache.clear();
+    adminPresencePageCache.clear();
     adminPollsCache.clear();
     return;
   }
 
-  for (const cache of [detailsCache, adminParticipantsCache, adminRsvpsPageCache, adminSalesPageCache, adminPollsCache]) {
+  for (const cache of [detailsCache, adminParticipantsCache, adminRsvpsPageCache, adminSalesPageCache, adminPresencePageCache, adminPollsCache]) {
     cache.forEach((_, key) => {
       if (key.startsWith(`${eventId}:`)) cache.delete(key);
     });
@@ -262,6 +300,159 @@ export interface AdminEventParticipantsPage {
   hasMore: boolean;
 }
 
+const isMissingPresenceRpcError = (error: { code?: string | null; message?: string | null }): boolean => {
+  const code = (error.code ?? "").toLowerCase();
+  const message = (error.message ?? "").toLowerCase();
+  return (
+    code === "pgrst202" ||
+    message.includes("could not find the function") ||
+    message.includes("admin_event_presence_page")
+  );
+};
+
+const buildLegacyMergedPresenceRows = async (eventId: string): Promise<Row[]> => {
+  const [rsvpsRaw, salesRaw] = await Promise.all([
+    selectRows("eventos_rsvps", {
+      eq: { eventoId: eventId },
+      orderBy: { column: "timestamp", ascending: false },
+      limit: 1200,
+    }),
+    selectRows("solicitacoes_ingressos", {
+      eq: { eventoId: eventId },
+      orderBy: { column: "dataSolicitacao", ascending: false },
+      limit: 1200,
+    }),
+  ]);
+
+  const mergedByUser = new Map<string, Row>();
+
+  normalizeRows(rsvpsRaw).forEach((row) => {
+    const userId = asString(row.userId).trim();
+    if (!userId) return;
+
+    const statusRaw = asString(row.status, "maybe").toLowerCase();
+    const rsvpStatus = statusRaw === "going" ? "going" : "maybe";
+
+    mergedByUser.set(userId, {
+      id: asString(row.id, userId),
+      userId,
+      userName: asString(row.userName, "Aluno"),
+      userAvatar: asString(row.userAvatar),
+      userTurma: asString(row.userTurma, "-"),
+      rsvpStatus,
+      pagamento: "pendente",
+      lote: "-",
+      quantidade: 1,
+      valorTotal: "-",
+      dataAprovacao: null,
+      aprovadoPor: "",
+      ticketRequestId: null,
+    });
+  });
+
+  normalizeRows(salesRaw).forEach((row) => {
+    const userId = asString(row.userId).trim();
+    const requestId = asString(row.id).trim();
+    if (!userId || !requestId) return;
+
+    const saleStatusRaw = asString(row.status, "pendente").toLowerCase();
+    const pagamento =
+      saleStatusRaw === "aprovado"
+        ? "pago"
+        : saleStatusRaw === "analise"
+        ? "analise"
+        : "pendente";
+
+    const previous = mergedByUser.get(userId);
+    mergedByUser.set(userId, {
+      id: asString(previous?.id, requestId),
+      userId,
+      userName: asString(row.userName, asString(previous?.userName, "Aluno")),
+      userAvatar: asString(previous?.userAvatar),
+      userTurma: asString(row.userTurma, asString(previous?.userTurma, "-")),
+      rsvpStatus: "going",
+      pagamento,
+      lote: asString(row.loteNome, "-"),
+      quantidade: Math.max(1, asNum(row.quantidade, 1)),
+      valorTotal: asString(row.valorTotal, "-"),
+      dataAprovacao: row.dataAprovacao ?? null,
+      aprovadoPor: asString(row.aprovadoPor),
+      ticketRequestId: requestId,
+    });
+  });
+
+  return Array.from(mergedByUser.values()).sort((left, right) =>
+    asString(left.userName).localeCompare(asString(right.userName), "pt-BR")
+  );
+};
+
+export async function fetchAdminEventPresencePage(options: {
+  eventId: string;
+  pageSize?: number;
+  cursorId?: string | null;
+  forceRefresh?: boolean;
+}): Promise<AdminEventParticipantsPage> {
+  const eventId = options.eventId.trim();
+  if (!eventId) return { rows: [], nextCursor: null, hasMore: false };
+
+  const pageSize = boundedLimit(options.pageSize ?? 10, 200);
+  const offset = parseOffsetCursor(options.cursorId);
+  const forceRefresh = options.forceRefresh ?? false;
+  const cacheKey = `${eventId}:${pageSize}:${offset}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(adminPresencePageCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  let rows: Row[] = [];
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.rpc("admin_event_presence_page", {
+      p_event_id: eventId,
+      p_limit: pageSize + 1,
+      p_offset: offset,
+    });
+    if (error) {
+      if (!isMissingPresenceRpcError(error)) {
+        throwSupabaseError(error);
+      }
+      const legacyRows = await buildLegacyMergedPresenceRows(eventId);
+      rows = legacyRows.slice(offset, offset + pageSize + 1);
+    } else {
+      rows = normalizeRows((Array.isArray(data) ? data : []) as Row[]);
+    }
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof (error as { code?: unknown }).code === "string" &&
+      isMissingPresenceRpcError({
+        code: (error as { code: string }).code,
+        message:
+          "message" in error && typeof (error as { message?: unknown }).message === "string"
+            ? (error as { message: string }).message
+            : "",
+      })
+    ) {
+      const legacyRows = await buildLegacyMergedPresenceRows(eventId);
+      rows = legacyRows.slice(offset, offset + pageSize + 1);
+    } else {
+      throw error;
+    }
+  }
+
+  const hasMore = rows.length > pageSize;
+  const result: AdminEventParticipantsPage = {
+    rows: rows.slice(0, pageSize),
+    hasMore,
+    nextCursor: nextOffsetCursor(offset, pageSize, hasMore),
+  };
+  setCache(adminPresencePageCache, cacheKey, result);
+  return result;
+}
+
 export async function fetchAdminEventRsvpsPage(options: {
   eventId: string;
   pageSize?: number;
@@ -445,10 +636,12 @@ export async function fetchEventDetailsBundle(options: {
         : Promise.resolve([] as Row[]),
     ]);
 
+  const comentariosWithVisuals = await applyEventCommentAuthorVisuals(comentariosRaw);
+
   const bundle: EventDetailsBundle = {
     evento,
     rsvps: normalizeRows(rsvpsRaw),
-    comentarios: normalizeRows(comentariosRaw),
+    comentarios: normalizeRows(comentariosWithVisuals),
     enquetes: normalizeRows(enquetesRaw),
     patentes: normalizeRows(patentesRaw),
     financeiro,
@@ -751,11 +944,32 @@ export async function createEventComment(payload: {
   if (!eventId) return { id: "" };
 
   const supabase = getSupabaseClient();
+  const userId = asString(payload.data.userId).trim();
+  const visuals = userId ? await fetchCanonicalUserVisuals([userId]) : new Map();
+  const visual = userId ? visuals.get(userId) : undefined;
+
+  const visualPatch: Row = visual
+    ? {
+        userName: visual.nome || payload.data.userName,
+        userAvatar: visual.foto || payload.data.userAvatar,
+        userTurma: visual.turma || payload.data.userTurma,
+        role: visual.role || payload.data.role,
+        userPlanoCor: visual.plano_cor,
+        userPlanoIcon: visual.plano_icon,
+        userPatente: visual.patente,
+      }
+    : {};
+
+  const safePayloadData: Row = { ...payload.data };
+  delete safePayloadData.userPatenteIcon;
+  delete safePayloadData.userPatenteCor;
+
   const { data, error } = await supabase
     .from("eventos_comentarios")
     .insert({
       eventoId: eventId,
-      ...payload.data,
+      ...safePayloadData,
+      ...visualPatch,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     })
@@ -763,7 +977,6 @@ export async function createEventComment(payload: {
     .single();
   if (error) throwSupabaseError(error);
 
-  const userId = typeof payload.data.userId === "string" ? payload.data.userId.trim() : "";
   if (userId) {
     await incrementUserStats(userId, { commentsCount: 1 });
   }

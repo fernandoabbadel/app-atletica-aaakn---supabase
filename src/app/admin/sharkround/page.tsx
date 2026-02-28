@@ -332,7 +332,7 @@ export default function AdminSharkRound() {
                       src={liga.foto || "https://github.com/shadcn.png"}
                       alt={liga.nome}
                       fill
-                      unoptimized
+                      
                       className="rounded-full object-cover border-2 border-zinc-800 bg-black"
                     />
                   </div>

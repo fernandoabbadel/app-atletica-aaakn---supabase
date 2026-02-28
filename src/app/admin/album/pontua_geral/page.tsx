@@ -62,7 +62,7 @@ export default function AdminAlbumPontuaGeralPage() {
             <article key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center gap-3">
               <div className="w-7 text-center text-xs font-black text-zinc-500">{(page - 1) * PAGE_SIZE + idx + 1}</div>
               <div className="relative w-10 h-10 rounded-full overflow-hidden border border-zinc-700 bg-black">
-                <Image src={row.foto || "https://github.com/shadcn.png"} alt={row.nome} fill unoptimized className="object-cover" />
+                <Image src={row.foto || "https://github.com/shadcn.png"} alt={row.nome} fill  className="object-cover" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold truncate">{row.nome}</p>

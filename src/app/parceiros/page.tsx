@@ -170,7 +170,7 @@ export default function ParceirosPage() {
                                 alt={row.nome}
                                 fill
                                 className="object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition duration-500"
-                                unoptimized
+                                
                               />
                             ) : (
                               <div className="w-full h-full bg-zinc-950" />

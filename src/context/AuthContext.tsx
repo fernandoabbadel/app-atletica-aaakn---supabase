@@ -25,6 +25,7 @@ interface PlanoConfig {
     icon: string;
     descontoLoja: number;
     xpMultiplier: number;
+    nivelPrioridade: number;
 }
 
 const DEFAULT_PATENTES: PatenteConfig[] = [
@@ -115,6 +116,7 @@ export interface User {
   plano_cor?: string;
   plano_icon?: string;
   desconto_loja?: number;
+  nivel_prioridade?: number;
   
   [key: string]: unknown; 
 }
@@ -140,6 +142,30 @@ const asString = (value: unknown, fallback = ""): string =>
 
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const normalizePlanName = (value: unknown): string => {
+  const raw = asString(value).trim().toLowerCase();
+  if (!raw) return "";
+
+  const cleaned = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned.startsWith("plano ")) {
+    return cleaned.slice("plano ".length).trim();
+  }
+
+  return cleaned;
+};
+
+const findPlanByName = (plans: PlanoConfig[], planName: unknown): PlanoConfig | null => {
+  const normalizedTarget = normalizePlanName(planName);
+  if (!normalizedTarget) return null;
+  return plans.find((plan) => normalizePlanName(plan.nome) === normalizedTarget) || null;
+};
 
 const isDuplicateKeyError = (error: unknown): boolean => {
   const code = getBackendErrorCode(error);
@@ -428,7 +454,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { data, error } = await supabase
           .from("planos")
-          .select("nome,cor,icon,descontoLoja,xpMultiplier");
+          .select("nome,cor,icon,descontoLoja,xpMultiplier,nivelPrioridade");
 
         if (error) throw error;
 
@@ -436,10 +462,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setPlanosCache(
             data.map((row) => ({
               nome: asString(row.nome, "Plano"),
-              cor: asString(row.cor, "text-zinc-400"),
-              icon: asString(row.icon, "Fish"),
+              cor: asString(row.cor, "zinc"),
+              icon: asString(row.icon, "ghost"),
               descontoLoja: asNumber(row.descontoLoja, 0),
               xpMultiplier: asNumber(row.xpMultiplier, 1),
+              nivelPrioridade: asNumber(row.nivelPrioridade, 1),
             }))
           );
         }
@@ -704,13 +731,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const runMaintenance = async () => {
         // Ã°Å¸Â¦Ë† TRAVA DE SEGURANÃƒâ€¡A: Guest Local NÃƒÆ’O roda manutenÃƒÂ§ÃƒÂ£o no banco
-        if (!user || isLocalGuest || user.isAnonymous || loading || patentesCache.length === 0) return;
-        
-        if (lastMaintenanceUid.current === user.uid) return;
-        lastMaintenanceUid.current = user.uid;
+        if (
+          !user ||
+          isLocalGuest ||
+          user.isAnonymous ||
+          loading ||
+          patentesCache.length === 0 ||
+          planosCache.length === 0
+        ) {
+          return;
+        }
+
+        const maintenanceKey = [
+          user.uid,
+          normalizePlanName(user.plano),
+          asString(user.plano_icon).toLowerCase(),
+          asString(user.plano_cor).toLowerCase(),
+          planosCache
+            .map((plan) => `${normalizePlanName(plan.nome)}:${plan.icon}:${plan.cor}:${plan.descontoLoja}:${plan.xpMultiplier}:${plan.nivelPrioridade}`)
+            .sort()
+            .join("|"),
+        ].join("::");
+
+        if (lastMaintenanceUid.current === maintenanceKey) return;
 
         const updates: Record<string, unknown> = {};
         let hasUpdates = false;
+        let maintenanceFailed = false;
+        const primaryPlan = [...planosCache].sort((left, right) => {
+          if (left.nivelPrioridade !== right.nivelPrioridade) {
+            return left.nivelPrioridade - right.nivelPrioridade;
+          }
+
+          return normalizePlanName(left.nome).localeCompare(normalizePlanName(right.nome), "pt-BR", {
+            sensitivity: "base",
+          });
+        })[0];
+        const defaultPlanName = primaryPlan?.nome || DEFAULT_USER_PROPS.plano;
+        const defaultPlanBadge = primaryPlan?.nome || DEFAULT_USER_PROPS.plano_badge;
+        const defaultPlanColor = primaryPlan?.cor || DEFAULT_USER_PROPS.plano_cor;
+        const defaultPlanIcon = primaryPlan?.icon || DEFAULT_USER_PROPS.plano_icon;
+        const defaultPlanDiscount = primaryPlan?.descontoLoja ?? DEFAULT_USER_PROPS.desconto_loja;
+        const defaultPlanXpMultiplier = primaryPlan?.xpMultiplier ?? DEFAULT_USER_PROPS.xpMultiplier;
+        const defaultPlanPriority = primaryPlan?.nivelPrioridade ?? DEFAULT_USER_PROPS.nivel_prioridade;
+        const defaultPlanTier: "bicho" | "atleta" | "lenda" =
+          normalizePlanName(defaultPlanName).includes("lenda")
+            ? "lenda"
+            : normalizePlanName(defaultPlanName).includes("atleta")
+            ? "atleta"
+            : "bicho";
 
         // A. AUTO-CURA
         if (user.xp === undefined) { updates.xp = DEFAULT_USER_PROPS.xp; hasUpdates = true; }
@@ -719,21 +788,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!user.patente) { updates.patente = DEFAULT_USER_PROPS.patente; hasUpdates = true; }
 
         const roleNormalized = typeof user.role === "string" ? user.role.toLowerCase() : "";
-        const planNormalized = typeof user.plano === "string" ? user.plano.trim().toLowerCase() : "";
+        const planNormalized = normalizePlanName(user.plano);
         // Corrige contaminacao de fallback "Visitante" em usuarios reais apos falhas transitórias de auth sync.
         if (roleNormalized && roleNormalized !== "guest" && planNormalized === "visitante") {
-            updates.plano = DEFAULT_USER_PROPS.plano;
-            updates.plano_badge = DEFAULT_USER_PROPS.plano_badge;
-            updates.plano_cor = DEFAULT_USER_PROPS.plano_cor;
-            updates.plano_icon = DEFAULT_USER_PROPS.plano_icon;
-            updates.desconto_loja = DEFAULT_USER_PROPS.desconto_loja;
-            updates.xpMultiplier = DEFAULT_USER_PROPS.xpMultiplier;
+            updates.plano = defaultPlanName;
+            updates.plano_badge = defaultPlanBadge;
+            updates.plano_cor = defaultPlanColor;
+            updates.plano_icon = defaultPlanIcon;
+            updates.desconto_loja = defaultPlanDiscount;
+            updates.xpMultiplier = defaultPlanXpMultiplier;
+            updates.nivel_prioridade = defaultPlanPriority;
+            updates.tier = defaultPlanTier;
             hasUpdates = true;
         }
         
-        if (!user.plano) { updates.plano = DEFAULT_USER_PROPS.plano; hasUpdates = true; }
-        if (!user.plano_badge) { updates.plano_badge = DEFAULT_USER_PROPS.plano_badge; hasUpdates = true; }
-        if (!user.plano_cor) { updates.plano_cor = DEFAULT_USER_PROPS.plano_cor; hasUpdates = true; }
+        if (!user.plano) { updates.plano = defaultPlanName; hasUpdates = true; }
+        if (!user.plano_badge) { updates.plano_badge = defaultPlanBadge; hasUpdates = true; }
+        if (!user.plano_cor) { updates.plano_cor = defaultPlanColor; hasUpdates = true; }
+        if (!user.plano_icon) { updates.plano_icon = defaultPlanIcon; hasUpdates = true; }
+        if (user.desconto_loja === undefined) { updates.desconto_loja = defaultPlanDiscount; hasUpdates = true; }
+        if (user.xpMultiplier === undefined) { updates.xpMultiplier = defaultPlanXpMultiplier; hasUpdates = true; }
+        if (user.nivel_prioridade === undefined) { updates.nivel_prioridade = defaultPlanPriority; hasUpdates = true; }
 
         const currentStats = user.stats || {};
         const missingStatKeys = Object.keys(DEFAULT_STATS).some(key => currentStats[key] === undefined);
@@ -777,7 +852,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // D. RECONCILIACAO COM ULTIMA SOLICITACAO APROVADA
         if (planosCache.length > 0) {
-            const planoAtual = String(user.plano || "").trim().toLowerCase();
+            const planoAtual = normalizePlanName(user.plano);
             const precisaReconciliarPlano =
                 !planoAtual ||
                 planoAtual === "visitante" ||
@@ -796,10 +871,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         .maybeSingle();
 
                     if (!latestApprovedError && latestApprovedRequest) {
-                        const approvedPlanName = asString(latestApprovedRequest.planoNome).trim().toLowerCase();
-                        const approvedPlan = planosCache.find(
-                            (p) => p.nome.trim().toLowerCase() === approvedPlanName
-                        );
+                        const approvedPlanName = normalizePlanName(latestApprovedRequest.planoNome);
+                        const approvedPlan = findPlanByName(planosCache, latestApprovedRequest.planoNome);
 
                         if (approvedPlan && approvedPlanName && approvedPlanName !== planoAtual) {
                             updates.plano = approvedPlan.nome;
@@ -808,6 +881,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                             updates.plano_icon = approvedPlan.icon;
                             updates.desconto_loja = approvedPlan.descontoLoja;
                             updates.xpMultiplier = approvedPlan.xpMultiplier;
+                            updates.nivel_prioridade = approvedPlan.nivelPrioridade;
                             updates.tier = approvedPlanName.includes("lenda")
                                 ? "lenda"
                                 : approvedPlanName.includes("atleta")
@@ -817,6 +891,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         }
                     }
                 } catch (reconcileError: unknown) {
+                    maintenanceFailed = true;
                     if (!isPermissionError(reconcileError) && !isNavigatorLockTimeoutError(reconcileError)) {
                         console.warn("Falha ao reconciliar plano aprovado:", reconcileError);
                     }
@@ -825,17 +900,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // E. SINCRONIA DE PLANO
-        if (user.plano && planosCache.length > 0) {
-            const planoAtual = String(user.plano).trim().toLowerCase();
-            const planoReal = planosCache.find((p) => p.nome.trim().toLowerCase() === planoAtual);
-            if (planoReal) {
-                if (user.plano_cor !== planoReal.cor || user.plano_icon !== planoReal.icon) {
-                    updates.plano_cor = planoReal.cor;
-                    updates.plano_icon = planoReal.icon;
-                    updates.desconto_loja = planoReal.descontoLoja;
-                    updates.xpMultiplier = planoReal.xpMultiplier;
-                    hasUpdates = true;
-                }
+        const effectivePlanName = updates.plano ?? user.plano;
+        const planoReal = findPlanByName(planosCache, effectivePlanName);
+        if (planoReal) {
+            const currentPlanColor = asString(updates.plano_cor ?? user.plano_cor);
+            const currentPlanIcon = asString(updates.plano_icon ?? user.plano_icon);
+            const currentDiscount = Number(updates.desconto_loja ?? user.desconto_loja ?? 0);
+            const currentXpMultiplier = Number(updates.xpMultiplier ?? user.xpMultiplier ?? 1);
+            const currentPriority = Number(updates.nivel_prioridade ?? user.nivel_prioridade ?? 1);
+
+            if (
+              currentPlanColor !== planoReal.cor ||
+              currentPlanIcon !== planoReal.icon ||
+              currentDiscount !== planoReal.descontoLoja ||
+              currentXpMultiplier !== planoReal.xpMultiplier ||
+              currentPriority !== planoReal.nivelPrioridade
+            ) {
+              updates.plano_cor = planoReal.cor;
+              updates.plano_icon = planoReal.icon;
+              updates.desconto_loja = planoReal.descontoLoja;
+              updates.xpMultiplier = planoReal.xpMultiplier;
+              updates.nivel_prioridade = planoReal.nivelPrioridade;
+              hasUpdates = true;
             }
         }
 
@@ -843,10 +929,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
                 await persistUserPatch(user, updates);
             } catch (err: unknown) {
+                maintenanceFailed = true;
                 if (!isPermissionError(err)) {
                     console.warn("Erro ao atualizar manutenÃ§Ã£o do usuÃ¡rio:", err);
                 }
             }
+        }
+
+        if (!maintenanceFailed) {
+            lastMaintenanceUid.current = maintenanceKey;
         }
     };
 
@@ -1072,6 +1163,9 @@ export const useAuth = () => {
   if (!context) throw new Error("useAuth deve ser usado dentro de um AuthProvider");
   return context;
 };
+
+
+
 
 
 

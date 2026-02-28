@@ -513,7 +513,7 @@ export default function AlbumTurmaPage() {
           fill
           className="object-cover opacity-60"
           alt="Capa Turma"
-          unoptimized
+          
           priority
           sizes="100vw"
           onError={() => {
@@ -577,7 +577,7 @@ export default function AlbumTurmaPage() {
                     alt={u.nome}
                     fill
                     className="object-cover"
-                    unoptimized
+                    
                     sizes="96px"
                   />
                   {isColada && (
@@ -745,7 +745,7 @@ export default function AlbumTurmaPage() {
                 fill
                 className="object-cover"
                 alt="Meu Avatar"
-                unoptimized
+                
                 sizes="96px"
               />
             </div>

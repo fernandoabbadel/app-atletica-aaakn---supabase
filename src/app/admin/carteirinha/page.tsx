@@ -193,7 +193,7 @@ export default function AdminCarteirinhaPage() {
                       alt={`Background ${turma}`}
                       fill
                       className="object-cover"
-                      unoptimized
+                      
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-zinc-700 text-[10px] font-bold uppercase text-center p-2 opacity-50">

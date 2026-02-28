@@ -88,7 +88,7 @@ export default function AdminGamesPage() {
                                 alt={u.nome || "User"} 
                                 fill 
                                 className="object-cover"
-                                unoptimized
+                                
                              />
                           </div>
                           <div>

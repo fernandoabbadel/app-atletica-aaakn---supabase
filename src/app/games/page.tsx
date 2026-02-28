@@ -652,7 +652,7 @@ export default function SharkLegendsPage() {
                             <Link href={`/perfil/${rankUser.id}`} key={rankUser.id} className="flex items-center p-4 hover:bg-zinc-800/20 transition cursor-pointer">
                                 <span className={`font-black w-8 text-center ${index < 3 ? 'text-yellow-500 text-lg' : 'text-zinc-600 text-sm'}`}>#{index+1}</span>
                                 <div className="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-800 overflow-hidden shrink-0 relative">
-                                    <Image src={rankUser.foto} alt={rankUser.name} fill className="object-cover" unoptimized/>
+                                    <Image src={rankUser.foto} alt={rankUser.name} fill className="object-cover" />
                                 </div>
                                 <div className="w-8 h-8 rounded-full border border-zinc-700 bg-black overflow-hidden shrink-0 -ml-3 z-10 flex items-center justify-center">
                                     <div className="scale-[0.3]"><SharkAvatar size="sm" customColor={rankUser.customColor} /></div>

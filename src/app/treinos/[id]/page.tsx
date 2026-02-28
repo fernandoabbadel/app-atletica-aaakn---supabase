@@ -244,7 +244,7 @@ export default function TreinoDetalhesPage() {
                 alt={treino.modalidade}
                 fill
                 className="object-cover opacity-60"
-                unoptimized
+                
             />
             <div className={`absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/30 to-transparent z-10`}></div>
         </div>
@@ -261,7 +261,7 @@ export default function TreinoDetalhesPage() {
             {rankingTurmas.map((t, i) => (
                 <div key={t.turma} className="flex items-center gap-3 bg-black/60 backdrop-blur-md pl-1.5 pr-4 py-1.5 rounded-full border border-white/10 animate-in slide-in-from-right duration-700 shadow-xl" style={{ animationDelay: `${i * 100}ms` }}>
                     <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden border border-zinc-500 shrink-0 relative">
-                        {t.imagem ? <Image src={t.imagem} alt={t.turma} fill className="object-cover" unoptimized/> : <span className="text-xs font-black">{t.turma}</span>}
+                        {t.imagem ? <Image src={t.imagem} alt={t.turma} fill className="object-cover" /> : <span className="text-xs font-black">{t.turma}</span>}
                     </div>
                     <div className="flex flex-col items-end leading-none">
                         <span className="text-[9px] font-bold text-zinc-400 uppercase">Dominando</span>
@@ -349,7 +349,7 @@ export default function TreinoDetalhesPage() {
                 <div className="bg-gradient-to-br from-zinc-900 to-black border border-zinc-800 p-5 rounded-2xl flex flex-col items-center text-center gap-3 relative overflow-hidden group-hover:border-zinc-600 transition">
                     <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${theme.gradient} to-transparent`}></div>
                     <div className="w-20 h-20 rounded-full border-4 border-[#050505] shadow-xl overflow-hidden relative group-hover:scale-105 transition duration-300">
-                        {treino.treinadorAvatar ? <Image src={treino.treinadorAvatar} alt="Treinador" fill className="object-cover" unoptimized/> : <User size={32} className="text-zinc-600 m-auto"/>}
+                        {treino.treinadorAvatar ? <Image src={treino.treinadorAvatar} alt="Treinador" fill className="object-cover" /> : <User size={32} className="text-zinc-600 m-auto"/>}
                         <div className="absolute bottom-0 right-0 bg-emerald-500 p-1 rounded-full border-2 border-black"><Crown size={12} className="text-black"/></div>
                     </div>
                     <div>
@@ -385,7 +385,7 @@ export default function TreinoDetalhesPage() {
                             <div className={`flex items-center justify-between p-3 rounded-xl border transition hover:bg-white/5 ${statusColor}`}>
                                 <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 rounded-full border border-zinc-700 overflow-hidden relative">
-                                        <Image src={pessoa.avatar || "https://github.com/shadcn.png"} alt={pessoa.nome} fill className="object-cover" unoptimized/>
+                                        <Image src={pessoa.avatar || "https://github.com/shadcn.png"} alt={pessoa.nome} fill className="object-cover" />
                                     </div>
                                     <div>
                                         <p className={`text-sm font-bold ${pessoa.statusVisual === 'falta' ? 'text-zinc-500 line-through' : 'text-white'}`}>{pessoa.nome}</p>

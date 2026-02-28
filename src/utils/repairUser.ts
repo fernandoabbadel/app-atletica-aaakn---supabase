@@ -16,10 +16,10 @@ const DEFAULT_VALUES = {
   plano: "Bicho Solto",
   plano_status: "ativo",
   plano_badge: "Bicho Solto",
-  plano_cor: "gray",
-  plano_icon: "user",
+  plano_cor: "zinc",
+  plano_icon: "ghost",
   desconto_loja: 0,
-  nivel_prioridade: 0,
+  nivel_prioridade: 1,
 
   // Stats Completos
   stats: {

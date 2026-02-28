@@ -349,7 +349,7 @@ export default function LigasUnitauPage() {
                               width={48}
                               height={48}
                               className="w-12 h-12 rounded-full object-cover border border-indigo-500/20"
-                              unoptimized
+                              
                             />
                             <div className="flex-1"><h4 className="font-bold text-sm text-white">{l.nome}</h4><div className="w-full bg-zinc-800 h-1.5 rounded-full mt-1 overflow-hidden"><div className="h-full bg-indigo-500 transition-all duration-1000" style={{width: `${l.matchPercent}%`}}/></div></div>
                             <span className="text-xs font-black text-indigo-400">{l.matchPercent}%</span>
@@ -369,7 +369,7 @@ export default function LigasUnitauPage() {
                       fill
                       sizes="100vw"
                       className="object-cover opacity-60 transition duration-500 hover:opacity-80"
-                      unoptimized
+                      
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#050505] to-transparent"/>
                     <div className="absolute bottom-2 left-4"><h2 className="text-3xl font-black italic uppercase tracking-tighter text-white drop-shadow-md">{l.sigla}</h2></div>
@@ -400,7 +400,7 @@ export default function LigasUnitauPage() {
                         fill
                         sizes="100vw"
                         className="object-cover opacity-50"
-                        unoptimized
+                        
                       />
                       <div className="absolute bottom-4 left-6">
                           <h1 className="text-4xl font-black italic text-white drop-shadow-lg">{selectedLeague.sigla}</h1>
@@ -441,7 +441,7 @@ export default function LigasUnitauPage() {
                                                 width={56}
                                                 height={56}
                                                 className="w-full h-full object-cover"
-                                                unoptimized
+                                                
                                               />
                                           </div>
                                           <p className="text-[10px] font-bold mt-2 text-center truncate w-full text-zinc-300 group-hover:text-white">{m.nome}</p>

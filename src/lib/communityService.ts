@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "./supabase";
 import {
   asObject,
+  asString,
   asStringArray,
   boundedLimit,
   incrementUserStats,
@@ -9,6 +10,7 @@ import {
   toggleArrayValue,
   type Row,
 } from "./supabaseData";
+import { fetchCanonicalUserVisuals } from "./userVisualsService";
 import {
   DEFAULT_COMMUNITY_CATEGORIES,
   normalizeCommunityCategories,
@@ -21,6 +23,26 @@ export type QueryRow<T extends RawData = RawData> = {
   id: string;
   data: T;
 };
+
+export interface BadgeCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  display_order: number;
+}
+
+export interface Badge {
+  id: string;
+  name: string;
+  image_url: string;
+  points: number;
+  category_id: string;
+  is_active: boolean;
+}
+
+export interface CategoryWithBadges extends BadgeCategory {
+  badges: Badge[];
+}
 
 const MAX_FEED_RESULTS = 220;
 const MAX_ADMIN_POST_RESULTS = 80;
@@ -89,6 +111,91 @@ const mapRow = (row: Row): QueryRow => ({
   id: String(row.id || ""),
   data: normalizeRowTimestamps(row) as RawData,
 });
+
+const applyCommunityAuthorVisuals = async (rows: Row[]): Promise<Row[]> => {
+  if (rows.length === 0) return rows;
+
+  const userIds = rows
+    .map((row) => (typeof row.userId === "string" ? row.userId.trim() : ""))
+    .filter((value): value is string => value.length > 0);
+
+  if (userIds.length === 0) return rows;
+
+  const visuals = await fetchCanonicalUserVisuals(userIds);
+  if (visuals.size === 0) return rows;
+
+  return rows.map((row) => {
+    const userId = typeof row.userId === "string" ? row.userId.trim() : "";
+    if (!userId) return row;
+
+    const visual = visuals.get(userId);
+    if (!visual) return row;
+
+    const next: Row = { ...row };
+
+    next.userName = visual.nome || asString(row.userName).trim();
+    next.avatar = visual.foto || asString(row.avatar).trim();
+    next.handle = visual.apelido ? `@${visual.apelido}` : asString(row.handle).trim();
+    next.role = visual.role || asString(row.role).trim();
+    next.plano = visual.plano;
+    next.plano_cor = visual.plano_cor;
+    next.plano_icon = visual.plano_icon;
+    next.patente = visual.patente;
+    next.patente_icon = visual.patente_icon;
+    next.patente_cor = visual.patente_cor;
+
+    return next;
+  });
+};
+
+export async function getCategoriesWithBadges(): Promise<CategoryWithBadges[]> {
+  const supabase = getSupabaseClient();
+
+  try {
+    const [categoriesResult, badgesResult] = await Promise.all([
+      supabase
+        .from("badge_categories")
+        .select("id, name, description, display_order")
+        .order("display_order", { ascending: true }),
+      supabase
+        .from("badges")
+        .select("id, name, image_url, points, category_id, is_active")
+        .eq("is_active", true)
+        .limit(1000),
+    ]);
+
+    if (categoriesResult.error) {
+      console.error("Erro ao buscar categorias de badges:", categoriesResult.error);
+      throwSupabaseError(categoriesResult.error);
+    }
+
+    if (badgesResult.error) {
+      console.error("Erro ao buscar badges ativos:", badgesResult.error);
+      throwSupabaseError(badgesResult.error);
+    }
+
+    const categories = (categoriesResult.data ?? []) as BadgeCategory[];
+    const allBadges = (badgesResult.data ?? []) as Badge[];
+    const badgesByCategory = new Map<string, Badge[]>();
+
+    allBadges.forEach((badge) => {
+      const existing = badgesByCategory.get(badge.category_id);
+      if (existing) {
+        existing.push(badge);
+        return;
+      }
+      badgesByCategory.set(badge.category_id, [badge]);
+    });
+
+    return categories.map((category) => ({
+      ...category,
+      badges: badgesByCategory.get(category.id) ?? [],
+    }));
+  } catch (error: unknown) {
+    console.error("Erro critico em getCategoriesWithBadges:", error);
+    return [];
+  }
+}
 
 const normalizeReportRow = (row: Row): QueryRow => {
   const normalized = normalizeRowTimestamps(row, ["timestamp", "reviewedAt"]);
@@ -315,7 +422,8 @@ export async function fetchCommunityFeed(maxResults = MAX_FEED_RESULTS): Promise
     orderBy: { column: "createdAt", ascending: false },
     limit: boundedLimit(maxResults, MAX_FEED_RESULTS),
   });
-  return rows.map((row) => mapRow(row));
+  const enriched = await applyCommunityAuthorVisuals(rows);
+  return enriched.map((row) => mapRow(row));
 }
 
 export async function fetchCommunityFeedByCategory(payload: {
@@ -340,7 +448,8 @@ export async function fetchCommunityFeedByCategory(payload: {
 
   const { data, error } = await query;
   if (error) throwSupabaseError(error);
-  return ((data ?? []) as Row[]).map((row) => mapRow(row));
+  const enriched = await applyCommunityAuthorVisuals((data ?? []) as Row[]);
+  return enriched.map((row) => mapRow(row));
 }
 
 export async function fetchCommunityRecentCategoryCounts(payload?: {
@@ -394,7 +503,8 @@ export async function fetchCommunityAdminPosts(
     orderBy: { column: "createdAt", ascending: false },
     limit: boundedLimit(maxResults, MAX_ADMIN_POST_RESULTS),
   });
-  return rows.map((row) => mapRow(row));
+  const enriched = await applyCommunityAuthorVisuals(rows);
+  return enriched.map((row) => mapRow(row));
 }
 
 export async function fetchCommunityReports(
@@ -429,7 +539,8 @@ export async function fetchCommunityComments(
     .limit(maxResults);
 
   if (error) throwSupabaseError(error);
-  return ((data ?? []) as Row[]).map((row) => mapRow(row));
+  const enriched = await applyCommunityAuthorVisuals((data ?? []) as Row[]);
+  return enriched.map((row) => mapRow(row));
 }
 
 export async function fetchCommunityCommentPostId(commentId: string): Promise<string | null> {
@@ -639,8 +750,28 @@ export async function fetchCommunityUnreadCounts(payload: {
 
 export async function createCommunityPost(payload: RawData): Promise<{ id: string }> {
   const supabase = getSupabaseClient();
+  const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
+  const visuals = userId ? await fetchCanonicalUserVisuals([userId]) : new Map();
+  const visual = userId ? visuals.get(userId) : undefined;
+
+  const visualPatch: Row = visual
+    ? {
+        userName: visual.nome || payload.userName,
+        avatar: visual.foto || payload.avatar,
+        handle: visual.apelido ? `@${visual.apelido}` : payload.handle,
+        role: visual.role || payload.role,
+        plano: visual.plano,
+        plano_cor: visual.plano_cor,
+        plano_icon: visual.plano_icon,
+        patente: visual.patente,
+        patente_icon: visual.patente_icon,
+        patente_cor: visual.patente_cor,
+      }
+    : {};
+
   const insertPayload = {
     ...payload,
+    ...visualPatch,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -653,7 +784,6 @@ export async function createCommunityPost(payload: RawData): Promise<{ id: strin
 
   if (error) throwSupabaseError(error);
 
-  const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
   if (userId) {
     await incrementUserStats(userId, { postsCount: 1 });
   }
@@ -669,9 +799,28 @@ export async function createCommunityComment(payload: {
   if (!postId) return { id: "" };
 
   const supabase = getSupabaseClient();
+  const userId = typeof payload.data.userId === "string" ? payload.data.userId.trim() : "";
+  const visuals = userId ? await fetchCanonicalUserVisuals([userId]) : new Map();
+  const visual = userId ? visuals.get(userId) : undefined;
+
+  const visualPatch: Row = visual
+    ? {
+        userName: visual.nome || payload.data.userName,
+        avatar: visual.foto || payload.data.avatar,
+        role: visual.role || payload.data.role,
+        plano: visual.plano,
+        plano_cor: visual.plano_cor,
+        plano_icon: visual.plano_icon,
+        patente: visual.patente,
+        patente_icon: visual.patente_icon,
+        patente_cor: visual.patente_cor,
+      }
+    : {};
+
   const insertPayload = {
     postId,
     ...payload.data,
+    ...visualPatch,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -686,7 +835,6 @@ export async function createCommunityComment(payload: {
 
   await updatePostCommentCount(postId, 1);
 
-  const userId = typeof payload.data.userId === "string" ? payload.data.userId.trim() : "";
   if (userId) {
     await incrementUserStats(userId, { commentsCount: 1 });
   }

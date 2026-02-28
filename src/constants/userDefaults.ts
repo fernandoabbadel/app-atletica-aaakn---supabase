@@ -44,10 +44,10 @@ export const DEFAULT_USER_PROPS = {
     plano: "Bicho Solto",
     plano_status: "ativo",
     plano_badge: "Bicho Solto",
-    plano_cor: "text-zinc-400",
-    plano_icon: "Fish",
+    plano_cor: "zinc",
+    plano_icon: "ghost",
     desconto_loja: 0,
-    nivel_prioridade: 0,
+    nivel_prioridade: 1,
 
     // Configurações do Sistema
     role: "guest",

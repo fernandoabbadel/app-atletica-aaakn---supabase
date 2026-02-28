@@ -506,7 +506,7 @@ export default function DetalheProdutoPage() {
           priority
           className="object-cover"
           sizes="100vw"
-          unoptimized
+          
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-transparent z-10" />
         <button
@@ -765,7 +765,7 @@ export default function DetalheProdutoPage() {
                           fill
                           sizes="32px"
                           className="object-cover"
-                          unoptimized
+                          
                         />
                       </div>
                       <span className="text-xs font-bold text-white">{rev.userName}</span>

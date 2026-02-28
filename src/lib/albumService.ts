@@ -323,24 +323,49 @@ const isMissingTableError = (error: unknown): boolean => {
 };
 
 export async function fetchAlbumRankings(
-  maxResults = MAX_RANKING_RESULTS
+  maxResults = MAX_RANKING_RESULTS,
+  options?: { turma?: string }
 ): Promise<AlbumRankingEntry[]> {
   const safeLimit = boundedLimit(maxResults, MAX_RANKING_RESULTS);
-  const cacheKey = `${safeLimit}`;
+  const turmaFilter = options?.turma?.trim().toUpperCase() || "";
+  const cacheKey = `${safeLimit}:${turmaFilter || "all"}`;
   return runWithInflight(inflightRankingsCache, cacheKey, async () => {
     const cached = getCacheValue(rankingsCache, cacheKey);
     if (cached) return cached;
 
-    const q = query(
-      collection(db, "album_rankings"),
-      orderBy("totalColetado", "desc"),
-      limit(safeLimit)
-    );
-    const snap = await getDocs(q);
+    const fetchFilteredByTurma = async (turmaValue: string): Promise<AlbumRankingEntry[]> => {
+      const q = query(
+        collection(db, "album_rankings"),
+        where("turma", "==", turmaValue),
+        limit(safeLimit)
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((row) =>
+        toRankingEntry(row.id, row.data() as Record<string, unknown>)
+      );
+    };
 
-    const rows = snap.docs.map((row) =>
-      toRankingEntry(row.id, row.data() as Record<string, unknown>)
-    );
+    let rows: AlbumRankingEntry[] = [];
+    if (turmaFilter) {
+      rows = await fetchFilteredByTurma(turmaFilter);
+      if (rows.length === 0 && turmaFilter !== turmaFilter.toLowerCase()) {
+        rows = await fetchFilteredByTurma(turmaFilter.toLowerCase());
+      }
+      rows = [...rows].sort(
+        (left, right) => (right.totalColetado || 0) - (left.totalColetado || 0)
+      );
+    } else {
+      const q = query(
+        collection(db, "album_rankings"),
+        orderBy("totalColetado", "desc"),
+        limit(safeLimit)
+      );
+      const snap = await getDocs(q);
+      rows = snap.docs.map((row) =>
+        toRankingEntry(row.id, row.data() as Record<string, unknown>)
+      );
+    }
+
     setCacheValue(rankingsCache, cacheKey, rows);
     return rows;
   });

@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useParams } from "next/navigation";
@@ -19,33 +19,10 @@ import { useToast } from "@/context/ToastContext";
 import { logActivity } from "@/lib/logger";
 import {
   fetchEventTitleById,
-  fetchAdminEventRsvpsPage,
-  fetchAdminEventSalesPage,
+  fetchAdminEventPresencePage,
   incrementEventPurchaseUserStats,
   setAdminTicketPayment,
 } from "@/lib/eventsNativeService";
-
-interface RsvpItem {
-  id: string;
-  userId: string;
-  userName: string;
-  userAvatar: string;
-  userTurma: string;
-  status: "going" | "maybe";
-}
-
-interface SaleItem {
-  id: string;
-  userId: string;
-  userName: string;
-  userTurma: string;
-  status: "aprovado" | "pendente" | "analise";
-  loteNome: string;
-  quantidade: number;
-  valorTotal: string;
-  dataAprovacao?: unknown;
-  aprovadoPor?: string;
-}
 
 interface MergedParticipant {
   id: string;
@@ -63,7 +40,7 @@ interface MergedParticipant {
   ticketRequestId?: string;
 }
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
 
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
@@ -101,12 +78,20 @@ const parseCurrency = (value: string): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const normalizeRsvp = (raw: Record<string, unknown>): RsvpItem | null => {
+const normalizeMergedParticipant = (raw: Record<string, unknown>): MergedParticipant | null => {
   const userId = asString(raw.userId).trim();
   if (!userId) return null;
 
-  const statusRaw = asString(raw.status, "maybe").toLowerCase();
-  const status: "going" | "maybe" = statusRaw === "going" ? "going" : "maybe";
+  const rsvpStatusRaw = asString(raw.rsvpStatus, "maybe").toLowerCase();
+  const rsvpStatus: "going" | "maybe" = rsvpStatusRaw === "going" ? "going" : "maybe";
+
+  const pagamentoRaw = asString(raw.pagamento, "pendente").toLowerCase();
+  const pagamento: "pago" | "pendente" | "analise" =
+    pagamentoRaw === "pago"
+      ? "pago"
+      : pagamentoRaw === "analise"
+      ? "analise"
+      : "pendente";
 
   return {
     id: asString(raw.id, userId),
@@ -114,45 +99,27 @@ const normalizeRsvp = (raw: Record<string, unknown>): RsvpItem | null => {
     userName: asString(raw.userName, "Aluno"),
     userAvatar: asString(raw.userAvatar),
     userTurma: asString(raw.userTurma, "-"),
-    status,
-  };
-};
-
-const normalizeSale = (raw: Record<string, unknown>): SaleItem | null => {
-  const id = asString(raw.id).trim();
-  const userId = asString(raw.userId).trim();
-  if (!id || !userId) return null;
-
-  const statusRaw = asString(raw.status, "pendente").toLowerCase();
-  const status: SaleItem["status"] =
-    statusRaw === "aprovado"
-      ? "aprovado"
-      : statusRaw === "analise"
-      ? "analise"
-      : "pendente";
-
-  return {
-    id,
-    userId,
-    userName: asString(raw.userName, "Aluno"),
-    userTurma: asString(raw.userTurma, "-"),
-    status,
-    loteNome: asString(raw.loteNome, "-"),
+    rsvpStatus,
+    pagamento,
+    lote: asString(raw.lote, "-"),
     quantidade: Math.max(1, asNumber(raw.quantidade, 1)),
-    valorTotal: asString(raw.valorTotal, "0"),
+    valorTotal: asString(raw.valorTotal, "-"),
     dataAprovacao: raw.dataAprovacao,
     aprovadoPor: asString(raw.aprovadoPor),
+    ticketRequestId: asString(raw.ticketRequestId) || undefined,
   };
 };
 
-const mergeUniqueById = <T extends { id: string }>(current: T[], next: T[]): T[] => {
+const mergeUniqueByUserId = (
+  current: MergedParticipant[],
+  next: MergedParticipant[]
+): MergedParticipant[] => {
   if (!next.length) return current;
-
-  const known = new Set(current.map((row) => row.id));
+  const known = new Set(current.map((row) => row.userId));
   const merged = [...current];
   next.forEach((row) => {
-    if (known.has(row.id)) return;
-    known.add(row.id);
+    if (known.has(row.userId)) return;
+    known.add(row.userId);
     merged.push(row);
   });
   return merged;
@@ -168,16 +135,10 @@ export default function AdminEventoListaPage() {
   const [eventTitle, setEventTitle] = useState("Evento");
   const [loading, setLoading] = useState(true);
 
-  const [rsvps, setRsvps] = useState<RsvpItem[]>([]);
-  const [sales, setSales] = useState<SaleItem[]>([]);
-
-  const [rsvpsCursor, setRsvpsCursor] = useState<string | null>(null);
-  const [salesCursor, setSalesCursor] = useState<string | null>(null);
-  const [hasMoreRsvps, setHasMoreRsvps] = useState(false);
-  const [hasMoreSales, setHasMoreSales] = useState(false);
-
-  const [loadingMoreRsvps, setLoadingMoreRsvps] = useState(false);
-  const [loadingMoreSales, setLoadingMoreSales] = useState(false);
+  const [rows, setRows] = useState<MergedParticipant[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const loadHeader = useCallback(async () => {
     if (!eventId) return;
@@ -190,37 +151,22 @@ export default function AdminEventoListaPage() {
 
     setLoading(true);
     try {
-      const [rsvpPage, salesPage] = await Promise.all([
-        fetchAdminEventRsvpsPage({
-          eventId,
-          pageSize: PAGE_SIZE,
-          forceRefresh: false,
-        }),
-        fetchAdminEventSalesPage({
-          eventId,
-          pageSize: PAGE_SIZE,
-          forceRefresh: false,
-        }),
-      ]);
+      const page = await fetchAdminEventPresencePage({
+        eventId,
+        pageSize: PAGE_SIZE,
+        forceRefresh: false,
+      });
 
-      setRsvps(
-        rsvpPage.rows
-          .map((row) => normalizeRsvp(row))
-          .filter((row): row is RsvpItem => row !== null)
-      );
-      setSales(
-        salesPage.rows
-          .map((row) => normalizeSale(row))
-          .filter((row): row is SaleItem => row !== null)
-      );
+      const normalized = page.rows
+        .map((row) => normalizeMergedParticipant(row))
+        .filter((row): row is MergedParticipant => row !== null);
 
-      setRsvpsCursor(rsvpPage.nextCursor);
-      setSalesCursor(salesPage.nextCursor);
-      setHasMoreRsvps(rsvpPage.hasMore);
-      setHasMoreSales(salesPage.hasMore);
+      setRows(normalized);
+      setCursor(page.nextCursor);
+      setHasMore(page.hasMore);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao carregar lista de presença.", "error");
+      addToast("Erro ao carregar lista de presenca.", "error");
     } finally {
       setLoading(false);
     }
@@ -231,99 +177,30 @@ export default function AdminEventoListaPage() {
     void loadInitial();
   }, [loadHeader, loadInitial]);
 
-  const mergedRows = useMemo<MergedParticipant[]>(() => {
-    const byUser = new Map<string, MergedParticipant>();
+  const handleLoadMore = async () => {
+    if (!eventId || !hasMore || !cursor || loadingMore) return;
 
-    rsvps.forEach((row) => {
-      byUser.set(row.userId, {
-        id: row.id,
-        userId: row.userId,
-        userName: row.userName,
-        userAvatar: row.userAvatar,
-        userTurma: row.userTurma,
-        rsvpStatus: row.status,
-        pagamento: "pendente",
-        lote: "-",
-        quantidade: 1,
-        valorTotal: "-",
-      });
-    });
-
-    sales.forEach((sale) => {
-      const existing = byUser.get(sale.userId);
-      byUser.set(sale.userId, {
-        id: existing?.id || sale.id,
-        userId: sale.userId,
-        userName: sale.userName || existing?.userName || "Aluno",
-        userAvatar: existing?.userAvatar || "",
-        userTurma: sale.userTurma || existing?.userTurma || "-",
-        rsvpStatus: "going",
-        pagamento: sale.status === "aprovado" ? "pago" : sale.status,
-        lote: sale.loteNome || "-",
-        quantidade: sale.quantidade || 1,
-        valorTotal: sale.valorTotal || "-",
-        dataAprovacao: sale.dataAprovacao,
-        aprovadoPor: sale.aprovadoPor,
-        ticketRequestId: sale.id,
-      });
-    });
-
-    return Array.from(byUser.values()).sort((a, b) =>
-      a.userName.localeCompare(b.userName, "pt-BR")
-    );
-  }, [rsvps, sales]);
-
-  const handleLoadMoreRsvps = async () => {
-    if (!eventId || !hasMoreRsvps || !rsvpsCursor || loadingMoreRsvps) return;
-
-    setLoadingMoreRsvps(true);
+    setLoadingMore(true);
     try {
-      const page = await fetchAdminEventRsvpsPage({
+      const page = await fetchAdminEventPresencePage({
         eventId,
         pageSize: PAGE_SIZE,
-        cursorId: rsvpsCursor,
+        cursorId: cursor,
         forceRefresh: false,
       });
 
       const normalized = page.rows
-        .map((row) => normalizeRsvp(row))
-        .filter((row): row is RsvpItem => row !== null);
+        .map((row) => normalizeMergedParticipant(row))
+        .filter((row): row is MergedParticipant => row !== null);
 
-      setRsvps((prev) => mergeUniqueById(prev, normalized));
-      setRsvpsCursor(page.nextCursor);
-      setHasMoreRsvps(page.hasMore);
+      setRows((prev) => mergeUniqueByUserId(prev, normalized));
+      setCursor(page.nextCursor);
+      setHasMore(page.hasMore);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao carregar mais RSVP.", "error");
+      addToast("Erro ao carregar mais participantes.", "error");
     } finally {
-      setLoadingMoreRsvps(false);
-    }
-  };
-
-  const handleLoadMoreSales = async () => {
-    if (!eventId || !hasMoreSales || !salesCursor || loadingMoreSales) return;
-
-    setLoadingMoreSales(true);
-    try {
-      const page = await fetchAdminEventSalesPage({
-        eventId,
-        pageSize: PAGE_SIZE,
-        cursorId: salesCursor,
-        forceRefresh: false,
-      });
-
-      const normalized = page.rows
-        .map((row) => normalizeSale(row))
-        .filter((row): row is SaleItem => row !== null);
-
-      setSales((prev) => mergeUniqueById(prev, normalized));
-      setSalesCursor(page.nextCursor);
-      setHasMoreSales(page.hasMore);
-    } catch (error: unknown) {
-      console.error(error);
-      addToast("Erro ao carregar mais vendas.", "error");
-    } finally {
-      setLoadingMoreSales(false);
+      setLoadingMore(false);
     }
   };
 
@@ -349,17 +226,18 @@ export default function AdminEventoListaPage() {
         });
       }
 
-      setSales((prev) =>
-        prev.map((sale) => {
-          if (sale.id !== row.ticketRequestId) return sale;
+      setRows((prev) =>
+        prev.map((entry) => {
+          if (entry.ticketRequestId !== row.ticketRequestId) return entry;
           return {
-            ...sale,
-            status: isApproving ? "aprovado" : "pendente",
+            ...entry,
+            pagamento: isApproving ? "pago" : "pendente",
             dataAprovacao: isApproving ? new Date() : null,
             aprovadoPor: isApproving ? user?.nome || "Admin" : "",
           };
         })
       );
+
       if (user?.uid) {
         await logActivity(
           user.uid,
@@ -377,7 +255,7 @@ export default function AdminEventoListaPage() {
   };
 
   const handleExportCsv = () => {
-    if (!mergedRows.length) return;
+    if (!rows.length) return;
 
     const headers = [
       "Nome",
@@ -387,11 +265,11 @@ export default function AdminEventoListaPage() {
       "Lote",
       "Quantidade",
       "Valor",
-      "Data Aprovação",
+      "Data Aprovacao",
       "Aprovado Por",
     ];
 
-    const rows = mergedRows.map((row) => [
+    const csvRows = rows.map((row) => [
       row.userName,
       row.userTurma,
       row.rsvpStatus,
@@ -403,7 +281,7 @@ export default function AdminEventoListaPage() {
       row.aprovadoPor || "-",
     ]);
 
-    const csvContent = [headers.join(","), ...rows.map((line) => line.join(","))].join("\n");
+    const csvContent = [headers.join(","), ...csvRows.map((line) => line.join(","))].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -426,7 +304,7 @@ export default function AdminEventoListaPage() {
             </Link>
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
-                <Users size={18} className="text-emerald-400" /> Lista de Presença
+                <Users size={18} className="text-emerald-400" /> Lista de Presenca
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">{eventTitle}</p>
             </div>
@@ -442,7 +320,7 @@ export default function AdminEventoListaPage() {
 
       <main className="px-6 py-6 space-y-4">
         <div className="text-xs text-zinc-500 uppercase font-black">
-          RSVP carregados: {rsvps.length} • Vendas carregadas: {sales.length}
+          Participantes carregados: {rows.length}
         </div>
 
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -450,14 +328,14 @@ export default function AdminEventoListaPage() {
             <table className="w-full text-left text-xs whitespace-nowrap">
               <thead className="bg-black/40 text-zinc-500 uppercase font-black">
                 <tr>
-                  <th className="p-4">Usuário</th>
+                  <th className="p-4">Usuario</th>
                   <th className="p-4">Turma</th>
                   <th className="p-4">RSVP</th>
                   <th className="p-4">Pagamento</th>
                   <th className="p-4">Lote</th>
                   <th className="p-4">Valor</th>
-                  <th className="p-4">Aprovação</th>
-                  <th className="p-4 text-right">Ação</th>
+                  <th className="p-4">Aprovacao</th>
+                  <th className="p-4 text-right">Acao</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800 text-zinc-200">
@@ -467,14 +345,14 @@ export default function AdminEventoListaPage() {
                       <Loader2 className="animate-spin mx-auto text-emerald-500" />
                     </td>
                   </tr>
-                ) : mergedRows.length === 0 ? (
+                ) : rows.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="p-8 text-center text-zinc-500">
                       Nenhum participante encontrado.
                     </td>
                   </tr>
                 ) : (
-                  mergedRows.map((row) => (
+                  rows.map((row) => (
                     <tr key={`${row.userId}:${row.id}`} className="hover:bg-zinc-800/40">
                       <td className="p-4">
                         <div className="flex items-center gap-2">
@@ -484,7 +362,7 @@ export default function AdminEventoListaPage() {
                               alt={row.userName}
                               fill
                               className="object-cover"
-                              unoptimized
+                              
                             />
                           </div>
                           <Link
@@ -516,7 +394,7 @@ export default function AdminEventoListaPage() {
                       <td className="p-4">{row.lote || "-"}</td>
                       <td className="p-4">{row.valorTotal || "-"}</td>
                       <td className="p-4 text-zinc-400">
-                        {row.aprovadoPor ? `${parseDateTime(row.dataAprovacao)} • ${row.aprovadoPor}` : "-"}
+                        {row.aprovadoPor ? `${parseDateTime(row.dataAprovacao)} - ${row.aprovadoPor}` : "-"}
                       </td>
                       <td className="p-4">
                         <div className="flex justify-end">
@@ -528,17 +406,9 @@ export default function AdminEventoListaPage() {
                                   ? "bg-zinc-900 text-zinc-300 border-zinc-700"
                                   : "bg-emerald-600 text-white border-emerald-500"
                               }`}
-                              title={
-                                row.pagamento === "pago"
-                                  ? "Desfazer aprovação"
-                                  : "Aprovar pagamento"
-                              }
+                              title={row.pagamento === "pago" ? "Desfazer aprovacao" : "Aprovar pagamento"}
                             >
-                              {row.pagamento === "pago" ? (
-                                <RotateCcw size={14} />
-                              ) : (
-                                <Check size={14} />
-                              )}
+                              {row.pagamento === "pago" ? <RotateCcw size={14} /> : <Check size={14} />}
                             </button>
                           ) : (
                             <span className="text-zinc-600 text-[10px]">-</span>
@@ -553,35 +423,19 @@ export default function AdminEventoListaPage() {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3">
           <button
-            onClick={() => void handleLoadMoreRsvps()}
-            disabled={!hasMoreRsvps || loadingMoreRsvps}
+            onClick={() => void handleLoadMore()}
+            disabled={!hasMore || loadingMore}
             className="py-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 text-xs font-black uppercase tracking-wide hover:bg-zinc-800 disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {loadingMoreRsvps ? (
+            {loadingMore ? (
               <>
-                <Loader2 size={15} className="animate-spin" /> Carregando RSVP
+                <Loader2 size={15} className="animate-spin" /> Carregando participantes
               </>
             ) : (
               <>
-                <ChevronDown size={15} /> Carregar mais RSVP (10)
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={() => void handleLoadMoreSales()}
-            disabled={!hasMoreSales || loadingMoreSales}
-            className="py-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 text-xs font-black uppercase tracking-wide hover:bg-zinc-800 disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {loadingMoreSales ? (
-              <>
-                <Loader2 size={15} className="animate-spin" /> Carregando vendas
-              </>
-            ) : (
-              <>
-                <ChevronDown size={15} /> Carregar mais vendas (10)
+                <ChevronDown size={15} /> Carregar mais participantes ({PAGE_SIZE})
               </>
             )}
           </button>
@@ -590,3 +444,4 @@ export default function AdminEventoListaPage() {
     </div>
   );
 }
+

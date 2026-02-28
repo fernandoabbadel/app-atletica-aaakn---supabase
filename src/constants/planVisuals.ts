@@ -219,3 +219,10 @@ export const resolvePlanIcon = (
   return ICONS[normalized] || fallback;
 };
 
+export const resolveUserPlanIcon = (
+  rawIcon: string | null | undefined,
+  _rawPlan: string | null | undefined,
+  fallback: LucideIcon = Ghost
+): LucideIcon => {
+  return resolvePlanIcon(rawIcon, fallback);
+};

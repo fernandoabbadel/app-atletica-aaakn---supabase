@@ -96,7 +96,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     src={user?.foto || "https://github.com/shadcn.png"} 
                     alt="Admin Avatar" 
                     fill
-                    unoptimized
+                    
                     className="rounded-full border border-emerald-500 object-cover shadow-[0_0_10px_rgba(16,185,129,0.2)]"
                 />
             </div>

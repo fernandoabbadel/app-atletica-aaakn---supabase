@@ -148,7 +148,7 @@ export default function FidelidadePage() {
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-3">
                     {/* 🦈 Image otimizado */}
-                    <Image src="/logo.png" width={40} height={40} className="object-contain drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]" alt="Logo Atlética" unoptimized/>
+                    <Image src="/logo.png" width={40} height={40} className="object-contain drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]" alt="Logo Atlética" />
                     <div>
                       <h2 className="text-base font-black italic uppercase tracking-tighter text-white leading-none">Shark Card</h2>
                       <p className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest mt-0.5">Membro Oficial</p>
@@ -169,7 +169,7 @@ export default function FidelidadePage() {
                         <div key={i} className="aspect-square relative flex items-center justify-center">
                           <div className={`w-full h-full rounded-full flex items-center justify-center transition-all duration-500 border overflow-hidden relative ${conquistado ? "bg-emerald-500 border-emerald-400 shadow-[0_0_15px_#10b981]" : "bg-black/40 border-dashed border-zinc-700"}`}>
                             {conquistado ? (
-                              <Image src="/logo.png" fill className="object-contain p-1 mix-blend-multiply opacity-80 filter brightness-0" alt="Selo Conquistado" unoptimized/>
+                              <Image src="/logo.png" fill className="object-contain p-1 mix-blend-multiply opacity-80 filter brightness-0" alt="Selo Conquistado" />
                             ) : (
                               <span className="text-[8px] font-black text-white/10">{i + 1}</span>
                             )}
@@ -256,7 +256,7 @@ export default function FidelidadePage() {
                             alt={premio.title}
                             fill
                             className="object-cover" 
-                            unoptimized
+                            
                         />
                       </div>
 

@@ -140,7 +140,7 @@ export default function AdminDashboardPage() {
                                     alt={user.nome} 
                                     fill
                                     className="rounded-full object-cover border border-zinc-700"
-                                    unoptimized
+                                    
                                   />
                               </div>
                               <div>

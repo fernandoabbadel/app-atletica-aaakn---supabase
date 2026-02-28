@@ -426,7 +426,7 @@ export default function AdminTreinoListaPage() {
                                   alt={row.nome}
                                   fill
                                   className="object-cover"
-                                  unoptimized
+                                  
                                 />
                               </div>
                               <span className="font-bold text-white">{row.nome}</span>

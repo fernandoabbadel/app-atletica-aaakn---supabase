@@ -151,7 +151,7 @@ export default function AdminLojaMenuPage() {
                 PIX / Comprovante da Loja
               </h2>
               <p className="mt-1 text-[11px] text-zinc-500">
-                Esses dados aparecem na sequencia de confirmacao do pedido da loja e em "Meus Pedidos".
+                Esses dados aparecem na sequencia de confirmacao do pedido da loja e em Meus Pedidos.
               </p>
             </div>
             <button

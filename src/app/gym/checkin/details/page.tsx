@@ -75,7 +75,7 @@ export default function CheckinDetailsPage() {
                 fill
                 sizes="160px"
                 className="object-cover" 
-                unoptimized
+                
             />
           </div>
           <p className="text-[10px] text-zinc-500 mt-2 font-bold uppercase tracking-widest">

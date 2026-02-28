@@ -33,7 +33,7 @@ import {
   DEFAULT_COMMUNITY_CATEGORIES,
   normalizeCommunityCategories,
 } from "../../constants/communityCategories";
-import { resolvePlanIcon, resolvePlanTextClass } from "../../constants/planVisuals";
+import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../constants/planVisuals";
 
 // --- TIPAGEM ---
 
@@ -130,27 +130,43 @@ const UserBadges = ({ userData }: { userData: Partial<PostData | CommentData> })
     const isAdmin = userData?.role?.includes("admin") || userData?.role === "master";
     const normalizeIcon = (value: string | undefined) =>
       String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const isDisplayLabel = (value: string | undefined): value is string => {
+      const raw = String(value || "").trim();
+      if (!raw) return false;
+      const normalized = raw
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return normalized !== "visitante" && normalized !== "visitor";
+    };
 
-    const planIconName = normalizeIcon(userData?.plano_icon || "user");
-    const patentIconName = normalizeIcon(userData?.patente_icon || "fish");
-    const planColorClass = resolvePlanTextClass(userData?.plano_cor || "zinc");
-    const patentColorClass = resolvePlanTextClass(userData?.patente_cor || "zinc");
-    const PlanIcon = resolvePlanIcon(userData?.plano_icon || "user", User);
-    const PatentIcon = resolvePlanIcon(userData?.patente_icon || "fish", Fish);
+    const planIconName = normalizeIcon(userData?.plano_icon);
+    const patentIconName = normalizeIcon(userData?.patente_icon);
+    const planColorClass = resolvePlanTextClass(userData?.plano_cor, "text-zinc-400");
+    const patentColorClass = resolvePlanTextClass(userData?.patente_cor, "text-zinc-400");
+    const PlanIcon = planIconName ? resolveUserPlanIcon(userData?.plano_icon, userData?.plano, User) : null;
+    const PatentIcon = patentIconName ? resolvePlanIcon(userData?.patente_icon, Fish) : null;
 
-    const tooltipText = `${userData?.patente || "Novato"} • ${userData?.plano || "Visitante"}`;
+    const tooltipParts = [userData?.patente, userData?.plano]
+      .filter(isDisplayLabel);
+    const tooltipText = tooltipParts.join(" • ");
 
     return (
-        <div className="flex items-center gap-1.5 ml-1 select-none" title={tooltipText}>
+        <div className="flex items-center gap-1.5 ml-1 select-none" title={tooltipText || undefined}>
             {isAdmin && (
                 <span className="flex items-center bg-red-500/10 p-0.5 rounded border border-red-500/20">
                     <ShieldCheck size={10} className="text-red-500" />
                 </span>
             )}
-            <span className={`flex items-center opacity-80 ${planColorClass}`}>
-                <PlanIcon size={12} />
-            </span>
-            {planIconName !== patentIconName && (
+            {PlanIcon && (
+                <span className={`flex items-center opacity-80 ${planColorClass}`}>
+                    <PlanIcon size={12} />
+                </span>
+            )}
+            {PatentIcon && planIconName !== patentIconName && (
                 <span className={`flex items-center ${patentColorClass}`}>
                     <PatentIcon size={14} className="drop-shadow-sm" />
                 </span>
@@ -505,14 +521,12 @@ export default function ComunidadePage() {
         userName: user.nome || "Anônimo",
         handle: user.apelido ? `@${user.apelido}` : "@atleta",
         avatar: user.foto || "https://github.com/shadcn.png",
-
-        plano_cor: user.plano_cor ? String(user.plano_cor) : "zinc",
-        plano_icon: user.plano_icon ? String(user.plano_icon) : "user",
-        plano: user.plano ? String(user.plano) : "Visitante",
-
-        patente: user.patente ? String(user.patente) : "Novato",
-        patente_icon: user.patente_icon || "Fish",
-        patente_cor: user.patente_cor || "text-zinc-400",
+        plano_cor: typeof user.plano_cor === "string" ? user.plano_cor : undefined,
+        plano_icon: typeof user.plano_icon === "string" ? user.plano_icon : undefined,
+        plano: typeof user.plano === "string" ? user.plano : undefined,
+        patente: typeof user.patente === "string" ? user.patente : undefined,
+        patente_icon: typeof user.patente_icon === "string" ? user.patente_icon : undefined,
+        patente_cor: typeof user.patente_cor === "string" ? user.patente_cor : undefined,
 
         role: user.role ? String(user.role) : "user",
       };
@@ -585,14 +599,12 @@ export default function ComunidadePage() {
               userId: user.uid ? String(user.uid) : "",
               userName: user.nome || "Anônimo",
               avatar: user.foto || "/logo.png",
-
-              plano_cor: user.plano_cor ? String(user.plano_cor) : "zinc",
-              plano_icon: user.plano_icon ? String(user.plano_icon) : "user",
-              plano: user.plano ? String(user.plano) : "Membro",
-
-              patente: user.patente ? String(user.patente) : "Novato",
-              patente_icon: user.patente_icon || "Fish",
-              patente_cor: user.patente_cor || "text-zinc-400",
+              plano_cor: typeof user.plano_cor === "string" ? user.plano_cor : undefined,
+              plano_icon: typeof user.plano_icon === "string" ? user.plano_icon : undefined,
+              plano: typeof user.plano === "string" ? user.plano : undefined,
+              patente: typeof user.patente === "string" ? user.patente : undefined,
+              patente_icon: typeof user.patente_icon === "string" ? user.patente_icon : undefined,
+              patente_cor: typeof user.patente_cor === "string" ? user.patente_cor : undefined,
 
               role: user.role ? String(user.role) : "user",
           };
@@ -897,7 +909,7 @@ export default function ComunidadePage() {
                             <div className="flex justify-between items-start">
                                 <div>
                                     <div className="flex items-center gap-1.5">
-                                        <Link href={`/perfil/${post.userId}`} className={`font-bold text-sm hover:underline transition ${resolvePlanTextClass(post.plano_cor || "zinc", "text-zinc-200")}`}>
+                                        <Link href={`/perfil/${post.userId}`} className={`font-bold text-sm hover:underline transition ${resolvePlanTextClass(post.plano_cor, "text-zinc-200")}`}>
                                             {post.userName}
                                         </Link>
                                         <UserBadges userData={post} />
@@ -969,7 +981,7 @@ export default function ComunidadePage() {
                                   <div className="bg-zinc-800/50 p-3 rounded-2xl rounded-tl-none border border-zinc-800/50 w-full">
                                       <div className="flex items-center justify-between">
                                           <div className="flex items-center gap-2">
-                                              <Link href={`/perfil/${comment.userId}`} className={`text-xs font-bold hover:underline ${resolvePlanTextClass(comment.plano_cor || "zinc", "text-white")}`}>{comment.userName}</Link>
+                                              <Link href={`/perfil/${comment.userId}`} className={`text-xs font-bold hover:underline ${resolvePlanTextClass(comment.plano_cor, "text-white")}`}>{comment.userName}</Link>
                                               <UserBadges userData={comment}/> 
                                               <span className="text-[8px] text-zinc-600 ml-auto">{formatCustomDate(comment.createdAt)}</span>
                                           </div>

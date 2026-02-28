@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import {
   ArrowLeft, CreditCard, ChevronRight,
-  QrCode, X, Award
+  QrCode, X, Award, Ghost
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // ðŸ¦ˆ Importado para otimização
@@ -16,7 +16,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import SharkLoader from "@/app/components/SharkLoader";
 import { getTurmaImage } from "@/constants/turmaImages";
-import { resolvePlanIcon, resolvePlanTheme } from "@/constants/planVisuals";
+import { resolvePlanTheme, resolveUserPlanIcon } from "@/constants/planVisuals";
 
 export default function CarteirinhaPage() {
   const { user, loading } = useAuth();
@@ -61,7 +61,7 @@ export default function CarteirinhaPage() {
 
   // Define o estilo
   const style = resolvePlanTheme(userCor);
-  const PlanIcon = resolvePlanIcon(userIconName, Award);
+  const PlanIcon = resolveUserPlanIcon(userIconName, user.plano, Ghost);
   const canUpgrade = userCor === 'zinc' || userCor === 'emerald';
 
   return (
@@ -97,7 +97,7 @@ export default function CarteirinhaPage() {
                  alt="Background Turma"
                  fill
                  className="object-cover opacity-60 mix-blend-overlay brightness-75 scale-105"
-                 unoptimized // Permite URLs externas/base64 sem config no next.config.js
+                  // Permite URLs externas/base64 sem config no next.config.js
                  priority
               />
              <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-black/80"></div>
@@ -143,7 +143,7 @@ export default function CarteirinhaPage() {
                       alt="Foto do Atleta"
                       fill
                       className="object-cover object-top"
-                      unoptimized
+                      
                     />
                 </div>
                 <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 pointer-events-none rounded-[4px]"></div>

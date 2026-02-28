@@ -197,7 +197,7 @@ export default function AdminFidelidadePage() {
                         alt={u.nome}
                         width={40}
                         height={40}
-                        unoptimized
+                        
                         className="rounded-full border border-zinc-700 object-cover w-10 h-10" 
                       />
                       <div><p className="font-bold text-sm text-white">{u.nome}</p><p className="text-[10px] text-zinc-500">{u.turma}</p></div>
@@ -223,7 +223,7 @@ export default function AdminFidelidadePage() {
                         src={reward.image || "/logo.png"} 
                         alt={reward.title}
                         fill
-                        unoptimized
+                        
                         className="object-cover"
                     />
                 </div>

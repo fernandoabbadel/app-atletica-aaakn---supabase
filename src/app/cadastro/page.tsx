@@ -352,7 +352,7 @@ export default function CadastroPage() {
                                 alt="Avatar" 
                                 fill
                                 className="object-cover" 
-                                unoptimized
+                                
                             />
                         )}
                         
@@ -571,7 +571,7 @@ export default function CadastroPage() {
                                             alt={t.nome} 
                                             fill 
                                             className="object-cover" 
-                                            unoptimized
+                                            
                                             priority={t.id === "T1" || t.id === "T2"}
                                         />
                                     </div>

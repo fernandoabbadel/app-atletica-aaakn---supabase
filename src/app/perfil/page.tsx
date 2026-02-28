@@ -6,7 +6,7 @@ import {
   ArrowLeft, MapPin, Edit3, Instagram, MessageCircle, Ghost, Fish, Share2, ShieldCheck, Loader2, 
   X, PawPrint, Users, Lock, Heart, UserCheck,
   Trophy, Calendar, Dumbbell, LayoutList,
-  ChevronRight, User, Clock, CheckCircle, Camera
+  ChevronRight, Clock, CheckCircle, Camera
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext"; 
@@ -23,7 +23,7 @@ import { validateImageFile } from "../../lib/upload";
 import Link from "next/link";
 import Image from "next/image";
 import { getTurmaImage } from "../../constants/turmaImages";
-import { resolvePlanIcon, resolvePlanTextClass } from "../../constants/planVisuals";
+import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../constants/planVisuals";
 
 // ============================================================================
 // 🦈 1. INTERFACES & TIPAGEM (ID 906)
@@ -162,11 +162,11 @@ const ProfileBadges = ({ userData }: { userData: UserProfile }) => {
     const isAdmin = userData?.role?.includes('admin') || userData?.role === 'master';
     const normalizeIcon = (value: string | undefined) =>
       String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const planIconName = normalizeIcon(userData?.plano_icon || "user");
+    const planIconName = normalizeIcon(userData?.plano_icon || "ghost");
     const patentIconName = normalizeIcon(userData?.patente_icon || "fish");
     const planColorClass = resolvePlanTextClass(userData?.plano_cor || "zinc");
     const patentColorClass = resolvePlanTextClass(userData?.patente_cor || "zinc");
-    const PlanIcon = resolvePlanIcon(userData?.plano_icon || "user", User);
+    const PlanIcon = resolveUserPlanIcon(userData?.plano_icon, userData?.plano, Ghost);
     const PatentIcon = resolvePlanIcon(userData?.patente_icon || "fish", Fish);
 
     return (
@@ -264,7 +264,7 @@ export default function MeuPerfilPage() {
 
     const fetchProfile = async () => {
         try {
-            const bundle = await fetchOwnProfileBundle(user.uid, { forceRefresh: false });
+            const bundle = await fetchOwnProfileBundle(user.uid, { forceRefresh: true });
             if (bundle?.profile) {
                 const data = bundle.profile as UserProfile;
                 setProfile(data);
@@ -457,7 +457,7 @@ export default function MeuPerfilPage() {
                 alt="Capa"
                 fill
                 className="object-cover opacity-60 blur-[2px] group-hover:blur-0 transition duration-700"
-                unoptimized
+                
                 sizes="100vw"
                 priority
             />
@@ -478,7 +478,7 @@ export default function MeuPerfilPage() {
                         alt="Foto Perfil"
                         fill
                         className="rounded-full object-cover border-4 border-[#050505]"
-                        unoptimized
+                        
                         sizes="(max-width: 768px) 160px, 160px"
                     />
                     {/* ID 1020/1023: Ícone de Upload VOLTOU, mas só aparece no HOVER */}
@@ -491,7 +491,7 @@ export default function MeuPerfilPage() {
                 {/* 2. Logo da Turma (ID 1021 - Sobreposta CORRETAMENTE no canto inferior direito) */}
                 {/* Está "absoluta" em relação ao pai de 160px (w-40), garantindo que fique na borda */}
                 <div className="absolute bottom-0 right-0 w-14 h-14 bg-black rounded-full border-2 border-[#050505] flex items-center justify-center shadow-lg z-20 overflow-hidden">
-                    <Image src={turmaImage} alt="Turma" fill className="object-cover" unoptimized sizes="56px"/>
+                    <Image src={turmaImage} alt="Turma" fill className="object-cover"  sizes="56px"/>
                 </div>
                 
                 {/* 🦈 REMOVIDO: Level Badge (Peixe Palhaço) - ID 1030 */}
@@ -580,7 +580,7 @@ export default function MeuPerfilPage() {
 
                     {activeTab === 'eventos' && (
                         myEvents.length > 0 ? (
-                            <div className="grid grid-cols-2 gap-3 animate-in fade-in">{myEvents.map(e => (<Link href={`/eventos/${e.id}`} key={e.id} className="group flex flex-col bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-emerald-500/50 transition-all shadow-lg hover:shadow-emerald-500/10"><div className="h-28 w-full bg-zinc-800 relative overflow-hidden"><Image src={e.imagem || "https://placehold.co/600x400/111/333?text=Evento"} alt={e.titulo} fill className="object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500" style={{ objectPosition: `50% ${e.imagePositionY || 50}%` }} unoptimized sizes="(max-width: 768px) 100vw, 50vw" /><div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent"/><div className="absolute bottom-2 left-2 right-2"><p className="text-[10px] font-black text-white uppercase truncate drop-shadow-md">{e.titulo}</p></div></div><div className="p-2 flex items-center justify-between bg-zinc-950"><div className="flex items-center gap-1 text-[9px] text-zinc-400 font-bold uppercase"><Calendar size={10} className="text-emerald-500"/><span>{e.data || "Data à definir"}</span></div><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_#10b981]"></div></div></Link>))}</div>
+                            <div className="grid grid-cols-2 gap-3 animate-in fade-in">{myEvents.map(e => (<Link href={`/eventos/${e.id}`} key={e.id} className="group flex flex-col bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-emerald-500/50 transition-all shadow-lg hover:shadow-emerald-500/10"><div className="h-28 w-full bg-zinc-800 relative overflow-hidden"><Image src={e.imagem || "https://placehold.co/600x400/111/333?text=Evento"} alt={e.titulo} fill className="object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500" style={{ objectPosition: `50% ${e.imagePositionY || 50}%` }}  sizes="(max-width: 768px) 100vw, 50vw" /><div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent"/><div className="absolute bottom-2 left-2 right-2"><p className="text-[10px] font-black text-white uppercase truncate drop-shadow-md">{e.titulo}</p></div></div><div className="p-2 flex items-center justify-between bg-zinc-950"><div className="flex items-center gap-1 text-[9px] text-zinc-400 font-bold uppercase"><Calendar size={10} className="text-emerald-500"/><span>{e.data || "Data à definir"}</span></div><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_#10b981]"></div></div></Link>))}</div>
                         ) : <div className="text-center text-zinc-600 text-xs py-4">Nenhum evento marcado.</div>
                     )}
 
@@ -592,7 +592,7 @@ export default function MeuPerfilPage() {
                                         <div className="w-24 h-24 rounded-full bg-black border-2 border-zinc-800 p-0.5 group-hover:border-emerald-500 group-hover:scale-105 transition-all shadow-lg">
                                             <div className="w-full h-full rounded-full overflow-hidden bg-zinc-900 flex items-center justify-center relative">
                                                 {l.logoBase64 ? (
-                                                    <Image src={l.logoBase64} alt={l.nome} fill className="object-cover" unoptimized sizes="96px" />
+                                                    <Image src={l.logoBase64} alt={l.nome} fill className="object-cover"  sizes="96px" />
                                                 ) : (
                                                     <Users size={32} className="text-zinc-500"/>
                                                 )}
@@ -616,7 +616,7 @@ export default function MeuPerfilPage() {
                                                     alt={t.modalidade}
                                                     fill
                                                     className="object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500"
-                                                    unoptimized
+                                                    
                                                     sizes="96px"
                                                  />
                                                  <div className="absolute inset-0 bg-gradient-to-r from-transparent to-zinc-900"/>
@@ -759,7 +759,7 @@ export default function MeuPerfilPage() {
                       <button onClick={() => setActiveModal(null)} className="p-1 text-zinc-500 hover:text-white"><X size={20}/></button>
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                      {(activeModal === 'followers' ? followersList : followingList).length === 0 ? <div className="text-center py-10 text-zinc-600"><Ghost size={32} className="mx-auto mb-2 opacity-50"/><p className="text-xs">Nada por aqui.</p></div> : (activeModal === 'followers' ? followersList : followingList).map(f => (<Link href={`/perfil/${f.uid}`} key={f.uid} onClick={() => setActiveModal(null)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-900 transition border border-transparent hover:border-zinc-800"><div className="w-10 h-10 rounded-full bg-black overflow-hidden border border-zinc-700 relative"><Image src={f.foto || "https://github.com/shadcn.png"} alt={f.nome} fill sizes="40px" className="object-cover" unoptimized/></div><div className="flex-1"><p className="text-sm font-bold text-white">{f.nome}</p><p className="text-[10px] text-zinc-500 font-bold uppercase">{f.turma || "Bicho"}</p></div><ChevronRight size={14} className="text-zinc-600"/></Link>))}
+                      {(activeModal === 'followers' ? followersList : followingList).length === 0 ? <div className="text-center py-10 text-zinc-600"><Ghost size={32} className="mx-auto mb-2 opacity-50"/><p className="text-xs">Nada por aqui.</p></div> : (activeModal === 'followers' ? followersList : followingList).map(f => (<Link href={`/perfil/${f.uid}`} key={f.uid} onClick={() => setActiveModal(null)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-900 transition border border-transparent hover:border-zinc-800"><div className="w-10 h-10 rounded-full bg-black overflow-hidden border border-zinc-700 relative"><Image src={f.foto || "https://github.com/shadcn.png"} alt={f.nome} fill sizes="40px" className="object-cover" /></div><div className="flex-1"><p className="text-sm font-bold text-white">{f.nome}</p><p className="text-[10px] text-zinc-500 font-bold uppercase">{f.turma || "Bicho"}</p></div><ChevronRight size={14} className="text-zinc-600"/></Link>))}
                   </div>
               </div>
           </div>

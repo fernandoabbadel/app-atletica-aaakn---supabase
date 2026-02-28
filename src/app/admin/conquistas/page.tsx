@@ -370,7 +370,7 @@ export default function AdminConquistasPage() {
                                 <div className="flex items-center gap-4">
                                     <span className="font-black text-zinc-700 w-4">#{i+1}</span>
                                     <div className="w-10 h-10 rounded-full border-2 border-zinc-800 overflow-hidden relative">
-                                        <Image src={u.foto || "https://github.com/shadcn.png"} alt={u.nome} fill className="object-cover" unoptimized/>
+                                        <Image src={u.foto || "https://github.com/shadcn.png"} alt={u.nome} fill className="object-cover" />
                                     </div>
                                     <div><p className="font-bold text-sm text-white">{u.nome}</p><p className="text-[10px] text-zinc-500 uppercase">{u.turma} • XP: {u.xp}</p></div>
                                 </div>

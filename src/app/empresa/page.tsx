@@ -69,7 +69,7 @@ export default function EmpresaLoginPage() {
                      alt="AAAKN" 
                      fill
                      className="object-contain relative z-10 drop-shadow-2xl" 
-                     unoptimized
+                     
                    />
                 </div>
                 <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-1">Área do Parceiro</h1>

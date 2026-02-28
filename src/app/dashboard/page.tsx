@@ -117,7 +117,7 @@ const EventCardItem = ({ evt, userId, onToggleLike }: { evt: Evento, userId: str
                 fill
                 className="object-cover opacity-80 group-hover:opacity-100 transition duration-500" 
                 style={{ objectPosition: `50% ${evt.imagePositionY || 50}%` }} 
-                unoptimized
+                
             />
         ) : (
             <div className="w-full h-full flex items-center justify-center text-zinc-700"><Calendar size={48}/></div>
@@ -163,7 +163,7 @@ const ProductCard = ({ prod, userId, onToggleLike, turmaStats }: { prod: Produto
                     alt={prod.nome}
                     fill
                     className="object-cover group-hover:scale-105 transition duration-500" 
-                    unoptimized
+                    
                 />
             </Link>
             
@@ -205,7 +205,7 @@ const ProductCard = ({ prod, userId, onToggleLike, turmaStats }: { prod: Produto
                                               alt={`T${st.turma}`}
                                               fill
                                               className="object-cover"
-                                              unoptimized
+                                              
                                            />
                                     </div>
                                     <span className="text-[9px] font-bold text-zinc-400 ml-1.5">+{st.count}</span>
@@ -416,7 +416,7 @@ export default function DashboardPage() {
                     alt="Perfil" 
                     fill
                     className="rounded-full object-cover" 
-                    unoptimized
+                    
                 />
             </div>
         </Link>
@@ -441,7 +441,7 @@ export default function DashboardPage() {
                       alt={p.nome}
                       fill
                       className="object-cover opacity-35 group-hover:opacity-50 transition"
-                      unoptimized
+                      
                     />
                     <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/65 to-black" />
                   </div>
@@ -451,7 +451,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="relative z-10 h-full flex flex-col justify-end p-6">
                     <div className="w-24 h-24 rounded-2xl bg-black/70 border border-yellow-500/30 overflow-hidden mb-4 relative shadow-[0_0_20px_rgba(234,179,8,0.15)]">
-                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill className="object-cover" unoptimized />
+                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill className="object-cover"  />
                     </div>
                     <h3 className="text-2xl font-black uppercase italic text-white leading-tight">{p.nome}</h3>
                     <p className="text-xs font-bold uppercase tracking-widest text-yellow-300/80 mt-2">
@@ -477,11 +477,11 @@ export default function DashboardPage() {
                     className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-700 hover:border-zinc-500"
                   >
                     <div className="absolute inset-0">
-                      <Image src={getPartnerCoverSrc(p)} alt="Capa" fill className="object-cover opacity-25 group-hover:opacity-40 transition" unoptimized />
+                      <Image src={getPartnerCoverSrc(p)} alt="Capa" fill className="object-cover opacity-25 group-hover:opacity-40 transition"  />
                       <div className="absolute inset-0 bg-black/50" />
                     </div>
                     <div className="w-20 h-20 bg-black rounded-full border-2 border-zinc-500/80 flex items-center justify-center overflow-hidden shadow-2xl relative z-10 group-hover:scale-110 transition">
-                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill className="object-cover" unoptimized />
+                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill className="object-cover"  />
                     </div>
                     <div className="text-center relative z-10 px-2 w-full">
                       <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>
@@ -501,7 +501,7 @@ export default function DashboardPage() {
             alt="Carteira BG"
             fill
             className="object-cover opacity-40 group-hover:opacity-50 transition transform group-hover:scale-105 duration-700" 
-            unoptimized
+            
             priority
           />
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-transparent p-6 flex flex-col justify-center">
@@ -531,7 +531,7 @@ export default function DashboardPage() {
               <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 opacity-30 group-hover:opacity-50 transition">
                   {treinos.length > 0 ? treinos.map((img, i) => (
                     <div key={i} className="relative w-full h-full border-[0.5px] border-black">
-                        <Image src={img} alt="Treino" fill className="object-cover" unoptimized/>
+                        <Image src={img} alt="Treino" fill className="object-cover" />
                     </div>
                   )) : (
                       <>
@@ -638,7 +638,7 @@ export default function DashboardPage() {
                                             alt={liga.nome}
                                             fill
                                             className="rounded-full object-cover"
-                                            unoptimized
+                                            
                                        />
                                    </div>
                                    {bizuAtivo && (
@@ -713,11 +713,11 @@ export default function DashboardPage() {
                    {parceirosStandard.map((p) => (
                        <Link href={`/parceiros/${p.id}`} key={p.id} className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-800 hover:border-zinc-600">
                            <div className="absolute inset-0">
-                               <Image src={getPartnerCoverSrc(p)} alt="Capa" fill className="object-cover opacity-30 group-hover:opacity-50 transition" unoptimized/>
+                               <Image src={getPartnerCoverSrc(p)} alt="Capa" fill className="object-cover opacity-30 group-hover:opacity-50 transition" />
                                <div className="absolute inset-0 bg-black/40"/>
                            </div>
                            <div className="w-20 h-20 bg-black rounded-full border-2 border-zinc-600 flex items-center justify-center overflow-hidden shadow-2xl relative z-10 group-hover:scale-110 transition">
-                               <Image src={getPartnerLogoSrc(p)} alt="Logo" fill className="object-cover" unoptimized/>
+                               <Image src={getPartnerLogoSrc(p)} alt="Logo" fill className="object-cover" />
                            </div>
                            <div className="text-center relative z-10 px-2 w-full">
                                <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>
@@ -744,7 +744,7 @@ export default function DashboardPage() {
                             alt="Avatar"
                             fill
                             className="object-cover"
-                            unoptimized
+                            
                         />
                       </div>
                       <div className="flex-1 min-w-0">

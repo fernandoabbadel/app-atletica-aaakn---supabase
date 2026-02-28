@@ -9,7 +9,8 @@
     "verify": "npm run lint && npm run type-check",
     "build": "npm run verify && npm run check-schema && next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint src scripts next.config.ts tailwind.config.ts",
+    "scan:unoptimized": "node scripts/find-unoptimized.mjs src/app",
     "smoke": "playwright test tests/smoke",
     "smoke:ligas": "playwright test tests/smoke/ligas.spec.ts"
   },

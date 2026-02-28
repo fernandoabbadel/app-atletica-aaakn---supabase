@@ -61,7 +61,7 @@ export interface UserProfile {
   sharkCoins: number;
   selos: number;
   patente: string; // Ex: "Plâncton"
-  tier: "bicho" | "atleta" | "veterano";
+  tier: "bicho" | "cardume" | "atleta" | "lenda" | "veterano";
   
   // Plano / Associação
   plano: string; 

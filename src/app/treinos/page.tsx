@@ -213,7 +213,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
                         src={treino.imagem || "https://placehold.co/800x600/111/333"} 
                         alt={`Capa do treino de ${treino.modalidade}`}
                         fill
-                        unoptimized // 🦈 Para evitar erro de host externo
+                         // 🦈 Para evitar erro de host externo
                         className="object-cover opacity-60 group-hover:opacity-80 group-hover:scale-105 transition duration-1000" 
                     />
                     <div className={`absolute inset-0 bg-gradient-to-b ${theme.gradient}`}></div>
@@ -262,7 +262,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
                                                     alt={`Logo ${t.turma}`}
                                                     fill
                                                     className="object-cover"
-                                                    unoptimized
+                                                    
                                                 />
                                             ) : (
                                                 <span className="text-[9px] flex items-center justify-center h-full text-white font-bold">{t.turma}</span>
@@ -284,7 +284,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
                                             alt={`Avatar participante ${i}`}
                                             fill
                                             className="object-cover"
-                                            unoptimized
+                                            
                                         />
                                     </div>
                                 ))}

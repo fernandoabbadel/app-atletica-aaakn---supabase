@@ -2,18 +2,18 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import Image from "next/image";
 import {
   Home, Calendar, Dumbbell, CreditCard, Menu, X, Wallet,
   Trophy, Gamepad2, ShoppingBag, Settings, HelpCircle, LogOut,
   ChevronRight, Handshake, Clock, CalendarRange, MessageCircle, MapPin,
-  Crown, Medal, Star, ShieldCheck, User, LogIn, Layout, Camera,
+  Crown, Medal, Star, ShieldCheck, Ghost, LogIn, Layout, Camera,
   Target, GraduationCap, Users, Lock, Bell, Fish, Swords, Sparkles, ScanLine // ðŸ¦ˆ Adicionado Sparkles
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { isPermissionError } from "@/lib/backendErrors";
+import { OptimizedImage } from "@/app/components/shared/OptimizedImage";
 import { getTurmaImage } from "../../constants/turmaImages";
-import { resolvePlanIcon, resolvePlanTextClass } from "@/constants/planVisuals";
+import { resolvePlanTextClass, resolveUserPlanIcon } from "@/constants/planVisuals";
 import {
   fetchBottomNavBannedAppealsCount,
   fetchBottomNavNotifications,
@@ -65,7 +65,7 @@ const resolveTurmaSlug = (turmaRaw?: string): string => {
 const UserBadges = ({ userData }: { userData: UserData }) => {
     const isAdmin = userData?.role === 'master' || userData?.role === 'admin_geral' || userData?.role === 'admin_gestor';
     const planColorClass = resolvePlanTextClass(userData?.plano_cor || "zinc");
-    const PlanIcon = resolvePlanIcon(userData?.plano_icon || "user", User);
+    const PlanIcon = resolveUserPlanIcon(userData?.plano_icon, userData?.plano, Ghost);
 
     return (
         <div className="flex items-center gap-1.5">
@@ -326,7 +326,7 @@ export default function BottomNavbar() {
         <div className="p-6 pb-4 border-b border-zinc-800 bg-black/40 backdrop-blur-sm flex justify-between items-center">
             <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-900/20 relative">
-                    <Image src="/logo.png" alt="Logo" fill sizes="32px" className="object-contain p-1" unoptimized priority/>
+                    <OptimizedImage src="/logo.png" alt="Logo" fill sizes="32px" className="object-contain p-1" priority/>
                 </div>
                 <div>
                     <h2 className="text-lg font-black italic uppercase text-white leading-none">AAAKN</h2>
@@ -372,11 +372,11 @@ export default function BottomNavbar() {
                     <div onClick={() => handleNavigation('/perfil')} className="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-2xl border border-zinc-800 mb-4 cursor-pointer hover:bg-zinc-900 hover:border-emerald-500/30 transition group">
                         <div className="relative">
                             <div className="w-12 h-12 rounded-full bg-black overflow-hidden border-2 border-zinc-700 group-hover:border-emerald-500 transition relative">
-                                <Image src={currentUser.foto || "https://github.com/shadcn.png"} alt="User" fill className="object-cover" unoptimized/>
+                                <OptimizedImage src={currentUser.foto || "https://github.com/shadcn.png"} alt="User" fill sizes="48px" className="object-cover"/>
                             </div>
                             {userTurmaImg && (
                                 <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border border-zinc-900 overflow-hidden shadow-sm z-10">
-                                    <Image src={userTurmaImg} alt="Turma" fill className="object-cover" unoptimized/>
+                                    <OptimizedImage src={userTurmaImg} alt="Turma" fill sizes="20px" className="object-cover"/>
                                 </div>
                             )}
                         </div>

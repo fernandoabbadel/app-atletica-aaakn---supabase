@@ -378,7 +378,7 @@ export default function AdminGymPage() {
                                     >
                                         <div className="font-black text-red-700 w-4">#{i+1}</div>
                                         <div className="w-8 h-8 rounded-full border border-red-500/30 overflow-hidden bg-zinc-900 relative">
-                                            <Image src={profile.foto} alt={profile.usuario} fill className="object-cover" unoptimized/>
+                                            <Image src={profile.foto} alt={profile.usuario} fill className="object-cover" />
                                         </div>
                                         <div className="flex-1">
                                             <p className="text-xs font-bold text-red-200 group-hover:underline">{profile.usuario}</p>
@@ -399,7 +399,7 @@ export default function AdminGymPage() {
                             {RANKING_TURMAS_MOCK.map((turma) => (
                                 <div key={turma.id} className="flex items-center gap-4">
                                     <div className="w-10 h-10 rounded-full bg-black border border-zinc-700 overflow-hidden shrink-0 relative">
-                                        <Image src={turma.logo} alt={turma.nome} fill className="object-cover" unoptimized/>
+                                        <Image src={turma.logo} alt={turma.nome} fill className="object-cover" />
                                     </div>
                                     <div className="flex-1">
                                         <div className="flex justify-between text-xs mb-1">
@@ -434,7 +434,7 @@ export default function AdminGymPage() {
                                         <div className="flex items-center gap-3">
                                             <span className={`text-sm font-black w-4 ${user.pos <= 3 ? 'text-yellow-500' : 'text-zinc-600'}`}>{user.pos}</span>
                                             <div className="w-6 h-6 rounded-full overflow-hidden border border-zinc-700 relative">
-                                                <Image src={user.avatar} alt={user.nome} fill className="object-cover" unoptimized/>
+                                                <Image src={user.avatar} alt={user.nome} fill className="object-cover" />
                                             </div>
                                             <span className="text-xs font-bold text-zinc-300 group-hover:text-white transition">{user.nome}</span>
                                         </div>
@@ -472,14 +472,14 @@ export default function AdminGymPage() {
                             <div className="p-3 flex justify-between items-center border-b bg-black/40 border-zinc-800">
                                 <Link href={`/perfil/${item.usuarioHandle}`} className="flex items-center gap-2 group">
                                     <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 overflow-hidden relative">
-                                        <Image src={item.foto} alt="Avatar" fill className="object-cover" unoptimized/>
+                                        <Image src={item.foto} alt="Avatar" fill className="object-cover" />
                                     </div>
                                     <div><span className="text-xs font-bold text-white block group-hover:text-emerald-400 transition">{item.usuario}</span><span className="text-[9px] text-zinc-500 uppercase">{item.turma}</span></div>
                                 </Link>
                                 <span className="text-[9px] text-zinc-500">{item.data}</span>
                             </div>
                             <div className="relative h-56 bg-black group cursor-zoom-in" onClick={() => setShowModalImage(item)}>
-                                <Image src={item.foto} alt="Treino" fill className="object-cover opacity-90 group-hover:opacity-100 transition" unoptimized/>
+                                <Image src={item.foto} alt="Treino" fill className="object-cover opacity-90 group-hover:opacity-100 transition" />
                                 {item.status !== 'pendente' && <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-sm z-10"><span className={`px-3 py-1 rounded-full text-xs font-black uppercase ${item.status === 'punido' || item.status === 'rejeitado' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-black'}`}>{item.status}</span></div>}
                                 {item.motivoDenuncia && <div className="absolute bottom-0 left-0 w-full bg-red-900/90 backdrop-blur-md p-2 border-t border-red-500/50 z-10"><p className="text-[10px] text-red-200 font-bold uppercase mb-1">Motivo:</p><p className="text-xs text-white truncate">&quot;{item.motivoDenuncia}&quot;</p></div>}
                             </div>
@@ -505,7 +505,7 @@ export default function AdminGymPage() {
             <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300">
                 {champs.map(champ => (
                     <div key={champ.id} className="bg-zinc-900 p-5 rounded-2xl border border-zinc-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative overflow-hidden">
-                        {champ.fotoCapa && <div className="absolute inset-0 z-0 opacity-10"><Image src={champ.fotoCapa} alt="Bg" fill className="object-cover" unoptimized/></div>}
+                        {champ.fotoCapa && <div className="absolute inset-0 z-0 opacity-10"><Image src={champ.fotoCapa} alt="Bg" fill className="object-cover" /></div>}
                         <div className="flex items-start gap-4 relative z-10">
                             <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-black shadow-lg shrink-0 ${champ.status === 'ativo' ? 'bg-emerald-500' : 'bg-zinc-700 text-zinc-400'}`}><Trophy size={24} /></div>
                             <div>
@@ -553,7 +553,7 @@ export default function AdminGymPage() {
                   
                   {/* COLUNA ESQUERDA: FOTO */}
                   <div className="md:w-[60%] bg-black relative flex items-center justify-center h-64 md:h-auto">
-                      <Image src={showModalImage.foto} alt="Prova" fill className="object-cover" unoptimized/>
+                      <Image src={showModalImage.foto} alt="Prova" fill className="object-cover" />
                       
                       {/* Badge de Status (Admin) */}
                       <div className={`absolute top-6 left-6 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wide flex items-center gap-2 shadow-lg z-10 ${
@@ -570,7 +570,7 @@ export default function AdminGymPage() {
                       <div className="p-6 border-b border-zinc-800/50 flex items-center gap-4">
                           <Link href={`/perfil/${showModalImage.usuarioHandle}`} className="group relative w-12 h-12">
                             <div className="absolute inset-0 rounded-full p-0.5 border border-zinc-700 group-hover:border-[#10b981] transition overflow-hidden">
-                                <Image src={showModalImage.foto} alt="Avatar" fill className="object-cover" unoptimized/>
+                                <Image src={showModalImage.foto} alt="Avatar" fill className="object-cover" />
                             </div>
                           </Link>
                           <div>
@@ -650,7 +650,7 @@ export default function AdminGymPage() {
                       {selectedShameProfile.treinos.map((item, i) => (
                           <div key={i} className="flex items-center gap-4 p-4 bg-black/40 rounded-2xl border border-zinc-800">
                               <div className="w-12 h-12 rounded-xl bg-zinc-800 overflow-hidden shrink-0 cursor-zoom-in group relative" onClick={() => setShowModalImage(item)}>
-                                  <Image src={item.foto} alt="Prova" fill className="object-cover" unoptimized/>
+                                  <Image src={item.foto} alt="Prova" fill className="object-cover" />
                                   <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-10"><Eye size={16}/></div>
                               </div>
                               <div className="flex-1">
@@ -671,7 +671,7 @@ export default function AdminGymPage() {
               <div className="bg-zinc-900 w-full max-w-md rounded-3xl border border-zinc-800 p-6 space-y-4">
                   <h2 className="font-bold text-white text-lg">{editingChamp.id ? 'Editar' : 'Novo'} Campeonato</h2>
                   <div onClick={() => fileInputRef.current?.click()} className="h-32 rounded-2xl border-2 border-dashed border-zinc-700 flex flex-col items-center justify-center cursor-pointer hover:border-emerald-500 hover:bg-zinc-800/50 transition overflow-hidden relative">
-                      {editingChamp.fotoCapa ? <Image src={editingChamp.fotoCapa} alt="Capa" fill className="object-cover" unoptimized/> : <><UploadCloud size={24} className="text-zinc-500 mb-2 relative z-10"/><span className="text-xs text-zinc-500 font-bold uppercase relative z-10">Capa do Evento</span></>}
+                      {editingChamp.fotoCapa ? <Image src={editingChamp.fotoCapa} alt="Capa" fill className="object-cover" /> : <><UploadCloud size={24} className="text-zinc-500 mb-2 relative z-10"/><span className="text-xs text-zinc-500 font-bold uppercase relative z-10">Capa do Evento</span></>}
                       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                   </div>
                   <input type="text" placeholder="Título" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white focus:border-emerald-500 outline-none" value={editingChamp.titulo || ""} onChange={e => setEditingChamp({...editingChamp, titulo: e.target.value})} />

@@ -135,7 +135,7 @@ export default function AlbumTurmasPage() {
           alt="Capa do album"
           fill
           className="object-cover opacity-75"
-          unoptimized
+          
           priority
           sizes="100vw"
         />
@@ -212,7 +212,7 @@ export default function AlbumTurmasPage() {
                   priority={index < 2}
                   className="object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition duration-500"
                   sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 25vw"
-                  unoptimized
+                  
                   onError={() =>
                     setImageFallbackIndex((prev) => {
                       const current = prev[turma.id] ?? 0;
