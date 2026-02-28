@@ -134,6 +134,10 @@ const DEFAULT_PATENTES: PatenteConfig[] = [
 const COMMENT_MAX_CHARS = 280;
 const POLL_OPTION_MAX_CHARS = 40;
 const POLL_OPTION_MAX_COUNT = 10;
+const EVENT_DETAILS_RSVPS_LIMIT = 200;
+const EVENT_DETAILS_COMMENTS_LIMIT = 100;
+const EVENT_DETAILS_POLLS_LIMIT = 20;
+const EVENT_DETAILS_PEDIDOS_LIMIT = 20;
 
 const parseEventDate = (dateStr: string, timeStr: string = "00:00") => {
     try {
@@ -289,10 +293,10 @@ export default function DetalhesEventoPage() {
               const bundle = await fetchEventDetailsBundle({
                   eventId,
                   userId: user?.uid || null,
-                  rsvpsLimit: 600,
-                  commentsLimit: 300,
-                  pollsLimit: 60,
-                  pedidosLimit: 60,
+                  rsvpsLimit: EVENT_DETAILS_RSVPS_LIMIT,
+                  commentsLimit: EVENT_DETAILS_COMMENTS_LIMIT,
+                  pollsLimit: EVENT_DETAILS_POLLS_LIMIT,
+                  pedidosLimit: EVENT_DETAILS_PEDIDOS_LIMIT,
                   forceRefresh: false,
               });
 

@@ -9,6 +9,13 @@ const MAX_PRODUCTS = 240;
 const MAX_ORDERS = 1200;
 const MAX_REVIEWS = 600;
 const MAX_CATEGORIES = 300;
+const STORE_PRODUCT_SELECT_COLUMNS =
+  "id,nome,preco,precoAntigo,img,descricao,likes,categoria,estoque,cores,variantes,caracteristicas,active,aprovado,createdAt,updatedAt";
+const STORE_CATEGORY_SELECT_COLUMNS = "id,nome";
+const STORE_REVIEW_SELECT_COLUMNS =
+  "id,productId,userId,userName,userAvatar,rating,comment,createdAt,updatedAt";
+const STORE_ORDER_SELECT_COLUMNS =
+  "id,userId,userName,productId,productName,price,total,quantidade,itens,data,status,createdAt,updatedAt";
 
 const productsFeedCache = new Map<string, CacheEntry<Row[]>>();
 const productsPageCache = new Map<string, CacheEntry<StoreProductsPageResult>>();
@@ -92,12 +99,14 @@ const normalizeRowTimestamps = (row: Row): Row => {
 };
 
 async function queryRows(table: string, options?: {
+  selectColumns?: string;
   eq?: Record<string, string | number | boolean>;
   orderBy?: { column: string; ascending: boolean };
   limit?: number;
 }): Promise<Row[]> {
   const supabase = getSupabaseClient();
-  let query = supabase.from(table).select("*");
+  const selectColumns = options?.selectColumns ?? "id";
+  let query = supabase.from(table).select(selectColumns);
 
   if (options?.eq) {
     for (const [column, value] of Object.entries(options.eq)) {
@@ -113,7 +122,8 @@ async function queryRows(table: string, options?: {
 
   const { data, error } = await query;
   if (error) throwSupabaseError(error);
-  return (data ?? []).map((row) => normalizeRowTimestamps(row as Row));
+  const rows = (data ?? []) as unknown as Row[];
+  return rows.map((row) => normalizeRowTimestamps(row));
 }
 
 export interface StoreProductDetailBundle {
@@ -146,11 +156,15 @@ export async function fetchStoreCategories(options?: {
   let rows: Row[] = [];
   try {
     rows = await queryRows("categorias", {
+      selectColumns: STORE_CATEGORY_SELECT_COLUMNS,
       orderBy: { column: "nome", ascending: true },
       limit: maxResults,
     });
   } catch {
-    rows = await queryRows("categorias", { limit: maxResults });
+    rows = await queryRows("categorias", {
+      selectColumns: STORE_CATEGORY_SELECT_COLUMNS,
+      limit: maxResults,
+    });
   }
 
   setCache(categoriesCache, cacheKey, rows);
@@ -180,7 +194,7 @@ export async function fetchStoreProductsPage(options?: {
   const to = from + pageSize; // inclui +1 item para detectar hasMore (range e inclusivo)
 
   const runQuery = async (withOrder: boolean): Promise<Row[]> => {
-    let query = supabase.from("produtos").select("*");
+    let query = supabase.from("produtos").select(STORE_PRODUCT_SELECT_COLUMNS);
     query = query.eq("active", true).eq("aprovado", true);
     if (category) query = query.eq("categoria", category);
     if (withOrder) {
@@ -227,8 +241,17 @@ export async function fetchStoreProducts(options?: {
 
   const runQuery = async (withOrder: boolean): Promise<Row[]> => {
     return queryRows("produtos", withOrder
-      ? { eq: { active: true, aprovado: true }, orderBy: { column: "nome", ascending: true }, limit: maxResults }
-      : { eq: { active: true, aprovado: true }, limit: maxResults });
+      ? {
+          selectColumns: STORE_PRODUCT_SELECT_COLUMNS,
+          eq: { active: true, aprovado: true },
+          orderBy: { column: "nome", ascending: true },
+          limit: maxResults,
+        }
+      : {
+          selectColumns: STORE_PRODUCT_SELECT_COLUMNS,
+          eq: { active: true, aprovado: true },
+          limit: maxResults,
+        });
   };
 
   let rows: Row[] = [];
@@ -264,7 +287,11 @@ export async function fetchStoreProductDetail(options: {
     if (cached) return cached;
   }
 
-  const productQuery = await supabase.from("produtos").select("*").eq("id", productId).maybeSingle();
+  const productQuery = await supabase
+    .from("produtos")
+    .select(STORE_PRODUCT_SELECT_COLUMNS)
+    .eq("id", productId)
+    .maybeSingle();
   if (productQuery.error) throwSupabaseError(productQuery.error);
   const produtoCandidate = productQuery.data ? normalizeRowTimestamps(productQuery.data as Row) : null;
   const produto =
@@ -274,17 +301,31 @@ export async function fetchStoreProductDetail(options: {
       : produtoCandidate;
 
   const reviewsPromise = queryRows("reviews", {
+    selectColumns: STORE_REVIEW_SELECT_COLUMNS,
     eq: { productId },
     orderBy: { column: "createdAt", ascending: false },
     limit: reviewsLimit,
-  }).catch(() => queryRows("reviews", { eq: { productId }, limit: reviewsLimit }));
+  }).catch(() =>
+    queryRows("reviews", {
+      selectColumns: STORE_REVIEW_SELECT_COLUMNS,
+      eq: { productId },
+      limit: reviewsLimit,
+    })
+  );
 
   const ordersPromise = userId
     ? queryRows("orders", {
+        selectColumns: STORE_ORDER_SELECT_COLUMNS,
         eq: { userId, productId },
         orderBy: { column: "createdAt", ascending: false },
         limit: ordersLimit,
-      }).catch(() => queryRows("orders", { eq: { userId, productId }, limit: ordersLimit }))
+      }).catch(() =>
+        queryRows("orders", {
+          selectColumns: STORE_ORDER_SELECT_COLUMNS,
+          eq: { userId, productId },
+          limit: ordersLimit,
+        })
+      )
     : Promise.resolve([] as Row[]);
 
   const [reviews, userOrders] = await Promise.all([reviewsPromise, ordersPromise]);

@@ -21,6 +21,23 @@ const MAX_RSVPS = 2000;
 const MAX_POLLS = 200;
 const MAX_COMMENTS = 300;
 const MAX_TICKETS = 2000;
+const DEFAULT_EVENT_DETAILS_RSVPS_LIMIT = 200;
+const DEFAULT_EVENT_DETAILS_COMMENTS_LIMIT = 100;
+const DEFAULT_EVENT_DETAILS_POLLS_LIMIT = 20;
+const DEFAULT_EVENT_DETAILS_PEDIDOS_LIMIT = 20;
+const EVENTOS_SELECT_COLUMNS =
+  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,isLowStock,stats,lotes,interessados,likesList,createdAt,updatedAt";
+const EVENTOS_RSVPS_SELECT_COLUMNS =
+  "id,eventoId,userId,status,userName,userAvatar,userTurma,timestamp";
+const EVENTOS_COMENTARIOS_SELECT_COLUMNS =
+  "id,eventoId,userId,userName,userAvatar,userTurma,role,userPlanoCor,userPlanoIcon,userPatente,text,texto:text,likes,reports,hidden,createdAt,updatedAt";
+const EVENTOS_ENQUETES_SELECT_COLUMNS =
+  "id,eventoId,question,allowUserOptions,options,voters,userVotes,createdAt,updatedAt";
+const PATENTES_SELECT_COLUMNS = "id,titulo,minXp,cor,iconName,bg,border,text";
+const SOLICITACOES_INGRESSOS_SELECT_COLUMNS =
+  "id,eventoId,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,dataSolicitacao,dataAprovacao,aprovadoPor";
+const FINANCEIRO_CONFIG_SELECT_COLUMNS =
+  "id,data,chave,banco,titular,whatsapp,updatedAt,createdAt";
 
 const feedCache = new Map<string, CacheEntry<Row[]>>();
 const detailsCache = new Map<string, CacheEntry<EventDetailsBundle>>();
@@ -110,6 +127,7 @@ const invalidateEventCaches = (eventId?: string): void => {
 async function selectRows(
   table: string,
   options?: {
+    selectColumns?: string;
     eq?: Record<string, string>;
     orderBy?: { column: string; ascending?: boolean };
     limit?: number;
@@ -117,7 +135,22 @@ async function selectRows(
   }
 ): Promise<Row[]> {
   const supabase = getSupabaseClient();
-  let query = supabase.from(table).select("*");
+  const selectColumns =
+    options?.selectColumns ??
+    (table === "eventos"
+      ? EVENTOS_SELECT_COLUMNS
+      : table === "eventos_rsvps"
+      ? EVENTOS_RSVPS_SELECT_COLUMNS
+      : table === "eventos_comentarios"
+      ? EVENTOS_COMENTARIOS_SELECT_COLUMNS
+      : table === "eventos_enquetes"
+      ? EVENTOS_ENQUETES_SELECT_COLUMNS
+      : table === "solicitacoes_ingressos"
+      ? SOLICITACOES_INGRESSOS_SELECT_COLUMNS
+      : table === "patentes_config"
+      ? PATENTES_SELECT_COLUMNS
+      : "id");
+  let query = supabase.from(table).select(selectColumns);
 
   if (options?.eq) {
     for (const [column, value] of Object.entries(options.eq)) {
@@ -135,14 +168,14 @@ async function selectRows(
 
   const { data, error } = await query;
   if (error) throwSupabaseError(error);
-  return (data ?? []) as Row[];
+  return (data ?? []) as unknown as Row[];
 }
 
 async function selectEventById(eventId: string): Promise<Row | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("eventos")
-    .select("*")
+    .select(EVENTOS_SELECT_COLUMNS)
     .eq("id", eventId)
     .maybeSingle();
 
@@ -245,7 +278,7 @@ async function fetchFinanceiroConfig(forceRefresh = false): Promise<Row | null> 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("app_config")
-    .select("*")
+    .select(FINANCEIRO_CONFIG_SELECT_COLUMNS)
     .eq("id", "financeiro")
     .maybeSingle();
   if (error) throwSupabaseError(error);
@@ -589,10 +622,16 @@ export async function fetchEventDetailsBundle(options: {
   }
 
   const userId = options.userId?.trim() || "";
-  const rsvpsLimit = boundedLimit(options.rsvpsLimit ?? 450, MAX_RSVPS);
-  const commentsLimit = boundedLimit(options.commentsLimit ?? 120, MAX_COMMENTS);
-  const pollsLimit = boundedLimit(options.pollsLimit ?? 40, MAX_POLLS);
-  const pedidosLimit = boundedLimit(options.pedidosLimit ?? 50, MAX_TICKETS);
+  const rsvpsLimit = boundedLimit(options.rsvpsLimit ?? DEFAULT_EVENT_DETAILS_RSVPS_LIMIT, MAX_RSVPS);
+  const commentsLimit = boundedLimit(
+    options.commentsLimit ?? DEFAULT_EVENT_DETAILS_COMMENTS_LIMIT,
+    MAX_COMMENTS
+  );
+  const pollsLimit = boundedLimit(options.pollsLimit ?? DEFAULT_EVENT_DETAILS_POLLS_LIMIT, MAX_POLLS);
+  const pedidosLimit = boundedLimit(
+    options.pedidosLimit ?? DEFAULT_EVENT_DETAILS_PEDIDOS_LIMIT,
+    MAX_TICKETS
+  );
   const forceRefresh = options.forceRefresh ?? false;
   const cacheKey = `${eventId}:${userId}:${rsvpsLimit}:${commentsLimit}:${pollsLimit}:${pedidosLimit}`;
 
@@ -625,7 +664,7 @@ export async function fetchEventDetailsBundle(options: {
         ? (async () => {
             const { data, error } = await supabase
               .from("solicitacoes_ingressos")
-              .select("*")
+              .select(SOLICITACOES_INGRESSOS_SELECT_COLUMNS)
               .eq("userId", userId)
               .eq("eventoId", eventId)
               .order("dataSolicitacao", { ascending: false })
@@ -694,7 +733,7 @@ export async function upsertAdminEvent(payload: {
       createdAt: nowIso(),
       updatedAt: nowIso(),
     })
-    .select("*")
+    .select(EVENTOS_SELECT_COLUMNS)
     .single();
 
   if (error) throwSupabaseError(error);
@@ -961,6 +1000,13 @@ export async function createEventComment(payload: {
     : {};
 
   const safePayloadData: Row = { ...payload.data };
+  if (
+    (safePayloadData.text === undefined || safePayloadData.text === null) &&
+    typeof safePayloadData.texto === "string"
+  ) {
+    safePayloadData.text = safePayloadData.texto;
+  }
+  delete safePayloadData.texto;
   delete safePayloadData.userPatenteIcon;
   delete safePayloadData.userPatenteCor;
 

@@ -7,6 +7,8 @@ const MAX_EVENT_RESULTS = 8;
 const MAX_TREINO_RESULTS = 8;
 const MAX_LIGA_RESULTS = 8;
 const MAX_FOLLOW_RESULTS = 260;
+const PROFILE_USER_SELECT_COLUMNS =
+  "uid,nome,apelido,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,status,whatsappPublico,idadePublica,relacionamentoPublico,esportes,pets,statusRelacionamento,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,tier,level,xp,stats";
 
 const publicBundleCache = new Map<string, CacheEntry<PublicProfileBundle | null>>();
 const followListCache = new Map<string, CacheEntry<FollowListItem[]>>();
@@ -281,7 +283,11 @@ const normalizeFollowListItem = (raw: unknown): FollowListItem | null => {
 
 async function fetchProfileById(uid: string): Promise<ProfileUserRecord | null> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase.from("users").select("*").eq("uid", uid).maybeSingle();
+  const { data, error } = await supabase
+    .from("users")
+    .select(PROFILE_USER_SELECT_COLUMNS)
+    .eq("uid", uid)
+    .maybeSingle();
   if (error) throwSupabaseError(error);
   if (!data) return null;
   return normalizeUserProfile(data);

@@ -84,7 +84,8 @@ const sortRowsByDateCandidatesDesc = (rows: Row[], fields: string[]): Row[] =>
   });
 
 async function safeCount(
-  tableName: string
+  tableName: string,
+  countColumn: string
 ): Promise<{ count: number; fallbackUsed: boolean }> {
   const supabase = getSupabaseClient();
 
@@ -92,7 +93,7 @@ async function safeCount(
   for (const mode of ["planned", "estimated", "exact"] as const) {
     const { count, error } = await supabase
       .from(tableName)
-      .select("*", { count: mode, head: true });
+      .select(countColumn, { count: mode, head: true });
 
     if (!error && typeof count === "number") {
       return { count, fallbackUsed: false };
@@ -104,6 +105,7 @@ async function safeCount(
 
 async function fetchRowsWithOrderFallback(options: {
   tableName: string;
+  selectColumns: string;
   maxResults: number;
   orderFields: string[];
 }): Promise<Row[]> {
@@ -114,12 +116,12 @@ async function fetchRowsWithOrderFallback(options: {
   for (const field of options.orderFields) {
     const { data, error } = await supabase
       .from(options.tableName)
-      .select("*")
+      .select(options.selectColumns)
       .order(field, { ascending: false })
       .limit(options.maxResults);
 
     if (!error && Array.isArray(data)) {
-      return data as Row[];
+      return data as unknown as Row[];
     }
 
     lastError = error;
@@ -128,14 +130,14 @@ async function fetchRowsWithOrderFallback(options: {
   // Fallback final sem order para nao quebrar se a coluna ainda nao existir.
   const { data, error } = await supabase
     .from(options.tableName)
-    .select("*")
+    .select(options.selectColumns)
     .limit(options.maxResults);
 
   if (error) {
     throw error ?? lastError;
   }
 
-  return Array.isArray(data) ? (data as Row[]) : [];
+  return Array.isArray(data) ? (data as unknown as Row[]) : [];
 }
 
 export interface AdminDashboardStats {
@@ -223,16 +225,19 @@ export async function fetchAdminDashboardBundle(options?: {
 
   const [usersCountResult, eventsCountResult, salesCountResult, usersRows, logsRows] =
     await Promise.all([
-      safeCount("users"),
-      safeCount("eventos"),
-      safeCount("store_orders"),
+      safeCount("users", "uid"),
+      safeCount("eventos", "id"),
+      safeCount("store_orders", "id"),
       fetchRowsWithOrderFallback({
         tableName: "users",
+        selectColumns:
+          "id,uid,nome,email,foto,turma,role,data_adesao,createdAt,created_at",
         maxResults: usersLimit,
         orderFields: ["data_adesao", "createdAt", "created_at"],
       }),
       fetchRowsWithOrderFallback({
         tableName: "activity_logs",
+        selectColumns: "id,userName,action,resource,timestamp,createdAt,created_at",
         maxResults: logsLimit,
         orderFields: ["timestamp", "createdAt", "created_at"],
       }),

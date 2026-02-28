@@ -50,6 +50,7 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
 
 async function queryRows(options: {
   tableName: string;
+  selectColumns: string;
   maxResults: number;
   eq?: { field: string; value: string | number | boolean };
   orderField?: string;
@@ -58,7 +59,10 @@ async function queryRows(options: {
   let lastError: unknown = null;
 
   // Tentativa principal: query enxuta com filtro/ordem.
-  let primaryQuery = supabase.from(options.tableName).select("*").limit(options.maxResults);
+  let primaryQuery = supabase
+    .from(options.tableName)
+    .select(options.selectColumns)
+    .limit(options.maxResults);
   if (options.eq) {
     primaryQuery = primaryQuery.eq(options.eq.field, options.eq.value);
   }
@@ -68,12 +72,15 @@ async function queryRows(options: {
 
   const { data: primaryData, error: primaryError } = await primaryQuery;
   if (!primaryError && Array.isArray(primaryData)) {
-    return primaryData as RawRow[];
+    return primaryData as unknown as RawRow[];
   }
   lastError = primaryError;
 
   // Fallback sem order para tolerar schema/indice ainda em migracao.
-  let fallbackQuery = supabase.from(options.tableName).select("*").limit(options.maxResults);
+  let fallbackQuery = supabase
+    .from(options.tableName)
+    .select(options.selectColumns)
+    .limit(options.maxResults);
   if (options.eq) {
     fallbackQuery = fallbackQuery.eq(options.eq.field, options.eq.value);
   }
@@ -83,7 +90,7 @@ async function queryRows(options: {
     throw fallbackError ?? lastError;
   }
 
-  return Array.isArray(fallbackData) ? (fallbackData as RawRow[]) : [];
+  return Array.isArray(fallbackData) ? (fallbackData as unknown as RawRow[]) : [];
 }
 
 export interface SharkroundGameQuestionRecord {
@@ -170,6 +177,7 @@ export async function fetchActiveSharkroundLeagues(options?: {
 
   const rows = await queryRows({
     tableName: "ligas_config",
+    selectColumns: "id,nome,sigla,logoBase64,ativa,perguntas",
     eq: { field: "ativa", value: true },
     maxResults,
   });
@@ -193,6 +201,7 @@ export async function fetchSharkroundPlayersPreview(options?: {
 
   const rows = await queryRows({
     tableName: "users",
+    selectColumns: "id,uid,nome,foto,xp",
     orderField: "xp",
     maxResults,
   });
@@ -221,6 +230,7 @@ export async function fetchSharkroundTubasRanking(options?: {
 
   const rows = await queryRows({
     tableName: "users",
+    selectColumns: "id,uid,nome,foto,tubas",
     orderField: "tubas",
     maxResults,
   });

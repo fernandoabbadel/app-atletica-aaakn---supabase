@@ -194,7 +194,10 @@ export async function fetchAchievementsConfig(options?: {
     if (cached) return cached;
   }
 
-  const { data, error } = await supabase.from("achievements_config").select("*").limit(maxResults);
+  const { data, error } = await supabase
+    .from("achievements_config")
+    .select("id,titulo,desc,xp,target,statKey,cat,iconName,active,repeatable")
+    .limit(maxResults);
   if (error) throwSupabaseError(error);
 
   const rows = (data ?? [])
@@ -226,7 +229,7 @@ export async function fetchPatentesConfig(options?: {
 
   const { data, error } = await supabase
     .from("patentes_config")
-    .select("*")
+    .select("id,titulo,minXp,cor,iconName,bg,border,text")
     .order("minXp", { ascending: true })
     .limit(maxResults);
   if (error) throwSupabaseError(error);

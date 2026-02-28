@@ -20,6 +20,8 @@ type CacheEntry<T> = { cachedAt: number; value: T };
 const TTL_MS = 35_000;
 const MAX_PLAN_RESULTS = 60;
 const plansCache = new Map<string, CacheEntry<PlanRecord[]>>();
+const PLANOS_SELECT_COLUMNS =
+  "id,nome,preco,precoVal,parcelamento,descricao,cor,icon,destaque,beneficios,xpMultiplier,nivelPrioridade,descontoLoja";
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -87,7 +89,7 @@ export async function fetchPlanCatalog(options?: {
 
   const { data, error } = await supabase
     .from("planos")
-    .select("*")
+    .select(PLANOS_SELECT_COLUMNS)
     .order("precoVal", { ascending: true })
     .limit(maxResults);
 

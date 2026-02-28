@@ -44,7 +44,7 @@ async function fetchUsersCount(): Promise<number> {
   for (const mode of ["planned", "estimated", "exact"] as const) {
     const { count, error } = await supabase
       .from("users")
-      .select("*", { count: mode, head: true });
+      .select("uid", { count: mode, head: true });
 
     if (!error && typeof count === "number") {
       return count;
@@ -56,7 +56,7 @@ async function fetchUsersCount(): Promise<number> {
   // Fallback final com leitura limitada caso count esteja indisponivel.
   const { data, error } = await supabase
     .from("users")
-    .select("*")
+    .select("uid")
     .limit(USERS_COUNT_FALLBACK_LIMIT);
 
   if (error) {

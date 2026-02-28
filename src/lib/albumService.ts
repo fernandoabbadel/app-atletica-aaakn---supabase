@@ -599,7 +599,7 @@ export async function fetchAlbumCollectedIds(
       const supabase = getSupabaseClient();
       let capturesQuery = supabase
         .from(ALBUM_CAPTURES_TABLE)
-        .select("*")
+        .select("targetUserId,turma,dataColada")
         .eq("collectorUserId", userId)
         .order("dataColada", { ascending: false })
         .limit(maxResults);

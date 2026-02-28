@@ -11,10 +11,22 @@ const DASHBOARD_POSTS_LIMIT = 2;
 const DASHBOARD_TREINOS_LIMIT = 4;
 const DASHBOARD_PARTNERS_LIMIT = 50;
 const DASHBOARD_LIGAS_LIMIT = 60;
-const DASHBOARD_ALBUM_LIMIT = 350;
+const DASHBOARD_ALBUM_FALLBACK_LIMIT = 350;
 const DASHBOARD_LIKES_SAMPLE_PER_PRODUCT = 10;
 const DASHBOARD_USERS_IN_CHUNK = 10;
 const DASHBOARD_USERS_COUNT_FALLBACK_LIMIT = 2_000;
+const DASHBOARD_TOTAL_CACA_RPC = "dashboard_total_caca_calouros";
+
+const DASHBOARD_EVENTS_SELECT =
+  "id,titulo,data,local,imagem,tipo,likesList,participantes:interessados,imagePositionY";
+const DASHBOARD_PRODUCTS_SELECT = "id,nome,preco,img,likes";
+const DASHBOARD_PARTNERS_SELECT =
+  "id,nome,imgLogo,imgCapa,categoria,plano:tier,status";
+const DASHBOARD_LIGAS_SELECT =
+  "id,nome,sigla,foto,logoBase64,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
+const DASHBOARD_POSTS_SELECT = "id,userId,userName,avatar,createdAt,texto,likes";
+const DASHBOARD_TREINOS_SELECT = "id,imagem";
+const DASHBOARD_ALBUM_FALLBACK_SELECT = "totalColetado";
 
 const dashboardCache = new Map<string, CacheEntry<DashboardBundle>>();
 
@@ -25,6 +37,14 @@ const asNumber = (value: unknown, fallback = 0) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const asBoolean = (value: unknown, fallback = false) =>
   typeof value === "boolean" ? value : fallback;
+const asInteger = (value: unknown, fallback = 0): number => {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.floor(value);
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.floor(parsed);
+  }
+  return fallback;
+};
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 
@@ -74,6 +94,7 @@ const throwSupabaseError = (error: { message: string; code?: string | null; name
 
 async function fetchRowsWithFallback(
   table: string,
+  selectColumns: string,
   attempts: Array<{ orderBy?: { column: string; ascending: boolean }; limit: number; eq?: Record<string, string> }>
 ): Promise<Row[]> {
   const supabase = getSupabaseClient();
@@ -81,7 +102,7 @@ async function fetchRowsWithFallback(
 
   for (const attempt of attempts) {
     try {
-      let q = supabase.from(table).select("*");
+      let q = supabase.from(table).select(selectColumns);
       if (attempt.eq) {
         for (const [key, value] of Object.entries(attempt.eq)) {
           q = q.eq(key, value);
@@ -93,7 +114,7 @@ async function fetchRowsWithFallback(
       q = q.limit(attempt.limit);
       const { data, error } = await q;
       if (error) throw error;
-      return (data ?? []) as Row[];
+      return (data ?? []) as unknown as Row[];
     } catch (error: unknown) {
       lastError = error;
     }
@@ -103,6 +124,19 @@ async function fetchRowsWithFallback(
     throwSupabaseError(lastError as { message: string; code?: string | null; name?: string | null });
   }
   return [];
+}
+
+async function fetchDashboardTotalCaca(): Promise<number> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc(DASHBOARD_TOTAL_CACA_RPC);
+  if (!error) {
+    return Math.max(0, asInteger(data, 0));
+  }
+
+  const albumRows = await fetchRowsWithFallback("album_rankings", DASHBOARD_ALBUM_FALLBACK_SELECT, [
+    { limit: DASHBOARD_ALBUM_FALLBACK_LIMIT },
+  ]);
+  return albumRows.reduce((acc, row) => acc + asNumber(row.totalColetado, 0), 0);
 }
 
 async function safeUsersCount(): Promise<number> {
@@ -129,7 +163,7 @@ const normalizeEvento = (id: string, raw: unknown): DashboardEvent | null => {
     imagem: asString(data.imagem),
     tipo: asString(data.tipo),
     likesList: asStringArray(data.likesList),
-    participantes: asStringArray(data.participantes),
+    participantes: asStringArray(data.participantes ?? data.interessados),
     imagePositionY: asNumber(data.imagePositionY, 50),
   };
 };
@@ -157,7 +191,7 @@ const normalizeParceiro = (id: string, raw: unknown): DashboardPartner | null =>
     imgLogo: asString(data.imgLogo),
     imgCapa: asString(data.imgCapa) || undefined,
     categoria: asString(data.categoria) || undefined,
-    plano: asString(data.plano) || undefined,
+    plano: asString(data.plano) || asString(data.tier) || undefined,
     status: asString(data.status) || undefined,
   };
 };
@@ -366,29 +400,29 @@ export async function fetchDashboardBundle(options?: { forceRefresh?: boolean })
     if (cached) return cached;
   }
 
-  const [eventRows, productRows, partnerRows, ligaRows, albumRows, postRows, treinoRows, totalAlunos] =
+  const [eventRows, productRows, partnerRows, ligaRows, postRows, treinoRows, totalAlunos, totalCaca] =
     await Promise.all([
-      fetchRowsWithFallback("eventos", [
+      fetchRowsWithFallback("eventos", DASHBOARD_EVENTS_SELECT, [
         { orderBy: { column: "data", ascending: true }, limit: DASHBOARD_EVENTS_LIMIT },
         { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_EVENTS_LIMIT },
         { limit: DASHBOARD_EVENTS_LIMIT },
       ]),
-      fetchRowsWithFallback("produtos", [{ limit: DASHBOARD_PRODUCTS_LIMIT }]),
-      fetchRowsWithFallback("parceiros", [
+      fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [{ limit: DASHBOARD_PRODUCTS_LIMIT }]),
+      fetchRowsWithFallback("parceiros", DASHBOARD_PARTNERS_SELECT, [
         { eq: { status: "active" }, limit: DASHBOARD_PARTNERS_LIMIT },
         { limit: DASHBOARD_PARTNERS_LIMIT },
       ]),
-      fetchRowsWithFallback("ligas_config", [{ limit: DASHBOARD_LIGAS_LIMIT }]),
-      fetchRowsWithFallback("album_rankings", [{ limit: DASHBOARD_ALBUM_LIMIT }]),
-      fetchRowsWithFallback("posts", [
+      fetchRowsWithFallback("ligas_config", DASHBOARD_LIGAS_SELECT, [{ limit: DASHBOARD_LIGAS_LIMIT }]),
+      fetchRowsWithFallback("posts", DASHBOARD_POSTS_SELECT, [
         { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_POSTS_LIMIT },
         { limit: DASHBOARD_POSTS_LIMIT },
       ]),
-      fetchRowsWithFallback("treinos", [
+      fetchRowsWithFallback("treinos", DASHBOARD_TREINOS_SELECT, [
         { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_TREINOS_LIMIT },
         { limit: DASHBOARD_TREINOS_LIMIT },
       ]),
       safeUsersCount(),
+      fetchDashboardTotalCaca(),
     ]);
 
   const events = eventRows.map((row) => normalizeEvento(asString(row.id), row)).filter((row): row is DashboardEvent => row !== null);
@@ -403,7 +437,6 @@ export async function fetchDashboardBundle(options?: { forceRefresh?: boolean })
     .map((row) => normalizePost(asString(row.id), row))
     .filter((row): row is DashboardPost => row !== null);
   const treinos = treinoRows.map((row) => asString(row.imagem)).filter((entry) => entry.length > 0);
-  const totalCaca = albumRows.reduce((acc, row) => acc + asNumber(row.totalColetado, 0), 0);
   const productTurmaStats = await buildProductTurmaStats(produtos);
 
   const bundle: DashboardBundle = {

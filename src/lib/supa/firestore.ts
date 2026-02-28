@@ -1029,7 +1029,10 @@ export async function getCountFromServer(
     : { kind: "query", collection: input as CollectionReference, constraints: [] };
 
   const supabase = getSupabaseClient();
-  let builder = supabase.from(queryRef.collection.table).select("*", { head: true, count: "estimated" });
+  const countColumn = getCompatTableConfig(queryRef.collection.table).primaryKey;
+  let builder = supabase
+    .from(queryRef.collection.table)
+    .select(countColumn, { head: true, count: "estimated" });
   addParentFiltersToBuilder(builder as unknown as { eq: (column: string, value: unknown) => unknown }, queryRef.collection);
 
   for (const constraint of queryRef.constraints) {

@@ -399,6 +399,8 @@ const buildUserPatchPayload = (
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const USER_SELECT_COLUMNS =
+  "uid,nome,email,foto,role,status,isAnonymous,saved_role,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,heroPower,rankingPosition,stats,sharkCoins,selos,matricula,turma,handle,telefone,instagram,bio,dailyMatchesPlayed,turmaPhoto,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,idade,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,desconto_loja,nivel_prioridade,plano_status,capa,estadoOrigem,extra,createdAt,updatedAt";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -520,7 +522,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { data: existingRow, error: selectError } = await supabase
           .from("users")
-          .select("*")
+          .select(USER_SELECT_COLUMNS)
           .eq("uid", authUser.id)
           .maybeSingle();
 
@@ -542,7 +544,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { data: insertData, error: insertError } = await supabase
           .from("users")
           .insert(newUserPayload)
-          .select("*")
+          .select(USER_SELECT_COLUMNS)
           .single();
 
         if (insertError) {
@@ -553,7 +555,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Corrida comum: onAuthStateChange e getSession disparam em paralelo no primeiro login.
           const { data: concurrentRow, error: concurrentSelectError } = await supabase
             .from("users")
-            .select("*")
+            .select(USER_SELECT_COLUMNS)
             .eq("uid", authUser.id)
             .maybeSingle();
 
@@ -672,7 +674,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .from("users")
           .update(mutablePatch)
           .eq("uid", currentUser.uid)
-          .select("*")
+          .select(USER_SELECT_COLUMNS)
           .maybeSingle();
 
         if (!updateResult.error) {
@@ -708,7 +710,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { data: recoveredRow, error: recoveryError } = await supabase
           .from("users")
           .upsert(recoveryPayload, { onConflict: "uid" })
-          .select("*")
+          .select(USER_SELECT_COLUMNS)
           .single();
 
         if (recoveryError) throw recoveryError;
@@ -1101,7 +1103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { data, error } = await supabase
           .from("users")
-          .select("*")
+          .select(USER_SELECT_COLUMNS)
           .eq("uid", user.uid)
           .maybeSingle();
 

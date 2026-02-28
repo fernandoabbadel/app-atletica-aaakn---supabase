@@ -48,6 +48,8 @@ type CacheEntry<T> = { cachedAt: number; value: T };
 const TTL_MS = 30_000;
 const MAX_RESULTS = 600;
 const publicPartnersCache = new Map<string, CacheEntry<PartnerRecord[]>>();
+const PARTNERS_SELECT_COLUMNS =
+  "id,nome,categoria,tier,status,cnpj,responsavel,email,telefone,descricao,endereco,horario,insta,site,whats,imgCapa,imgLogo,mensalidade,vendasTotal,totalScans,cupons,senha,createdAt";
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -156,7 +158,7 @@ export async function fetchPublicPartners(options?: {
 
   const primary = await supabase
     .from("parceiros")
-    .select("*")
+    .select(PARTNERS_SELECT_COLUMNS)
     .eq("status", "active")
     .order("tier", { ascending: true })
     .order("nome", { ascending: true })
@@ -167,7 +169,7 @@ export async function fetchPublicPartners(options?: {
   } else {
     const fallback = await supabase
       .from("parceiros")
-      .select("*")
+      .select(PARTNERS_SELECT_COLUMNS)
       .eq("status", "active")
       .order("nome", { ascending: true })
       .limit(maxResults);

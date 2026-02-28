@@ -16,6 +16,9 @@ const MAX_STAT_VALUE = 9_999_999;
 // Tabela/linha padrao para guardar JSON de configuracao no Supabase.
 const SITE_CONFIG_TABLE = "site_config";
 const LANDING_CONFIG_ROW_ID = "landing_page";
+const LANDING_ROW_SELECT_WRAPPER = "id,key,config,data,payload,updated_at";
+const LANDING_ROW_SELECT_FLAT =
+  "id,key,tagline,taglineColor,heroTitle,heroSubtitle,heroHighlight,titleColor,gradientStart,gradientEnd,statUsers,statPosts,statPartners,address,phone,whatsapp,email,socialLinks,reviews,updated_at";
 
 let landingConfigCache: CacheEntry<LandingConfig> | null = null;
 
@@ -216,17 +219,19 @@ async function fetchLandingConfigRow(): Promise<unknown> {
 
   // Suporta schemas com chave primaria chamada id ou key.
   for (const keyColumn of ["id", "key"] as const) {
-    const { data, error } = await supabase
-      .from(SITE_CONFIG_TABLE)
-      .select("*")
-      .eq(keyColumn, LANDING_CONFIG_ROW_ID)
-      .maybeSingle();
+    for (const selectColumns of [LANDING_ROW_SELECT_WRAPPER, LANDING_ROW_SELECT_FLAT]) {
+      const { data, error } = await supabase
+        .from(SITE_CONFIG_TABLE)
+        .select(selectColumns)
+        .eq(keyColumn, LANDING_CONFIG_ROW_ID)
+        .maybeSingle();
 
-    if (!error) {
-      return data;
+      if (!error) {
+        return data;
+      }
+
+      lastError = error;
     }
-
-    lastError = error;
   }
 
   if (lastError) throw lastError;

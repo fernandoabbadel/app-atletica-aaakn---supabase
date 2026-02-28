@@ -17,6 +17,12 @@ const MAX_CHAMADA_RESULTS = 240;
 const MAX_MODALIDADES = 30;
 const MAX_RECURRING_WEEKS = 20;
 const DEFAULT_MODALIDADES = ["Futsal", "Volei"];
+const TREINOS_SELECT_COLUMNS =
+  "id,modalidade,diaSemana,dia,horario,local,treinador,treinadorId,treinadorAvatar,descricao,imagem,ordemDia,status,confirmados,createdAt,updatedAt";
+const TREINOS_RSVPS_SELECT_COLUMNS =
+  "id,treinoId,userId,userName,userAvatar,userTurma,status,timestamp,createdAt,updatedAt";
+const TREINOS_CHAMADA_SELECT_COLUMNS =
+  "id,treinoId,userId,nome,avatar,turma,status,origem,pagamento,timestamp,updatedAt";
 
 const nowIso = (): string => new Date().toISOString();
 const asNumber = (value: unknown, fallback = 0): number =>
@@ -351,7 +357,7 @@ export async function fetchTreinosAdminList(options?: {
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_TREINOS_RESULTS);
   const { data, error } = await supabase
     .from("treinos")
-    .select("*")
+    .select(TREINOS_SELECT_COLUMNS)
     .order("dia", { ascending: false })
     .limit(maxResults);
   if (error) throwSupabaseError(error);
@@ -375,7 +381,7 @@ export async function fetchTreinosByDateRange(payload: {
   const maxResults = boundedLimit(payload.maxResults ?? 120, MAX_MONTH_RESULTS);
   const { data, error } = await supabase
     .from("treinos")
-    .select("*")
+    .select(TREINOS_SELECT_COLUMNS)
     .gte("dia", startDate)
     .lte("dia", endDate)
     .order("dia", { ascending: true })
@@ -398,7 +404,7 @@ export async function fetchTreinoById(
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("treinos")
-    .select("*")
+    .select(TREINOS_SELECT_COLUMNS)
     .eq("id", cleanTreinoId)
     .maybeSingle();
   if (error) throwSupabaseError(error);
@@ -418,7 +424,7 @@ export async function fetchTreinoRsvps(
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_RSVP_RESULTS);
   const { data, error } = await supabase
     .from("treinos_rsvps")
-    .select("*")
+    .select(TREINOS_RSVPS_SELECT_COLUMNS)
     .eq("treinoId", cleanTreinoId)
     .order("timestamp", { ascending: false })
     .limit(maxResults);
@@ -441,7 +447,7 @@ export async function fetchTreinoRsvpsPage(
   const offset = parseOffsetCursor(options?.cursorId);
   const { data, error } = await supabase
     .from("treinos_rsvps")
-    .select("*")
+    .select(TREINOS_RSVPS_SELECT_COLUMNS)
     .eq("treinoId", cleanTreinoId)
     .order("timestamp", { ascending: false })
     .range(offset, offset + pageSize);
@@ -467,7 +473,7 @@ export async function fetchTreinoChamada(
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_CHAMADA_RESULTS);
   const { data, error } = await supabase
     .from("treinos_chamada")
-    .select("*")
+    .select(TREINOS_CHAMADA_SELECT_COLUMNS)
     .eq("treinoId", cleanTreinoId)
     .order("timestamp", { ascending: false })
     .limit(maxResults);
@@ -490,7 +496,7 @@ export async function fetchTreinoChamadaPage(
   const offset = parseOffsetCursor(options?.cursorId);
   const { data, error } = await supabase
     .from("treinos_chamada")
-    .select("*")
+    .select(TREINOS_CHAMADA_SELECT_COLUMNS)
     .eq("treinoId", cleanTreinoId)
     .order("timestamp", { ascending: false })
     .range(offset, offset + pageSize);

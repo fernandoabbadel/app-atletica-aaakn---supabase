@@ -81,7 +81,10 @@ async function fetchRankingRows(options: {
   }
 
   // Tentativa 2: fallback sem select estrito para tolerar schema ainda em ajuste.
-  let fallbackQuery = supabase.from("users").select("*").limit(options.maxResults);
+  let fallbackQuery = supabase
+    .from("users")
+    .select("id,uid,nome,apelido,foto,turma,xp")
+    .limit(options.maxResults);
   if (options.turma) {
     fallbackQuery = fallbackQuery.eq("turma", options.turma);
   }

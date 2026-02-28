@@ -51,6 +51,13 @@ const MAX_COMMENT_RESULTS = 60;
 const DEFAULT_UNREAD_SINCE_DAYS = 90;
 const DEFAULT_RECENT_CATEGORY_WINDOW_DAYS = 2;
 const COMMUNITY_READS_TABLE = "community_category_reads";
+const COMMUNITY_POSTS_SELECT_COLUMNS =
+  "id,userId,userName,avatar,handle,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,imagem,categoria,likes,hype,comentarios,blocked,commentsDisabled,fixado,denunciasCount,createdAt,updatedAt";
+const COMMUNITY_REPORTS_SELECT_COLUMNS =
+  "id,targetId,targetType,postText,reporterId,reason,status,timestamp,reviewedAt,reviewedBy,createdAt";
+const COMMUNITY_COMMENTS_SELECT_COLUMNS =
+  "id,postId,userId,userName,avatar,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,likes,hidden,reports,createdAt,updatedAt";
+const COMMUNITY_CONFIG_SELECT_COLUMNS = "id,data,titulo,subtitulo,capaUrl,limitMessages,updatedAt";
 
 const nowIso = (): string => new Date().toISOString();
 const daysAgoIso = (days: number): string => {
@@ -215,13 +222,23 @@ const normalizeReportRow = (row: Row): QueryRow => {
 async function selectRows(
   table: string,
   options?: {
+    selectColumns?: string;
     eq?: Record<string, string | boolean>;
     orderBy?: { column: string; ascending?: boolean };
     limit?: number;
   }
 ): Promise<Row[]> {
   const supabase = getSupabaseClient();
-  let query = supabase.from(table).select("*");
+  const selectColumns =
+    options?.selectColumns ??
+    (table === "posts"
+      ? COMMUNITY_POSTS_SELECT_COLUMNS
+      : table === "denuncias"
+      ? COMMUNITY_REPORTS_SELECT_COLUMNS
+      : table === "posts_comments"
+      ? COMMUNITY_COMMENTS_SELECT_COLUMNS
+      : "id");
+  let query = supabase.from(table).select(selectColumns);
 
   if (options?.eq) {
     for (const [column, value] of Object.entries(options.eq)) {
@@ -241,14 +258,14 @@ async function selectRows(
 
   const { data, error } = await query;
   if (error) throwSupabaseError(error);
-  return (data ?? []) as Row[];
+  return (data ?? []) as unknown as Row[];
 }
 
 async function selectSinglePost(postId: string): Promise<Row | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("posts")
-    .select("*")
+    .select("id,userId,comentarios,likes,hype,denunciasCount")
     .eq("id", postId)
     .maybeSingle();
 
@@ -373,7 +390,7 @@ export async function fetchCommunityConfig(): Promise<RawData | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("app_config")
-    .select("*")
+    .select(COMMUNITY_CONFIG_SELECT_COLUMNS)
     .eq("id", "comunidade")
     .maybeSingle();
 
@@ -437,7 +454,7 @@ export async function fetchCommunityFeedByCategory(payload: {
   const supabase = getSupabaseClient();
   let query = supabase
     .from("posts")
-    .select("*")
+    .select(COMMUNITY_POSTS_SELECT_COLUMNS)
     .eq("categoria", categoria)
     .order("createdAt", { ascending: false })
     .limit(boundedLimit(payload.maxResults ?? 120, MAX_FEED_RESULTS));
@@ -533,7 +550,7 @@ export async function fetchCommunityComments(
 
   const { data, error } = await supabase
     .from("posts_comments")
-    .select("*")
+    .select(COMMUNITY_COMMENTS_SELECT_COLUMNS)
     .eq("postId", cleanPostId)
     .order("createdAt", { ascending })
     .limit(maxResults);
@@ -572,7 +589,7 @@ export async function fetchCommunityReadMap(
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from(COMMUNITY_READS_TABLE)
-    .select('categoria, "categoriaKey", "readAt"')
+    .select("categoria,categoriaKey,readAt")
     .eq("userId", cleanUserId);
 
   if (error && !isMissingRelationError(error)) {
