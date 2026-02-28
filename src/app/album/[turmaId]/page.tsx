@@ -145,12 +145,16 @@ export default function AlbumTurmaPage() {
   const [loadingAlbum, setLoadingAlbum] = useState(true);
   const [loadingTurma, setLoadingTurma] = useState(true);
   const [processingScan, setProcessingScan] = useState(false);
-  const [manualScanCode, setManualScanCode] = useState("");
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const processingScanRef = useRef(false);
   const lastScanAtRef = useRef(0);
   const autoScanHandledRef = useRef(false);
+  const meuAlbumRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    meuAlbumRef.current = meuAlbum;
+  }, [meuAlbum]);
 
   const calcularIdade = (dataNasc?: string): string => {
     if (!dataNasc) return "??";
@@ -199,10 +203,12 @@ export default function AlbumTurmaPage() {
         setMeuAlbum(collectedIds);
       } catch (error: unknown) {
         if (!mounted) return;
-        if (!isPermissionError(error)) {
+        const hadAlbumData = meuAlbumRef.current.length > 0;
+        if (!isPermissionError(error) && !hadAlbumData) {
           addToast("Erro ao carregar seu album.", "error");
         }
-        setMeuAlbum([]);
+        // Mantem estado atual em caso de falha pontual de leitura para nao "apagar" capturas ja exibidas.
+        setMeuAlbum((prev) => prev);
       } finally {
         if (mounted) setLoadingAlbum(false);
       }
@@ -302,10 +308,6 @@ export default function AlbumTurmaPage() {
     setShowScanner(true);
   }, [searchParams]);
 
-  useEffect(() => {
-    if (!showScanner) setManualScanCode("");
-  }, [showScanner]);
-
   const handleFoundUser = useCallback(
     async (rawScanned: string) => {
       if (!user || processingScanRef.current) return;
@@ -361,20 +363,13 @@ export default function AlbumTurmaPage() {
         const message = error instanceof Error ? error.message.toLowerCase() : "";
 
         if (
-          errorCode.includes("functions/not-found") ||
-          errorCode.includes("functions/unavailable") ||
-          errorCode.includes("functions/internal") ||
-          errorCode.includes("functions/unknown")
+          errorCode === "23505" ||
+          message.includes("duplicate key") ||
+          message.includes("unique")
         ) {
-          addToast("Backend de captura indisponivel. Publique as Functions.", "error");
-        } else if (
-          message.includes("cors") ||
-          message.includes("preflight") ||
-          message.includes("access-control-allow-origin")
-        ) {
-          addToast("Funcao de captura sem CORS. Rode deploy das Functions.", "error");
+          addToast("Figurinha repetida.", "info");
         } else if (isPermissionError(error)) {
-          addToast("Sem permissao para registrar captura. Revise as regras do Firestore.", "error");
+          addToast("Sem permissao para registrar captura. Revise as politicas do Supabase.", "error");
         } else {
           addToast("Erro ao registrar captura.", "error");
         }
@@ -719,27 +714,8 @@ export default function AlbumTurmaPage() {
             <div className="absolute bottom-0 left-0 right-0 z-50 bg-gradient-to-t from-black via-black/95 to-transparent p-4 border-t border-white/10">
               <div className="max-w-lg mx-auto space-y-3">
                 <p className="text-[11px] text-zinc-400 font-bold uppercase tracking-wide">
-                  Se a camera falhar, cole o codigo do QR manualmente:
+                  Aponte a camera para o QR e aguarde a leitura automatica.
                 </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={manualScanCode}
-                    onChange={(event) => setManualScanCode(event.target.value)}
-                    placeholder="UID / URL / JSON do QR"
-                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white"
-                  />
-                  <button
-                    disabled={processingScan || !manualScanCode.trim()}
-                    onClick={() => {
-                      const code = manualScanCode.trim();
-                      if (!code) return;
-                      void handleFoundUser(code);
-                    }}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black uppercase disabled:opacity-60"
-                  >
-                    Capturar
-                  </button>
-                </div>
                 {processingScan && (
                   <p className="text-[11px] text-emerald-400 font-bold uppercase">
                     Processando captura...

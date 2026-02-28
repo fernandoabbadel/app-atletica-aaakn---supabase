@@ -20,6 +20,7 @@ import {
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 type Row = Record<string, unknown>;
@@ -67,6 +68,13 @@ const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null =
 
 const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void => {
   cache.set(key, { cachedAt: Date.now(), value });
+};
+
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
 };
 
 const shouldFallbackToClient = (error: unknown): boolean => {
@@ -390,6 +398,9 @@ export async function approveStoreOrder(payload: {
   productName: string;
   price: number;
   approvedBy: string;
+  productId?: string;
+  quantidade?: number;
+  itens?: number;
 }): Promise<void> {
   const orderId = payload.orderId.trim();
   if (!orderId) return;
@@ -403,26 +414,125 @@ export async function approveStoreOrder(payload: {
     CALLABLE_APPROVE_ORDER,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "orders", orderId), {
-        status: "approved",
-        approvedBy: payload.approvedBy,
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const nowIso = new Date().toISOString();
+
+      const { error: orderError } = await supabase
+        .from("orders")
+        .update({
+          status: "approved",
+          approvedBy: payload.approvedBy,
+          updatedAt: nowIso,
+        })
+        .eq("id", orderId);
+      if (orderError) {
+        throwSupabaseError(orderError);
+      }
 
       const xpGain = Math.floor(Math.max(0, payload.price) * 10);
-      if (payload.userId.trim()) {
-        await updateDoc(doc(db, "users", payload.userId), {
-          xp: increment(xpGain),
-          selos: increment(1),
-        });
+      const quantity = Math.max(
+        1,
+        Math.floor(
+          Number(payload.quantidade ?? payload.itens ?? 1) || 1
+        )
+      );
 
-        await addDoc(collection(db, "notifications"), {
-          userId: payload.userId,
-          title: "Pagamento Aprovado!",
-          message: `Sua compra de ${payload.productName} foi confirmada. Voce ganhou ${xpGain} XP!`,
-          read: false,
-          createdAt: serverTimestamp(),
-        });
+      const productId = payload.productId?.trim() || "";
+      if (productId) {
+        try {
+          const { data: productRow, error: productFetchError } = await supabase
+            .from("produtos")
+            .select("estoque, vendidos")
+            .eq("id", productId)
+            .maybeSingle();
+
+          if (productFetchError) {
+            throw productFetchError;
+          }
+
+          if (productRow) {
+            const currentStock =
+              typeof productRow.estoque === "number" && Number.isFinite(productRow.estoque)
+                ? productRow.estoque
+                : 0;
+            const currentSold =
+              typeof productRow.vendidos === "number" && Number.isFinite(productRow.vendidos)
+                ? productRow.vendidos
+                : 0;
+
+            const { error: productUpdateError } = await supabase
+              .from("produtos")
+              .update({
+                estoque: Math.max(0, currentStock - quantity),
+                vendidos: currentSold + quantity,
+                updatedAt: nowIso,
+              })
+              .eq("id", productId);
+
+            if (productUpdateError) {
+              throw productUpdateError;
+            }
+          }
+        } catch (productError: unknown) {
+          console.warn("Loja: pedido aprovado, mas falhou ao atualizar estoque do produto.", productError);
+        }
+      }
+
+      if (payload.userId.trim()) {
+        try {
+          const { data: userRow, error: userFetchError } = await supabase
+            .from("users")
+            .select("xp, selos")
+            .eq("uid", payload.userId)
+            .maybeSingle();
+
+          if (userFetchError) {
+            throw userFetchError;
+          }
+
+          if (userRow) {
+            const currentXp =
+              typeof userRow.xp === "number" && Number.isFinite(userRow.xp)
+                ? userRow.xp
+                : 0;
+            const currentSelos =
+              typeof userRow.selos === "number" && Number.isFinite(userRow.selos)
+                ? userRow.selos
+                : 0;
+
+            const { error: userUpdateError } = await supabase
+              .from("users")
+              .update({
+                xp: currentXp + xpGain,
+                selos: currentSelos + 1,
+                updatedAt: nowIso,
+              })
+              .eq("uid", payload.userId);
+
+            if (userUpdateError) {
+              throw userUpdateError;
+            }
+          }
+        } catch (userError: unknown) {
+          console.warn("Loja: pedido aprovado, mas falhou ao atualizar XP/Selos do usuario.", userError);
+        }
+
+        try {
+          const { error: notificationError } = await supabase.from("notifications").insert({
+            userId: payload.userId,
+            title: "Pagamento Aprovado!",
+            message: `Sua compra de ${payload.productName} foi confirmada. Voce ganhou ${xpGain} XP!`,
+            read: false,
+            type: "order_approved",
+            createdAt: nowIso,
+          });
+
+          if (notificationError) {
+            throw notificationError;
+          }
+        } catch (notificationError: unknown) {
+          console.warn("Loja: pedido aprovado, mas falhou ao criar notificacao.", notificationError);
+        }
       }
 
       return { ok: true };
@@ -444,11 +554,19 @@ export async function setStoreOrderStatus(payload: {
     CALLABLE_SET_ORDER_STATUS,
     payload,
     async () => {
-      await updateDoc(doc(db, "orders", orderId), {
-        status: payload.status,
-        ...(payload.approvedBy ? { approvedBy: payload.approvedBy } : {}),
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: payload.status,
+          ...(payload.approvedBy ? { approvedBy: payload.approvedBy } : {}),
+          updatedAt: new Date().toISOString(),
+        })
+        .eq("id", orderId);
+
+      if (error) {
+        throwSupabaseError(error);
+      }
       return { ok: true };
     }
   );

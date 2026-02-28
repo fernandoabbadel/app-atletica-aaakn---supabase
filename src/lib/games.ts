@@ -42,7 +42,7 @@ export const calculateUserStats = (user: UserStatsSource): HeroStats => {
   return {
     forca: calc(20, ((stats.gymCheckins || 0) * 0.1) + ((stats.confirmedTrainings || 0) * 1)),
     inteligencia: calc(20, ((stats.postsCount || 0) * 0.1) + ((stats.commentsCount || 0) * 0.1) + ((stats.albumCollected || 0) * 0.1) + ((stats.followingCount || 0) * 0.1)),
-    stamina: calc(50, ((stats.loginCount || 0) * 0.1) + ((stats.streak7Cycles || 0) * 1) + ((stats.streak30Cycles || 0) * 5) + ((stats.eventsAttended || 0) * 5) + ((stats.confirmedTrainings || 0) * 1)),
+    stamina: calc(50, ((stats.loginCount || 0) * 0.1) + ((stats.streak7Cycles || 0) * 1) + ((stats.streak30Cycles || 0) * 5) + (((stats.eventsBought || 0) + (stats.eventsAttended || 0)) * 5) + ((stats.confirmedTrainings || 0) * 1)),
     defesa: calc(20, ((stats.storeSpent || 0) * 0.1) + ((stats.followersCount || 0) * 0.1) + (user.plano_badge ? 30 : 0)),
     ataque: calc(25, ((stats.arenaWins || 0) * 0.1) - ((stats.arenaLosses || 0) * 0.05)),
     hp: calc(200, currentLevel * 50),

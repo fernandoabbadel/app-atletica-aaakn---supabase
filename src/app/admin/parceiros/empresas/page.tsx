@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ChevronDown,
+  Plus,
   Loader2,
   Power,
   Search,
@@ -149,7 +150,7 @@ export default function AdminParceirosEmpresasPage() {
           <div>
             <h1 className="text-xl font-black uppercase tracking-tight">Empresas Parceiras</h1>
             <p className="text-[11px] text-zinc-500 font-bold">
-              Query paginada (20 por leitura de lista)
+              Lista paginada (20 por leitura). Nao carrega tudo de uma vez.
             </p>
           </div>
         </div>
@@ -157,17 +158,27 @@ export default function AdminParceirosEmpresasPage() {
 
       <main className="px-6 py-6 space-y-4">
         <section className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-          <div className="relative w-full md:max-w-md">
-            <Search
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-            />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar empresa"
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-3 text-sm text-white outline-none focus:border-emerald-500"
-            />
+          <div className="w-full md:max-w-2xl flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+              />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar empresa"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-3 text-sm text-white outline-none focus:border-emerald-500"
+              />
+            </div>
+            <Link
+              href="/empresa/cadastro"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 whitespace-nowrap"
+              title="Abrir formulario de cadastro de parceiro"
+            >
+              <Plus size={14} />
+              Criar Parceiro
+            </Link>
           </div>
 
           <div className="flex gap-2">

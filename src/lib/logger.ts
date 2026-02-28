@@ -13,6 +13,54 @@ export type ActionType =
   | "UNFOLLOW"
   | "GAME_CYCLE";
 
+const normalizeToken = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const hasAnyToken = (haystack: string, tokens: string[]): boolean =>
+  tokens.some((token) => haystack.includes(token));
+
+const shouldPersistAuditLog = (
+  action: ActionType,
+  resource: string,
+  detailsString: string
+): boolean => {
+  const actionKey = action.toUpperCase();
+  const resourceKey = normalizeToken(resource);
+  const detailsKey = normalizeToken(detailsString);
+
+  // 1) Login da diretoria no painel admin
+  if (resourceKey === "adminpainel") {
+    return actionKey === "LOGIN";
+  }
+
+  // 2) CRUD de produto da lojinha
+  if (resourceKey === "lojaproduto") {
+    return actionKey === "CREATE" || actionKey === "UPDATE" || actionKey === "DELETE";
+  }
+
+  // 3) Aprovar/reprovar comprovantes (eventos, loja, planos)
+  if (resourceKey === "lojapagamentos" || resourceKey === "eventospagamentos" || resourceKey === "planospedidos") {
+    if (actionKey !== "UPDATE") return false;
+    return hasAnyToken(detailsKey, ["aprov", "rejeit", "estorn", "desfaz", "comprov"]);
+  }
+
+  // 4) Exclusao de denuncia
+  if (resourceKey.startsWith("denuncias")) {
+    return actionKey === "DELETE";
+  }
+
+  // 5) Evento criado/deletado
+  if (resourceKey === "eventosadmin") {
+    return actionKey === "CREATE" || actionKey === "DELETE";
+  }
+
+  return false;
+};
+
 export const logActivity = async (
   userId: string,
   userName: string,
@@ -24,6 +72,10 @@ export const logActivity = async (
     const supabase = getSupabaseClient();
     const detailsString =
       typeof details === "object" && details !== null ? JSON.stringify(details) : String(details);
+
+    if (!shouldPersistAuditLog(action, resource, detailsString)) {
+      return;
+    }
 
     // Tabela opcional no bootstrap inicial. Se nao existir ainda, o catch evita quebrar o fluxo principal.
     const { error } = await supabase.from("activity_logs").insert({

@@ -166,6 +166,36 @@ const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
   return matrix;
 };
 
+const extractPermissionMatrix = (raw: unknown): PermissionMatrix | null => {
+  const direct = normalizePermissionMatrix(raw);
+  if (direct && Object.keys(direct).length > 0) {
+    return direct;
+  }
+
+  const obj = asObject(raw);
+  if (!obj) return null;
+
+  const directFromKey = normalizePermissionMatrix(obj.permissionMatrix);
+  if (directFromKey && Object.keys(directFromKey).length > 0) {
+    return directFromKey;
+  }
+
+  const nestedData = asObject(obj.data);
+  if (!nestedData) return null;
+
+  const fromNestedKey = normalizePermissionMatrix(nestedData.permissionMatrix);
+  if (fromNestedKey && Object.keys(fromNestedKey).length > 0) {
+    return fromNestedKey;
+  }
+
+  const nestedDirect = normalizePermissionMatrix(nestedData);
+  if (nestedDirect && Object.keys(nestedDirect).length > 0) {
+    return nestedDirect;
+  }
+
+  return null;
+};
+
 const normalizePermissionUserRecord = (
   raw: unknown,
   fallbackId = ""
@@ -368,16 +398,15 @@ export async function fetchPermissionMatrix(options?: {
     { forceRefresh },
     async () => {
       const snap = await getDoc(doc(db, "settings", "permissions"));
-      return { matrix: snap.exists() ? snap.data() : null };
+      if (!snap.exists()) {
+        return { matrix: null };
+      }
+
+      return { matrix: extractPermissionMatrix(snap.data()) };
     }
   );
 
-  if (response.matrix === null) {
-    permissionMatrixCache = { cachedAt: Date.now(), value: null };
-    return null;
-  }
-
-  const normalized = normalizePermissionMatrix(response.matrix);
+  const normalized = extractPermissionMatrix(response.matrix);
   permissionMatrixCache = { cachedAt: Date.now(), value: normalized };
   return normalized;
 }
@@ -391,7 +420,11 @@ export async function savePermissionMatrix(
     SAVE_PERMISSION_MATRIX_CALLABLE,
     { matrix: sanitized },
     async () => {
-      await setDoc(doc(db, "settings", "permissions"), sanitized);
+      await setDoc(
+        doc(db, "settings", "permissions"),
+        { data: { permissionMatrix: sanitized } },
+        { merge: true }
+      );
       return { ok: true };
     }
   );

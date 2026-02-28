@@ -30,6 +30,7 @@ const MAX_PLAN_RESULTS = 60;
 const MAX_SUBSCRIPTION_RESULTS = 900;
 const MAX_REQUEST_RESULTS = 500;
 const MAX_USER_REQUEST_RESULTS = 90;
+const PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT = 500;
 
 const PLAN_CREATE_REQUEST_CALLABLE = "planCreateAdhesionRequest";
 const PLAN_UPSERT_CALLABLE = "planAdminUpsert";
@@ -121,6 +122,76 @@ const isIndexRequiredError = (error: unknown): boolean => {
   return false;
 };
 
+const getBackendErrorText = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  const data = asObject(error);
+  const message = typeof data?.message === "string" ? data.message : "";
+  const details = typeof data?.details === "string" ? data.details : "";
+  return `${message} ${details}`.trim();
+};
+
+const extractMissingColumnFromSchemaError = (error: unknown): string | null => {
+  const message = getBackendErrorText(error);
+  if (!message) return null;
+
+  const normalized = message.toLowerCase();
+  const isMissingColumnError =
+    normalized.includes("schema cache") ||
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    (normalized.includes("could not find the") && normalized.includes("column"));
+
+  if (!isMissingColumnError) return null;
+
+  const patterns = [
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+    /column ['"]?([a-z0-9_]+)['"]? does not exist/i,
+    /column\s+([a-z0-9_]+)\s+does not exist/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+
+  return null;
+};
+
+const findPatchKeyByColumn = (
+  patch: Record<string, unknown>,
+  columnName: string
+): string | null => {
+  const target = columnName.trim().toLowerCase();
+  if (!target) return null;
+
+  const key = Object.keys(patch).find((entry) => entry.toLowerCase() === target);
+  return key ?? null;
+};
+
+const updateUserWithSchemaFallback = async (
+  userId: string,
+  patch: Record<string, unknown>
+): Promise<void> => {
+  const mutablePatch: Record<string, unknown> = { ...patch };
+
+  while (Object.keys(mutablePatch).length > 0) {
+    try {
+      await updateDoc(doc(db, "users", userId), mutablePatch);
+      return;
+    } catch (error: unknown) {
+      const missingColumn = extractMissingColumnFromSchemaError(error);
+      const removableKey = missingColumn
+        ? findPatchKeyByColumn(mutablePatch, missingColumn)
+        : null;
+
+      if (!removableKey) throw error;
+      delete mutablePatch[removableKey];
+      console.warn(
+        `Plan approval fallback: coluna ausente "${missingColumn}" em users; seguindo sem esse campo.`
+      );
+    }
+  }
+};
+
 async function callWithFallback<TReq, TRes>(
   callableName: string,
   payload: TReq,
@@ -157,6 +228,71 @@ const toMillis = (value: unknown): number => {
 
 const sortByDateDesc = <T>(rows: T[], getDateValue: (entry: T) => unknown): T[] =>
   [...rows].sort((left, right) => toMillis(getDateValue(right)) - toMillis(getDateValue(left)));
+
+async function syncPlanVisualSnapshotsForUser(payload: {
+  userId: string;
+  plano: string;
+  planoCor: string;
+  planoIcon: string;
+}): Promise<void> {
+  const userId = payload.userId.trim();
+  if (!userId) return;
+
+  const syncCollection = async (
+    collectionName: "posts" | "posts_comments" | "eventos_comentarios",
+    patch: Record<string, unknown>
+  ) => {
+    const snap = await getDocs(
+      query(
+        collection(db, collectionName),
+        where("userId", "==", userId),
+        limit(PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT)
+      )
+    );
+
+    if (snap.docs.length === 0) return;
+
+    await Promise.all(
+      snap.docs.map((row) =>
+        updateDoc(doc(db, collectionName, row.id), patch)
+      )
+    );
+
+    if (snap.docs.length >= PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT) {
+      console.warn(
+        `Plan snapshot sync atingiu limite de ${PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT} em ${collectionName} para user ${userId}.`
+      );
+    }
+  };
+
+  const tasks = [
+    syncCollection("posts", {
+      plano: payload.plano,
+      plano_cor: payload.planoCor,
+      plano_icon: payload.planoIcon,
+      updatedAt: serverTimestamp(),
+    }),
+    syncCollection("posts_comments", {
+      plano: payload.plano,
+      plano_cor: payload.planoCor,
+      plano_icon: payload.planoIcon,
+      updatedAt: serverTimestamp(),
+    }),
+    syncCollection("eventos_comentarios", {
+      userPlanoCor: payload.planoCor,
+      userPlanoIcon: payload.planoIcon,
+      updatedAt: serverTimestamp(),
+    }),
+  ];
+
+  const results = await Promise.allSettled(tasks);
+  if (results.some((result) => result.status === "rejected")) {
+    console.warn("Falha parcial ao sincronizar snapshots de plano do usuario.", {
+      userId,
+      results,
+    });
+  }
+}
 
 export interface PlanRecord {
   id: string;
@@ -215,6 +351,11 @@ export interface FinanceConfigRecord {
   whatsapp?: string;
 }
 
+type DefaultPlanSeedEntry = {
+  id: string;
+  data: Omit<PlanRecord, "id">;
+};
+
 const DEFAULT_BANNER_CONFIG: BannerConfigRecord = {
   titulo: "VIRE TUBARAO REI",
   subtitulo: "Domine o Oceano",
@@ -226,6 +367,93 @@ const DEFAULT_FINANCE_CONFIG: FinanceConfigRecord = {
   banco: "Banco Inter",
   titular: "Assoc. Atletica Acad. Knight",
 };
+
+const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
+  {
+    id: "bicho_solto",
+    data: {
+      nome: "Bicho Solto",
+      preco: "0,00",
+      precoVal: 0,
+      parcelamento: "Acesso gratuito",
+      descricao: "Entrada no ecossistema AAAKN",
+      cor: "zinc",
+      icon: "ghost",
+      destaque: false,
+      beneficios: [
+        "Acesso ao app e carteira digital",
+        "Participacao em eventos abertos",
+        "Ranking e funcionalidades basicas",
+      ],
+      xpMultiplier: 1,
+      nivelPrioridade: 1,
+      descontoLoja: 0,
+    },
+  },
+  {
+    id: "cardume_livre",
+    data: {
+      nome: "Cardume Livre",
+      preco: "14,90",
+      precoVal: 14.9,
+      parcelamento: "ou 12x de R$ 1,49",
+      descricao: "Primeiro nivel premium",
+      cor: "blue",
+      icon: "fish",
+      destaque: false,
+      beneficios: [
+        "Desconto em parceiros selecionados",
+        "Prioridade moderada em lotes",
+        "Acesso a conteudos exclusivos",
+      ],
+      xpMultiplier: 1.1,
+      nivelPrioridade: 2,
+      descontoLoja: 5,
+    },
+  },
+  {
+    id: "atleta",
+    data: {
+      nome: "Atleta",
+      preco: "29,90",
+      precoVal: 29.9,
+      parcelamento: "ou 12x de R$ 2,99",
+      descricao: "Plano oficial do atleta",
+      cor: "emerald",
+      icon: "star",
+      destaque: true,
+      beneficios: [
+        "Prioridade em eventos e inscricoes",
+        "Desconto ampliado na loja",
+        "Multiplicador de XP turbinado",
+      ],
+      xpMultiplier: 1.25,
+      nivelPrioridade: 3,
+      descontoLoja: 10,
+    },
+  },
+  {
+    id: "lenda",
+    data: {
+      nome: "Lenda",
+      preco: "59,90",
+      precoVal: 59.9,
+      parcelamento: "ou 12x de R$ 5,99",
+      descricao: "Maximo nivel de beneficios",
+      cor: "yellow",
+      icon: "crown",
+      destaque: true,
+      beneficios: [
+        "Prioridade maxima no ecossistema",
+        "Maior desconto na loja",
+        "Beneficios VIP em acoes especiais",
+      ],
+      xpMultiplier: 1.5,
+      nivelPrioridade: 4,
+      descontoLoja: 20,
+    },
+  },
+] as const;
 
 const normalizePlan = (id: string, raw: unknown): PlanRecord | null => {
   const data = asObject(raw);
@@ -666,6 +894,36 @@ export async function seedDefaultPlans(entries: Partial<PlanRecord>[]): Promise<
   clearPlanReadCaches();
 }
 
+export async function restoreDefaultPlanCatalog(options?: {
+  overwriteExisting?: boolean;
+}): Promise<{ restored: number; skipped: boolean }> {
+  const overwriteExisting = options?.overwriteExisting ?? false;
+
+  const existing = await fetchPlanCatalog({
+    maxResults: MAX_PLAN_RESULTS,
+    forceRefresh: true,
+  });
+  if (existing.length > 0 && !overwriteExisting) {
+    return { restored: 0, skipped: true };
+  }
+
+  const writes = DEFAULT_PLAN_CATALOG.map((entry) =>
+    setDoc(
+      doc(db, "planos", entry.id),
+      {
+        ...entry.data,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    )
+  );
+
+  await Promise.all(writes);
+  clearPlanReadCaches();
+  return { restored: DEFAULT_PLAN_CATALOG.length, skipped: false };
+}
+
 export async function saveMarketingBannerConfig(
   config: BannerConfigRecord
 ): Promise<void> {
@@ -702,6 +960,7 @@ export async function approvePlanRequest(payload: {
     descontoLoja: number;
   };
 }): Promise<{ subscriptionId: string }> {
+  const approvedAt = new Date().toISOString();
   const requestPayload = {
     ...payload,
     requestId: payload.requestId.trim(),
@@ -722,6 +981,18 @@ export async function approvePlanRequest(payload: {
       descontoLoja: Math.max(0, payload.userPatch.descontoLoja),
     },
   };
+  const completeUserPatch = {
+    plano: requestPayload.userPatch.plano,
+    plano_status: "ativo",
+    plano_badge: requestPayload.userPatch.planoBadge,
+    plano_cor: requestPayload.userPatch.planoCor,
+    plano_icon: requestPayload.userPatch.planoIcon,
+    tier: requestPayload.userPatch.tier,
+    xpMultiplier: requestPayload.userPatch.xpMultiplier,
+    nivel_prioridade: requestPayload.userPatch.nivelPrioridade,
+    desconto_loja: requestPayload.userPatch.descontoLoja,
+    data_adesao: approvedAt,
+  };
 
   if (!requestPayload.requestId || !requestPayload.userId) {
     throw new Error("Solicitacao invalida para aprovacao.");
@@ -734,19 +1005,6 @@ export async function approvePlanRequest(payload: {
     const batch = writeBatch(db);
     batch.update(doc(db, "solicitacoes_adesao", requestPayload.requestId), {
       status: "aprovado",
-    });
-
-    batch.update(doc(db, "users", requestPayload.userId), {
-      plano: requestPayload.userPatch.plano,
-      plano_badge: requestPayload.userPatch.planoBadge,
-      plano_cor: requestPayload.userPatch.planoCor,
-      plano_icon: requestPayload.userPatch.planoIcon,
-      tier: requestPayload.userPatch.tier,
-      xpMultiplier: requestPayload.userPatch.xpMultiplier,
-      nivel_prioridade: requestPayload.userPatch.nivelPrioridade,
-      desconto_loja: requestPayload.userPatch.descontoLoja,
-      plano_status: "ativo",
-      data_adesao: new Date().toISOString(),
     });
 
     const subscriptionRef = doc(collection(db, "assinaturas"));
@@ -765,6 +1023,17 @@ export async function approvePlanRequest(payload: {
 
     await batch.commit();
     return { subscriptionId: subscriptionRef.id };
+  });
+
+  // Garante sincronizacao dos campos visuais/beneficios no users mesmo quando
+  // a Function de aprovacao estiver desatualizada ou com schema legado.
+  await updateUserWithSchemaFallback(requestPayload.userId, completeUserPatch);
+
+  await syncPlanVisualSnapshotsForUser({
+    userId: requestPayload.userId,
+    plano: requestPayload.userPatch.plano,
+    planoCor: requestPayload.userPatch.planoCor,
+    planoIcon: requestPayload.userPatch.planoIcon,
   });
 
   clearAdminPlanReadCaches();

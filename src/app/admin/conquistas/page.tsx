@@ -57,6 +57,38 @@ const DEFAULT_ACHIEVEMENTS: AchievementConfig[] = ACHIEVEMENTS_CATALOG.map((item
   repeatable: false,
 }));
 
+const DEFAULT_ACHIEVEMENTS_BY_ID = new Map(
+  DEFAULT_ACHIEVEMENTS.map((item) => [item.id, item] as const)
+);
+
+const mergeAchievementsWithDefaults = (entries: AchievementConfig[]): AchievementConfig[] => {
+  const seen = new Set<string>();
+  const merged = entries.map((entry) => {
+    const fallback = DEFAULT_ACHIEVEMENTS_BY_ID.get(entry.id);
+    if (!fallback || !entry.id.startsWith("evt_")) {
+      seen.add(entry.id);
+      return entry;
+    }
+    seen.add(entry.id);
+    return {
+      ...entry,
+      titulo: fallback.titulo,
+      desc: fallback.desc,
+      xp: fallback.xp,
+      target: fallback.target,
+      statKey: fallback.statKey,
+      cat: fallback.cat,
+      iconName: fallback.iconName,
+    };
+  });
+
+  const missingEventDefaults = DEFAULT_ACHIEVEMENTS.filter(
+    (item) => item.id.startsWith("evt_") && !seen.has(item.id)
+  );
+
+  return [...merged, ...missingEventDefaults];
+};
+
 const ICON_OPTIONS = [
     { label: "Peixe", value: "Fish", icon: <Fish/> },
     { label: "Espadas", value: "Swords", icon: <Swords/> },
@@ -114,7 +146,7 @@ export default function AdminConquistasPage() {
 
       setAchievements(
         achievementsData.length > 0
-          ? achievementsData
+          ? mergeAchievementsWithDefaults(achievementsData)
           : DEFAULT_ACHIEVEMENTS
       );
       setLogs(logsData);

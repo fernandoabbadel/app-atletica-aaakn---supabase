@@ -7,13 +7,13 @@ import {
   Home, Calendar, Dumbbell, CreditCard, Menu, X, Wallet,
   Trophy, Gamepad2, ShoppingBag, Settings, HelpCircle, LogOut,
   ChevronRight, Handshake, Clock, CalendarRange, MessageCircle, MapPin,
-  Crown, Medal, Star, ShieldCheck, User, Ghost, LogIn, Layout, Camera,
-  Target, GraduationCap, Users, Lock, Bell, Fish, Swords, Zap, Gem,
-  Skull, Rocket, Heart, ThumbsUp, LayoutGrid, UserPlus, Sparkles, ScanLine // 🦈 Adicionado Sparkles
+  Crown, Medal, Star, ShieldCheck, User, LogIn, Layout, Camera,
+  Target, GraduationCap, Users, Lock, Bell, Fish, Swords, Sparkles, ScanLine // ðŸ¦ˆ Adicionado Sparkles
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { isPermissionError } from "@/lib/backendErrors";
 import { getTurmaImage } from "../../constants/turmaImages";
+import { resolvePlanIcon, resolvePlanTextClass } from "@/constants/planVisuals";
 import {
   fetchBottomNavBannedAppealsCount,
   fetchBottomNavNotifications,
@@ -28,7 +28,7 @@ const shouldEnableFocusRefetch = (): boolean => {
   return process.env.NEXT_PUBLIC_ENABLE_FOCUS_REFETCH === "true";
 };
 
-// --- 🦈 UTILITÁRIO LOCAL ---
+// --- ðŸ¦ˆ UTILITÁRIO LOCAL ---
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
 }
@@ -51,17 +51,7 @@ interface BannerProps {
     tier: string; closeMenu: () => void; router: ReturnType<typeof useRouter>;
 }
 
-// --- CONFIGURAÇÕES VISUAIS ---
-
-const PLAN_COLORS: Record<string, string> = {
-    yellow: "text-yellow-400",
-    emerald: "text-emerald-400",
-    purple: "text-purple-400",
-    blue: "text-blue-400",
-    red: "text-red-400",
-    orange: "text-orange-400",
-    zinc: "text-zinc-400",
-};
+// --- CONFIGURAÃ‡Ã•ES VISUAIS ---
 
 const resolveTurmaSlug = (turmaRaw?: string): string => {
     if (!turmaRaw) return "t8";
@@ -74,26 +64,13 @@ const resolveTurmaSlug = (turmaRaw?: string): string => {
 // --- SUB-COMPONENTES OTIMIZADOS ---
 const UserBadges = ({ userData }: { userData: UserData }) => {
     const isAdmin = userData?.role === 'master' || userData?.role === 'admin_geral' || userData?.role === 'admin_gestor';
-    const planIconName = String(userData?.plano_icon || 'user').toLowerCase().trim();
-    const patentIconName = String(userData?.patente_icon || 'fish').toLowerCase().trim();
-    
-    const planColorClass = userData?.plano_cor?.startsWith('text-') ? userData.plano_cor : (PLAN_COLORS[userData?.plano_cor || "zinc"]);
-    const patentColorClass = userData?.patente_cor?.startsWith('text-') ? userData.patente_cor : (PLAN_COLORS[userData?.patente_cor || "zinc"]);
-
-    const icons: Record<string, React.ElementType> = { 
-        ghost: Ghost, star: Star, crown: Crown, fish: Fish, trophy: Trophy, gem: Gem, 
-        zap: Zap, swords: Swords, skull: Skull, rocket: Rocket, medal: Medal, heart: Heart,
-        thumbsup: ThumbsUp, layoutgrid: LayoutGrid, userplus: UserPlus, target: Target, user: User 
-    };
-    
-    const PlanIcon = icons[planIconName] || User;
-    const PatentIcon = icons[patentIconName] || Fish;
+    const planColorClass = resolvePlanTextClass(userData?.plano_cor || "zinc");
+    const PlanIcon = resolvePlanIcon(userData?.plano_icon || "user", User);
 
     return (
         <div className="flex items-center gap-1.5">
             {isAdmin && <span className="flex items-center bg-red-500/10 p-0.5 rounded border border-red-500/20"><ShieldCheck size={12} className="text-red-500" /></span>}
             <span className={cn("flex items-center opacity-80", planColorClass)}><PlanIcon size={14} /></span>
-            {planIconName !== patentIconName && <span className={cn("flex items-center", patentColorClass)}><PatentIcon size={16} className="drop-shadow-sm" /></span>}
         </div>
     );
 };
@@ -113,7 +90,7 @@ const SocioGrowthBanner = ({ tier, closeMenu, router }: BannerProps) => {
             <div className="relative p-3 flex items-center justify-between z-10">
                 <div className="flex items-center gap-3">
                     <div className="p-1.5 rounded-full bg-yellow-500/20 border border-yellow-500/50"><Crown size={16} className="text-yellow-400" /></div>
-                    <div className="text-left"><h4 className="text-xs font-black italic uppercase text-white">VIRE SÓCIO LENDA</h4><p className="text-[9px] font-medium text-zinc-300">Domine o Oceano</p></div>
+                    <div className="text-left"><h4 className="text-xs font-black italic uppercase text-white">VIRE SOCIO LENDA</h4><p className="text-[9px] font-medium text-zinc-300">Domine o Oceano</p></div>
                 </div>
                 <ChevronRight size={16} className="text-yellow-500/50 group-hover:text-yellow-400 transition-colors" />
             </div>
@@ -143,8 +120,9 @@ export default function BottomNavbar() {
   const currentTurmaSlug = resolveTurmaSlug(currentUser?.turma);
   const isGuestVirtual = userUid.startsWith("guest_virtual_");
   const canLoadNotifications = Boolean(userUid) && !user?.isAnonymous && !isGuestVirtual;
+  const sidebarNameColor = resolvePlanTextClass(currentUser?.plano_cor || "zinc", "text-white");
 
-  // --- LÓGICA DE EFEITOS E DADOS (Mantida 100%) ---
+  // --- LÃ“GICA DE EFEITOS E DADOS (Mantida 100%) ---
   useEffect(() => {
     const handleScroll = () => {
         const currentScrollY = window.scrollY;
@@ -172,7 +150,7 @@ export default function BottomNavbar() {
         setUnreadCount(feed.unreadCount);
       } catch (error: unknown) {
         if (!isPermissionError(error)) {
-          console.error("Erro ao carregar notificações:", error);
+          console.error("Erro ao carregar notificacoes:", error);
         }
         setNotifications([]);
         setUnreadCount(0);
@@ -274,7 +252,7 @@ export default function BottomNavbar() {
           setUnreadCount((prev) => Math.max(0, prev - 1));
         } catch (error: unknown) {
           if (!isPermissionError(error)) {
-            console.error("Erro ao marcar notificação como lida:", error);
+            console.error("Erro ao marcar notificacao como lida:", error);
           }
         }
       }
@@ -300,9 +278,9 @@ export default function BottomNavbar() {
   const isHiddenRoute = ["/", "/login", "/cadastro", "/banned"].includes(pathname || "") || pathname?.startsWith("/empresa") || pathname?.startsWith("/admin");
   if (isHiddenRoute) return null;
 
-  // --- DEFINIÇÃO DOS MENUS (CSS e Badges Atualizados) ---
+  // --- DEFINIÃ‡ÃƒO DOS MENUS (CSS e Badges Atualizados) ---
   const bottomItems: NavItemProps[] = [
-      { id: 'home', label: 'Início', icon: <Home size={22}/>, path: '/dashboard' },
+      { id: 'home', label: 'Inicio', icon: <Home size={22}/>, path: '/dashboard' },
       { id: 'eventos', label: 'Eventos', icon: <Calendar size={22}/>, path: '/eventos' },
       { id: 'scan', label: 'Scanner', icon: <ScanLine size={28}/>, path: `/album/${currentTurmaSlug}?scan=1`, isMain: true },
       { id: 'carteira', label: 'Carteira', icon: <Wallet size={22}/>, path: '/carteirinha' },
@@ -315,24 +293,24 @@ export default function BottomNavbar() {
       { id: 'carteira_side', label: 'Carteirinha', icon: <CreditCard size={18} />, path: '/carteirinha' },
       { id: 'parceiros', label: 'Parceiros', icon: <Handshake size={18} />, path: '/parceiros' },
       { id: 'comunidade', label: 'Comunidade', icon: <MessageCircle size={18} />, path: '/comunidade' },
-      { id: 'album', label: 'Álbum da Galera', icon: <Camera size={18} />, path: '/album' },
+      { id: 'album', label: 'Album da Galera', icon: <Camera size={18} />, path: '/album' },
   ];
 
   const sidebarItemsAtleta: NavItemProps[] = [
       { id: 'treinos', label: 'Treinos', icon: <CalendarRange size={18} />, path: '/treinos' },
-      { id: 'arena', label: 'Arena Games', icon: <Gamepad2 size={18} />, path: '/arena-games', badge: "Vem Aí ✨", isComingSoon: true },
+      { id: 'arena', label: 'Arena Games', icon: <Gamepad2 size={18} />, path: '/arena-games', badge: "Vem ai", isComingSoon: true },
       { id: 'shark_round', label: 'Shark Round', icon: <Target size={18} />, path: '/sharkround', isComingSoon: true },
-      { id: 'ranking', label: 'Ranking', icon: <Trophy size={18} />, path: '/ranking', badge: "Vem Aí ✨", isComingSoon: true },
-      { id: 'gym_side', label: 'Treinando com Tubarão', icon: <Dumbbell size={18} />, path: '/gym-rats', badge: "Vem Aí ✨", isComingSoon: true },
+      { id: 'ranking', label: 'Ranking', icon: <Trophy size={18} />, path: '/ranking', badge: "Vem ai", isComingSoon: true },
+      { id: 'gym_side', label: 'Treinando com Tubarao', icon: <Dumbbell size={18} />, path: '/gym-rats', badge: "Vem ai", isComingSoon: true },
   ];
 
   const sidebarItemsInfo: NavItemProps[] = [
-      { id: 'ligas', label: 'Área das Ligas', icon: <Users size={18} />, path: '/ligas_unitau' },
-      { id: 'avaliacao', label: 'Avaliação Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true },
+      { id: 'ligas', label: 'Area das Ligas', icon: <Users size={18} />, path: '/ligas_unitau' },
+      { id: 'avaliacao', label: 'Avaliacao Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true },
       { id: 'conquistas', label: 'Conquistas', icon: <Medal size={18} />, path: '/conquistas', isComingSoon: true },
       { id: 'fidelidade', label: 'Fidelidade', icon: <Star size={18} />, path: '/fidelidade', isComingSoon: true },
       { id: 'guia', label: 'Guia', icon: <HelpCircle size={18} />, path: '/guia' },
-      { id: 'historico', label: 'Nossa História', icon: <Clock size={18} />, path: '/historico' },
+      { id: 'historico', label: 'Nossa Historia', icon: <Clock size={18} />, path: '/historico' },
   ];
 
   const userTurmaImg = currentUser?.turma ? getTurmaImage(currentUser.turma) : null;
@@ -364,12 +342,12 @@ export default function BottomNavbar() {
             </div>
         </div>
 
-        {/* NOTIFICAÇÕES */}
+        {/* NOTIFICAÃ‡Ã•ES */}
         {showNotifications && (
             <div className="absolute top-[72px] left-0 w-full h-[calc(100%-72px)] bg-zinc-950 z-20 overflow-y-auto animate-in slide-in-from-top-2 border-t border-zinc-800">
                 <div className="p-4 space-y-3">
                     <div className="flex justify-between items-center mb-2">
-                        <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Notificações</h3>
+                        <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Notificacoes</h3>
                         <button onClick={() => setShowNotifications(false)} className="text-[10px] text-emerald-500 font-bold">Fechar</button>
                     </div>
                     {notifications.length === 0 && <p className="text-center text-xs text-zinc-600 py-4">Tudo limpo por aqui.</p>}
@@ -403,9 +381,9 @@ export default function BottomNavbar() {
                             )}
                         </div>
                         <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-white truncate">{currentUser.nome?.split(" ")[0]}</p>
+                            <p className={`text-sm font-bold truncate ${sidebarNameColor}`}>{currentUser.nome?.split(" ")[0]}</p>
                             <div className="flex items-center gap-2 mt-1">
-                                <div className="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded border border-white/5" title={`Nível ${currentUser.level || 1}`}>
+                                <div className="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded border border-white/5" title={`Nivel ${currentUser.level || 1}`}>
                                     <LevelIcon level={currentUser.level || 1} />
                                     <span className="text-[9px] font-mono text-zinc-400">Nv.{currentUser.level || 1}</span>
                                 </div>
@@ -433,7 +411,7 @@ export default function BottomNavbar() {
                 </div>
 
                 {/* ÁREA DO ATLETA (COM BADGES NOVAS) */}
-                <div className="px-2 pt-6 pb-2 border-t border-zinc-800/50 mt-2"><h3 className="text-[10px] font-black text-emerald-600 uppercase flex items-center gap-2 tracking-widest"><Dumbbell size={10}/> Área do Atleta</h3></div>
+                <div className="px-2 pt-6 pb-2 border-t border-zinc-800/50 mt-2"><h3 className="text-[10px] font-black text-emerald-600 uppercase flex items-center gap-2 tracking-widest"><Dumbbell size={10}/> Area do Atleta</h3></div>
                 <div className="space-y-1">
                     {sidebarItemsAtleta.map((item) => (
                         <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center justify-between p-3 rounded-xl transition-all group", pathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-60 cursor-not-allowed grayscale")}>
@@ -515,6 +493,7 @@ export default function BottomNavbar() {
     </>
   );
 }
+
 
 
 

@@ -163,7 +163,7 @@ export default function RankingPage() {
                                 alt="2º Lugar"
                                 width={64}
                                 height={64}
-                                unoptimized // 🦈 Evita erro de domínio externo
+                                sizes="64px"
                                 className="rounded-full border-4 border-zinc-400 object-cover cursor-pointer hover:scale-105 transition bg-zinc-800"
                                 onError={(e) => (e.currentTarget.src = getFallbackImage())}
                             />
@@ -187,7 +187,7 @@ export default function RankingPage() {
                             alt="1º Lugar"
                             width={96}
                             height={96}
-                            unoptimized
+                            sizes="96px"
                             priority
                             className="rounded-full border-4 border-yellow-500 object-cover shadow-[0_0_40px_rgba(234,179,8,0.4)] cursor-pointer hover:scale-105 transition bg-zinc-800"
                             onError={(e) => (e.currentTarget.src = getFallbackImage())}
@@ -211,7 +211,7 @@ export default function RankingPage() {
                             alt="3º Lugar"
                             width={64}
                             height={64}
-                            unoptimized
+                            sizes="64px"
                             className="rounded-full border-4 border-amber-700 object-cover cursor-pointer hover:scale-105 transition bg-zinc-800"
                             onError={(e) => (e.currentTarget.src = getFallbackImage())}
                         />
@@ -241,7 +241,7 @@ export default function RankingPage() {
                         alt={`Foto de ${item.nome}`}
                         width={40}
                         height={40}
-                        unoptimized
+                        sizes="40px"
                         className="rounded-full object-cover bg-zinc-800 w-10 h-10" // Forçando w/h no css também
                         onError={(e) => (e.currentTarget.src = getFallbackImage())}
                     />

@@ -51,7 +51,7 @@ const useCounter = (end: number, duration: number = 2000) => {
   return count;
 };
 
-// --- COMPONENTE: Card de EstatÃƒÂ­stica ---
+// --- COMPONENTE: Card de EstatÒ­stica ---
 type StatColor = "emerald" | "blue" | "amber";
 
 interface StatCardProps {
@@ -88,12 +88,12 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"aluno" | "empresa">("aluno");
 
-  // Ã°Å¸â€â€™ Redirecionamento de SeguranÃƒÂ§a
+  // Ã°Å¸â€â€™ Redirecionamento de SeguranÒ§a
   useEffect(() => {
     if (!authLoading && user) router.push("/dashboard");
   }, [user, authLoading, router]);
 
-  // Ã°Å¸â€œÂ¡ Busca ConfiguraÃƒÂ§ÃƒÂµes Visuais
+  // Ã°Å¸â€œÂ¡ Busca ConfiguraÒ§Òµes Visuais
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -128,7 +128,7 @@ export default function LandingPage() {
       {/* ================= HERO SECTION ================= */}
       <main className="relative z-10 container mx-auto px-4 pt-10 pb-20 lg:pt-20 lg:flex lg:items-center lg:gap-16">
         
-        {/* ESQUERDA: Texto DinÃƒÂ¢mico */}
+        {/* ESQUERDA: Texto DinÒ¢mico */}
         <div className="flex-1 text-center lg:text-left space-y-8">
             <div className="relative w-48 h-48 lg:w-64 lg:h-64 mx-auto lg:mx-0 animate-float-slow group">
                 <div className="absolute inset-0 bg-emerald-500/20 blur-[50px] rounded-full scale-75" />
@@ -195,7 +195,7 @@ export default function LandingPage() {
       </main>
 
       {/* ================= PLANOS REMOVIDOS ================= */}
-      {/* A seÃƒÂ§ÃƒÂ£o de planos foi totalmente removida conforme solicitado pelo TubarÃƒÂ£o */}
+      {/* A seÒ§Ò£o de planos foi totalmente removida conforme solicitado pelo TubarÒ£o */}
 
       {/* ================= DEPOIMENTOS ================= */}
       <section className="py-20 container mx-auto px-4 border-t border-white/5 bg-zinc-950/30">

@@ -16,10 +16,12 @@ import {
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
+import { logActivity } from "@/lib/logger";
 import {
   fetchEventTitleById,
   fetchAdminEventRsvpsPage,
   fetchAdminEventSalesPage,
+  incrementEventPurchaseUserStats,
   setAdminTicketPayment,
 } from "@/lib/eventsNativeService";
 
@@ -91,6 +93,12 @@ const parseDateTime = (value: unknown): string => {
   }
 
   return "-";
+};
+
+const parseCurrency = (value: string): number => {
+  const normalized = value.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const normalizeRsvp = (raw: Record<string, unknown>): RsvpItem | null => {
@@ -212,7 +220,7 @@ export default function AdminEventoListaPage() {
       setHasMoreSales(salesPage.hasMore);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao carregar lista de presenca.", "error");
+      addToast("Erro ao carregar lista de presença.", "error");
     } finally {
       setLoading(false);
     }
@@ -323,12 +331,23 @@ export default function AdminEventoListaPage() {
     if (!row.ticketRequestId) return;
 
     const isApproving = row.pagamento !== "pago";
+    const amount = parseCurrency(row.valorTotal || "0");
     try {
       await setAdminTicketPayment({
         ticketRequestId: row.ticketRequestId,
         isApproving,
         approvedBy: user?.nome || "Admin",
       });
+
+      if (row.userId && Number.isFinite(amount)) {
+        await incrementEventPurchaseUserStats({
+          userId: row.userId,
+          isApproving,
+          valorGasto: amount,
+          lotName: row.lote,
+          eventTitle,
+        });
+      }
 
       setSales((prev) =>
         prev.map((sale) => {
@@ -341,6 +360,15 @@ export default function AdminEventoListaPage() {
           };
         })
       );
+      if (user?.uid) {
+        await logActivity(
+          user.uid,
+          user.nome || "Admin",
+          "UPDATE",
+          "Eventos/Pagamentos",
+          `${isApproving ? "Aprovou" : "Rejeitou"} comprovante de ${row.userName} (${eventTitle})`
+        ).catch(() => {});
+      }
       addToast(isApproving ? "Pagamento aprovado." : "Pagamento reaberto.", "success");
     } catch (error: unknown) {
       console.error(error);
@@ -359,7 +387,7 @@ export default function AdminEventoListaPage() {
       "Lote",
       "Quantidade",
       "Valor",
-      "Data Aprovacao",
+      "Data Aprovação",
       "Aprovado Por",
     ];
 
@@ -398,7 +426,7 @@ export default function AdminEventoListaPage() {
             </Link>
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
-                <Users size={18} className="text-emerald-400" /> Lista de Presenca
+                <Users size={18} className="text-emerald-400" /> Lista de Presença
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">{eventTitle}</p>
             </div>
@@ -414,7 +442,7 @@ export default function AdminEventoListaPage() {
 
       <main className="px-6 py-6 space-y-4">
         <div className="text-xs text-zinc-500 uppercase font-black">
-          RSVP carregados: {rsvps.length} � Vendas carregadas: {sales.length}
+          RSVP carregados: {rsvps.length} • Vendas carregadas: {sales.length}
         </div>
 
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -422,14 +450,14 @@ export default function AdminEventoListaPage() {
             <table className="w-full text-left text-xs whitespace-nowrap">
               <thead className="bg-black/40 text-zinc-500 uppercase font-black">
                 <tr>
-                  <th className="p-4">Usuario</th>
+                  <th className="p-4">Usuário</th>
                   <th className="p-4">Turma</th>
                   <th className="p-4">RSVP</th>
                   <th className="p-4">Pagamento</th>
                   <th className="p-4">Lote</th>
                   <th className="p-4">Valor</th>
-                  <th className="p-4">Aprovacao</th>
-                  <th className="p-4 text-right">Acao</th>
+                  <th className="p-4">Aprovação</th>
+                  <th className="p-4 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800 text-zinc-200">
@@ -488,7 +516,7 @@ export default function AdminEventoListaPage() {
                       <td className="p-4">{row.lote || "-"}</td>
                       <td className="p-4">{row.valorTotal || "-"}</td>
                       <td className="p-4 text-zinc-400">
-                        {row.aprovadoPor ? `${parseDateTime(row.dataAprovacao)} � ${row.aprovadoPor}` : "-"}
+                        {row.aprovadoPor ? `${parseDateTime(row.dataAprovacao)} • ${row.aprovadoPor}` : "-"}
                       </td>
                       <td className="p-4">
                         <div className="flex justify-end">
@@ -502,7 +530,7 @@ export default function AdminEventoListaPage() {
                               }`}
                               title={
                                 row.pagamento === "pago"
-                                  ? "Desfazer aprovacao"
+                                  ? "Desfazer aprovação"
                                   : "Aprovar pagamento"
                               }
                             >
@@ -562,5 +590,3 @@ export default function AdminEventoListaPage() {
     </div>
   );
 }
-
-

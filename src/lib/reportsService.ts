@@ -77,6 +77,7 @@ export type SupportCategory =
   | "conta"
   | "bug"
   | "denuncia"
+  | "sugestorias"
   | "outro";
 
 export interface SupportTicketRecord {
@@ -232,6 +233,7 @@ const normalizeSupportCategory = (value: unknown): SupportCategory => {
     category === "conta" ||
     category === "bug" ||
     category === "denuncia" ||
+    category === "sugestorias" ||
     category === "outro"
   ) {
     return category;
@@ -249,6 +251,8 @@ const supportCategoryLabel = (category: SupportCategory): string => {
       return "Bug";
     case "denuncia":
       return "Denuncia";
+    case "sugestorias":
+      return "Sugestorias";
     case "outro":
       return "Outro";
     default:

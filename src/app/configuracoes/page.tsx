@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState } from "react";
 import {
@@ -8,7 +8,7 @@ import {
   Crown, Shield, History
 } from "lucide-react";
 import Link from "next/link";
-import Image from "next/image"; // 🦈 Importado para otimização
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
@@ -16,6 +16,7 @@ import { auth } from "@/lib/backend";
 import { deleteUser } from "@/lib/supa/auth";
 import { logActivity } from "../../lib/logger";
 import { softDeleteAccount, toggleAccountStatus } from "../../lib/settingsService";
+import { resolvePlanTheme } from "../../constants/planVisuals";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -30,7 +31,7 @@ export default function SettingsPage() {
     if (!user) return;
     const isActive = user.status === 'ativo';
     
-    const confirmMsg = isActive 
+    const confirmMsg = isActive
         ? "⏸️ PAUSAR CONTA?\n\nVocê ficará como 'Inativo'. Seus dados e XP serão mantidos, mas você perderá acesso às áreas exclusivas até reativar."
         : "▶️ REATIVAR CONTA?\n\nSeus privilégios originais serão restaurados imediatamente.";
 
@@ -84,13 +85,26 @@ export default function SettingsPage() {
         router.push("/login");
     } catch (error: unknown) {
         console.error(error);
-        addToast("Erro ao processar exclusao.", "error");
+        addToast("Erro ao processar exclusão.", "error");
     } finally {
         setActionLoading(false);
     }
   };
 
   if (!user) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>;
+
+  const roleLabel = user.role === "user" ? "Membro" : String(user.role || "Membro");
+  const rawPlanLabel =
+    (typeof user.plano === "string" && user.plano.trim()) ||
+    (typeof user.plano_badge === "string" && user.plano_badge.trim()) ||
+    "";
+  const isGuestRole = String(user.role || "").toLowerCase() === "guest";
+  const planLabel =
+    !isGuestRole && rawPlanLabel.toLowerCase() === "visitante"
+      ? "Bicho Solto"
+      : (rawPlanLabel || "Bicho Solto");
+  const planTheme = resolvePlanTheme(typeof user.plano_cor === "string" ? user.plano_cor : "zinc");
+  const planBadgeClasses = planTheme.badgeClass;
 
   return (
     <div className="min-h-screen bg-[#050505] text-white pb-24 font-sans selection:bg-emerald-500">
@@ -114,6 +128,7 @@ export default function SettingsPage() {
                             src={user.foto || "https://github.com/shadcn.png"} 
                             alt="Perfil" 
                             fill
+                            sizes="80px"
                             className="object-cover rounded-full border-4 border-[#050505]"
                             unoptimized
                         />
@@ -125,11 +140,11 @@ export default function SettingsPage() {
 
                 <div className="flex-1">
                     <h2 className="font-black text-xl text-white leading-none mb-1">{user.nome}</h2>
-                    <p className="text-xs text-zinc-400 font-medium mb-3">{user.role === 'user' ? 'Membro' : user.role} • {user.turma || "T??"}</p>
+                    <p className="text-xs text-zinc-400 font-medium mb-3">{roleLabel} • {user.turma || "T?"}</p>
                     
                     <div className="flex items-center gap-2 mb-3">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider flex items-center gap-1 ${user.plano_cor ? `text-${user.plano_cor}-400 bg-${user.plano_cor}-500/10 border-${user.plano_cor}-500/20` : 'text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>
-                            <Crown size={10} strokeWidth={3} /> {user.plano || "Bicho Solto"}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider flex items-center gap-1 ${planBadgeClasses}`}>
+                            <Crown size={10} strokeWidth={3} /> {planLabel}
                         </span>
                         <span className={`text-[10px] px-2 py-0.5 rounded border font-bold uppercase ${user.status === 'ativo' ? 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20' : 'text-red-500 bg-red-500/10 border-red-500/20'}`}>
                             {user.status}
@@ -151,9 +166,9 @@ export default function SettingsPage() {
                 <h3 className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest px-2">Minha Conta</h3>
                 <div className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800">
                     <MenuItem href="/perfil" icon={<FileText size={18} />} label="Dados Pessoais" desc="Atualizar cadastro" />
-                    {/* 🦈 Link para Nova Página de Pedidos (ID 16) */}
+                    {/* Link para nova página de pedidos (ID 16) */}
                     <MenuItem href="/configuracoes/pedidos" icon={<History size={18} />} label="Meus Pedidos" desc="Acompanhar compras" badge="Novo" />
-                    <MenuItem href="/configuracoes/seguranca" icon={<Shield size={18} />} label="Segurança & Senha" desc="Proteger conta" />
+                    <MenuItem href="/configuracoes/seguranca" icon={<Shield size={18} />} label="Segurança & Senha" desc="Proteger conta" badge="Bloqueado" disabled />
                 </div>
             </div>
 
@@ -207,9 +222,9 @@ export default function SettingsPage() {
   );
 }
 
-function MenuItem({ href, icon, label, desc, badge }: { href: string, icon: React.ReactNode, label: string, desc?: string, badge?: string }) {
-    return (
-        <Link href={href} className="w-full flex items-center justify-between p-4 border-b border-zinc-800 last:border-0 hover:bg-zinc-800/50 transition group">
+function MenuItem({ href, icon, label, desc, badge, disabled }: { href: string, icon: React.ReactNode, label: string, desc?: string, badge?: string, disabled?: boolean }) {
+    const card = (
+        <div className={`w-full flex items-center justify-between p-4 border-b border-zinc-800 last:border-0 transition group ${disabled ? "opacity-60 cursor-not-allowed bg-zinc-900/40" : "hover:bg-zinc-800/50"}`}>
             <div className="flex items-center gap-3 text-zinc-400 group-hover:text-white transition">
                 {icon}
                 <div className="text-left">
@@ -218,12 +233,23 @@ function MenuItem({ href, icon, label, desc, badge }: { href: string, icon: Reac
                 </div>
             </div>
             <div className="flex items-center gap-2">
-                {badge && <span className="bg-emerald-500/20 text-emerald-400 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-500/30 uppercase">{badge}</span>}
-                <ChevronRight size={16} className="text-zinc-600 group-hover:text-emerald-500 transition" />
+                {badge && (
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${disabled ? "bg-zinc-700/30 text-zinc-400 border-zinc-700" : "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"}`}>
+                    {badge}
+                  </span>
+                )}
+                {!disabled && <ChevronRight size={16} className="text-zinc-600 group-hover:text-emerald-500 transition" />}
             </div>
+        </div>
+    );
+
+    if (disabled) {
+        return card;
+    }
+
+    return (
+        <Link href={href} className="block">
+            {card}
         </Link>
     );
 }
-
-
-

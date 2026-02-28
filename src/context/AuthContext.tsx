@@ -146,6 +146,59 @@ const isDuplicateKeyError = (error: unknown): boolean => {
   return code === "23505";
 };
 
+const isNavigatorLockTimeoutError = (error: unknown): boolean => {
+  const raw = asRecord(error);
+  const candidates = [
+    error instanceof Error ? error.message : "",
+    asString(raw?.message),
+    asString(raw?.details),
+    asString(raw?.hint),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" | ")
+    .toLowerCase();
+
+  return (
+    candidates.includes("navigator lockmanage") ||
+    candidates.includes("lockmanager") ||
+    (candidates.includes("timed out waiting") && candidates.includes("auth-token"))
+  );
+};
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  const raw = asRecord(error);
+  const messageParts = [
+    error instanceof Error ? error.message : "",
+    asString(raw?.message),
+    asString(raw?.details),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+
+  if (!messageParts) return null;
+
+  const normalized = messageParts.toLowerCase();
+  const isMissingColumnError =
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    (normalized.includes("could not find the") && normalized.includes("column")) ||
+    normalized.includes("schema cache");
+
+  if (!isMissingColumnError) return null;
+
+  const patterns = [
+    /column\s+users\.([a-z0-9_]+)\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+    /column ['"]?([a-z0-9_]+)['"]? does not exist/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = messageParts.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+
+  return null;
+};
+
 const formatBackendErrorForConsole = (error: unknown): unknown => {
   if (error instanceof Error) {
     const extra = error as Error & {
@@ -333,7 +386,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [patentesCache, setPatentesCache] = useState<PatenteConfig[]>([]); 
   const [planosCache, setPlanosCache] = useState<PlanoConfig[]>([]);
   const lastMaintenanceUid = useRef<string | null>(null);
+  const lastUserRefreshAtRef = useRef(0);
   const syncingAuthUidRef = useRef<string | null>(null);
+  const authSyncFallbackUidRef = useRef<string | null>(null);
 
   const router = useRouter();
   const pathname = usePathname(); 
@@ -389,7 +444,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
       } catch (error: unknown) {
-        if (!isPermissionError(error)) {
+        if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
           console.error("Erro ao carregar planos:", error);
         }
       }
@@ -446,6 +501,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (existingRow) {
           if (!active || currentToken !== syncToken) return;
+          authSyncFallbackUidRef.current = null;
           const normalized = normalizeUserRow(existingRow, authUser);
           setUser(normalized);
           setIsAdmin(["master", "admin_geral", "admin_gestor"].includes(String(normalized.role)));
@@ -487,12 +543,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!active || currentToken !== syncToken) return;
 
         const normalized = normalizeUserRow(insertedRow, authUser);
+        authSyncFallbackUidRef.current = null;
         setUser(normalized);
         setIsAdmin(false);
         setLoading(false);
         void logActivity(normalized.uid, normalized.nome, "CREATE", "Usuarios", "Novo cadastro via Google");
       } catch (error: unknown) {
-        if (!isPermissionError(error)) {
+        if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
           console.warn("Falha na sincronizacao do usuario (fallback ativo):", formatBackendErrorForConsole(error));
         }
         if (!active || currentToken !== syncToken) return;
@@ -513,6 +570,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           authUser
         );
 
+        authSyncFallbackUidRef.current = authUser.id;
         setUser(fallbackUser);
         setIsAdmin(false);
         setLoading(false);
@@ -548,6 +606,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAdmin(false);
         setLoading(false);
         lastMaintenanceUid.current = null;
+        authSyncFallbackUidRef.current = null;
       }
     };
 
@@ -557,7 +616,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     void supabase.auth.getSession().then(({ data, error }) => {
       if (error) {
-        if (!isPermissionError(error)) {
+        if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
           console.error("Erro ao recuperar sessao:", error);
         }
         if (active) {
@@ -578,15 +637,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const persistUserPatch = useCallback(
     async (currentUser: User, patch: Record<string, unknown>): Promise<User> => {
       const { dbPatch } = buildUserPatchPayload(currentUser, patch);
+      const mutablePatch: Record<string, unknown> = { ...dbPatch };
+      let data: Record<string, unknown> | null = null;
 
-      const { data, error } = await supabase
-        .from("users")
-        .update(dbPatch)
-        .eq("uid", currentUser.uid)
-        .select("*")
-        .maybeSingle();
+      while (Object.keys(mutablePatch).length > 0) {
+        const updateResult = await supabase
+          .from("users")
+          .update(mutablePatch)
+          .eq("uid", currentUser.uid)
+          .select("*")
+          .maybeSingle();
 
-      if (error) throw error;
+        if (!updateResult.error) {
+          data = (updateResult.data as Record<string, unknown> | null) ?? null;
+          break;
+        }
+
+        const missingColumn = extractMissingSchemaColumn(updateResult.error);
+        if (!missingColumn) throw updateResult.error;
+
+        const removableKey =
+          Object.keys(mutablePatch).find((key) => key.toLowerCase() === missingColumn.toLowerCase()) ?? null;
+        if (!removableKey) throw updateResult.error;
+        delete mutablePatch[removableKey];
+      }
 
       if (!data) {
         const recoveryPayload: Record<string, unknown> = {
@@ -601,7 +675,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ultimoLoginDiario:
             asString(currentUser.ultimoLoginDiario) || new Date().toLocaleDateString("pt-BR"),
           data_adesao: asString(currentUser.data_adesao) || new Date().toISOString(),
-          ...dbPatch,
+          ...mutablePatch,
         };
 
         const { data: recoveredRow, error: recoveryError } = await supabase
@@ -643,6 +717,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (user.level === undefined) { updates.level = DEFAULT_USER_PROPS.level; hasUpdates = true; }
         if (user.sharkCoins === undefined) { updates.sharkCoins = DEFAULT_USER_PROPS.sharkCoins; hasUpdates = true; }
         if (!user.patente) { updates.patente = DEFAULT_USER_PROPS.patente; hasUpdates = true; }
+
+        const roleNormalized = typeof user.role === "string" ? user.role.toLowerCase() : "";
+        const planNormalized = typeof user.plano === "string" ? user.plano.trim().toLowerCase() : "";
+        // Corrige contaminacao de fallback "Visitante" em usuarios reais apos falhas transitórias de auth sync.
+        if (roleNormalized && roleNormalized !== "guest" && planNormalized === "visitante") {
+            updates.plano = DEFAULT_USER_PROPS.plano;
+            updates.plano_badge = DEFAULT_USER_PROPS.plano_badge;
+            updates.plano_cor = DEFAULT_USER_PROPS.plano_cor;
+            updates.plano_icon = DEFAULT_USER_PROPS.plano_icon;
+            updates.desconto_loja = DEFAULT_USER_PROPS.desconto_loja;
+            updates.xpMultiplier = DEFAULT_USER_PROPS.xpMultiplier;
+            hasUpdates = true;
+        }
         
         if (!user.plano) { updates.plano = DEFAULT_USER_PROPS.plano; hasUpdates = true; }
         if (!user.plano_badge) { updates.plano_badge = DEFAULT_USER_PROPS.plano_badge; hasUpdates = true; }
@@ -688,9 +775,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
-        // D. SINCRONIA DE PLANO
-        if (user.plano && user.plano !== "Bicho Solto" && planosCache.length > 0) {
-            const planoReal = planosCache.find(p => p.nome === user.plano);
+        // D. RECONCILIACAO COM ULTIMA SOLICITACAO APROVADA
+        if (planosCache.length > 0) {
+            const planoAtual = String(user.plano || "").trim().toLowerCase();
+            const precisaReconciliarPlano =
+                !planoAtual ||
+                planoAtual === "visitante" ||
+                planoAtual === "bicho" ||
+                planoAtual === "bicho solto";
+
+            if (precisaReconciliarPlano) {
+                try {
+                    const { data: latestApprovedRequest, error: latestApprovedError } = await supabase
+                        .from("solicitacoes_adesao")
+                        .select("planoNome, status, updatedAt, dataSolicitacao")
+                        .eq("userId", user.uid)
+                        .eq("status", "aprovado")
+                        .order("updatedAt", { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                    if (!latestApprovedError && latestApprovedRequest) {
+                        const approvedPlanName = asString(latestApprovedRequest.planoNome).trim().toLowerCase();
+                        const approvedPlan = planosCache.find(
+                            (p) => p.nome.trim().toLowerCase() === approvedPlanName
+                        );
+
+                        if (approvedPlan && approvedPlanName && approvedPlanName !== planoAtual) {
+                            updates.plano = approvedPlan.nome;
+                            updates.plano_badge = approvedPlan.nome;
+                            updates.plano_cor = approvedPlan.cor;
+                            updates.plano_icon = approvedPlan.icon;
+                            updates.desconto_loja = approvedPlan.descontoLoja;
+                            updates.xpMultiplier = approvedPlan.xpMultiplier;
+                            updates.tier = approvedPlanName.includes("lenda")
+                                ? "lenda"
+                                : approvedPlanName.includes("atleta")
+                                    ? "atleta"
+                                    : "bicho";
+                            hasUpdates = true;
+                        }
+                    }
+                } catch (reconcileError: unknown) {
+                    if (!isPermissionError(reconcileError) && !isNavigatorLockTimeoutError(reconcileError)) {
+                        console.warn("Falha ao reconciliar plano aprovado:", reconcileError);
+                    }
+                }
+            }
+        }
+
+        // E. SINCRONIA DE PLANO
+        if (user.plano && planosCache.length > 0) {
+            const planoAtual = String(user.plano).trim().toLowerCase();
+            const planoReal = planosCache.find((p) => p.nome.trim().toLowerCase() === planoAtual);
             if (planoReal) {
                 if (user.plano_cor !== planoReal.cor || user.plano_icon !== planoReal.icon) {
                     updates.plano_cor = planoReal.cor;
@@ -733,6 +870,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (loading || !user || isLocalGuest) return;
       if (user.status === "banned" || user.status === "bloqueado") return;
       if (isCadastroBypassPath(pathname)) return;
+      if (authSyncFallbackUidRef.current === user.uid) return;
 
       if (hasCadastroPendente(user)) {
           router.replace("/cadastro");
@@ -817,6 +955,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setIsAdmin(false);
     lastMaintenanceUid.current = null;
+    authSyncFallbackUidRef.current = null;
     router.push("/");
   };
 
@@ -859,6 +998,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw error;
     }
   };
+
+  useEffect(() => {
+    if (!user || isLocalGuest || user.isAnonymous) return;
+
+    const now = Date.now();
+    if (now - lastUserRefreshAtRef.current < 15_000) return;
+    lastUserRefreshAtRef.current = now;
+
+    const refresh = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("*")
+          .eq("uid", user.uid)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (!data) return;
+
+        const normalized = normalizeUserRow(data);
+        setUser((previous) => {
+          if (!previous) return normalized;
+
+          const previousSignature = [
+            asString(previous.plano),
+            asString(previous.plano_badge),
+            asString(previous.plano_cor),
+            asString(previous.plano_icon),
+            asString(previous.tier),
+            asString(previous.status),
+            asString(previous.role),
+          ].join("|");
+          const nextSignature = [
+            asString(normalized.plano),
+            asString(normalized.plano_badge),
+            asString(normalized.plano_cor),
+            asString(normalized.plano_icon),
+            asString(normalized.tier),
+            asString(normalized.status),
+            asString(normalized.role),
+          ].join("|");
+
+          return previousSignature === nextSignature ? previous : normalized;
+        });
+
+        setIsAdmin(["master", "admin_geral", "admin_gestor"].includes(String(normalized.role)));
+      } catch (error: unknown) {
+        if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
+          console.warn("Falha ao atualizar snapshot do usuario:", formatBackendErrorForConsole(error));
+        }
+      }
+    };
+
+    void refresh();
+  }, [pathname, user, isLocalGuest]);
 
   if (!mounted) return null;
 

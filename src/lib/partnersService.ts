@@ -468,14 +468,6 @@ const sanitizeStorageSegment = (value: string): string =>
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "") || "item";
 
-const getSafeFileExtension = (file: File): string => {
-  const nameMatch = file.name.toLowerCase().match(/\.([a-z0-9]+)$/);
-  if (nameMatch?.[1]) return nameMatch[1];
-  if (file.type === "image/png") return "png";
-  if (file.type === "image/webp") return "webp";
-  return "jpg";
-};
-
 export async function uploadPartnerImageToStorage(options: {
   file: File;
   kind: PartnerStorageImageKind;
@@ -483,11 +475,23 @@ export async function uploadPartnerImageToStorage(options: {
 }): Promise<string> {
   const partnerSegment = sanitizeStorageSegment(options.partnerId || "temp");
   const folder = options.kind === "capa" ? "capas" : "logos";
-  const fileBase = sanitizeStorageSegment(options.file.name.replace(/\.[^.]+$/, ""));
-  const extension = getSafeFileExtension(options.file);
-  const objectPath = `parceiros/${partnerSegment}/${folder}/${Date.now()}-${fileBase}.${extension}`;
+  const objectDir = `parceiros/${partnerSegment}/${folder}`;
 
-  const { url, error } = await uploadImage(options.file, objectPath);
+  const { url, error } = await uploadImage(options.file, objectDir, {
+    scopeKey: `parceiros:${partnerSegment}:${options.kind}`,
+    fileName: options.kind,
+    upsert: true,
+    appendVersionQuery: true,
+    maxBytes: options.kind === "capa" ? 3 * 1024 * 1024 : 2 * 1024 * 1024,
+    maxWidth: options.kind === "capa" ? 2400 : 1400,
+    maxHeight: options.kind === "capa" ? 1800 : 1400,
+    maxPixels: options.kind === "capa" ? 3_600_000 : 1_960_000,
+    compressionMaxWidth: options.kind === "capa" ? 1800 : 1200,
+    compressionMaxHeight: options.kind === "capa" ? 1200 : 1200,
+    compressionMaxBytes: 200 * 1024,
+    quality: 0.82,
+    cacheControl: "86400",
+  });
   if (!url || error) {
     throw new Error(error || "Falha ao subir imagem do parceiro.");
   }

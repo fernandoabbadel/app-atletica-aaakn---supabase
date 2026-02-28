@@ -212,6 +212,7 @@ const COMPAT_TABLE_CONFIG: Readonly<Record<string, CompatTableConfig>> = {
   categorias: { primaryKey: "id" },
   denuncias: { primaryKey: "id" },
   eventos: { primaryKey: "id" },
+  eventos_comentarios: { primaryKey: "id" },
   eventos_enquetes: { primaryKey: "id" },
   eventos_rsvps: { primaryKey: "id" },
   guia_data: { primaryKey: "id" },
@@ -223,6 +224,7 @@ const COMPAT_TABLE_CONFIG: Readonly<Record<string, CompatTableConfig>> = {
   parceiros: { primaryKey: "id" },
   planos: { primaryKey: "id" },
   posts: { primaryKey: "id" },
+  posts_comments: { primaryKey: "id" },
   produtos: { primaryKey: "id" },
   quiz_history: { primaryKey: "id" },
   reviews: { primaryKey: "id" },
@@ -1107,7 +1109,8 @@ class CompatBatch {
   }
 }
 
-export function writeBatch(_db: FirestoreInstance): CompatBatch {
+export function writeBatch(db: FirestoreInstance): CompatBatch {
+  void db;
   return new CompatBatch();
 }
 

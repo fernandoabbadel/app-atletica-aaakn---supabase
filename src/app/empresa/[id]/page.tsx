@@ -297,8 +297,12 @@ export default function EmpresaDashboard() {
     e: React.ChangeEvent<HTMLInputElement>,
     field: "imgLogo" | "imgCapa"
   ) => {
-      const file = e.target.files?.[0];
-      if (!file || !partner) return;
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      if (!file || !partner || uploadingProfileImageField !== null) {
+          input.value = "";
+          return;
+      }
 
       setUploadingProfileImageField(field);
       try {
@@ -321,7 +325,7 @@ export default function EmpresaDashboard() {
           addToast("Deu ruim no plantão! 🚨 Imagem inválida ou upload falhou.", "error");
       } finally {
           setUploadingProfileImageField(null);
-          e.target.value = "";
+          input.value = "";
       }
   };
 
@@ -472,8 +476,8 @@ export default function EmpresaDashboard() {
                           {uploadingProfileImageField === "imgCapa" ? <Loader2 size={14} className="animate-spin" /> : null}
                           {uploadingProfileImageField === "imgCapa" ? "Enviando capa..." : "Alterar Capa"}
                         </button>
-                        <input type="file" hidden ref={logoInputRef} onChange={e => handleFileChange(e, 'imgLogo')}/>
-                        <input type="file" hidden ref={coverInputRef} onChange={e => handleFileChange(e, 'imgCapa')}/>
+                        <input type="file" hidden ref={logoInputRef} accept="image/png,image/jpeg,image/webp" disabled={uploadingProfileImageField !== null} onChange={e => handleFileChange(e, 'imgLogo')}/>
+                        <input type="file" hidden ref={coverInputRef} accept="image/png,image/jpeg,image/webp" disabled={uploadingProfileImageField !== null} onChange={e => handleFileChange(e, 'imgCapa')}/>
                     </div>
                 </div>
 

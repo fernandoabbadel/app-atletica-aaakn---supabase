@@ -6,6 +6,7 @@ import { ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 
 import { useAuth } from "../../../../context/AuthContext";
 import { useToast } from "../../../../context/ToastContext";
+import { logActivity } from "../../../../lib/logger";
 import {
   approveStoreOrder,
   fetchAdminStoreBundle,
@@ -16,8 +17,11 @@ type OrderRow = {
   id: string;
   userId?: string;
   userName?: string;
+  productId?: string;
   productName?: string;
   price?: number;
+  quantidade?: number;
+  itens?: number;
   status?: string;
 };
 
@@ -77,13 +81,26 @@ export default function AdminLojaPedidosPendentesPage() {
         orderId: row.id,
         userId: String(row.userId || ""),
         userName: String(row.userName || "Usuario"),
+        productId: String(row.productId || ""),
         productName: String(row.productName || "Produto"),
         price: Number(row.price || 0),
+        quantidade: Number(row.quantidade || 0) || undefined,
+        itens: Number(row.itens || 0) || undefined,
         approvedBy: user?.uid || "admin",
       });
+      if (user?.uid) {
+        await logActivity(
+          user.uid,
+          user.nome || "Admin",
+          "UPDATE",
+          "Loja/Pagamentos",
+          `Aprovou comprovante do pedido ${row.id} (${row.productName || "Produto"})`
+        ).catch(() => {});
+      }
       addToast("Pedido aprovado.", "success");
       await load(true);
-    } catch {
+    } catch (error: unknown) {
+      console.error("Erro ao aprovar pedido (admin/loja):", error);
       addToast("Erro ao aprovar pedido.", "error");
     }
   };
@@ -91,9 +108,19 @@ export default function AdminLojaPedidosPendentesPage() {
   const handleReject = async (row: OrderRow) => {
     try {
       await setStoreOrderStatus({ orderId: row.id, status: "rejected" });
+      if (user?.uid) {
+        await logActivity(
+          user.uid,
+          user.nome || "Admin",
+          "UPDATE",
+          "Loja/Pagamentos",
+          `Rejeitou comprovante do pedido ${row.id} (${row.productName || "Produto"})`
+        ).catch(() => {});
+      }
       addToast("Pedido rejeitado.", "info");
       await load(true);
-    } catch {
+    } catch (error: unknown) {
+      console.error("Erro ao rejeitar pedido (admin/loja):", error);
       addToast("Erro ao rejeitar pedido.", "error");
     }
   };

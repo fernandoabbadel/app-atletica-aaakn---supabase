@@ -28,6 +28,7 @@ const CATEGORY_OPTIONS: Array<{ value: SupportCategory; label: string }> = [
   { value: "conta", label: "Conta" },
   { value: "bug", label: "Bug" },
   { value: "denuncia", label: "Denuncia" },
+  { value: "sugestorias", label: "Sugestorias" },
   { value: "outro", label: "Outro" },
 ];
 

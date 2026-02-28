@@ -1,19 +1,17 @@
-// ARQUIVO: src/app/perfil/[id]/page.tsx
+﻿// ARQUIVO: src/app/perfil/[id]/page.tsx
 
 "use client";
 
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Image from "next/image"; // 🦈 Importado Next Image
+import Image from "next/image";
 import { 
-  ArrowLeft, MapPin, Edit3, Instagram, MessageCircle, Crown, 
-  Star, Ghost, Fish, Swords, Share2, ShieldCheck, Loader2, 
+  ArrowLeft, MapPin, Edit3, Instagram, MessageCircle, Ghost, Fish, Share2, ShieldCheck, Loader2, 
   UserPlus, UserCheck, X, PawPrint, Users, Lock, Heart,
-  Zap, Gem, Trophy, ShoppingBag, Medal, Calendar, Clock, CheckCircle, EyeOff
+  Calendar, Clock, CheckCircle, EyeOff
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext"; 
 import { useToast } from "../../../context/ToastContext";
-import { fetchPatentesConfig } from "../../../lib/achievementsService";
 import {
   fetchFollowCounts,
   fetchFollowList,
@@ -23,6 +21,7 @@ import {
 import { getBackendErrorCode } from "@/lib/backendErrors";
 import Link from "next/link";
 import { getTurmaImage } from "../../../constants/turmaImages";
+import { resolvePlanIcon, resolvePlanTheme } from "../../../constants/planVisuals";
 
 // --- TIPAGEM ---
 
@@ -60,13 +59,6 @@ interface LigaItem {
   sigla?: string;
   logoBase64?: string;
   membrosIds?: string[];
-}
-
-interface PatenteData {
-    titulo: string;
-    minXp: number;
-    cor: string;
-    iconName: string;
 }
 
 interface UserProfile {
@@ -138,35 +130,22 @@ const getSportInfo = (sport: string) => {
 
 // --- COMPONENTES VISUAIS ---
 
-const LevelBadge = ({ xp }: { xp: number }) => {
-    const [patentes, setPatentes] = useState<PatenteData[]>([]);
-    useEffect(() => {
-        const loadPatentes = async () => {
-            try {
-                const rows = await fetchPatentesConfig({ maxResults: 80 });
-                const data = rows.map((entry) => ({
-                    titulo: entry.titulo,
-                    minXp: entry.minXp,
-                    cor: entry.cor,
-                    iconName: entry.iconName,
-                } as PatenteData));
-                data.sort((a, b) => a.minXp - b.minXp);
-                if (data.length > 0) setPatentes(data);
-            else setPatentes([{ titulo: "Plâncton", minXp: 0, cor: "text-zinc-400", iconName: "Fish" }]);
-            } catch (error: unknown) {
-                console.error(error);
-                setPatentes([{ titulo: "Plancton", minXp: 0, cor: "text-zinc-400", iconName: "Fish" }]);
-            }
-        };
-        void loadPatentes();
-    }, []);
-    const currentBadge = patentes.slice().reverse().find(p => xp >= p.minXp) || patentes[0];
-    if (!currentBadge) return null;
-    
-    // 🦈 Tipagem correta para o mapa de ícones
-    const IconMap: Record<string, React.ElementType> = { Fish, Swords, Crown, Skull: Ghost, Rocket: Star, Star, Zap, Trophy, Medal, Heart };
-    const IconComp = IconMap[currentBadge.iconName] || Fish;
-    const colorClass = currentBadge.cor || "text-zinc-500";
+const LevelBadge = ({
+  xp,
+  patente,
+  patenteIcon,
+  patenteCor,
+}: {
+  xp: number;
+  patente?: string;
+  patenteIcon?: string;
+  patenteCor?: string;
+}) => {
+    const IconComp = resolvePlanIcon(patenteIcon || "fish", Fish);
+    const colorClass =
+      typeof patenteCor === "string" && patenteCor.trim().startsWith("text-")
+        ? patenteCor
+        : "text-zinc-500";
     let borderClass = "border-zinc-700";
     if (colorClass.includes("orange")) borderClass = "border-orange-500/50";
     else if (colorClass.includes("red")) borderClass = "border-red-500/50";
@@ -175,29 +154,18 @@ const LevelBadge = ({ xp }: { xp: number }) => {
     else if (colorClass.includes("yellow")) borderClass = "border-yellow-500/50";
 
     return (
-        <div title={`${currentBadge.titulo} • ${xp} XP`} className={`relative group cursor-help p-3 rounded-full bg-zinc-900 border ${borderClass} shadow-lg transition-transform hover:scale-110`}>
+        <div title={`${patente || "Plankton"} • ${xp} XP`} className={`relative group cursor-help p-3 rounded-full bg-zinc-900 border ${borderClass} shadow-lg transition-transform hover:scale-110`}>
             <IconComp size={20} className={colorClass} />
         </div>
     );
 };
-
 const PlanBadge = ({ nome, cor, iconName }: { nome?: string, cor?: string, iconName?: string }) => {
-    const IconMap: Record<string, React.ElementType> = {
-        'ghost': Ghost, 'star': Star, 'crown': Crown, 'fish': Fish,
-        'zap': Zap, 'gem': Gem, 'trophy': Trophy, 'shopping': ShoppingBag, 'user': Users
-    };
-    const IconComponent = (iconName && IconMap[iconName]) ? IconMap[iconName] : Ghost;
+    const IconComponent = resolvePlanIcon(iconName, Ghost);
     const title = nome || "Bicho Solto";
-    let styleClass = 'text-zinc-500 border-zinc-700 bg-zinc-900';
-    if(cor === 'yellow') styleClass = 'text-yellow-500 border-yellow-500/50 bg-yellow-500/10';
-    else if(cor === 'emerald') styleClass = 'text-emerald-400 border-emerald-500/50 bg-emerald-500/10';
-    else if(cor === 'zinc') styleClass = 'text-zinc-400 border-zinc-500/50 bg-zinc-500/10';
-    else if(cor === 'purple') styleClass = 'text-purple-400 border-purple-500/50 bg-purple-500/10';
-    else if(cor === 'blue') styleClass = 'text-blue-400 border-blue-500/50 bg-blue-500/10';
-    else if(cor === 'red') styleClass = 'text-red-500 border-red-500/50 bg-red-500/10';
+    const theme = resolvePlanTheme(cor);
 
     return (
-        <div className={`relative group cursor-help p-3 rounded-full border shadow-lg transition-transform hover:scale-110 ${styleClass}`}>
+        <div className={`relative group cursor-help p-3 rounded-full border shadow-lg transition-transform hover:scale-110 ${theme.badgeClass}`}>
             <IconComponent size={20} className="animate-pulse-slow" />
             <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 px-3 py-2 bg-black/95 text-white text-[10px] font-bold rounded-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-zinc-800 pointer-events-none z-50 shadow-2xl">
                 <span className="uppercase tracking-wider">Plano {title}</span>
@@ -245,7 +213,7 @@ export default function PerfilPublicoPage() {
             if (bundle?.profile) {
                 const data = bundle.profile as UserProfile;
 
-                // 🦈 VERIFICAÇÃO DE CONTA DESATIVADA 
+                // ðŸ¦ˆ VERIFICAÃ‡ÃƒO DE CONTA DESATIVADA 
                 if ((data.role === 'inactive' || data.status === 'paused') && !isOwnProfile) {
                     setProfileHidden(true);
                     setLoading(false);
@@ -284,7 +252,7 @@ export default function PerfilPublicoPage() {
         finally { setLoading(false); }
     };
     void fetchProfile();
-  }, [params.id, user, isOwnProfile, addToast, router]); // 🦈 Dependências adicionadas
+  }, [params.id, user, isOwnProfile, addToast, router]); // ðŸ¦ˆ Dependências adicionadas
 
   const handleFollow = async () => {
       if (!user || !profile) return;
@@ -375,7 +343,7 @@ export default function PerfilPublicoPage() {
 
   if (loading) return <div className="h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500" size={40}/></div>;
 
-  // 🦈 TELA DE PERFIL OCULTO
+  // ðŸ¦ˆ TELA DE PERFIL OCULTO
   if (profileHidden) {
       return (
           <div className="min-h-screen bg-[#050505] text-zinc-500 font-sans flex flex-col items-center justify-center p-6 text-center">
@@ -408,7 +376,7 @@ export default function PerfilPublicoPage() {
       <div className="relative">
         <div className="h-48 w-full bg-zinc-900 overflow-hidden relative">
             <div className="absolute inset-0 bg-gradient-to-b from-emerald-900/20 via-[#050505]/50 to-[#050505] z-10"></div>
-            {/* 🦈 Correção de Imagem: Capa */}
+            {/* ðŸ¦ˆ Correção de Imagem: Capa */}
             <Image 
                 src={turmaImage} 
                 alt="Capa da Turma"
@@ -423,7 +391,7 @@ export default function PerfilPublicoPage() {
         <div className="px-6 relative z-20 -mt-16 flex flex-col items-center">
             
             <div className="relative mb-3 group">
-                {/* 🦈 Correção de Imagem: Avatar */}
+                {/* ðŸ¦ˆ Correção de Imagem: Avatar */}
                 <div className={`w-32 h-32 rounded-full p-1 bg-gradient-to-tr shadow-[0_0_40px_rgba(16,185,129,0.3)] ${profile.status === 'paused' ? 'from-zinc-600 via-zinc-800 to-zinc-900 grayscale opacity-80' : 'from-emerald-500 via-zinc-800 to-zinc-900'} relative`}>
                     <div className="w-full h-full rounded-full overflow-hidden relative border-4 border-[#050505]">
                         <Image 
@@ -436,7 +404,7 @@ export default function PerfilPublicoPage() {
                         />
                     </div>
                 </div>
-                {/* 🦈 Correção de Imagem: Badge da Turma Pequena */}
+                {/* ðŸ¦ˆ Correção de Imagem: Badge da Turma Pequena */}
                 <div className="absolute bottom-1 right-1 w-10 h-10 bg-black rounded-full border-2 border-[#050505] flex items-center justify-center shadow-lg z-30 overflow-hidden">
                     <Image 
                         src={turmaImage} 
@@ -476,7 +444,12 @@ export default function PerfilPublicoPage() {
                     <button onClick={handleFollow} className={`px-8 py-2 rounded-full text-xs font-bold uppercase border transition shadow-lg flex items-center gap-2 ${isFollowing ? 'bg-zinc-900 border-zinc-700 text-zinc-400' : 'bg-emerald-600 border-emerald-500 text-white hover:scale-105'}`}>{isFollowing ? <UserCheck size={14}/> : <UserPlus size={14}/>} {isFollowing ? "Seguindo" : "Seguir"}</button>
                 )}
                 
-                <LevelBadge xp={profile.xp || 0} />
+                <LevelBadge
+                  xp={profile.xp || 0}
+                  patente={profile.patente}
+                  patenteIcon={profile.patente_icon}
+                  patenteCor={profile.patente_cor}
+                />
             </div>
 
             <div className="grid grid-cols-3 gap-3 w-full max-w-sm mb-8">
@@ -604,4 +577,5 @@ export default function PerfilPublicoPage() {
     </div>
   );
 }
+
 

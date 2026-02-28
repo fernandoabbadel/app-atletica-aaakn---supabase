@@ -10,6 +10,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   startAfter,
   updateDoc,
   where,
@@ -241,6 +242,27 @@ export async function fetchFinanceiroConfig(options?: {
   const data = asObj(snap.data());
   setCache(financeiroCache, cacheKey, data);
   return data;
+}
+
+export async function saveFinanceiroConfig(payload: {
+  chave: string;
+  banco: string;
+  titular: string;
+  whatsapp?: string;
+}): Promise<void> {
+  await setDoc(
+    doc(db, "app_config", "financeiro"),
+    {
+      chave: payload.chave.trim(),
+      banco: payload.banco.trim(),
+      titular: payload.titular.trim(),
+      whatsapp: payload.whatsapp?.trim() || "",
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  financeiroCache.clear();
 }
 
 export async function fetchEventCheckoutData(options: {

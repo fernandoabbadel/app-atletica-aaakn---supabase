@@ -19,6 +19,7 @@ import { getBackendErrorCode } from "./backendErrors";
 import { clearDashboardCaches as clearAuthenticatedDashboardCaches } from "./dashboardService";
 import { clearDashboardCaches as clearPublicDashboardCaches } from "./dashboardPublicService";
 import { getSupabaseClient } from "./supabase";
+import { incrementUserStats } from "./supabaseData";
 import { uploadImage } from "./upload";
 
 type CacheEntry<T> = {
@@ -433,14 +434,6 @@ const sanitizeStorageSegment = (value: string): string =>
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "") || "item";
 
-const getSafeFileExtension = (file: File): string => {
-  const nameMatch = file.name.toLowerCase().match(/\.([a-z0-9]+)$/);
-  if (nameMatch?.[1]) return nameMatch[1];
-  if (file.type === "image/png") return "png";
-  if (file.type === "image/webp") return "webp";
-  return "jpg";
-};
-
 const leagueImageFolderByKind: Record<LeagueStorageImageKind, string> = {
   logo: "logos",
   member: "membros",
@@ -459,11 +452,34 @@ export async function uploadLeagueImageToStorage(options: {
     ? `/${sanitizeStorageSegment(options.entityId)}`
     : "";
   const folder = leagueImageFolderByKind[options.kind];
-  const fileBase = sanitizeStorageSegment(options.file.name.replace(/\.[^.]+$/, ""));
-  const extension = getSafeFileExtension(options.file);
-  const objectPath = `ligas/${leagueSegment}/${folder}${entitySegment}/${Date.now()}-${fileBase}.${extension}`;
+  const objectDir = `ligas/${leagueSegment}/${folder}${entitySegment}`;
+  const isEventImage = options.kind === "event";
+  const isLogoImage = options.kind === "logo";
+  const isMemberImage = options.kind === "member";
+  const fileName =
+    options.kind === "logo"
+      ? "logo"
+      : options.kind === "event"
+        ? "evento"
+        : options.kind === "member"
+          ? "membro"
+          : "pergunta";
 
-  const { url, error } = await uploadImage(options.file, objectPath);
+  const { url, error } = await uploadImage(options.file, objectDir, {
+    scopeKey: `ligas:${leagueSegment}:${options.kind}:${options.entityId || "root"}`,
+    fileName,
+    upsert: true,
+    appendVersionQuery: true,
+    maxBytes: isEventImage ? 3 * 1024 * 1024 : 2 * 1024 * 1024,
+    maxWidth: isEventImage ? 2400 : isLogoImage ? 1600 : isMemberImage ? 1400 : 1800,
+    maxHeight: isEventImage ? 1800 : isLogoImage ? 1600 : isMemberImage ? 1400 : 1800,
+    maxPixels: isEventImage ? 3_600_000 : 2_560_000,
+    compressionMaxWidth: isEventImage ? 1800 : 1400,
+    compressionMaxHeight: isEventImage ? 1200 : 1400,
+    compressionMaxBytes: isEventImage ? 200 * 1024 : 150 * 1024,
+    quality: 0.82,
+    cacheControl: "86400",
+  });
   if (!url || error) {
     throw new Error(error || "Falha ao subir imagem da liga.");
   }
@@ -668,6 +684,7 @@ export async function setLeagueVisibility(payload: {
 export async function changeLeagueLikeCount(payload: {
   id: string;
   delta: 1 | -1;
+  actorUserId?: string;
 }): Promise<void> {
   const cleanId = payload.id.trim();
   if (!cleanId) return;
@@ -683,6 +700,15 @@ export async function changeLeagueLikeCount(payload: {
       return { ok: true };
     }
   );
+
+  const actorUserId = payload.actorUserId?.trim() || "";
+  if (actorUserId) {
+    try {
+      await incrementUserStats(actorUserId, { leagueLikesGiven: payload.delta });
+    } catch (error: unknown) {
+      console.warn("Liga: falha ao atualizar stats de curtidas de liga.", error);
+    }
+  }
 
   clearLeagueDependentCaches();
 }
@@ -831,6 +857,12 @@ export async function addLeagueQuizHistory(payload: {
       return { ok: true };
     }
   );
+
+  try {
+    await incrementUserStats(userId, { leagueQuizRuns: 1 });
+  } catch (error: unknown) {
+    console.warn("Ligas: falha ao atualizar stats de quiz.", error);
+  }
 
   clearUsersCache();
 }

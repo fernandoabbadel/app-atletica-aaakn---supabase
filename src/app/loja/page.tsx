@@ -6,11 +6,11 @@ import Link from "next/link";
 import Image from "next/image";
 import { 
   ArrowLeft, ShoppingBag, Search, 
-  Package, Zap, AlertCircle 
+  Package, Zap, AlertCircle, ChevronDown
 } from "lucide-react";
 // addToast removido pois nao estava sendo usado, se precisar re-importe
 // import { useToast } from "../../context/ToastContext"; 
-import { fetchStoreProducts } from "../../lib/storePublicService";
+import { fetchStoreCategories, fetchStoreProductsPage } from "../../lib/storePublicService";
 // --- TIPAGEM EXATA DO SEU SUPABASE ---
 interface Variante {
   id: string;
@@ -30,6 +30,7 @@ interface Produto {
   precoAntigo?: number;
   estoque: number;
   lote: string;
+  cores?: string | string[];
   tagLabel?: string;
   tagColor?: string;
   tagEffect?: "pulse" | "shine" | "none";
@@ -38,6 +39,8 @@ interface Produto {
   cliques: number;
   createdAt?: unknown;
 }
+
+const STORE_PAGE_SIZE = 20;
 
 // Helper de Cores para as Tags
 const getTagColorClass = (color?: string) => {
@@ -51,33 +54,46 @@ const getTagColorClass = (color?: string) => {
   }
 };
 
+const parseColorLines = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter((entry): entry is string => entry.length > 0);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/\r?\n|,/)
+      .map((entry) => entry.trim())
+      .filter((entry): entry is string => entry.length > 0);
+  }
+  return [];
+};
+
+const getProductColorPreview = (produto: Produto): string[] => {
+  const variantColors = Array.isArray(produto.variantes)
+    ? produto.variantes
+        .map((variant) => (typeof variant?.cor === "string" ? variant.cor.trim() : ""))
+        .filter((entry): entry is string => entry.length > 0)
+    : [];
+
+  const manualColors = parseColorLines(produto.cores);
+  return Array.from(new Set([...variantColors, ...manualColors]));
+};
+
 export default function LojaPage() {
   // Estados
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [busca, setBusca] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState("Todos");
   const [cartCount, setCartCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [categoriasCatalogo, setCategoriasCatalogo] = useState<string[]>([]);
 
-    // 1. CARREGAR DADOS DO SUPABASE
+  // 1. CONTADOR DO CARRINHO (LocalStorage)
   useEffect(() => {
-    let mounted = true;
-
-    const loadProducts = async () => {
-      try {
-        const rows = await fetchStoreProducts({ maxResults: 80, forceRefresh: false });
-        if (!mounted) return;
-        setProdutos(rows as unknown as Produto[]);
-      } catch (error: unknown) {
-        console.error(error);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    void loadProducts();
-
-    // Atualizar contador do carrinho (LocalStorage)
     const updateCartCount = () => {
         const raw = localStorage.getItem("cart");
         if (raw) {
@@ -92,16 +108,108 @@ export default function LojaPage() {
     window.addEventListener('storage', updateCartCount);
     
     return () => { 
-        mounted = false;
         window.removeEventListener('storage', updateCartCount);
     };
   }, []);
 
-  // 2. FILTRAGEM
+  // 2. CARREGAR CATEGORIAS (leve)
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCategories = async () => {
+      try {
+        const rows = await fetchStoreCategories({ maxResults: 120, forceRefresh: false });
+        if (!mounted) return;
+        const names = rows
+          .map((row) => (typeof (row as { nome?: unknown }).nome === "string" ? ((row as { nome: string }).nome || "").trim() : ""))
+          .filter((entry): entry is string => entry.length > 0);
+        setCategoriasCatalogo(Array.from(new Set(names)));
+      } catch (error: unknown) {
+        console.error(error);
+      }
+    };
+
+    void loadCategories();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // 3. CARREGAR PRODUTOS POR PAGINA/CATEGORIA (reduz over-fetch no plano free)
+  useEffect(() => {
+    let mounted = true;
+
+    const loadFirstPage = async () => {
+      setLoading(true);
+      try {
+        const page = await fetchStoreProductsPage({
+          page: 1,
+          pageSize: STORE_PAGE_SIZE,
+          category: filtroCategoria,
+          forceRefresh: false,
+        });
+        if (!mounted) return;
+        setProdutos(page.products as unknown as Produto[]);
+        setHasMore(page.hasMore);
+        setCurrentPage(1);
+      } catch (error: unknown) {
+        console.error(error);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    void loadFirstPage();
+    return () => {
+      mounted = false;
+    };
+  }, [filtroCategoria]);
+
+  const handleLoadMore = async () => {
+    if (loading || loadingMore || !hasMore) return;
+
+    const nextPage = currentPage + 1;
+    setLoadingMore(true);
+    try {
+      const page = await fetchStoreProductsPage({
+        page: nextPage,
+        pageSize: STORE_PAGE_SIZE,
+        category: filtroCategoria,
+        forceRefresh: false,
+      });
+
+      setProdutos((prev) => {
+        const existing = new Set(prev.map((item) => item.id));
+        const next = [...prev];
+        (page.products as unknown as Produto[]).forEach((item) => {
+          if (existing.has(item.id)) return;
+          existing.add(item.id);
+          next.push(item);
+        });
+        return next;
+      });
+      setHasMore(page.hasMore);
+      setCurrentPage(nextPage);
+    } catch (error: unknown) {
+      console.error(error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // 4. FILTRAGEM
   const categoriasDisponiveis = useMemo(() => {
-      const cats = new Set(produtos.map(p => p.categoria).filter(Boolean));
+      const cats = new Set<string>();
+      categoriasCatalogo.forEach((cat) => {
+        const clean = String(cat || "").trim();
+        if (clean) cats.add(clean);
+      });
+      produtos.forEach((p) => {
+        const clean = String(p.categoria || "").trim();
+        if (clean) cats.add(clean);
+      });
       return ["Todos", ...Array.from(cats)];
-  }, [produtos]);
+  }, [categoriasCatalogo, produtos]);
 
   const produtosFiltrados = produtos.filter(p => {
       const matchNome = p.nome.toLowerCase().includes(busca.toLowerCase());
@@ -185,6 +293,8 @@ export default function LojaPage() {
                     const estoqueTotal = temVariantes 
                         ? prod.variantes.reduce((acc, v) => acc + Number(v.estoque), 0) 
                         : Number(prod.estoque);
+                    const allColors = getProductColorPreview(prod);
+                    const colorPreview = allColors.slice(0, 3);
 
                     return (
                         <Link 
@@ -229,6 +339,23 @@ export default function LojaPage() {
                                 <div className="flex justify-between items-start">
                                     <h3 className="text-sm font-black text-white leading-tight line-clamp-2">{prod.nome}</h3>
                                 </div>
+                                {colorPreview.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {colorPreview.map((color) => (
+                                      <span
+                                        key={`${prod.id}-color-${color}`}
+                                        className="px-2 py-0.5 rounded-md border border-zinc-700 bg-zinc-950 text-[9px] font-bold uppercase text-zinc-300"
+                                      >
+                                        {color}
+                                      </span>
+                                    ))}
+                                    {allColors.length > colorPreview.length && (
+                                      <span className="px-2 py-0.5 rounded-md border border-zinc-700 bg-zinc-950 text-[9px] font-bold uppercase text-zinc-500">
+                                        +{allColors.length - colorPreview.length}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                                 
                                 <div className="mt-auto pt-2 flex items-end justify-between">
                                     <div>
@@ -253,6 +380,34 @@ export default function LojaPage() {
                     );
                 })}
             </div>
+        )}
+
+        {!loading && produtosFiltrados.length > 0 && hasMore && (
+          <div className="mt-5 flex justify-center">
+            <button
+              onClick={() => void handleLoadMore()}
+              disabled={loadingMore}
+              className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-xs font-black uppercase text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+            >
+              {loadingMore ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                  Carregando
+                </>
+              ) : (
+                <>
+                  <ChevronDown size={14} />
+                  Carregar mais desta categoria
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {!loading && (
+          <p className="mt-4 text-center text-[10px] text-zinc-600 font-bold uppercase tracking-wide">
+            Loja paginada por categoria ({STORE_PAGE_SIZE} por leitura)
+          </p>
         )}
       </main>
 

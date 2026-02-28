@@ -5,10 +5,9 @@ import React, { useCallback, useEffect, useState, useMemo } from "react";
 import {
   ArrowLeft, Calendar, MapPin, Share2, Ticket, Clock,
   Users, CheckCircle, HelpCircle, XCircle,
-  Loader2, Crown, MessageCircle,
+  Loader2, MessageCircle,
   Heart, Send, Trash2, ShieldAlert, Star,
-  Ghost, Zap, Gem, Trophy, ShoppingBag, Fish, Swords,
-  ChevronLeft, ChevronRight, Flag, Medal, Skull, Rocket, Phone, X
+  Ghost, Fish, ChevronLeft, ChevronRight, Flag, Phone, X
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -28,6 +27,7 @@ import {
 import { getTurmaImage } from "../../../constants/turmaImages";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
+import { resolvePlanIcon, resolvePlanTextClass } from "../../../constants/planVisuals";
 
 // --- INTERFACES ---
 interface Lote {
@@ -120,26 +120,14 @@ interface PatenteConfig {
     iconName: string;
 }
 
-// --- CONFIGURACAO DE ICONES ---
-const ICON_COMPONENTS: Record<string, React.ElementType> = {
-    Fish, Swords, Crown, Skull, Rocket,
-    Star, Zap, Trophy, Medal, Heart,
-    Ghost, Gem, ShoppingBag
-};
-
 const DEFAULT_PATENTES: PatenteConfig[] = [
-    { titulo: "Pl�ncton", minXp: 0, cor: "text-zinc-400", iconName: "Fish" },
-    { titulo: "Peixe Palha�o", minXp: 500, cor: "text-orange-400", iconName: "Fish" },
+    { titulo: "Plâncton", minXp: 0, cor: "text-zinc-400", iconName: "Fish" },
+    { titulo: "Peixe Palhaço", minXp: 500, cor: "text-orange-400", iconName: "Fish" },
     { titulo: "Barracuda", minXp: 2000, cor: "text-blue-400", iconName: "Swords" },
-    { titulo: "Tubar�o Martelo", minXp: 5000, cor: "text-purple-400", iconName: "Fish" },
-    { titulo: "Tubar�o Branco", minXp: 15000, cor: "text-emerald-400", iconName: "Fish" },
+    { titulo: "Tubarão Martelo", minXp: 5000, cor: "text-purple-400", iconName: "Fish" },
+    { titulo: "Tubarão Branco", minXp: 15000, cor: "text-emerald-400", iconName: "Fish" },
     { titulo: "MEGALODON", minXp: 50000, cor: "text-red-600", iconName: "Crown" },
 ];
-
-const PLAN_COLORS: Record<string, string> = {
-    yellow: "text-yellow-400", emerald: "text-emerald-400", purple: "text-purple-400",
-    blue: "text-blue-400", red: "text-red-500", zinc: "text-zinc-400"
-};
 
 const COMMENT_MAX_CHARS = 280;
 const POLL_OPTION_MAX_CHARS = 40;
@@ -207,23 +195,26 @@ function EventCountdown({ dateStr, timeStr }: { dateStr: string, timeStr: string
 
 // --- BADGES DO USUARIO ---
 const UserBadges = ({ data, patentesConfig }: { data: Comentario, patentesConfig: PatenteConfig[] }) => {
-    const isAdminUser = data.role === 'admin_geral' || data.role === 'master';
-    const PlanIcon = ICON_COMPONENTS[data.userPlanoIcon || 'Ghost'] || Ghost;
-    const planColor = PLAN_COLORS[data.userPlanoCor || 'zinc'];
-    const patenteName = data.userPatente || "Pl�ncton";
-    const patenteConfig = patentesConfig.find(p => p.titulo === patenteName) || patentesConfig[0] || DEFAULT_PATENTES[0];
-    const PatenteIcon = ICON_COMPONENTS[patenteConfig.iconName] || Fish;
-    const patenteColor = patenteConfig.cor || "text-zinc-400";
+    const isAdminUser = data.role === "admin_geral" || data.role === "master";
+    const normalizeIcon = (value: string | undefined) =>
+      String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    const planIconName = normalizeIcon(data.userPlanoIcon || "ghost");
+    const PlanIcon = resolvePlanIcon(data.userPlanoIcon || "ghost", Ghost);
+    const planColor = resolvePlanTextClass(data.userPlanoCor || "zinc");
+    const patenteName = data.userPatente || "Plâncton";
+    const patenteConfig = patentesConfig.find((p) => p.titulo === patenteName) || patentesConfig[0] || DEFAULT_PATENTES[0];
+    const PatenteIcon = resolvePlanIcon(patenteConfig.iconName, Fish);
+    const patenteColor = resolvePlanTextClass(patenteConfig.cor || "text-zinc-400");
 
     return (
         <div className="flex items-center gap-1.5 ml-1">
             {isAdminUser && <span title="Admin"><ShieldAlert size={12} className="text-red-500 fill-red-500/20" /></span>}
-            {data.userPlanoIcon && data.userPlanoIcon !== 'ghost' && <PlanIcon size={12} className={planColor} title="Plano VIP" />}
+            {planIconName && planIconName !== "ghost" && <PlanIcon size={12} className={planColor} />}
             <div title={`Patente: ${patenteConfig.titulo}`} className="flex items-center justify-center"><PatenteIcon size={12} className={patenteColor} /></div>
         </div>
     );
 };
-
 export default function DetalhesEventoPage() {
   const params = useParams();
   const { user, isAdmin } = useAuth(); 
@@ -322,13 +313,13 @@ export default function DetalhesEventoPage() {
   };
 
   const handleRSVP = async (status: "going" | "maybe") => {
-      if (!user || !evento) return addToast("Faca login para confirmar!", "error");
+      if (!user || !evento) return addToast("Faça login para confirmar!", "error");
       try {
           await setEventRsvpDetailed({
               eventId: evento.id,
               userId: user.uid,
               status,
-              userName: user.nome || "Anonimo",
+              userName: user.nome || "Anônimo",
               userAvatar: user.foto || "",
               userTurma: user.turma || "Geral",
           });
@@ -341,16 +332,16 @@ export default function DetalhesEventoPage() {
       const commentText = newComment.trim().slice(0, COMMENT_MAX_CHARS);
       if (!commentText || !user || !evento) return;
       const newCommentData = {
-          text: commentText, userId: user.uid, userName: user.nome || "Anonimo",
+          text: commentText, userId: user.uid, userName: user.nome || "Anônimo",
           userAvatar: user.foto || "", userTurma: user.turma || "Geral",
           userPlanoCor: user.plano_cor || "zinc", userPlanoIcon: user.plano_icon || "ghost",
-          userPatente: user.patente || "Pl�ncton", role: user.role || 'user',
+          userPatente: user.patente || "Plâncton", role: user.role || "user",
           likes: [], reports: [], hidden: false
       };
       try {
           await createEventComment({ eventId: evento.id, data: newCommentData });
           setNewComment("");
-          addToast("Comentario enviado!", "success");
+          addToast("Comentário enviado!", "success");
           await refreshEventData();
       } catch { addToast("Erro ao comentar.", "error"); }
   };
@@ -371,10 +362,10 @@ export default function DetalhesEventoPage() {
   };
 
   const handleDeleteComment = async (comId: string) => {
-      if (!evento || !confirm("Apagar este comentario?")) return;
+      if (!evento || !confirm("Apagar este comentário?")) return;
       try {
           await deleteEventComment({ eventId: evento.id, commentId: comId });
-          addToast("Comentario apagado.", "info");
+          addToast("Comentário apagado.", "info");
           await refreshEventData();
       } catch {
           addToast("Erro ao apagar.", "error");
@@ -384,14 +375,14 @@ export default function DetalhesEventoPage() {
   const handleReportComment = async (comId: string) => {
       if (!user || !evento) return;
       await reportEventComment({ eventId: evento.id, commentId: comId, userId: user.uid });
-      addToast("Comentario denunciado.", "info");
+      addToast("Comentário denunciado.", "info");
       await refreshEventData();
   };
 
   const handleToggleHideComment = async (comId: string, currentStatus: boolean) => {
       if(!evento) return;
       await setEventCommentHidden({ eventId: evento.id, commentId: comId, hidden: !currentStatus });
-      addToast(currentStatus ? "Comentario restaurado." : "Comentario ocultado.", "info");
+      addToast(currentStatus ? "Comentário restaurado." : "Comentário ocultado.", "info");
       await refreshEventData();
   };
 
@@ -439,7 +430,7 @@ export default function DetalhesEventoPage() {
               text: cleanOptionText,
               votes: 0,
               creatorId: user.uid,
-              creatorName: user.nome?.split(" ")[0] || "Anonimo",
+              creatorName: user.nome?.split(" ")[0] || "Anônimo",
               creatorAvatar: user.foto || "",
               votesByTurma: {},
           },
@@ -760,11 +751,11 @@ export default function DetalhesEventoPage() {
                     <Send size={18}/>
                 </button>
             </div>
-            <p className="text-[10px] text-zinc-500 -mt-3">Comentario: {newComment.length}/{COMMENT_MAX_CHARS}</p>
+            <p className="text-[10px] text-zinc-500 -mt-3">Comentário: {newComment.length}/{COMMENT_MAX_CHARS}</p>
 
             <div className="space-y-4">
                 {orderedComments.map((c) => {
-                    const nameColorClass = PLAN_COLORS[c.userPlanoCor || 'zinc'] || "text-zinc-300";
+                    const nameColorClass = resolvePlanTextClass(c.userPlanoCor || "zinc", "text-zinc-300");
                     const likesArray = Array.isArray(c.likes) ? c.likes : [];
 
                 return (!c.hidden || isAdmin) && (
@@ -847,7 +838,7 @@ export default function DetalhesEventoPage() {
                             </div>
                             <span className={`text-[10px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 ${pedido.status === 'aprovado' ? 'bg-emerald-500 text-black' : 'bg-yellow-500 text-black'}`}>
                                 {pedido.status === 'aprovado' ? <CheckCircle size={12}/> : <Clock size={12}/>}
-                                {pedido.status === 'aprovado' ? 'Confirmado' : 'Aguardando Aprovacao'}
+                                {pedido.status === 'aprovado' ? 'Confirmado' : 'Aguardando Aprovação'}
                             </span>
                         </div>
 
@@ -918,5 +909,3 @@ export default function DetalhesEventoPage() {
     </div>
   );
 }
-
-

@@ -101,7 +101,7 @@ export default function AdminTreinoListaPage() {
 
       if (treino) {
         setTitulo(treino.modalidade || "Treino");
-        setSubtitulo(`${treino.dia || "-"} � ${treino.horario || "-"} � ${treino.local || "-"}`);
+        setSubtitulo(`${treino.dia || "-"} • ${treino.horario || "-"} • ${treino.local || "-"}`);
       }
 
       setChamadaRows(chamadaPage.rows);
@@ -112,7 +112,7 @@ export default function AdminTreinoListaPage() {
       setHasMoreRsvp(rsvpPage.hasMore);
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao carregar lista de presenca.", "error");
+      addToast("Erro ao carregar lista de presença.", "error");
     } finally {
       setLoading(false);
     }
@@ -194,7 +194,7 @@ export default function AdminTreinoListaPage() {
       );
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao atualizar presenca.", "error");
+      addToast("Erro ao atualizar presença.", "error");
     } finally {
       setUpdatingId(null);
     }
@@ -263,7 +263,7 @@ export default function AdminTreinoListaPage() {
       setUserPool(users);
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao carregar base de usuarios.", "error");
+      addToast("Erro ao carregar base de usuários.", "error");
     } finally {
       setLoadingUsers(false);
     }
@@ -328,9 +328,9 @@ export default function AdminTreinoListaPage() {
               <ArrowLeft size={18} className="text-zinc-300" />
             </Link>
             <div>
-              <h1 className="text-xl font-black uppercase tracking-tight">Lista de Presenca</h1>
+              <h1 className="text-xl font-black uppercase tracking-tight">Lista de Presença</h1>
               <p className="text-[11px] text-zinc-500 font-bold">
-                {titulo} � {subtitulo}
+                {titulo} • {subtitulo}
               </p>
             </div>
           </div>
@@ -363,7 +363,7 @@ export default function AdminTreinoListaPage() {
                     ? "Carregando base..."
                     : userPool.length > 0
                     ? "Base carregada"
-                    : "Carregar 80 usuarios"}
+                    : "Carregar 80 usuários"}
                 </button>
               </div>
 
@@ -515,7 +515,7 @@ export default function AdminTreinoListaPage() {
                                 onClick={() => void handleConfirmPendingRsvp(row)}
                                 disabled={updatingId === row.userId}
                                 className="p-2 rounded-lg bg-emerald-600 text-white border border-emerald-500 disabled:opacity-50"
-                                title="Confirmar presenca"
+                                title="Confirmar presença"
                               >
                                 {updatingId === row.userId ? (
                                   <Loader2 size={14} className="animate-spin" />
@@ -572,5 +572,4 @@ export default function AdminTreinoListaPage() {
     </div>
   );
 }
-
 

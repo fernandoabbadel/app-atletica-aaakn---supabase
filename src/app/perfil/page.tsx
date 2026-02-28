@@ -3,12 +3,10 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { 
-  ArrowLeft, MapPin, Edit3, Instagram, MessageCircle, Crown, 
-  Star, Ghost, Fish, Swords, Share2, ShieldCheck, Loader2, 
+  ArrowLeft, MapPin, Edit3, Instagram, MessageCircle, Ghost, Fish, Share2, ShieldCheck, Loader2, 
   X, PawPrint, Users, Lock, Heart, UserCheck,
-  Zap, Gem, Trophy, Medal, Calendar, Dumbbell, LayoutList,
-  ChevronRight, ThumbsUp, LayoutGrid, UserPlus, Target, User,
-  Skull, Rocket, Clock, CheckCircle, Camera
+  Trophy, Calendar, Dumbbell, LayoutList,
+  ChevronRight, User, Clock, CheckCircle, Camera
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext"; 
@@ -25,6 +23,7 @@ import { validateImageFile } from "../../lib/upload";
 import Link from "next/link";
 import Image from "next/image";
 import { getTurmaImage } from "../../constants/turmaImages";
+import { resolvePlanIcon, resolvePlanTextClass } from "../../constants/planVisuals";
 
 // ============================================================================
 // 🦈 1. INTERFACES & TIPAGEM (ID 906)
@@ -117,11 +116,6 @@ interface FollowData {
 // 🦈 HELPERS E CONSTANTES
 // ============================================================================
 
-const PLAN_COLORS: Record<string, string> = {
-    yellow: "text-yellow-400", emerald: "text-emerald-400", purple: "text-purple-400",
-    blue: "text-blue-400", red: "text-red-500", zinc: "text-zinc-400"
-};
-
 const SPORTS_LIST = [
     "Futebol", "Futsal", "Volei", "Basquete", "Handebol", "Rugby", 
     "Tenis", "Beach Tennis", "Natacao", "Surf", "Skate", "Taco", 
@@ -166,23 +160,14 @@ const getSportInfo = (sport: string) => {
 // 🦈 PROFILE BADGES
 const ProfileBadges = ({ userData }: { userData: UserProfile }) => {
     const isAdmin = userData?.role?.includes('admin') || userData?.role === 'master';
-    const rawPlanIcon = userData?.plano_icon || 'user';
-    const planIconName = String(rawPlanIcon).toLowerCase().trim();
-    const rawPatentIcon = userData?.patente_icon || 'fish';
-    const patentIconName = String(rawPatentIcon).toLowerCase().trim();
-    const rawPlanColor = userData?.plano_cor || "text-zinc-400";
-    const planColorClass = rawPlanColor.startsWith('text-') ? rawPlanColor : (PLAN_COLORS[rawPlanColor] || "text-zinc-400");
-    const rawPatentColor = userData?.patente_cor || "text-zinc-400";
-    const patentColorClass = rawPatentColor.startsWith('text-') ? rawPatentColor : (PLAN_COLORS[rawPatentColor] || "text-zinc-400");
-
-    const icons: Record<string, React.ElementType> = { 
-        ghost: Ghost, star: Star, crown: Crown, fish: Fish, trophy: Trophy, gem: Gem, zap: Zap, swords: Swords, 
-        skull: Skull, rocket: Rocket, medal: Medal, heart: Heart, thumbsup: ThumbsUp, layoutgrid: LayoutGrid, 
-        userplus: UserPlus, target: Target, user: User 
-    };
-
-    const PlanIcon = icons[planIconName] || User;
-    const PatentIcon = icons[patentIconName] || Fish;
+    const normalizeIcon = (value: string | undefined) =>
+      String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const planIconName = normalizeIcon(userData?.plano_icon || "user");
+    const patentIconName = normalizeIcon(userData?.patente_icon || "fish");
+    const planColorClass = resolvePlanTextClass(userData?.plano_cor || "zinc");
+    const patentColorClass = resolvePlanTextClass(userData?.patente_cor || "zinc");
+    const PlanIcon = resolvePlanIcon(userData?.plano_icon || "user", User);
+    const PatentIcon = resolvePlanIcon(userData?.patente_icon || "fish", Fish);
 
     return (
         <div className="flex items-center gap-5 bg-black/40 px-6 py-3 rounded-full border border-white/5 backdrop-blur-sm shadow-xl">
@@ -379,12 +364,17 @@ export default function MeuPerfilPage() {
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'avatar' | 'capa') => {
-      if (!e.target.files || !e.target.files[0] || !user) return;
-      const file = e.target.files[0];
+      const input = e.currentTarget;
+      if (!input.files || !input.files[0] || !user || savingProfile) {
+          input.value = "";
+          return;
+      }
+      const file = input.files[0];
       
       const validationError = validateImageFile(file);
       if (validationError) {
           addToast(validationError, "error");
+          input.value = "";
           return;
       }
 
@@ -406,6 +396,7 @@ export default function MeuPerfilPage() {
           addToast("Erro no upload da imagem.", "error");
       } finally {
           setSavingProfile(false);
+          input.value = "";
       }
   };
 
@@ -471,7 +462,7 @@ export default function MeuPerfilPage() {
                 priority
             />
             <button onClick={() => router.push('/dashboard')} className="absolute top-6 left-6 z-20 p-2 bg-black/40 backdrop-blur-md rounded-full border border-white/10 hover:bg-white hover:text-black transition"><ArrowLeft size={20}/></button>
-            <input type="file" ref={coverInputRef} className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'capa')} />
+            <input type="file" ref={coverInputRef} className="hidden" accept="image/png,image/jpeg,image/webp" disabled={savingProfile} onChange={(e) => handleImageUpload(e, 'capa')} />
         </div>
 
         <div className="px-6 relative z-20 -mt-20 flex flex-col items-center">
@@ -494,7 +485,7 @@ export default function MeuPerfilPage() {
                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                         <Camera size={32} className="text-white drop-shadow-md" />
                     </div>
-                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'avatar')} />
+                    <input type="file" ref={fileInputRef} className="hidden" accept="image/png,image/jpeg,image/webp" disabled={savingProfile} onChange={(e) => handleImageUpload(e, 'avatar')} />
                 </div>
                 
                 {/* 2. Logo da Turma (ID 1021 - Sobreposta CORRETAMENTE no canto inferior direito) */}

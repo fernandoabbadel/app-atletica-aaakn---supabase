@@ -143,15 +143,15 @@ export default function TurmaRankingPage({
                   {index + 1}º
                 </span>
                 
-                {/* 🦈 3. Substituição por Image com Unoptimized (Externo) */}
+                {/* 🦈 3. Imagem otimizada com domínio remoto permitido no Next */}
                 <div className="relative w-10 h-10 rounded-full overflow-hidden bg-zinc-800 shrink-0">
                     <Image
                       src={item.foto}
                       alt={`Foto de ${item.nome}`}
                       width={40}
                       height={40}
+                      sizes="40px"
                       className={`object-cover ${index === 0 ? "border-2 border-yellow-500" : ""}`}
-                      unoptimized // Importante para evitar erro de configuração de domínio
                       onError={(e) => (e.currentTarget.srcset = "https://github.com/shadcn.png")}
                     />
                 </div>

@@ -4,15 +4,13 @@ import React, { useState, useEffect } from "react";
 import { 
   ArrowLeft, Heart, MessageCircle, MoreHorizontal, Flame, 
   Image as ImageIcon, ShieldCheck, Pin, X, Loader2, AlertTriangle, Send, Trash2, Flag,
-  Crown, Star, Ghost, Lock, Zap, Gem, Trophy, Fish, User, 
-  Swords, Skull, Rocket, Medal, ThumbsUp, LayoutGrid, UserPlus, Target
+  Lock, Fish, User
 } from "lucide-react";
 import Link from "next/link";
-import Image from "next/image"; // 🦈 Importando Image
+import Image from "next/image";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { Security } from "../../lib/security";
-import { compressImageFile } from "../../lib/imageCompression";
 import { uploadImage, validateImageFile } from "../../lib/upload";
 import {
   createCommunityComment,
@@ -22,12 +20,20 @@ import {
   deleteCommunityPost,
   fetchCommunityComments,
   fetchCommunityConfig,
-  fetchCommunityFeed,
+  fetchCommunityFeedByCategory,
+  fetchCommunityRecentCategoryCounts,
+  fetchCommunityUnreadCounts,
+  markCommunityCategoryRead,
   setCommunityPostPatch,
   toggleCommunityCommentLike,
   toggleCommunityPostReaction,
 } from "../../lib/communityService";
 import { nowDateLike, type DateLike } from "../../lib/supabaseData";
+import {
+  DEFAULT_COMMUNITY_CATEGORIES,
+  normalizeCommunityCategories,
+} from "../../constants/communityCategories";
+import { resolvePlanIcon, resolvePlanTextClass } from "../../constants/planVisuals";
 
 // --- TIPAGEM ---
 
@@ -36,6 +42,7 @@ interface AppConfig {
     subtitulo?: string;
     capaUrl?: string;
     limitMessages?: boolean;
+    categorias?: string[];
 }
 
 interface PostData {
@@ -90,19 +97,7 @@ interface CommentData {
 
 // --- CONSTANTES ---
 
-const CATEGORIAS_OFICIAIS = [
-    "Geral", "Futebol", "Vôlei", "Basquete", "Handebol", 
-    "Sinuca", "Truco", "Natação", "Bateria", "Cheerleaders", "Sugestões"
-];
-
-const PLAN_COLORS: Record<string, string> = {
-    yellow: "text-yellow-400",
-    emerald: "text-emerald-400",
-    purple: "text-purple-400",
-    blue: "text-blue-400",
-    red: "text-red-500",
-    zinc: "text-zinc-400"
-};
+const RECENT_BADGE_WINDOW_DAYS = 2;
 
 // --- FUNÇÕES AUXILIARES ---
 
@@ -130,37 +125,20 @@ const formatCustomDate = (timestamp: DateLike | null | undefined) => {
 
 // --- COMPONENTES ---
 
-// 🦈 UserBadges tipado corretamente (Fim do any)
+// UserBadges tipado corretamente (fim do any)
 const UserBadges = ({ userData }: { userData: Partial<PostData | CommentData> }) => {
-    const isAdmin = userData?.role?.includes('admin') || userData?.role === 'master';
-    
-    // 1. Definição dos Ícones
-    const rawPlanIcon = userData?.plano_icon || 'user';
-    const planIconName = String(rawPlanIcon).toLowerCase().trim();
+    const isAdmin = userData?.role?.includes("admin") || userData?.role === "master";
+    const normalizeIcon = (value: string | undefined) =>
+      String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
-    const rawPatentIcon = userData?.patente_icon || 'fish';
-    const patentIconName = String(rawPatentIcon).toLowerCase().trim();
-    
-    // 2. Definição das Cores
-    const rawPlanColor = userData?.plano_cor || "text-zinc-400";
-    const planColorClass = rawPlanColor.startsWith('text-') ? rawPlanColor : (PLAN_COLORS[rawPlanColor] || "text-zinc-400");
+    const planIconName = normalizeIcon(userData?.plano_icon || "user");
+    const patentIconName = normalizeIcon(userData?.patente_icon || "fish");
+    const planColorClass = resolvePlanTextClass(userData?.plano_cor || "zinc");
+    const patentColorClass = resolvePlanTextClass(userData?.patente_cor || "zinc");
+    const PlanIcon = resolvePlanIcon(userData?.plano_icon || "user", User);
+    const PatentIcon = resolvePlanIcon(userData?.patente_icon || "fish", Fish);
 
-    const rawPatentColor = userData?.patente_cor || "text-zinc-400";
-    const patentColorClass = rawPatentColor.startsWith('text-') ? rawPatentColor : (PLAN_COLORS[rawPatentColor] || "text-zinc-400");
-
-    // Mapa Visual Completo
-    const icons: Record<string, React.ElementType> = { 
-        ghost: Ghost, star: Star, crown: Crown, fish: Fish, 
-        trophy: Trophy, gem: Gem, zap: Zap, swords: Swords, 
-        skull: Skull, rocket: Rocket, medal: Medal, heart: Heart,
-        thumbsup: ThumbsUp, layoutgrid: LayoutGrid, userplus: UserPlus, 
-        target: Target, user: User 
-    };
-    
-    const PlanIcon = icons[planIconName] || User;
-    const PatentIcon = icons[patentIconName] || Fish;
-
-    const tooltipText = `${userData?.patente || 'Novato'} • ${userData?.plano || 'Visitante'}`;
+    const tooltipText = `${userData?.patente || "Novato"} • ${userData?.plano || "Visitante"}`;
 
     return (
         <div className="flex items-center gap-1.5 ml-1 select-none" title={tooltipText}>
@@ -173,32 +151,33 @@ const UserBadges = ({ userData }: { userData: Partial<PostData | CommentData> })
                 <PlanIcon size={12} />
             </span>
             {planIconName !== patentIconName && (
-                <span className={`flex items-center ${patentColorClass}`}> 
+                <span className={`flex items-center ${patentColorClass}`}>
                     <PatentIcon size={14} className="drop-shadow-sm" />
                 </span>
             )}
         </div>
     );
 };
-
 export default function ComunidadePage() {
   const { user } = useAuth();
   const { addToast } = useToast();
   
-  const [activeTab, setActiveTab] = useState("Geral");
+  const [activeTab, setActiveTab] = useState(DEFAULT_COMMUNITY_CATEGORIES[0] || "Geral");
   const [activeFilter, setActiveFilter] = useState<"recent" | "likes" | "comments" | "hype">("recent");
-  // 🦈 Removido setModalidades não utilizado
-  const [modalidades] = useState<string[]>(CATEGORIAS_OFICIAIS);
+  const [modalidades, setModalidades] = useState<string[]>(DEFAULT_COMMUNITY_CATEGORIES);
   
   const [posts, setPosts] = useState<PostData[]>([]);
   const [allPostsRaw, setAllPostsRaw] = useState<PostData[]>([]);
   const [config, setConfig] = useState<AppConfig>({});
+  const [recentByCategory, setRecentByCategory] = useState<Record<string, number>>({});
+  const [unreadByCategory, setUnreadByCategory] = useState<Record<string, number>>({});
+  const [countsRefreshToken, setCountsRefreshToken] = useState(0);
   const [loading, setLoading] = useState(true);
   
   const [newPostText, setNewPostText] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   
-  // 🦈 TRAVAS ANTI-SPAM
+  // TRAVAS ANTI-SPAM
   const [isPublishing, setIsPublishing] = useState(false);
   const [isPostingComment, setIsPostingComment] = useState(false);
 
@@ -228,14 +207,27 @@ export default function ComunidadePage() {
       setImageFile(file);
   };
 
-    useEffect(() => {
+  useEffect(() => {
     let mounted = true;
 
     const loadConfig = async () => {
       try {
         const configData = await fetchCommunityConfig();
-        if (!mounted || !configData) return;
-        setConfig((prev) => ({ ...prev, ...(configData as Partial<AppConfig>) }));
+        if (!mounted) return;
+
+        const rawConfig = (configData as Partial<AppConfig> | null) ?? {};
+        const normalizedConfig = {
+          ...rawConfig,
+          categorias: normalizeCommunityCategories(rawConfig.categorias),
+        };
+
+        setConfig((prev) => ({ ...prev, ...normalizedConfig }));
+        setModalidades(normalizedConfig.categorias);
+        setActiveTab((prev) =>
+          normalizedConfig.categorias.includes(prev)
+            ? prev
+            : normalizedConfig.categorias[0] || DEFAULT_COMMUNITY_CATEGORIES[0] || "Geral"
+        );
       } catch (error: unknown) {
         console.error(error);
         if (mounted) addToast("Erro ao carregar configuracoes da comunidade.", "error");
@@ -252,44 +244,46 @@ export default function ComunidadePage() {
     let mounted = true;
 
     const loadPosts = async () => {
+      if (!activeTab) {
+        setAllPostsRaw([]);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       try {
-        const rows = await fetchCommunityFeed(40);
+        const rows = await fetchCommunityFeedByCategory({
+          categoria: activeTab,
+          maxResults: 120,
+          includeBlocked: !!user?.role?.includes("admin"),
+        });
+
         if (!mounted) return;
 
-        let data = rows.map(
-          (row) =>
-            ({
-              id: row.id,
-              ...(row.data as Omit<PostData, "id">),
-            }) as PostData
-        );
-
-        if (!user?.role?.includes("admin")) {
-          data = data.filter((post) => !post.blocked);
-        }
-
         const now = Date.now();
-        data = data.map((post) => {
-          const createdAt = isDateLike(post.createdAt) ? post.createdAt : null;
-          const likes = Array.isArray(post.likes)
-            ? post.likes.filter((item): item is string => typeof item === "string")
+        const data = rows.map((row) => {
+          const raw = row.data as Record<string, unknown>;
+          const createdAt = isDateLike(raw.createdAt) ? raw.createdAt : null;
+          const likes = Array.isArray(raw.likes)
+            ? raw.likes.filter((item): item is string => typeof item === "string")
             : [];
-          const hype = Array.isArray(post.hype)
-            ? post.hype.filter((item): item is string => typeof item === "string")
+          const hype = Array.isArray(raw.hype)
+            ? raw.hype.filter((item): item is string => typeof item === "string")
             : [];
 
           return {
-            ...post,
+            id: row.id,
+            ...(raw as Omit<PostData, "id" | "likes" | "hype" | "createdAt">),
+            categoria: typeof raw.categoria === "string" ? raw.categoria : activeTab,
             createdAt,
             likes,
             hype,
-            comentarios: typeof post.comentarios === "number" ? post.comentarios : 0,
-            denunciasCount: typeof post.denunciasCount === "number" ? post.denunciasCount : 0,
+            comentarios: typeof raw.comentarios === "number" ? raw.comentarios : 0,
+            denunciasCount: typeof raw.denunciasCount === "number" ? raw.denunciasCount : 0,
             isRecent: createdAt
-              ? now - createdAt.toDate().getTime() < 24 * 60 * 60 * 1000
+              ? now - createdAt.toDate().getTime() < RECENT_BADGE_WINDOW_DAYS * 24 * 60 * 60 * 1000
               : false,
-          };
+          } as PostData;
         });
 
         setAllPostsRaw(data);
@@ -305,32 +299,103 @@ export default function ComunidadePage() {
     return () => {
       mounted = false;
     };
-  }, [user?.role, addToast]);
+  }, [activeTab, user?.role, addToast]);
 
   useEffect(() => {
-      const filteredByTab = allPostsRaw.filter((post) => post.categoria === activeTab);
-      const ordered = [...filteredByTab];
+    const ordered = [...allPostsRaw];
 
-      if (activeFilter === "recent") {
-          ordered.sort(
-              (a, b) =>
-                  (isDateLike(b.createdAt) ? b.createdAt.toMillis() : 0) -
-                  (isDateLike(a.createdAt) ? a.createdAt.toMillis() : 0)
-          );
-      }
-      if (activeFilter === "likes") {
-          ordered.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
-      }
-      if (activeFilter === "comments") {
-          ordered.sort((a, b) => (b.comentarios || 0) - (a.comentarios || 0));
-      }
-      if (activeFilter === "hype") {
-          ordered.sort((a, b) => (b.hype?.length || 0) - (a.hype?.length || 0));
-      }
+    if (activeFilter === "recent") {
+      ordered.sort(
+        (a, b) =>
+          (isDateLike(b.createdAt) ? b.createdAt.toMillis() : 0) -
+          (isDateLike(a.createdAt) ? a.createdAt.toMillis() : 0)
+      );
+    }
+    if (activeFilter === "likes") {
+      ordered.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+    }
+    if (activeFilter === "comments") {
+      ordered.sort((a, b) => (b.comentarios || 0) - (a.comentarios || 0));
+    }
+    if (activeFilter === "hype") {
+      ordered.sort((a, b) => (b.hype?.length || 0) - (a.hype?.length || 0));
+    }
 
-      const maxVisiblePosts = config.limitMessages === false ? 100 : 20;
-      setPosts(ordered.slice(0, maxVisiblePosts));
-  }, [allPostsRaw, activeTab, activeFilter, config.limitMessages]);
+    const maxVisiblePosts = config.limitMessages === false ? 100 : 20;
+    setPosts(ordered.slice(0, maxVisiblePosts));
+  }, [allPostsRaw, activeFilter, config.limitMessages]);
+
+  useEffect(() => {
+    if (modalidades.length === 0) {
+      setRecentByCategory({});
+      setUnreadByCategory({});
+      return;
+    }
+
+    let mounted = true;
+    const loadBadges = async () => {
+      try {
+        const recentCountsPromise = fetchCommunityRecentCategoryCounts({
+          categorias: modalidades,
+          includeBlocked: !!user?.role?.includes("admin"),
+          windowDays: RECENT_BADGE_WINDOW_DAYS,
+        });
+        const unreadCountsPromise = user?.uid
+          ? fetchCommunityUnreadCounts({
+              userId: user.uid,
+              categorias: modalidades,
+              includeBlocked: !!user?.role?.includes("admin"),
+            })
+          : Promise.resolve(
+              modalidades.reduce<Record<string, number>>((acc, categoria) => {
+                acc[categoria] = 0;
+                return acc;
+              }, {})
+            );
+
+        const [recentCounts, unreadCounts] = await Promise.all([
+          recentCountsPromise,
+          unreadCountsPromise,
+        ]);
+        if (!mounted) return;
+        setRecentByCategory(recentCounts);
+        setUnreadByCategory(unreadCounts);
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) addToast("Erro ao atualizar badges da comunidade.", "error");
+      }
+    };
+
+    void loadBadges();
+    return () => {
+      mounted = false;
+    };
+  }, [modalidades, user?.uid, user?.role, addToast, countsRefreshToken]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (!activeTab) return;
+    if (!modalidades.includes(activeTab)) return;
+
+    let active = true;
+    const markCurrentTabAsRead = async () => {
+      try {
+        await markCommunityCategoryRead({
+          userId: user.uid,
+          categoria: activeTab,
+        });
+        if (!active) return;
+        setUnreadByCategory((prev) => ({ ...prev, [activeTab]: 0 }));
+      } catch (error: unknown) {
+        console.error(error);
+      }
+    };
+
+    void markCurrentTabAsRead();
+    return () => {
+      active = false;
+    };
+  }, [activeTab, modalidades, user?.uid]);
 
   useEffect(() => {
       if (!commentModal) {
@@ -370,7 +435,7 @@ export default function ComunidadePage() {
               setCommentsList(comments);
           } catch (error: unknown) {
               console.error(error);
-              if (mounted) addToast("Erro ao carregar comentarios.", "error");
+              if (mounted) addToast("Erro ao carregar comentários.", "error");
           }
       };
 
@@ -380,12 +445,8 @@ export default function ComunidadePage() {
       };
   }, [commentModal, addToast]);
 
-  const getRecentCount = (cat: string) => {
-      return allPostsRaw.filter((post) => post.categoria === cat && post.isRecent).length;
-  };
-
   const handlePublish = async () => {
-    if (!user) return addToast("Fa�a login!", "error");
+    if (!user) return addToast("Faça login!", "error");
     if (isPublishing) return;
 
     const securityCheck = await Security.canUserPost(user.uid);
@@ -394,7 +455,7 @@ export default function ComunidadePage() {
     if (!newPostText.trim() && !imageFile) return;
 
     if (newPostText.length > 150) {
-      return addToast("Maximo de 150 caracteres! Seja direto, Tubarao.", "error");
+      return addToast("Máximo de 150 caracteres! Seja direto, Tubarão.", "error");
     }
 
     const oneDayAgo = new Date().getTime() - 24 * 60 * 60 * 1000;
@@ -407,7 +468,7 @@ export default function ComunidadePage() {
     );
 
     if (userPostsToday.length > 0 && !user.role?.includes("admin")) {
-      return addToast(`Voce ja postou em "${activeTab}" hoje. Volte amanha!`, "error");
+      return addToast(`Você já postou em "${activeTab}" hoje. Volte amanhã!`, "error");
     }
 
     setIsPublishing(true);
@@ -420,13 +481,18 @@ export default function ComunidadePage() {
           return;
         }
 
-        const optimizedImage = await compressImageFile(imageFile, {
-          maxWidth: 1600,
-          maxHeight: 1600,
+        const uploaded = await uploadImage(imageFile, "posts", {
+          scopeKey: `comunidade:post:${activeTab}`,
+          maxBytes: 2 * 1024 * 1024,
+          maxWidth: 2000,
+          maxHeight: 2000,
+          maxPixels: 3_000_000,
+          compressionMaxWidth: 1600,
+          compressionMaxHeight: 1600,
+          compressionMaxBytes: 200 * 1024,
           quality: 0.82,
+          rateLimitMax: 3,
         });
-
-        const uploaded = await uploadImage(optimizedImage, "posts");
         if (uploaded.error || !uploaded.url) {
           addToast(uploaded.error || "Falha no upload da imagem.", "error");
           return;
@@ -436,7 +502,7 @@ export default function ComunidadePage() {
 
       const safeUser = {
         userId: user.uid ? String(user.uid) : "",
-        userName: user.nome || "An�nimo",
+        userName: user.nome || "Anônimo",
         handle: user.apelido ? `@${user.apelido}` : "@atleta",
         avatar: user.foto || "https://github.com/shadcn.png",
 
@@ -481,6 +547,9 @@ export default function ComunidadePage() {
       };
 
       setAllPostsRaw((prev) => [optimisticPost, ...prev]);
+      setRecentByCategory((prev) => ({ ...prev, [activeTab]: (prev[activeTab] ?? 0) + 1 }));
+      setUnreadByCategory((prev) => ({ ...prev, [activeTab]: 0 }));
+      setCountsRefreshToken((prev) => prev + 1);
       setNewPostText("");
       setImageFile(null);
       addToast("Postado!", "success");
@@ -493,7 +562,7 @@ export default function ComunidadePage() {
   };
 
   const handleComment = async () => {
-      if (!user) return addToast("Fa�a login!", "error");
+      if (!user) return addToast("Faça login!", "error");
       if (!newComment.trim()) return;
       if (!commentModal) return;
       if (isPostingComment) return;
@@ -507,14 +576,14 @@ export default function ComunidadePage() {
       );
 
       if (myCommentsToday.length > 0 && !user.role?.includes("admin")) {
-          return addToast("Voce ja comentou neste post hoje.", "error");
+          return addToast("Você já comentou neste post hoje.", "error");
       }
 
       setIsPostingComment(true);
       try {
           const safeUser = {
               userId: user.uid ? String(user.uid) : "",
-              userName: user.nome || "Anonimo",
+              userName: user.nome || "Anônimo",
               avatar: user.foto || "/logo.png",
 
               plano_cor: user.plano_cor ? String(user.plano_cor) : "zinc",
@@ -576,6 +645,7 @@ export default function ComunidadePage() {
       try {
           await deleteCommunityPost(post.id);
           setAllPostsRaw((prev) => prev.filter((item) => item.id !== post.id));
+          setCountsRefreshToken((prev) => prev + 1);
           addToast("Mensagem apagada.", "info");
           setMenuOpen(null);
       } catch {
@@ -585,7 +655,7 @@ export default function ComunidadePage() {
 
   const handleDeleteComment = async (commentId: string) => {
       if (!user || !commentModal) return;
-      if (!confirm("Excluir comentario?")) return;
+      if (!confirm("Excluir comentário?")) return;
       try {
           await deleteCommunityComment(commentModal, commentId);
 
@@ -598,7 +668,7 @@ export default function ComunidadePage() {
               )
           );
 
-          addToast("Comentario removido.", "info");
+          addToast("Comentário removido.", "info");
           setCommentMenuOpen(null);
       } catch {
           addToast("Erro ao excluir.", "error");
@@ -606,14 +676,14 @@ export default function ComunidadePage() {
   };
 
   const handleReport = async () => {
-      if (!user) return addToast("Fa�a login!", "error");
+      if (!user) return addToast("Faça login!", "error");
       if (!reportReason) return addToast("Selecione um motivo!", "error");
       if (!reportModal) return;
 
       const finalReason = reportReason === "Outros" ? `Outros: ${otherReasonText}` : reportReason;
 
       const postAlvo = posts.find((post) => post.id === reportModal);
-      const textoSalvo = postAlvo ? postAlvo.texto : "Conteudo reportado";
+      const textoSalvo = postAlvo ? postAlvo.texto : "Conteúdo reportado";
 
       try {
           await createCommunityReport({
@@ -634,10 +704,10 @@ export default function ComunidadePage() {
               );
           }
 
-          addToast("Denuncia enviada.", "success");
+          addToast("Denúncia enviada.", "success");
       } catch (error: unknown) {
           console.error(error);
-          addToast("Erro ao enviar denuncia.", "error");
+          addToast("Erro ao enviar denúncia.", "error");
       } finally {
           setReportModal(null);
           setReportReason("");
@@ -724,9 +794,9 @@ export default function ComunidadePage() {
           <Image 
             src={config.capaUrl || "/carteirinha-bg.jpg"} 
             fill
+            sizes="100vw"
             className="object-cover opacity-40 blur-sm scale-110 group-hover:scale-100 transition duration-1000" 
             alt="Capa Comunidade"
-            unoptimized
           />
           <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/50 to-transparent" />
           <div className="absolute top-4 left-4 z-20"><Link href="/dashboard" className="p-2 bg-black/50 rounded-full text-white hover:bg-emerald-500 hover:text-black transition"><ArrowLeft size={24}/></Link></div>
@@ -740,13 +810,21 @@ export default function ComunidadePage() {
       <div className="sticky top-0 z-30 bg-[#050505]/95 backdrop-blur-md border-b border-zinc-900 overflow-x-auto custom-scrollbar">
           <div className="flex gap-2 p-3 min-w-max">
               {modalidades.map(mod => {
-                  const recentCount = getRecentCount(mod);
+                  const unreadCount = unreadByCategory[mod] ?? 0;
+                  const recentCount = recentByCategory[mod] ?? 0;
+                  const badgeCount = unreadCount > 0 ? unreadCount : recentCount;
+                  const isUnreadBadge = unreadCount > 0;
                   return (
                       <button key={mod} onClick={() => setActiveTab(mod)} className={`relative px-4 py-2 rounded-full text-[10px] font-black uppercase transition-all border ${activeTab === mod ? 'bg-emerald-500 text-black border-emerald-500' : 'bg-zinc-900 text-zinc-500 border-zinc-800'}`}>
                           {mod}
-                          {recentCount > 0 && activeTab !== mod && (
-                              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] w-4 h-4 flex items-center justify-center rounded-full border border-black animate-pulse">
-                                  {recentCount > 9 ? '9+' : recentCount}
+                          {badgeCount > 0 && activeTab !== mod && (
+                              <span
+                                className={`absolute -top-1 -right-1 text-[8px] min-w-4 h-4 px-1 flex items-center justify-center rounded-full border border-black ${
+                                  isUnreadBadge ? "bg-emerald-500 text-black animate-pulse" : "bg-red-500 text-white"
+                                }`}
+                                title={isUnreadBadge ? "Mensagens não lidas" : "Mensagens recentes (2 dias)"}
+                              >
+                                  {badgeCount > 9 ? '9+' : badgeCount}
                               </span>
                           )}
                       </button>
@@ -771,9 +849,9 @@ export default function ComunidadePage() {
                     <Image 
                         src={user?.foto || "https://github.com/shadcn.png"} 
                         fill 
+                        sizes="40px"
                         className="rounded-full object-cover" 
                         alt="Avatar"
-                        unoptimized
                     />
                 </div>
                 <div className="flex-1 relative">
@@ -790,7 +868,7 @@ export default function ComunidadePage() {
                 </div>
             </div>
             <div className="flex justify-between items-center mt-3">
-                <label className="p-2 hover:bg-zinc-800 rounded-full cursor-pointer text-emerald-500"><ImageIcon size={20}/><input type="file" className="hidden" onChange={e => handleSelectImage(e.target.files?.[0] || null)}/></label>
+                <label className="p-2 hover:bg-zinc-800 rounded-full cursor-pointer text-emerald-500"><ImageIcon size={20}/><input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={isPublishing} onChange={e => handleSelectImage(e.target.files?.[0] || null)}/></label>
                 
                 <button 
                     onClick={handlePublish} 
@@ -812,21 +890,21 @@ export default function ComunidadePage() {
                     <div className="flex gap-3">
                         <Link href={`/perfil/${post.userId}`}>
                             <div className="w-10 h-10 relative">
-                                <Image src={post.avatar} fill className="rounded-full border border-zinc-800 object-cover" alt={post.userName} unoptimized/>
+                                <Image src={post.avatar} fill sizes="40px" className="rounded-full border border-zinc-800 object-cover" alt={post.userName}/>
                             </div>
                         </Link>
                         <div className="flex-1 min-w-0">
                             <div className="flex justify-between items-start">
                                 <div>
                                     <div className="flex items-center gap-1.5">
-                                        <Link href={`/perfil/${post.userId}`} className={`font-bold text-sm hover:underline transition ${PLAN_COLORS[post.plano_cor || "zinc"] || "text-zinc-200"}`}>
+                                        <Link href={`/perfil/${post.userId}`} className={`font-bold text-sm hover:underline transition ${resolvePlanTextClass(post.plano_cor || "zinc", "text-zinc-200")}`}>
                                             {post.userName}
                                         </Link>
                                         <UserBadges userData={post} />
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <p className="text-[10px] text-zinc-500">{post.handle}</p>
-                                        <span className="text-[9px] text-zinc-600 font-mono">• {formatCustomDate(post.createdAt)}</span>
+                                        <span className="text-[9px] text-zinc-600 font-mono">⬢ {formatCustomDate(post.createdAt)}</span>
                                     </div>
                                 </div>
                                 <button onClick={() => setMenuOpen(menuOpen === post.id ? null : post.id)} className="text-zinc-600 hover:text-white p-1"><MoreHorizontal size={16}/></button>
@@ -844,7 +922,7 @@ export default function ComunidadePage() {
                             <p className="text-sm text-zinc-300 mt-2 whitespace-pre-line leading-relaxed break-words">{post.texto}</p>
                             {post.imagem && (
                                 <div className="mt-3 relative w-full h-64 sm:h-96 rounded-xl overflow-hidden border border-zinc-800">
-                                    <Image src={post.imagem} fill className="object-cover" alt="Post Image" unoptimized />
+                                    <Image src={post.imagem} fill sizes="(max-width: 640px) 100vw, 640px" className="object-cover" alt="Post Image" />
                                 </div>
                             )}
                             
@@ -884,14 +962,14 @@ export default function ComunidadePage() {
                           <div key={comment.id} className="flex gap-3 group">
                               <Link href={`/perfil/${comment.userId}`}>
                                   <div className="w-8 h-8 relative">
-                                      <Image src={comment.avatar} fill className="rounded-full object-cover border border-zinc-700" alt={comment.userName} unoptimized/>
+                                      <Image src={comment.avatar} fill sizes="32px" className="rounded-full object-cover border border-zinc-700" alt={comment.userName}/>
                                   </div>
                               </Link>
                               <div className="flex-1">
                                   <div className="bg-zinc-800/50 p-3 rounded-2xl rounded-tl-none border border-zinc-800/50 w-full">
                                       <div className="flex items-center justify-between">
                                           <div className="flex items-center gap-2">
-                                              <Link href={`/perfil/${comment.userId}`} className={`text-xs font-bold hover:underline ${PLAN_COLORS[comment.plano_cor || "zinc"] || "text-white"}`}>{comment.userName}</Link>
+                                              <Link href={`/perfil/${comment.userId}`} className={`text-xs font-bold hover:underline ${resolvePlanTextClass(comment.plano_cor || "zinc", "text-white")}`}>{comment.userName}</Link>
                                               <UserBadges userData={comment}/> 
                                               <span className="text-[8px] text-zinc-600 ml-auto">{formatCustomDate(comment.createdAt)}</span>
                                           </div>
@@ -957,7 +1035,6 @@ export default function ComunidadePage() {
     </div>
   );
 }
-
 
 
 

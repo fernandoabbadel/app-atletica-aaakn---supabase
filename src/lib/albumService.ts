@@ -1,4 +1,3 @@
-import { httpsCallable } from "@/lib/supa/functions";
 import {
   arrayUnion,
   collection,
@@ -19,11 +18,11 @@ import {
   where,
 } from "@/lib/supa/firestore";
 
-import { db, functions } from "./backend";
-import { getBackendErrorCode } from "./backendErrors";
+import { db } from "./backend";
+import { getSupabaseClient } from "./supabase";
 
 const DEFAULT_AVATAR_URL = "https://github.com/shadcn.png";
-const ALBUM_SCAN_CALLABLE = "albumRegisterCapture";
+const ALBUM_CAPTURES_TABLE = "album_captures";
 const MAX_RANKING_RESULTS = 100;
 const MAX_USERS_PER_CLASS = 150;
 const MAX_USERS_PAGE_SIZE = 60;
@@ -171,31 +170,14 @@ export interface AlbumCaptureResult {
   targetTurma?: string;
 }
 
-const shouldFallbackToClientCapture = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase() || "";
-  if (
-    code.includes("functions/not-found") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/internal") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/cancelled") ||
-    code.includes("functions/unknown")
-  ) {
-    return true;
-  }
-
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  return (
-    message.includes("failed to fetch") ||
-    message.includes("networkerror") ||
-    message.includes("cors") ||
-    message.includes("access-control-allow-origin") ||
-    message.includes("preflight")
-  );
-};
-
 const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase() || "";
+  const code =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? ((error as { code: string }).code || "").toLowerCase()
+      : "";
   if (code.includes("failed-precondition")) return true;
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
@@ -295,9 +277,49 @@ const toAlbumSummary = (
   updatedAt: raw.updatedAt,
 });
 
-const shouldUseCallable = (): boolean => {
-  if (typeof window === "undefined") return true;
-  return process.env.NEXT_PUBLIC_FORCE_ALBUM_CLIENT_FALLBACK !== "true";
+const isUniqueViolationError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) return false;
+  const code = "code" in error && typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code.toLowerCase()
+    : "";
+  if (code === "23505") return true;
+
+  const details = [
+    "message" in error && typeof (error as { message?: unknown }).message === "string"
+      ? (error as { message: string }).message
+      : "",
+    "details" in error && typeof (error as { details?: unknown }).details === "string"
+      ? (error as { details: string }).details
+      : "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return details.includes("duplicate key") || details.includes("unique");
+};
+
+const isMissingTableError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) return false;
+  const code = "code" in error && typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code.toLowerCase()
+    : "";
+  if (code === "42p01" || code === "pgrst205") return true;
+
+  const details = [
+    "message" in error && typeof (error as { message?: unknown }).message === "string"
+      ? (error as { message: string }).message
+      : "",
+    "details" in error && typeof (error as { details?: unknown }).details === "string"
+      ? (error as { details: string }).details
+      : "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    details.includes("relation") &&
+    details.includes("does not exist")
+  ) || details.includes("could not find the table");
 };
 
 export async function fetchAlbumRankings(
@@ -497,54 +519,131 @@ export async function fetchAlbumCollectedIds(
       return rows;
     }
 
-    const baseRef = collection(db, "users", userId, "albumColado");
-    const constraints = [
-      ...(turma ? [where("turma", "==", turma)] : []),
-      limit(maxResults),
-    ];
+    const fetchFromLegacyCollection = async (): Promise<string[]> => {
+      const baseRef = collection(db, "users", userId, "albumColado");
+      const constraints = [
+        ...(turma ? [where("turma", "==", turma)] : []),
+        limit(maxResults),
+      ];
 
-    const snap = await getDocs(query(baseRef, ...constraints));
-    const rows = snap.docs.map((row) => row.id);
+      const snap = await getDocs(query(baseRef, ...constraints));
+      const ids = snap.docs.map((row) => row.id);
 
-    if (rows.length > 0) {
-      const capturedByTurma = snap.docs.reduce<Record<string, string[]>>(
-        (acc, row) => {
-          const rowTurma = normalizeTurmaCode(
-            (row.data() as Record<string, unknown>).turma
+      if (!turma && ids.length > 0) {
+        const capturedByTurma = snap.docs.reduce<Record<string, string[]>>(
+          (acc, row) => {
+            const rowTurma = normalizeTurmaCode(
+              (row.data() as Record<string, unknown>).turma
+            );
+            if (!acc[rowTurma]) acc[rowTurma] = [];
+            acc[rowTurma].push(row.id);
+            return acc;
+          },
+          {}
+        );
+
+        const hydratedSummary: AlbumSummary = {
+          userId,
+          totalCollected: ids.length,
+          capturedByTurma,
+        };
+
+        try {
+          await setDoc(
+            doc(db, ALBUM_SUMMARY_COLLECTION, userId),
+            {
+              userId,
+              totalCollected: hydratedSummary.totalCollected,
+              capturedByTurma: hydratedSummary.capturedByTurma,
+              updatedAt: serverTimestamp(),
+              migratedFromLegacyAt: serverTimestamp(),
+            },
+            { merge: true }
           );
-          if (!acc[rowTurma]) acc[rowTurma] = [];
-          acc[rowTurma].push(row.id);
-          return acc;
-        },
-        {}
+        } catch {
+          // Regras antigas podem bloquear o write do resumo. Nao interrompe a tela.
+        }
+        setCacheValue(albumSummaryCache, userId, hydratedSummary);
+      }
+
+      setCacheValue(collectedIdsCache, cacheKey, ids);
+      return ids;
+    };
+
+    try {
+      const supabase = getSupabaseClient();
+      let capturesQuery = supabase
+        .from(ALBUM_CAPTURES_TABLE)
+        .select("*")
+        .eq("collectorUserId", userId)
+        .order("dataColada", { ascending: false })
+        .limit(maxResults);
+
+      if (turma) {
+        capturesQuery = capturesQuery.eq("turma", normalizeTurmaCode(turma));
+      }
+
+      const { data, error } = await capturesQuery;
+      if (error) throw error;
+
+      const rowsRaw = Array.isArray(data)
+        ? (data as Array<Record<string, unknown>>)
+        : [];
+
+      const ids = Array.from(
+        new Set(
+          rowsRaw
+            .map((row) => asString(row.targetUserId).trim())
+            .filter(Boolean)
+        )
       );
 
-      const hydratedSummary: AlbumSummary = {
-        userId,
-        totalCollected: rows.length,
-        capturedByTurma,
-      };
-
-      try {
-        await setDoc(
-          doc(db, ALBUM_SUMMARY_COLLECTION, userId),
-          {
-            userId,
-            totalCollected: hydratedSummary.totalCollected,
-            capturedByTurma: hydratedSummary.capturedByTurma,
-            updatedAt: serverTimestamp(),
-            migratedFromLegacyAt: serverTimestamp(),
+      if (!turma && ids.length > 0) {
+        const capturedByTurma = rowsRaw.reduce<Record<string, string[]>>(
+          (acc, row) => {
+            const targetId = asString(row.targetUserId).trim();
+            if (!targetId) return acc;
+            const turmaKey = normalizeTurmaCode(row.turma);
+            if (!acc[turmaKey]) acc[turmaKey] = [];
+            acc[turmaKey].push(targetId);
+            return acc;
           },
-          { merge: true }
+          {}
         );
-      } catch {
-        // Regras antigas podem bloquear o write do resumo. Nao interrompe a tela.
-      }
-      setCacheValue(albumSummaryCache, userId, hydratedSummary);
-    }
 
-    setCacheValue(collectedIdsCache, cacheKey, rows);
-    return rows;
+        const hydratedSummary: AlbumSummary = {
+          userId,
+          totalCollected: ids.length,
+          capturedByTurma,
+        };
+
+        try {
+          await setDoc(
+            doc(db, ALBUM_SUMMARY_COLLECTION, userId),
+            {
+              userId,
+              totalCollected: hydratedSummary.totalCollected,
+              capturedByTurma: hydratedSummary.capturedByTurma,
+              updatedAt: serverTimestamp(),
+              migratedFromCapturesAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } catch {
+          // Regras podem bloquear write do resumo. Nao interrompe a tela.
+        }
+        setCacheValue(albumSummaryCache, userId, hydratedSummary);
+      }
+
+      if (ids.length === 0) {
+        return fetchFromLegacyCollection();
+      }
+
+      setCacheValue(collectedIdsCache, cacheKey, ids);
+      return ids;
+    } catch {
+      return fetchFromLegacyCollection();
+    }
   });
 }
 
@@ -665,7 +764,7 @@ export async function registerAlbumCapture(payload: {
     albumSummaryCache.clear();
   };
 
-  const registerViaClientTransaction = async (): Promise<AlbumCaptureResult> => {
+  const registerViaLegacyCollection = async (): Promise<AlbumCaptureResult> => {
     const collectorRef = doc(db, "users", collectorUid);
     const targetRef = doc(db, "users", targetId);
     const albumRef = doc(db, "users", collectorUid, "albumColado", targetId);
@@ -769,38 +868,123 @@ export async function registerAlbumCapture(payload: {
     return transactionResult;
   };
 
-  try {
-    if (!shouldUseCallable()) {
-      return registerViaClientTransaction();
+  const registerViaSupabase = async (): Promise<AlbumCaptureResult> => {
+    const collectorRef = doc(db, "users", collectorUid);
+    const targetRef = doc(db, "users", targetId);
+    const rankingRef = doc(db, "album_rankings", collectorUid);
+    const summaryRef = doc(db, ALBUM_SUMMARY_COLLECTION, collectorUid);
+    const notificationRef = doc(collection(db, "notifications"));
+
+    const [collectorSnap, targetSnap] = await Promise.all([
+      getDoc(collectorRef),
+      getDoc(targetRef),
+    ]);
+
+    if (!targetSnap.exists()) {
+      return { status: "invalid-target" };
     }
 
-    const callable = httpsCallable<
-      { collectorUid: string; targetUid: string },
-      AlbumCaptureResult
-    >(functions, ALBUM_SCAN_CALLABLE);
+    const collectorData = collectorSnap.exists()
+      ? (collectorSnap.data() as Record<string, unknown>)
+      : undefined;
+    const targetData = targetSnap.data() as Record<string, unknown>;
 
-    const response = await callable({
-      collectorUid,
-      targetUid: targetId,
-    });
+    const targetName = asString(targetData.nome, "Integrante");
+    const targetTurma = asString(targetData.turma, "");
+    const targetTurmaKey = normalizeTurmaCode(targetTurma);
+    const collectorName = asString(
+      payload.collector.nome || collectorData?.nome,
+      "Tubarao"
+    );
+    const collectorTurma = asString(
+      payload.collector.turma || collectorData?.turma,
+      ""
+    );
+    const collectorFoto = asString(
+      payload.collector.foto || collectorData?.foto,
+      DEFAULT_AVATAR_URL
+    );
 
-    const status = response.data?.status;
-    if (status === "duplicate" || status === "invalid-target") {
-      return response.data;
+    const supabase = getSupabaseClient();
+    const captureId = `${collectorUid}__${targetId}`;
+    const { error: insertCaptureError } = await supabase
+      .from(ALBUM_CAPTURES_TABLE)
+      .insert({
+        id: captureId,
+        collectorUserId: collectorUid,
+        targetUserId: targetId,
+        nome: targetName,
+        turma: targetTurmaKey,
+      });
+
+    if (insertCaptureError) {
+      if (isUniqueViolationError(insertCaptureError)) {
+        return { status: "duplicate", targetName, targetTurma };
+      }
+      throw insertCaptureError;
+    }
+
+    const sideEffects = await Promise.allSettled([
+      setDoc(
+        rankingRef,
+        {
+          userId: collectorUid,
+          nome: collectorName,
+          turma: collectorTurma,
+          foto: collectorFoto,
+          totalColetado: increment(1),
+          scansT8: increment(targetTurmaKey === "T8" ? 1 : 0),
+          ultimoScan: serverTimestamp(),
+        },
+        { merge: true }
+      ),
+      setDoc(
+        collectorRef,
+        {
+          stats: {
+            albumCollected: increment(1),
+          },
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ),
+      setDoc(
+        summaryRef,
+        {
+          userId: collectorUid,
+          totalCollected: increment(1),
+          [`capturedByTurma.${targetTurmaKey}`]: arrayUnion(targetId),
+          lastCaptureId: targetId,
+          lastCaptureAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ),
+      setDoc(notificationRef, {
+        userId: collectorUid,
+        title: "Nova captura no Album",
+        message: `${targetName} entrou para sua colecao.`,
+        link: "/album",
+        read: false,
+        type: "album",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    ]);
+
+    if (sideEffects.some((effect) => effect.status === "rejected")) {
+      console.warn("Album capture: side-effects com falha parcial.", sideEffects);
     }
 
     clearCaptureCaches();
-    return {
-      status: "ok",
-      targetName: response.data?.targetName,
-      targetTurma: response.data?.targetTurma,
-    };
+    return { status: "ok", targetName, targetTurma };
+  };
+
+  try {
+    return await registerViaSupabase();
   } catch (error: unknown) {
-    if (
-      shouldFallbackToClientCapture(error) &&
-      process.env.NEXT_PUBLIC_ALLOW_ALBUM_CLIENT_FALLBACK === "true"
-    ) {
-      return registerViaClientTransaction();
+    if (isMissingTableError(error)) {
+      return registerViaLegacyCollection();
     }
     throw error;
   }

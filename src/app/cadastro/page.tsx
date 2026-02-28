@@ -109,7 +109,7 @@ export default function CadastroPage() {
   const [cidades, setCidades] = useState<IBGECity[]>([]);
   const [ufSelected, setUfSelected] = useState("");
   
-  // ðŸ¦ˆ ID 1: Estado para travar localizaÃ§Ã£o se jÃ¡ existir
+  // ðŸ¦ˆ ID 1: Estado para travar localização se já existir
   const [locationLocked, setLocationLocked] = useState(false);
 
   const normalizePhoneToBrE164 = (value: string): string => {
@@ -158,7 +158,7 @@ export default function CadastroPage() {
   // ðŸ¦ˆ LOAD DE DADOS COM SANITIZAÃ‡ÃƒO
   useEffect(() => {
     if (user) {
-      // ðŸ¦ˆ ID 1: Verifica se localizaÃ§Ã£o jÃ¡ existe para travar
+      // ðŸ¦ˆ ID 1: Verifica se localização já existe para travar
       if (user.estadoOrigem && user.cidadeOrigem) {
           setLocationLocked(true);
           // Preenche os selects/inputs mesmo travados
@@ -189,13 +189,18 @@ export default function CadastroPage() {
     }
   }, [user]);
 
-  // ðŸ¦ˆ LÃ³gica de Upload de Foto
+  // ðŸ¦ˆ Lógica de Upload de Foto
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      if (!file || imageLoading) {
+          input.value = "";
+          return;
+      }
       const validationError = validateImageFile(file);
       if (validationError) {
           addToast(validationError, "error");
+          input.value = "";
           return;
       }
 
@@ -219,6 +224,7 @@ export default function CadastroPage() {
           addToast("Erro ao enviar foto. Tente novamente.", "error");
       } finally {
           setImageLoading(false);
+          input.value = "";
       }
   };
 
@@ -251,15 +257,15 @@ export default function CadastroPage() {
     if (!formData.foto) { setLoading(false); return setError("A foto de perfil e obrigatoria!"); }
 
     try {
-      // 1. Atualiza dados do usuÃ¡rio
+      // 1. Atualiza dados do usuário
       await updateUser({
         ...formData,
         instagram: formData.instagram ? `@${formData.instagram.replace("@", "")}` : "",
         role: user?.role === 'guest' ? 'user' : user?.role 
       });
 
-      // ðŸ¦ˆ ID 1: LÃ³gica de Perfil Completo para GamificaÃ§Ã£o
-      // Verifica se todos os campos obrigatÃ³rios estÃ£o preenchidos
+      // ðŸ¦ˆ ID 1: Lógica de Perfil Completo para Gamificação
+      // Verifica se todos os campos obrigatórios estão preenchidos
       const isProfileComplete = 
         formData.nome && 
         user?.email && // Email vem do Auth
@@ -316,7 +322,7 @@ export default function CadastroPage() {
             <Image src="/logo.png" alt="Logo Fundo" fill className="object-contain" />
         </div>
 
-        {/* BOTÃƒO DE RETORNO */}
+        {/* BOTÒO DE RETORNO */}
         <div className="w-full max-w-3xl flex justify-start mb-4 relative z-20">
             <Link href="/perfil" className="bg-zinc-900 border border-zinc-800 p-3 rounded-full hover:bg-zinc-800 transition text-zinc-400 hover:text-white flex items-center gap-2 text-xs font-bold uppercase">
                 <ArrowLeft size={18}/> Voltar ao Perfil
@@ -350,17 +356,17 @@ export default function CadastroPage() {
                             />
                         )}
                         
-                        {/* Overlay de EdiÃ§Ã£o */}
+                        {/* Overlay de Edição */}
                         <label className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10 backdrop-blur-[2px]">
                             <Camera className="text-white mb-1" size={24}/>
                             <span className="text-[10px] uppercase font-bold text-white tracking-widest">Alterar</span>
-                            <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+                            <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={imageLoading} onChange={handleImageUpload} />
                         </label>
                     </div>
-                    {/* BotÃ£o flutuante mobile */}
+                    {/* Botão flutuante mobile */}
                     <label className="absolute bottom-0 right-0 bg-emerald-600 p-2 rounded-full border-2 border-[#050505] shadow-lg cursor-pointer md:hidden z-30">
                         <UploadCloud size={16} className="text-white"/>
-                        <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+                        <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={imageLoading} onChange={handleImageUpload} />
                     </label>
                 </div>
 
@@ -435,7 +441,7 @@ export default function CadastroPage() {
                         </div>
                     </div>
 
-                    {/* ðŸ¦ˆ ID 1: LOCALIZAÃ‡ÃƒO - Travar se jÃ¡ existir */}
+                    {/* ðŸ¦ˆ ID 1: LOCALIZAÃ‡ÃƒO - Travar se já existir */}
                     {locationLocked ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {/* Estado Locked */}
@@ -457,7 +463,7 @@ export default function CadastroPage() {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Adicionado 'px-4' pois este select nÃ£o tem Ã­cone, evitando que o texto cole na borda */}
+                            {/* Adicionado 'px-4' pois este select não tem ícone, evitando que o texto cole na borda */}
                             <select className="input-field px-4" value={ufSelected} onChange={e => setUfSelected(e.target.value)} required>
                                 <option value="">Estado de Origem</option>
                                 {ufs.map(uf => <option key={uf.id} value={uf.sigla}>{uf.nome}</option>)}
@@ -559,7 +565,7 @@ export default function CadastroPage() {
                             <div key={t.id} onClick={() => setFormData({...formData, turma: t.id})} className={`cursor-pointer rounded-2xl border p-4 flex items-center justify-between transition-all ${formData.turma === t.id ? "bg-emerald-500/10 border-emerald-500" : "bg-black/40 border-zinc-800 hover:bg-zinc-800"}`}>
                                 <div className="flex items-center gap-4">
                                     <div className="w-10 h-10 rounded-full bg-zinc-800 overflow-hidden relative">
-                                        {/* ðŸ¦ˆ 1. CorreÃ§Ã£o: Uso do Image do Next.js */}
+                                        {/* ðŸ¦ˆ 1. Correção: Uso do Image do Next.js */}
                                         <Image 
                                             src={getTurmaImage(t.id)} 
                                             alt={t.nome} 

@@ -44,6 +44,7 @@ interface AchievementConfig {
     statKey: string;
     cat: AchievementCategory;
     iconName: string;
+    iconEmoji?: string;
 }
 
 interface AchievementDisplay extends AchievementConfig {
@@ -89,6 +90,42 @@ const mapAchievementConfig = (entry: AchievementConfigRecord): AchievementConfig
     iconName: entry.iconName,
 });
 
+const DEFAULT_CATALOG_BY_ID = new Map(
+  ACHIEVEMENTS_CATALOG.map((item) => [item.id, item] as const)
+);
+
+const mergeCatalogWithDefaults = (entries: AchievementConfigRecord[]): AchievementConfig[] => {
+  const mapped = entries.map(mapAchievementConfig);
+  const mergedEventIds = new Set<string>();
+  const withOverrides = mapped.map((entry) => {
+    const fallback = DEFAULT_CATALOG_BY_ID.get(entry.id);
+    if (!fallback || !entry.id.startsWith("evt_")) {
+      return {
+        ...entry,
+        iconEmoji: fallback?.iconEmoji,
+      };
+    }
+    mergedEventIds.add(entry.id);
+    return {
+      ...entry,
+      titulo: fallback.titulo,
+      desc: fallback.desc,
+      xp: fallback.xp,
+      target: fallback.target,
+      statKey: fallback.statKey,
+      cat: fallback.cat,
+      iconName: fallback.iconName,
+      iconEmoji: fallback.iconEmoji,
+    };
+  });
+
+  const missingEventDefaults = ACHIEVEMENTS_CATALOG.filter(
+    (item) => item.id.startsWith("evt_") && !mergedEventIds.has(item.id)
+  );
+
+  return [...withOverrides, ...missingEventDefaults];
+};
+
 const mapBadgeConfig = (entry: PatenteConfigRecord): BadgeConfig => ({
     id: entry.id,
     titulo: entry.titulo,
@@ -125,7 +162,9 @@ export default function ConquistasPage() {
               if (!mounted) return;
 
               if (catalogData.length > 0) {
-                  setCatalog(catalogData.map(mapAchievementConfig));
+                  setCatalog(mergeCatalogWithDefaults(catalogData));
+              } else {
+                  setCatalog(ACHIEVEMENTS_CATALOG);
               }
 
               if (badgesData.length > 0) {
@@ -361,7 +400,11 @@ Por favor, analise onde essas chaves deveriam ser atualizadas (ex: ao fazer logi
 
                             <div className="flex items-center gap-4 relative z-10">
                                 <div className={`h-14 w-14 shrink-0 rounded-2xl flex items-center justify-center border transition-colors ${item.isUnlocked ? "bg-emerald-500 text-black border-emerald-400" : "bg-zinc-800 text-zinc-600 border-zinc-700"}`}>
-                                    <span className="text-2xl">{item.isUnlocked ? <IconComponent size={20}/> : <Lock size={20}/>}</span>
+                                    <span className="text-2xl">
+                                      {item.isUnlocked
+                                        ? item.iconEmoji || <IconComponent size={20}/>
+                                        : <Lock size={20}/>}
+                                    </span>
                                 </div>
 
                                 <div className="flex-1 min-w-0 pr-16">

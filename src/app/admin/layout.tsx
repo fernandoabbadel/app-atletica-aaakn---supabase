@@ -1,15 +1,16 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image"; // 🦈 Importando Image
 import {
   LogOut, LayoutDashboard, Settings, ShieldAlert, Trophy, Calendar,
-  Star, Gamepad2, BookOpen, Dumbbell, History, ShoppingBag, Megaphone,
+  Star, Gamepad2, BookOpen, Dumbbell, History, ShoppingBag, Megaphone, MessageSquare,
   Lock, Crown, BarChart3, Users, Camera, Dice5
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { logActivity } from "../../lib/logger";
 
 // 🦈 Interface para os itens do menu (Fim do any)
 interface SidebarItem {
@@ -23,11 +24,40 @@ interface SidebarItem {
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, logout } = useAuth(); 
+  const loginAuditRef = useRef(false);
+
+  useEffect(() => {
+    const userId = typeof user?.uid === "string" ? user.uid : "";
+    const userRole = typeof user?.role === "string" ? user.role.toLowerCase() : "";
+    if (!userId) return;
+    if (loginAuditRef.current) return;
+    if (!(userRole === "master" || userRole.includes("admin"))) return;
+
+    const sessionKey = `audit:admin:painel:${userId}`;
+    if (typeof window !== "undefined" && sessionStorage.getItem(sessionKey)) {
+      loginAuditRef.current = true;
+      return;
+    }
+
+    loginAuditRef.current = true;
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(sessionKey, "1");
+    }
+
+    void logActivity(
+      userId,
+      typeof user?.nome === "string" ? user.nome : "Admin",
+      "LOGIN",
+      "Admin/Painel",
+      `Acessou a base gate em ${pathname || "/admin"}`
+    );
+  }, [pathname, user?.nome, user?.role, user?.uid]);
 
   const sidebarItems: SidebarItem[] = [
     { name: "Dashboard", path: "/admin", icon: <LayoutDashboard size={18} /> },
     { name: "SharkRound", path: "/admin/sharkround", icon: <Dice5 size={18} /> },
     { name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
+    { name: "Comunidade", path: "/admin/comunidade", icon: <MessageSquare size={18} /> },
     { name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
     { name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
     { name: "Usuários", path: "/admin/usuarios", icon: <Users size={18} /> },

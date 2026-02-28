@@ -18,6 +18,46 @@ const PLANOS = [
     { id: 'standard', nome: 'Standard', valor: 'Grátis', icon: Shield, color: 'text-emerald-500', border: 'border-emerald-500/50', bg: 'bg-emerald-500/10' },
 ];
 
+const keepDigits = (value: string, maxDigits: number): string =>
+  value.replace(/\D/g, "").slice(0, maxDigits);
+
+const formatCnpjInput = (value: string): string => {
+  const digits = keepDigits(value, 14);
+  if (!digits) return "";
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  if (digits.length <= 12) {
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  }
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+};
+
+const formatCpfInput = (value: string): string => {
+  const digits = keepDigits(value, 11);
+  if (!digits) return "";
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+  if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+};
+
+const formatPhoneInput = (value: string): string => {
+  const digits = keepDigits(value, 13);
+  if (!digits) return "";
+  if (digits.length <= 2) return digits;
+
+  const country = digits.slice(0, 2);
+  if (digits.length <= 4) return `${country} (${digits.slice(2)}`;
+
+  const ddd = digits.slice(2, 4);
+  const number = digits.slice(4);
+  if (!number) return `${country} (${ddd})`;
+  if (number.length <= 4) return `${country} (${ddd}) ${number}`;
+  if (number.length <= 8) return `${country} (${ddd}) ${number.slice(0, 4)}-${number.slice(4)}`;
+  return `${country} (${ddd}) ${number.slice(0, 5)}-${number.slice(5, 9)}`;
+};
+
 export default function CompanyRegisterPage() {
   const router = useRouter();
   const { addToast } = useToast();
@@ -36,6 +76,21 @@ export default function CompanyRegisterPage() {
   });
 
   // ID 56: Redireciona se já logado como parceiro
+  const handleMaskedInputChange = (
+    field: "cnpj" | "cpf" | "telefone",
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const rawValue = event.target.value;
+    const formatted =
+      field === "cnpj"
+        ? formatCnpjInput(rawValue)
+        : field === "cpf"
+          ? formatCpfInput(rawValue)
+          : formatPhoneInput(rawValue);
+
+    setFormData((prev) => ({ ...prev, [field]: formatted }));
+  };
+
   useEffect(() => {
       if (user && user.role === 'partner') {
           addToast("Você já está logado!", "info");
@@ -199,7 +254,7 @@ export default function CompanyRegisterPage() {
                         </div>
                         <div className="relative">
                             <FileText className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={18} />
-                            <input type="text" placeholder="CNPJ (14 dígitos)" maxLength={18} className="input-field pl-14" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} />
+                            <input type="text" inputMode="numeric" placeholder="CNPJ (14 dígitos)" maxLength={18} className="input-field pl-14" value={formData.cnpj} onChange={(e) => handleMaskedInputChange("cnpj", e)} />
                         </div>
                     </div>
 
@@ -210,7 +265,7 @@ export default function CompanyRegisterPage() {
                         </div>
                         <div className="relative">
                             <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={18} />
-                            <input type="text" placeholder="CPF Responsável" maxLength={14} className="input-field pl-14" value={formData.cpf} onChange={e => setFormData({...formData, cpf: e.target.value})} />
+                            <input type="text" inputMode="numeric" placeholder="CPF Responsável" maxLength={14} className="input-field pl-14" value={formData.cpf} onChange={(e) => handleMaskedInputChange("cpf", e)} />
                         </div>
                     </div>
                     
@@ -228,7 +283,7 @@ export default function CompanyRegisterPage() {
                         </div>
                         <div className="relative">
                             <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={18} />
-                            <input type="tel" placeholder="WhatsApp (55 + DDD...)" maxLength={13} className="input-field pl-14" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})} />
+                            <input type="tel" inputMode="numeric" placeholder="WhatsApp (55 + DDD + número)" maxLength={18} className="input-field pl-14" value={formData.telefone} onChange={(e) => handleMaskedInputChange("telefone", e)} />
                         </div>
                     </div>
 

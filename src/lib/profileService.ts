@@ -14,10 +14,9 @@ import {
 } from "@/lib/supa/firestore";
 import { getSupabaseClient } from "@/lib/supabase";
 
-import { compressImageFile } from "./imageCompression";
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
-import { validateImageFile } from "./upload";
+import { uploadImage } from "./upload";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -907,63 +906,31 @@ export async function uploadProfileImage(payload: {
   if (!uid) {
     throw new Error("Usuario invalido para upload.");
   }
-  const supabase = getSupabaseClient();
-  const bucket =
-    process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET ||
-    process.env.NEXT_PUBLIC_SUPABASE_BUCKET ||
-    "uploads";
 
-  const sourceValidationError = validateImageFile(payload.file);
-  if (sourceValidationError) {
-    throw new Error(sourceValidationError);
-  }
-
-  const compressedFile = await compressImageFile(payload.file, {
-    maxWidth: payload.kind === "capa" ? 1800 : 1200,
-    maxHeight: payload.kind === "capa" ? 1800 : 1200,
-    quality: 0.82,
-  });
-
-  const compressedValidationError = validateImageFile(compressedFile);
-  if (compressedValidationError) {
-    throw new Error(compressedValidationError);
-  }
-
-  const baseName = compressedFile.name
-    .replace(/[^a-zA-Z0-9_.-]/g, "_")
-    .slice(0, 90);
   const prefix =
     payload.kind === "capa" ? "cover" : payload.kind === "avatar" ? "avatar" : "profile";
-  const path = `users/${uid}/${prefix}_${Date.now()}_${baseName}`;
-  const { error: uploadError } = await supabase.storage.from(bucket).upload(path, compressedFile, {
+  const { url, error } = await uploadImage(payload.file, `users/${uid}`, {
+    scopeKey: `profile:${uid}:${payload.kind}`,
+    fileName: prefix,
     upsert: true,
-    contentType: compressedFile.type || "image/jpeg",
+    appendVersionQuery: true,
+    maxBytes: payload.kind === "capa" ? 3 * 1024 * 1024 : 2 * 1024 * 1024,
+    maxWidth: payload.kind === "capa" ? 2400 : 1600,
+    maxHeight: payload.kind === "capa" ? 1800 : 1600,
+    maxPixels: payload.kind === "capa" ? 3_600_000 : 2_560_000,
+    compressionMaxWidth: payload.kind === "capa" ? 1800 : 1200,
+    compressionMaxHeight: payload.kind === "capa" ? 1200 : 1200,
+    compressionMaxBytes: payload.kind === "capa" ? 200 * 1024 : 120 * 1024,
+    quality: 0.82,
+    cacheControl: "86400",
+    rateLimitMax: 4,
   });
 
-  if (uploadError) {
-    throw Object.assign(new Error(uploadError.message), {
-      code: `storage/${uploadError.name ?? "upload-failed"}`,
-      cause: uploadError,
-    });
+  if (!url || error) {
+    throw new Error(error || "Falha ao subir imagem de perfil.");
   }
 
-  const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(path);
-  if (publicData?.publicUrl) {
-    return publicData.publicUrl;
-  }
-
-  const { data: signedData, error: signedError } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(path, 60 * 60 * 24 * 30);
-
-  if (signedError || !signedData?.signedUrl) {
-    throw Object.assign(new Error(signedError?.message || "Falha ao gerar URL do upload."), {
-      code: `storage/${signedError?.name ?? "signed-url-failed"}`,
-      cause: signedError,
-    });
-  }
-
-  return signedData.signedUrl;
+  return url;
 }
 
 export async function saveProfileImageUrl(payload: {

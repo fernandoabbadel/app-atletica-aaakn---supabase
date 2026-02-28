@@ -118,7 +118,8 @@ export async function incrementUserStats(
   for (const [key, delta] of Object.entries(deltas)) {
     if (!Number.isFinite(delta) || !delta) continue;
     const base = asNumber(nextStats[key], 0);
-    nextStats[key] = base + delta;
+    const updated = base + delta;
+    nextStats[key] = updated < 0 ? 0 : updated;
   }
 
   const { error: updateError } = await supabase
@@ -131,4 +132,3 @@ export async function incrementUserStats(
 
   if (updateError) throwSupabaseError(updateError);
 }
-

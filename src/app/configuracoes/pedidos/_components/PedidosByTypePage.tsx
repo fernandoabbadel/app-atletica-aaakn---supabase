@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle, Clock, Package, XCircle } from "lucide-react";
+import { CheckCircle, Clock, Copy, MessageCircle, Package, Wallet, X, XCircle } from "lucide-react";
 import { Timestamp } from "@/lib/supa/firestore";
 
 import { useAuth } from "../../../../context/AuthContext";
 import { fetchUserOrdersByTab } from "../../../../lib/settingsService";
+import { fetchFinanceiroConfig } from "../../../../lib/eventsService";
+import { useToast } from "../../../../context/ToastContext";
 
 interface PedidoUnificado {
   id: string;
@@ -14,23 +16,35 @@ interface PedidoUnificado {
   valor: number;
   status: "aprovado" | "rejeitado" | "pendente";
   data: Date;
+  raw?: PedidoRaw;
 }
 
 type PedidoRaw = {
   id: string;
   dataSolicitacao?: Timestamp;
   createdAt?: Timestamp;
-  data?: string;
+  data?: string | Record<string, unknown>;
   eventoNome?: string;
   quantidade?: number;
   loteNome?: string;
   valorTotal?: unknown;
-  itens?: unknown[];
+  itens?: unknown[] | number;
   total?: unknown;
+  productName?: string;
+  productId?: string;
+  price?: unknown;
+  userName?: string;
   planoNome?: string;
   valor?: unknown;
   status?: PedidoUnificado["status"];
 };
+
+const FINANCE_DEFAULT = {
+  chave: "financeiro@aaakn.com.br",
+  banco: "Banco Inter",
+  titular: "Assoc. Atletica Acad. Knight",
+  whatsapp: "5512999999999",
+} as const;
 
 const parseCurrencyValue = (value: unknown): number => {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
@@ -61,29 +75,46 @@ const normalizePedido = (item: PedidoRaw, tab: "eventos" | "loja" | "planos"): P
 
   if (item.dataSolicitacao instanceof Timestamp) data = item.dataSolicitacao.toDate();
   else if (item.createdAt instanceof Timestamp) data = item.createdAt.toDate();
-  else if (item.data) data = new Date(item.data);
+  else if (typeof item.data === "string" && item.data) data = new Date(item.data);
 
   if (tab === "eventos") {
     titulo = item.eventoNome || "Ingresso";
     subtitulo = `${item.quantidade || 1}x ${item.loteNome || "Lote unico"}`;
     valor = parseCurrencyValue(item.valorTotal);
   } else if (tab === "loja") {
-    titulo = `Pedido #${item.id.slice(0, 6).toUpperCase()}`;
-    subtitulo = `${item.itens?.length || 0} itens`;
-    valor = parseCurrencyValue(item.total);
+    const qtd =
+      typeof item.quantidade === "number"
+        ? item.quantidade
+        : typeof item.itens === "number"
+        ? item.itens
+        : Array.isArray(item.itens)
+        ? item.itens.length
+        : 1;
+    titulo = item.productName || `Pedido #${item.id.slice(0, 6).toUpperCase()}`;
+    subtitulo = `${qtd || 1} item(ns)`;
+    valor = parseCurrencyValue(item.total ?? item.price);
   } else {
     titulo = item.planoNome || "Adesao";
     subtitulo = "Anuidade";
     valor = parseCurrencyValue(item.valor);
   }
 
+  const statusRaw = String(item.status || "pendente").toLowerCase();
+  const normalizedStatus: PedidoUnificado["status"] =
+    statusRaw === "approved" || statusRaw === "aprovado"
+      ? "aprovado"
+      : statusRaw === "rejected" || statusRaw === "rejeitado"
+      ? "rejeitado"
+      : "pendente";
+
   return {
     id: item.id,
     titulo,
     subtitulo,
     valor,
-    status: item.status || "pendente",
+    status: normalizedStatus,
     data,
+    raw: item,
   };
 };
 
@@ -93,8 +124,17 @@ interface PedidosByTypePageProps {
 
 export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
   const { user } = useAuth();
+  const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [pedidos, setPedidos] = useState<PedidoUnificado[]>([]);
+  const [selectedPedido, setSelectedPedido] = useState<PedidoUnificado | null>(null);
+  const [financeiro, setFinanceiro] = useState<{
+    chave: string;
+    banco: string;
+    titular: string;
+    whatsapp: string;
+  } | null>(null);
+  const [loadingFinanceiro, setLoadingFinanceiro] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -127,6 +167,32 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
     };
   }, [user, tab]);
 
+  useEffect(() => {
+    if (!selectedPedido) return;
+    let mounted = true;
+    setLoadingFinanceiro(true);
+    const loadFinanceiro = async () => {
+      try {
+        const row = await fetchFinanceiroConfig({ forceRefresh: false });
+        if (!mounted) return;
+        setFinanceiro({
+          chave: typeof row?.chave === "string" && row.chave.trim() ? row.chave.trim() : FINANCE_DEFAULT.chave,
+          banco: typeof row?.banco === "string" && row.banco.trim() ? row.banco.trim() : FINANCE_DEFAULT.banco,
+          titular: typeof row?.titular === "string" && row.titular.trim() ? row.titular.trim() : FINANCE_DEFAULT.titular,
+          whatsapp: typeof row?.whatsapp === "string" && row.whatsapp.trim() ? row.whatsapp.trim() : FINANCE_DEFAULT.whatsapp,
+        });
+      } catch (error: unknown) {
+        console.error(error);
+      } finally {
+        if (mounted) setLoadingFinanceiro(false);
+      }
+    };
+    void loadFinanceiro();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedPedido]);
+
   const counts = useMemo(() => {
     return {
       approved: pedidos.filter((row) => row.status === "aprovado").length,
@@ -134,6 +200,14 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
       rejected: pedidos.filter((row) => row.status === "rejeitado").length,
     };
   }, [pedidos]);
+
+  const whatsappDigits = String(financeiro?.whatsapp || FINANCE_DEFAULT.whatsapp).replace(/\D/g, "");
+  const whatsappMessage = selectedPedido
+    ? encodeURIComponent(
+        `Fala, equipe AAAKN! Segue comprovante do pedido #${selectedPedido.id.slice(0, 8).toUpperCase()} (${selectedPedido.titulo}).`
+      )
+    : "";
+  const whatsappUrl = whatsappDigits ? `https://wa.me/${whatsappDigits}?text=${whatsappMessage}` : "";
 
   return (
     <main className="p-4 space-y-4">
@@ -161,7 +235,13 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
         </div>
       ) : (
         pedidos.map((pedido) => (
-          <article key={pedido.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+          <article
+            key={pedido.id}
+            className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 cursor-pointer hover:border-zinc-600 transition"
+            onClick={() => {
+              setSelectedPedido(pedido);
+            }}
+          >
             <div className="flex justify-between items-start gap-3">
               <div>
                 <h3 className="text-sm font-bold text-white">{pedido.titulo}</h3>
@@ -187,6 +267,110 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
             </div>
           </article>
         ))
+      )}
+
+      {selectedPedido && (
+        <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-[#0b0b0c] shadow-2xl">
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase font-black tracking-widest text-zinc-500">Detalhe do Pedido</p>
+                <h3 className="text-sm font-black uppercase text-white">{selectedPedido.titulo}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedPedido(null)}
+                className="p-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-500 font-bold uppercase">Pedido</span>
+                  <span className="text-zinc-300 font-mono">#{selectedPedido.id.slice(0, 8).toUpperCase()}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-500 font-bold uppercase">Status</span>
+                  <span className="text-zinc-300 font-bold uppercase">{selectedPedido.status}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-500 font-bold uppercase">Valor</span>
+                  <span className="text-emerald-400 font-black">R$ {selectedPedido.valor.toFixed(2)}</span>
+                </div>
+                <div className="text-[11px] text-zinc-500">
+                  {selectedPedido.data.toLocaleDateString("pt-BR")} {selectedPedido.data.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                </div>
+                {typeof selectedPedido.raw?.data === "object" && selectedPedido.raw?.data && "corSelecionada" in selectedPedido.raw.data && (
+                  <div className="text-xs text-zinc-300">
+                    <span className="text-zinc-500 font-bold uppercase">Cor:</span>{" "}
+                    {String((selectedPedido.raw.data as Record<string, unknown>).corSelecionada || "-")}
+                  </div>
+                )}
+              </div>
+
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Wallet size={14} className="text-emerald-400" />
+                  <p className="text-[10px] uppercase font-black tracking-widest text-zinc-500">Pagamento via PIX</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-zinc-500 font-bold uppercase">Chave PIX</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <p className="flex-1 rounded-lg border border-zinc-700 bg-black px-3 py-2 text-xs font-mono text-white truncate">
+                      {loadingFinanceiro ? "Carregando..." : (financeiro?.chave || FINANCE_DEFAULT.chave)}
+                    </p>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(financeiro?.chave || FINANCE_DEFAULT.chave);
+                          addToast("Chave PIX copiada!", "success");
+                        } catch (error: unknown) {
+                          console.error(error);
+                          addToast("Nao foi possivel copiar a chave PIX.", "error");
+                        }
+                      }}
+                      className="p-2 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                    >
+                      <Copy size={14} />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <p className="text-zinc-500 font-bold uppercase text-[10px]">Banco</p>
+                    <p className="text-zinc-300 font-bold mt-1">{financeiro?.banco || FINANCE_DEFAULT.banco}</p>
+                  </div>
+                  <div>
+                    <p className="text-zinc-500 font-bold uppercase text-[10px]">Titular</p>
+                    <p className="text-zinc-300 font-bold mt-1 truncate">{financeiro?.titular || FINANCE_DEFAULT.titular}</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-black/50 p-3 space-y-1">
+                  <p className="text-[10px] text-zinc-500 uppercase font-bold">WhatsApp p/ comprovante</p>
+                  <p className="text-zinc-300 text-xs font-mono">{financeiro?.whatsapp || FINANCE_DEFAULT.whatsapp}</p>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-black/50 p-3 flex items-start gap-2">
+                  <MessageCircle size={14} className="text-emerald-400 mt-0.5" />
+                  <p className="text-[11px] text-zinc-400">
+                    Envie o comprovante informando o numero do pedido <span className="font-mono text-zinc-200">#{selectedPedido.id.slice(0, 8).toUpperCase()}</span>.
+                  </p>
+                </div>
+                {whatsappUrl && (
+                  <a
+                    href={whatsappUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black uppercase text-emerald-400 hover:bg-emerald-500/20"
+                  >
+                    <MessageCircle size={14} /> Enviar Comprovante
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

@@ -28,6 +28,7 @@ import {
     type TreinoDashboardMetrics,
     type TreinoRecord,
     type TreinoRsvpRecord,
+    type TreinoSettingsRecord,
     type TreinoUserDirectoryItem,
     upsertChamadaPresence,
     updateChamadaStatus,
@@ -87,6 +88,12 @@ const getResponsibleColor = (id: string = "") => {
     return gradients[Math.abs(hash) % gradients.length];
 };
 
+const normalizeModalidadeNome = (value: string): string =>
+    value.trim().replace(/\s+/g, " ").slice(0, 40);
+
+const toModalidadeKey = (value: string): string =>
+    normalizeModalidadeNome(value).toLowerCase();
+
 export default function AdminTreinosPage() {
   const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'grade'>('dashboard');
@@ -95,6 +102,7 @@ export default function AdminTreinosPage() {
   const [treinos, setTreinos] = useState<Treino[]>([]);
   const [allUsers, setAllUsers] = useState<UserBase[]>([]);
   const [modalidades, setModalidades] = useState<string[]>([]);
+  const [modalidadeImagens, setModalidadeImagens] = useState<Record<string, string>>({});
   
   // Stats
   const [rankings, setRankings] = useState<Record<string, RankingItem[]>>({});
@@ -104,8 +112,10 @@ export default function AdminTreinosPage() {
   // Modais
   const [showModal, setShowModal] = useState(false);
   const [showNovaModalidade, setShowNovaModalidade] = useState(false);
+  const [showEditarModalidades, setShowEditarModalidades] = useState(false);
   const [showRankingModal, setShowRankingModal] = useState<string | null>(null);
   const [novaModalidadeNome, setNovaModalidadeNome] = useState("");
+  const [novaModalidadeImagem, setNovaModalidadeImagem] = useState("");
   
   // Edição
   const [isEditing, setIsEditing] = useState(false);
@@ -129,8 +139,9 @@ export default function AdminTreinosPage() {
   const [resultadoTreinador, setResultadoTreinador] = useState<UserBase[]>([]);
 
   // Form
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingNovaModalidadeImagem, setUploadingNovaModalidadeImagem] = useState(false);
+  const [uploadingCategoriaEdicao, setUploadingCategoriaEdicao] = useState<string | null>(null);
+  const fileInputNovaModalidadeRef = useRef<HTMLInputElement>(null);
   const [recurrenceDate, setRecurrenceDate] = useState("");
 
   const [novoTreino, setNovoTreino] = useState<Partial<Treino>>({
@@ -145,6 +156,12 @@ export default function AdminTreinosPage() {
     ordemDia: 1, 
     status: "ativo"
   });
+
+  const getModalidadeImagem = useCallback(
+    (modalidadeNome: string, images = modalidadeImagens): string =>
+      images[toModalidadeKey(modalidadeNome)] || "",
+    [modalidadeImagens]
+  );
 
   const loadTreinos = useCallback(async (forceRefresh = false) => {
       try {
@@ -183,15 +200,24 @@ export default function AdminTreinosPage() {
   useEffect(() => {
       const fetchMods = async () => {
           try {
-              const mods = await fetchTreinoSettings();
+              const settings: TreinoSettingsRecord = await fetchTreinoSettings();
+              const mods = settings.modalidades;
+              const imagens = settings.modalidadeImagens;
+              const modalidadePadrao = mods[0] || "Futsal";
               setModalidades(mods);
-              setNovoTreino(prev => ({...prev, modalidade: mods[0] || "Futsal"}));
+              setModalidadeImagens(imagens);
+              setNovoTreino(prev => ({
+                  ...prev,
+                  modalidade: modalidadePadrao,
+                  imagem: imagens[toModalidadeKey(modalidadePadrao)] || ""
+              }));
           } catch (error: unknown) {
               if (!isPermissionError(error)) {
                 console.error(error);
               }
-              setModalidades(["Futsal", "Volei"]); 
-              setNovoTreino(prev => ({...prev, modalidade: "Futsal"}));
+              setModalidades(["Futsal", "Volei"]);
+              setModalidadeImagens({});
+              setNovoTreino(prev => ({...prev, modalidade: "Futsal", imagem: ""}));
           }
       };
       void fetchMods();
@@ -294,13 +320,69 @@ export default function AdminTreinosPage() {
 
   // --- ACTIONS ---
 
-  const handleCriarModalidade = async () => {
-      if(!novaModalidadeNome.trim()) return;
-      if(modalidades.includes(novaModalidadeNome)) return addToast("Já existe!", "error");
-      const novas = [...modalidades, novaModalidadeNome];
+  const handleOpenNovaModalidade = () => {
+      setNovaModalidadeNome("");
+      setNovaModalidadeImagem("");
+      setShowNovaModalidade(true);
+  };
+
+  const handleUploadNovaModalidadeImagem = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      if (!file || uploadingNovaModalidadeImagem) {
+          input.value = "";
+          return;
+      }
+
+      setUploadingNovaModalidadeImagem(true);
       try {
-          await saveTreinoSettings(novas);
-          setModalidades(novas); setNovaModalidadeNome(""); setShowNovaModalidade(false);
+          const { url, error } = await uploadImage(file, "treinos/categorias", {
+              scopeKey: "admin:treinos:categoria:nova",
+              maxBytes: 2 * 1024 * 1024,
+              maxWidth: 1800,
+              maxHeight: 1800,
+              maxPixels: 2_560_000,
+              compressionMaxWidth: 1400,
+              compressionMaxHeight: 1400,
+              compressionMaxBytes: 150 * 1024,
+              quality: 0.82,
+              rateLimitMax: 4,
+          });
+          if (error) {
+              addToast(error, "error");
+              return;
+          }
+          if (url) {
+              setNovaModalidadeImagem(url);
+          }
+      } finally {
+          setUploadingNovaModalidadeImagem(false);
+          input.value = "";
+      }
+  };
+
+  const handleCriarModalidade = async () => {
+      const nomeNormalizado = normalizeModalidadeNome(novaModalidadeNome);
+      if(!nomeNormalizado) return;
+      const jaExiste = modalidades.some((mod) => normalizeModalidadeNome(mod).toLowerCase() === nomeNormalizado.toLowerCase());
+      if(jaExiste) return addToast("Já existe!", "error");
+
+      const novas = [...modalidades, nomeNormalizado];
+      const imagensAtualizadas = { ...modalidadeImagens };
+      if (novaModalidadeImagem) {
+          imagensAtualizadas[toModalidadeKey(nomeNormalizado)] = novaModalidadeImagem;
+      }
+
+      try {
+          await saveTreinoSettings({
+              modalidades: novas,
+              modalidadeImagens: imagensAtualizadas
+          });
+          setModalidades(novas);
+          setModalidadeImagens(imagensAtualizadas);
+          setNovaModalidadeNome("");
+          setNovaModalidadeImagem("");
+          setShowNovaModalidade(false);
           addToast("Modalidade criada!", "success");
       } catch (error: unknown) {
           console.error(error);
@@ -308,14 +390,116 @@ export default function AdminTreinosPage() {
       }
   };
 
+  const handleEditarImagemCategoria = async (modalidade: string, e: React.ChangeEvent<HTMLInputElement>) => {
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      if (!file || uploadingCategoriaEdicao !== null) {
+          input.value = "";
+          return;
+      }
+
+      setUploadingCategoriaEdicao(modalidade);
+      try {
+          const categoriaKey = toModalidadeKey(modalidade);
+          const { url, error } = await uploadImage(file, "treinos/categorias", {
+              scopeKey: `admin:treinos:categoria:${categoriaKey}`,
+              fileName: categoriaKey,
+              upsert: true,
+              appendVersionQuery: true,
+              maxBytes: 2 * 1024 * 1024,
+              maxWidth: 1800,
+              maxHeight: 1800,
+              maxPixels: 2_560_000,
+              compressionMaxWidth: 1400,
+              compressionMaxHeight: 1400,
+              compressionMaxBytes: 150 * 1024,
+              quality: 0.82,
+              cacheControl: "86400",
+              rateLimitMax: 4,
+          });
+          if (error) {
+              addToast(error, "error");
+              return;
+          }
+          if (!url) {
+              addToast("Falha ao subir imagem.", "error");
+              return;
+          }
+
+          const key = categoriaKey;
+          const imagensAtualizadas = { ...modalidadeImagens, [key]: url };
+          await saveTreinoSettings({
+              modalidades,
+              modalidadeImagens: imagensAtualizadas
+          });
+          setModalidadeImagens(imagensAtualizadas);
+          setNovoTreino((prev) =>
+              toModalidadeKey(prev.modalidade || "") === key ? { ...prev, imagem: url } : prev
+          );
+          addToast("Imagem da categoria atualizada!", "success");
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Erro ao atualizar imagem da categoria.", "error");
+      } finally {
+          setUploadingCategoriaEdicao(null);
+          input.value = "";
+      }
+  };
+
+  const handleRemoverImagemCategoria = async (modalidade: string) => {
+      const key = toModalidadeKey(modalidade);
+      const imagensAtualizadas = { ...modalidadeImagens };
+      delete imagensAtualizadas[key];
+      try {
+          await saveTreinoSettings({
+              modalidades,
+              modalidadeImagens: imagensAtualizadas
+          });
+          setModalidadeImagens(imagensAtualizadas);
+          setNovoTreino((prev) =>
+              toModalidadeKey(prev.modalidade || "") === key ? { ...prev, imagem: "" } : prev
+          );
+          addToast("Imagem removida da categoria.", "success");
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Erro ao remover imagem da categoria.", "error");
+      }
+  };
+
+  const handleModalidadeTreinoChange = (modalidade: string) => {
+      setNovoTreino((prev) => ({
+          ...prev,
+          modalidade,
+          imagem: getModalidadeImagem(modalidade)
+      }));
+  };
+
   const handleOpenCreate = () => {
       const modPadrao = modalidades.length > 0 ? modalidades[0] : "Futsal";
-      setNovoTreino({ modalidade: modPadrao, diaSemana: "Segunda-feira", dia: "", horario: "", local: "", treinador: "", descricao: "", imagem: "", ordemDia: 1, status: "ativo" });
+      setNovoTreino({
+          modalidade: modPadrao,
+          diaSemana: "Segunda-feira",
+          dia: "",
+          horario: "",
+          local: "",
+          treinador: "",
+          descricao: "",
+          imagem: getModalidadeImagem(modPadrao),
+          ordemDia: 1,
+          status: "ativo"
+      });
+      setRecurrenceDate("");
       setEditingId(null); setIsEditing(false); setShowModal(true);
   };
 
   const handleOpenEdit = (treino: Treino) => {
-      setNovoTreino({ ...treino }); setEditingId(treino.id); setIsEditing(true); setShowModal(true);
+      setNovoTreino({
+          ...treino,
+          imagem: treino.imagem || getModalidadeImagem(treino.modalidade)
+      });
+      setEditingId(treino.id);
+      setIsEditing(true);
+      setShowModal(true);
   };
 
   const handleSelectTreinador = (user: UserBase) => {
@@ -324,9 +508,22 @@ export default function AdminTreinosPage() {
   };
 
   const handleSave = async () => {
-    if (!novoTreino.modalidade || !novoTreino.dia) return addToast("Dados incompletos!", "error");
-    const diaObj = new Date(novoTreino.dia + "T12:00:00");
-    const basePayload = { ...novoTreino, diaSemana: DIAS_SEMANA[diaObj.getDay()].label, ordemDia: DIAS_SEMANA[diaObj.getDay()].val };
+    const modalidade = normalizeModalidadeNome(novoTreino.modalidade || "");
+    const dia = (novoTreino.dia || "").trim();
+    if (!modalidade || !dia) return addToast("Dados incompletos!", "error");
+
+    const diaObj = new Date(`${dia}T12:00:00`);
+    const diaSemanaConfig = DIAS_SEMANA[diaObj.getDay()];
+    if (Number.isNaN(diaObj.getTime()) || !diaSemanaConfig) {
+        return addToast("Data inválida.", "error");
+    }
+
+    if (recurrenceDate && recurrenceDate < dia) {
+        return addToast("A data final da repetição deve ser igual ou maior que a data inicial.", "error");
+    }
+
+    const imagemModalidade = getModalidadeImagem(modalidade);
+    const basePayload = { ...novoTreino, modalidade, dia, imagem: imagemModalidade, diaSemana: diaSemanaConfig.label, ordemDia: diaSemanaConfig.val };
     try {
         if (isEditing && editingId) {
             await upsertTreino({ id: editingId, data: basePayload });
@@ -335,9 +532,12 @@ export default function AdminTreinosPage() {
             if (recurrenceDate) {
                 const result = await createRecurringTreinos({
                     data: basePayload,
-                    startDate: novoTreino.dia,
+                    startDate: dia,
                     endDate: recurrenceDate,
                 });
+                if (result.count === 0) {
+                    return addToast("Nenhum treino criado. Revise o intervalo de repetição.", "error");
+                }
                 addToast(`${result.count} treinos criados!`, "success");
             } else {
                 await upsertTreino({ data: basePayload });
@@ -446,15 +646,6 @@ export default function AdminTreinosPage() {
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
   }
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-        setUploading(true);
-        const { url } = await uploadImage(file, "treinos");
-        if (url) setNovoTreino(prev => ({ ...prev, imagem: url }));
-        setUploading(false);
-    }
-  };
 
   const formatDate = (d: string) => d ? d.split('-').reverse().join('/') : "-";
   const isFeriado = (d: string) => FERIADOS.includes(d);
@@ -469,7 +660,7 @@ export default function AdminTreinosPage() {
         <div className="flex gap-2">
             {activeTab === 'grade' && (
                 <>
-                    <button onClick={() => setShowNovaModalidade(true)} className="bg-zinc-800 text-zinc-300 px-4 py-2 rounded-xl text-xs font-bold uppercase hover:bg-zinc-700 flex items-center gap-2 border border-zinc-700">
+                    <button onClick={handleOpenNovaModalidade} className="bg-zinc-800 text-zinc-300 px-4 py-2 rounded-xl text-xs font-bold uppercase hover:bg-zinc-700 flex items-center gap-2 border border-zinc-700">
                         <Trophy size={14}/> Add Esporte
                     </button>
                     <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 shadow-lg">
@@ -507,7 +698,7 @@ export default function AdminTreinosPage() {
                                 <h3 className="text-lg font-black text-white uppercase italic">{mod}</h3>
                                 <div className="mt-4 flex items-center gap-3">
                                     <div className="w-10 h-10 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center overflow-hidden relative">
-                                        {topPlayer ? <Image src={topPlayer.avatar} alt="Top Player" fill className="object-cover" unoptimized/> : <Users size={18} className="text-zinc-600"/>}
+                                        {topPlayer ? <Image src={topPlayer.avatar} alt="Top Player" fill sizes="40px" className="object-cover"/> : <Users size={18} className="text-zinc-600"/>}
                                     </div>
                                     <div>
                                         <p className="text-[9px] text-zinc-500 uppercase font-bold">MVP</p>
@@ -531,7 +722,7 @@ export default function AdminTreinosPage() {
                                 <div key={i} className="flex justify-between items-center p-3 border-b border-zinc-800 last:border-0 hover:bg-zinc-800/30 transition rounded-lg">
                                     <div className="flex items-center gap-3">
                                         <div className="relative w-8 h-8 rounded-full overflow-hidden grayscale">
-                                            <Image src={item.avatar || "https://github.com/shadcn.png"} alt="Ghost" fill className="object-cover" unoptimized/>
+                                            <Image src={item.avatar || "https://github.com/shadcn.png"} alt="Ghost" fill sizes="32px" className="object-cover"/>
                                         </div>
                                         <div><p className="font-bold text-white text-sm">{item.nome}</p><p className="text-xs text-zinc-500">{item.treinoMod} • {item.treinoData}</p></div>
                                     </div>
@@ -584,7 +775,7 @@ export default function AdminTreinosPage() {
                                                 </td>
                                                 <td className="p-4 font-bold flex items-center gap-2">
                                                     <div className="w-6 h-6 rounded bg-zinc-800 border border-zinc-700 overflow-hidden shrink-0 relative">
-                                                        {treino.imagem ? <Image src={treino.imagem} alt={treino.modalidade} fill className="object-cover" unoptimized/> : <Dumbbell className="p-1 text-zinc-600"/>}
+                                                        {treino.imagem ? <Image src={treino.imagem} alt={treino.modalidade} fill sizes="24px" className="object-cover"/> : <Dumbbell className="p-1 text-zinc-600"/>}
                                                     </div>
                                                     {treino.modalidade}
                                                 </td>
@@ -610,7 +801,7 @@ export default function AdminTreinosPage() {
                                                                 <div className={`mb-4 p-3 rounded-xl bg-gradient-to-r ${getResponsibleColor(treino.treinadorId)} border border-white/10 flex items-center gap-4 shadow-lg w-fit`}>
                                                                         <div className="relative">
                                                                             <div className="w-12 h-12 rounded-full border-2 border-white/20 bg-black/30 overflow-hidden flex items-center justify-center relative">
-                                                                                {treino.treinadorAvatar ? <Image src={treino.treinadorAvatar} alt="Treinador" fill className="object-cover" unoptimized/> : <Crown size={20} className="text-white"/>}
+                                                                                {treino.treinadorAvatar ? <Image src={treino.treinadorAvatar} alt="Treinador" fill sizes="48px" className="object-cover"/> : <Crown size={20} className="text-white"/>}
                                                                             </div>
                                                                             <div className="absolute -bottom-1 -right-1 bg-white text-black p-0.5 rounded-full"><Crown size={10} fill="black"/></div>
                                                                         </div>
@@ -634,7 +825,7 @@ export default function AdminTreinosPage() {
                                                                                     {resultadoBusca.map(u => (
                                                                                         <button key={u.uid} onClick={() => handleAddUserToChamada(u)} className="w-full text-left p-2 hover:bg-zinc-800 flex items-center gap-2 border-b border-zinc-800/50 last:border-0 text-xs text-white">
                                                                                             <div className="w-5 h-5 rounded-full relative overflow-hidden">
-                                                                                                <Image src={u.foto || "https://github.com/shadcn.png"} alt={u.nome} fill className="object-cover" unoptimized/>
+                                                                                                <Image src={u.foto || "https://github.com/shadcn.png"} alt={u.nome} fill sizes="20px" className="object-cover"/>
                                                                                             </div>
                                                                                             <span>{u.nome}</span>
                                                                                         </button>
@@ -656,7 +847,7 @@ export default function AdminTreinosPage() {
                                                                     >
                                                                         <div className="flex items-center gap-2 w-full">
                                                                             <div className="w-6 h-6 rounded-full border border-white/10 relative overflow-hidden">
-                                                                                <Image src={aluno.avatar || "https://github.com/shadcn.png"} alt={aluno.nome} fill className="object-cover" unoptimized/>
+                                                                                <Image src={aluno.avatar || "https://github.com/shadcn.png"} alt={aluno.nome} fill sizes="24px" className="object-cover"/>
                                                                             </div>
                                                                             <div className="flex flex-col">
                                                                                 <div className="flex items-center gap-2">
@@ -720,7 +911,7 @@ export default function AdminTreinosPage() {
                           <div key={item.userId} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-xl border border-zinc-800">
                               <span className={`text-lg font-black w-6 text-center ${idx === 0 ? 'text-yellow-500' : idx === 1 ? 'text-zinc-300' : idx === 2 ? 'text-orange-700' : 'text-zinc-600'}`}>{idx + 1}</span>
                               <div className="w-8 h-8 rounded-full bg-zinc-800 relative overflow-hidden">
-                                <Image src={item.avatar} alt={item.nome} fill className="object-cover" unoptimized/>
+                                <Image src={item.avatar} alt={item.nome} fill sizes="32px" className="object-cover"/>
                               </div>
                               <div className="flex-1"><p className="text-sm font-bold text-white">{item.nome}</p><p className="text-[10px] text-zinc-500">{item.turma}</p></div>
                               <div className="bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded text-xs font-bold">{item.count}xp</div>
@@ -737,12 +928,11 @@ export default function AdminTreinosPage() {
           <div className="bg-zinc-950 w-full max-w-lg rounded-2xl border border-zinc-800 p-6 space-y-4">
             <h2 className="font-bold text-white text-lg flex items-center gap-2"><Dumbbell size={20} className="text-emerald-500"/> {isEditing ? "Editar" : "Novo"} Treino</h2>
             <div className="flex gap-4">
-                <div onClick={() => fileInputRef.current?.click()} className="w-24 h-24 border-2 border-dashed border-zinc-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-emerald-500 transition bg-black/20 shrink-0 relative group overflow-hidden">
-                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload}/>
-                    {novoTreino.imagem ? <Image src={novoTreino.imagem} alt="Capa Treino" fill className="object-cover" unoptimized/> : (uploading ? <Loader2 className="animate-spin text-emerald-500"/> : <ImageIcon className="text-zinc-600"/>)}
+                <div className="w-24 h-24 border border-zinc-700 rounded-xl flex items-center justify-center bg-black/20 shrink-0 relative overflow-hidden">
+                    {novoTreino.imagem ? <Image src={novoTreino.imagem} alt="Imagem da categoria" fill sizes="96px" className="object-cover"/> : <ImageIcon className="text-zinc-600"/>}
                 </div>
                 <div className="flex-1 space-y-3">
-                    <select className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white outline-none" value={novoTreino.modalidade} onChange={(e) => setNovoTreino({ ...novoTreino, modalidade: e.target.value })}>
+                    <select className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white outline-none" value={novoTreino.modalidade} onChange={(e) => handleModalidadeTreinoChange(e.target.value)}>
                         {modalidades.map(m => <option className="bg-zinc-900" key={m} value={m}>{m}</option>)}
                     </select>
                     
@@ -768,7 +958,7 @@ export default function AdminTreinosPage() {
                                 {resultadoTreinador.map(u => (
                                     <button key={u.uid} onClick={() => handleSelectTreinador(u)} className="w-full text-left p-2 hover:bg-zinc-800 flex items-center gap-2 border-b border-zinc-800/50 last:border-0 text-xs text-white">
                                         <div className="w-5 h-5 rounded-full relative overflow-hidden">
-                                            <Image src={u.foto || "https://github.com/shadcn.png"} alt={u.nome} fill className="object-cover" unoptimized/>
+                                            <Image src={u.foto || "https://github.com/shadcn.png"} alt={u.nome} fill sizes="20px" className="object-cover"/>
                                         </div>
                                         <span>{u.nome}</span>
                                     </button>
@@ -813,10 +1003,64 @@ export default function AdminTreinosPage() {
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4">
               <div className="bg-zinc-900 w-full max-w-sm rounded-2xl border border-zinc-800 p-6 space-y-4">
                   <h2 className="font-bold text-white text-lg">Criar Esporte</h2>
-                  <input type="text" placeholder="Nome (ex: Natação)" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white outline-none" value={novaModalidadeNome} onChange={e => setNovaModalidadeNome(e.target.value)} />
+                  <input type="text" placeholder="Nome (ex: Natacao)" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white outline-none" value={novaModalidadeNome} onChange={e => setNovaModalidadeNome(e.target.value)} />
+                  <div>
+                      <input type="file" ref={fileInputNovaModalidadeRef} className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingNovaModalidadeImagem} onChange={handleUploadNovaModalidadeImagem}/>
+                      <button onClick={() => fileInputNovaModalidadeRef.current?.click()} disabled={uploadingNovaModalidadeImagem} className="w-full bg-zinc-950 border border-zinc-700 rounded-xl p-3 text-sm text-zinc-300 hover:border-emerald-500 transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
+                          {uploadingNovaModalidadeImagem ? <Loader2 size={14} className="animate-spin"/> : <ImageIcon size={14}/>} 
+                          {novaModalidadeImagem ? "Trocar imagem da categoria" : "Adicionar imagem da categoria"}
+                      </button>
+                      {novaModalidadeImagem && (
+                          <div className="mt-3 relative w-full h-28 rounded-xl overflow-hidden border border-zinc-700">
+                              <Image src={novaModalidadeImagem} alt="Preview categoria" fill sizes="320px" className="object-cover" />
+                          </div>
+                      )}
+                  </div>
                   <div className="flex gap-2">
+                      <button onClick={() => { setShowNovaModalidade(false); setShowEditarModalidades(true); }} className="flex-1 py-3 text-zinc-400 text-xs uppercase font-bold hover:text-white border border-zinc-700 rounded-xl">Editar categorias</button>
                       <button onClick={() => setShowNovaModalidade(false)} className="flex-1 py-3 text-zinc-500 text-xs uppercase font-bold hover:text-white">Cancelar</button>
                       <button onClick={handleCriarModalidade} className="flex-1 bg-emerald-600 text-white rounded-xl py-3 text-xs font-bold uppercase hover:bg-emerald-500">Criar</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {showEditarModalidades && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4" onClick={() => setShowEditarModalidades(false)}>
+              <div className="bg-zinc-900 w-full max-w-lg rounded-2xl border border-zinc-800 p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between">
+                      <h2 className="font-bold text-white text-lg">Editar Categorias</h2>
+                      <button onClick={() => setShowEditarModalidades(false)} className="text-zinc-400 hover:text-white"><X size={20}/></button>
+                  </div>
+                  <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar">
+                      {modalidades.map((modalidade) => {
+                          const key = toModalidadeKey(modalidade);
+                          const imagem = modalidadeImagens[key] || "";
+                          const uploading = uploadingCategoriaEdicao === modalidade;
+                          return (
+                              <div key={modalidade} className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 flex items-center gap-3">
+                                  <div className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-700 bg-black/40 relative shrink-0 flex items-center justify-center">
+                                      {imagem ? <Image src={imagem} alt={modalidade} fill sizes="64px" className="object-cover"/> : <ImageIcon size={16} className="text-zinc-600"/>}
+                                  </div>
+                                  <div className="flex-1">
+                                      <p className="text-sm font-bold text-white">{modalidade}</p>
+                                      <div className="mt-2 flex gap-2">
+                                          <label className="px-3 py-2 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-bold uppercase cursor-pointer hover:bg-zinc-700 flex items-center gap-2">
+                                              {uploading ? <Loader2 size={12} className="animate-spin"/> : <ImageIcon size={12}/>} 
+                                              {uploading ? "Enviando..." : "Trocar imagem"}
+                                              <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingCategoriaEdicao !== null} onChange={(e) => void handleEditarImagemCategoria(modalidade, e)} />
+                                          </label>
+                                          {imagem && (
+                                              <button onClick={() => void handleRemoverImagemCategoria(modalidade)} className="px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 text-xs font-bold uppercase hover:text-white hover:border-zinc-500">
+                                                  Remover
+                                              </button>
+                                          )}
+                                      </div>
+                                  </div>
+                              </div>
+                          );
+                      })}
+                      {modalidades.length === 0 && <p className="text-sm text-zinc-400 text-center py-8">Nenhuma categoria cadastrada.</p>}
                   </div>
               </div>
           </div>

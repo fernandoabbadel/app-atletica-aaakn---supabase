@@ -8,8 +8,11 @@ const TTL_MS = 120_000;
 const MAX_PRODUCTS = 240;
 const MAX_ORDERS = 1200;
 const MAX_REVIEWS = 600;
+const MAX_CATEGORIES = 300;
 
 const productsFeedCache = new Map<string, CacheEntry<Row[]>>();
+const productsPageCache = new Map<string, CacheEntry<StoreProductsPageResult>>();
+const categoriesCache = new Map<string, CacheEntry<Row[]>>();
 const productDetailCache = new Map<string, CacheEntry<StoreProductDetailBundle>>();
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
@@ -43,6 +46,8 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
 
 const invalidateStoreCaches = (productId?: string): void => {
   productsFeedCache.clear();
+  productsPageCache.clear();
+  categoriesCache.clear();
   if (!productId) {
     productDetailCache.clear();
     return;
@@ -87,7 +92,7 @@ const normalizeRowTimestamps = (row: Row): Row => {
 };
 
 async function queryRows(table: string, options?: {
-  eq?: Record<string, string>;
+  eq?: Record<string, string | number | boolean>;
   orderBy?: { column: string; ascending: boolean };
   limit?: number;
 }): Promise<Row[]> {
@@ -117,6 +122,96 @@ export interface StoreProductDetailBundle {
   userOrders: Row[];
 }
 
+export interface StoreProductsPageResult {
+  products: Row[];
+  hasMore: boolean;
+  page: number;
+  pageSize: number;
+  category: string | null;
+}
+
+export async function fetchStoreCategories(options?: {
+  maxResults?: number;
+  forceRefresh?: boolean;
+}): Promise<Row[]> {
+  const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_CATEGORIES);
+  const forceRefresh = options?.forceRefresh ?? false;
+  const cacheKey = `${maxResults}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(categoriesCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  let rows: Row[] = [];
+  try {
+    rows = await queryRows("categorias", {
+      orderBy: { column: "nome", ascending: true },
+      limit: maxResults,
+    });
+  } catch {
+    rows = await queryRows("categorias", { limit: maxResults });
+  }
+
+  setCache(categoriesCache, cacheKey, rows);
+  return rows;
+}
+
+export async function fetchStoreProductsPage(options?: {
+  page?: number;
+  pageSize?: number;
+  category?: string | null;
+  forceRefresh?: boolean;
+}): Promise<StoreProductsPageResult> {
+  const supabase = getSupabaseClient();
+  const page = Math.max(1, Math.floor(options?.page ?? 1));
+  const pageSize = boundedLimit(options?.pageSize ?? 20, 60);
+  const categoryRaw = asString(options?.category).trim();
+  const category = categoryRaw && categoryRaw !== "Todos" ? categoryRaw : null;
+  const forceRefresh = options?.forceRefresh ?? false;
+  const cacheKey = `${category || "all"}:${page}:${pageSize}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(productsPageCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize; // inclui +1 item para detectar hasMore (range e inclusivo)
+
+  const runQuery = async (withOrder: boolean): Promise<Row[]> => {
+    let query = supabase.from("produtos").select("*");
+    query = query.eq("active", true).eq("aprovado", true);
+    if (category) query = query.eq("categoria", category);
+    if (withOrder) {
+      query = query.order("nome", { ascending: true });
+    }
+    query = query.range(from, to);
+
+    const { data, error } = await query;
+    if (error) throwSupabaseError(error);
+    return (data ?? []).map((row) => normalizeRowTimestamps(row as Row));
+  };
+
+  let rows: Row[] = [];
+  try {
+    rows = await runQuery(true);
+  } catch {
+    rows = await runQuery(false);
+  }
+
+  const result: StoreProductsPageResult = {
+    products: rows.slice(0, pageSize),
+    hasMore: rows.length > pageSize,
+    page,
+    pageSize,
+    category,
+  };
+
+  setCache(productsPageCache, cacheKey, result);
+  return result;
+}
+
 export async function fetchStoreProducts(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
@@ -130,14 +225,17 @@ export async function fetchStoreProducts(options?: {
     if (cached) return cached;
   }
 
+  const runQuery = async (withOrder: boolean): Promise<Row[]> => {
+    return queryRows("produtos", withOrder
+      ? { eq: { active: true, aprovado: true }, orderBy: { column: "nome", ascending: true }, limit: maxResults }
+      : { eq: { active: true, aprovado: true }, limit: maxResults });
+  };
+
   let rows: Row[] = [];
   try {
-    rows = await queryRows("produtos", {
-      orderBy: { column: "nome", ascending: true },
-      limit: maxResults,
-    });
+    rows = await runQuery(true);
   } catch {
-    rows = await queryRows("produtos", { limit: maxResults });
+    rows = await runQuery(false);
   }
 
   setCache(productsFeedCache, cacheKey, rows);
@@ -168,7 +266,12 @@ export async function fetchStoreProductDetail(options: {
 
   const productQuery = await supabase.from("produtos").select("*").eq("id", productId).maybeSingle();
   if (productQuery.error) throwSupabaseError(productQuery.error);
-  const produto = productQuery.data ? normalizeRowTimestamps(productQuery.data as Row) : null;
+  const produtoCandidate = productQuery.data ? normalizeRowTimestamps(productQuery.data as Row) : null;
+  const produto =
+    produtoCandidate &&
+    (produtoCandidate.active === false || produtoCandidate.aprovado === false)
+      ? null
+      : produtoCandidate;
 
   const reviewsPromise = queryRows("reviews", {
     eq: { productId },
@@ -223,14 +326,25 @@ export async function createStoreOrder(payload: {
   productId: string;
   productName: string;
   price: number;
+  quantity?: number;
+  color?: string;
 }): Promise<{ id: string }> {
   const supabase = getSupabaseClient();
+  const quantity = Math.max(1, Math.floor(Number(payload.quantity ?? 1) || 1));
+  const unitPrice = Math.max(0, asNum(payload.price, 0));
+  const totalPrice = Number((unitPrice * quantity).toFixed(2));
   const requestPayload = {
     userId: payload.userId.trim(),
     userName: payload.userName.trim() || "Aluno",
     productId: payload.productId.trim(),
     productName: payload.productName.trim() || "Produto",
-    price: Math.max(0, asNum(payload.price, 0)),
+    price: totalPrice,
+    quantidade: quantity,
+    itens: quantity,
+    total: totalPrice,
+    data: payload.color?.trim()
+      ? { corSelecionada: payload.color.trim() }
+      : undefined,
   };
 
   const { data, error } = await supabase

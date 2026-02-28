@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { processLock, type LockFunc } from "@supabase/auth-js";
 
 // Reutiliza um singleton no browser para evitar multiplas instancias do cliente.
 let browserClient: SupabaseClient | null = null;
@@ -14,6 +15,12 @@ const getSupabaseEnv = (): { url: string; anonKey: string } => {
   return { url, anonKey };
 };
 
+const sharedAuthLock: LockFunc = async (name, acquireTimeout, fn) => {
+  // Em alguns navegadores mobile o Navigator LockManager falha com timeout.
+  // processLock evita esse bug mantendo serializacao local do auth client.
+  return processLock(name, Math.max(acquireTimeout, 30_000), fn);
+};
+
 const createSupabaseBrowserClient = (): SupabaseClient => {
   const { url, anonKey } = getSupabaseEnv();
 
@@ -23,6 +30,7 @@ const createSupabaseBrowserClient = (): SupabaseClient => {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      lock: sharedAuthLock,
     },
   });
 };
@@ -39,4 +47,3 @@ export const getSupabaseClient = (): SupabaseClient => {
 
   return browserClient;
 };
-

@@ -42,6 +42,23 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" ? value : null;
 
+const isAuthLockTimeoutError = (error: unknown): boolean => {
+  const raw = asObject(error);
+  const text = [
+    error instanceof Error ? error.message : "",
+    asString(raw?.message) ?? "",
+    asString(raw?.details) ?? "",
+  ]
+    .join(" | ")
+    .toLowerCase();
+
+  return (
+    text.includes("navigator lockmanage") ||
+    text.includes("lockmanager") ||
+    (text.includes("timed out") && text.includes("auth-token"))
+  );
+};
+
 const mapUser = (rawUser: unknown): User | null => {
   const user = rawUser as SupabaseAuthLikeUser | null;
   if (!user || typeof user !== "object") return null;
@@ -93,8 +110,20 @@ const ensureInitialized = async (): Promise<void> => {
 
   const supabase = getSupabaseClient();
 
-  const { data: sessionData } = await supabase.auth.getSession();
-  emitAuthState(mapUser(sessionData.session?.user ?? null));
+  try {
+    const { data: sessionData, error } = await supabase.auth.getSession();
+    if (error) {
+      if (!isAuthLockTimeoutError(error)) {
+        console.error("Auth bootstrap: erro ao obter sessao.", error);
+      }
+    } else {
+      emitAuthState(mapUser(sessionData.session?.user ?? null));
+    }
+  } catch (error: unknown) {
+    if (!isAuthLockTimeoutError(error)) {
+      console.error("Auth bootstrap: falha inesperada ao inicializar sessao.", error);
+    }
+  }
 
   const { data } = supabase.auth.onAuthStateChange((_event, session) => {
     emitAuthState(mapUser(session?.user ?? null));

@@ -973,15 +973,59 @@ export async function incrementEventPurchaseUserStats(payload: {
   userId: string;
   isApproving: boolean;
   valorGasto: number;
+  lotName?: string;
+  eventType?: string;
+  eventTitle?: string;
 }): Promise<void> {
   const userId = payload.userId.trim();
   if (!userId || !Number.isFinite(payload.valorGasto)) return;
 
   const diff = payload.isApproving ? 1 : -1;
-  await incrementUserStats(userId, {
+  const normalize = (value: string | undefined): string =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  const hasAnyToken = (haystack: string, tokens: string[]): boolean =>
+    tokens.some((token) => haystack.includes(token));
+
+  const lotText = normalize(payload.lotName);
+  const eventText = `${normalize(payload.eventType)} ${normalize(payload.eventTitle)}`.trim();
+  const isPromo = hasAnyToken(lotText, ["promo", "promocional", "desconto"]);
+  const isAcademic = hasAnyToken(eventText, [
+    "academ",
+    "liga",
+    "palestra",
+    "workshop",
+    "simposio",
+    "congresso",
+  ]);
+  const isSocial = hasAnyToken(eventText, [
+    "acao social",
+    "social",
+    "benefic",
+    "solidar",
+    "campanha",
+    "volunt",
+    "doacao",
+  ]);
+
+  const deltas: Record<string, number> = {
     eventsBought: diff,
     totalSpentEvents: payload.isApproving ? payload.valorGasto : -payload.valorGasto,
-  });
+  };
+
+  if (isPromo) {
+    deltas.promoTicketsBought = diff;
+  }
+  if (isAcademic) {
+    deltas.academicEvents = diff;
+  }
+  if (isSocial) {
+    deltas.socialActions = diff;
+  }
+
+  await incrementUserStats(userId, deltas);
 }
 
 export function clearEventsNativeCaches(): void {

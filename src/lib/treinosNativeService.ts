@@ -32,6 +32,31 @@ const normalizeModalidades = (value: unknown): string[] => {
   return normalized.length > 0 ? normalized : [...DEFAULT_MODALIDADES];
 };
 
+const normalizeModalidadeName = (value: string): string =>
+  value.trim().replace(/\s+/g, " ").slice(0, 40);
+
+const toModalidadeKey = (value: string): string =>
+  normalizeModalidadeName(value).toLowerCase();
+
+const normalizeModalidadeImagens = (
+  value: unknown,
+  modalidades: string[]
+): Record<string, string> => {
+  const data = asObject(value);
+  if (!data) return {};
+
+  const allowed = new Set(modalidades.map((item) => toModalidadeKey(item)));
+  const images: Record<string, string> = {};
+  Object.entries(data).forEach(([rawKey, rawValue]) => {
+    const key = toModalidadeKey(rawKey);
+    const url = asString(rawValue).trim().slice(0, 2000);
+    if (!key || !url) return;
+    if (allowed.size > 0 && !allowed.has(key)) return;
+    images[key] = url;
+  });
+  return images;
+};
+
 const normalizeStatus = (statusRaw: string): "ativo" | "cancelado" =>
   statusRaw === "cancelado" ? "cancelado" : "ativo";
 
@@ -262,25 +287,55 @@ export interface TreinoParticipantsPage<T> {
   hasMore: boolean;
 }
 
-export async function fetchTreinoSettings(options?: { forceRefresh?: boolean }): Promise<string[]> {
+export interface TreinoSettingsRecord {
+  modalidades: string[];
+  modalidadeImagens: Record<string, string>;
+}
+
+export async function fetchTreinoSettings(options?: {
+  forceRefresh?: boolean;
+}): Promise<TreinoSettingsRecord> {
   void options;
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("settings")
-    .select("modalidades")
+    .select("modalidades, data")
     .eq("id", "treinos")
     .maybeSingle();
   if (error) throwSupabaseError(error);
-  return normalizeModalidades(data?.modalidades);
+
+  const modalidades = normalizeModalidades(data?.modalidades);
+  const payload = asObject(data?.data) ?? {};
+  const modalidadeImagens = normalizeModalidadeImagens(payload.modalidadeImagens, modalidades);
+  return { modalidades, modalidadeImagens };
 }
 
-export async function saveTreinoSettings(modalidades: string[]): Promise<void> {
+export async function saveTreinoSettings(payload: {
+  modalidades: string[];
+  modalidadeImagens?: Record<string, string>;
+}): Promise<void> {
   const supabase = getSupabaseClient();
-  const normalized = normalizeModalidades(modalidades);
+  const normalized = normalizeModalidades(payload.modalidades);
+  const modalidadeImagens = normalizeModalidadeImagens(payload.modalidadeImagens, normalized);
+
+  const { data: currentData, error: currentError } = await supabase
+    .from("settings")
+    .select("data")
+    .eq("id", "treinos")
+    .maybeSingle();
+  if (currentError) throwSupabaseError(currentError);
+
+  const currentSettingsData = asObject(currentData?.data) ?? {};
+  const nextSettingsData: Row = {
+    ...currentSettingsData,
+    modalidadeImagens,
+  };
+
   const { error } = await supabase.from("settings").upsert(
     {
       id: "treinos",
       modalidades: normalized,
+      data: nextSettingsData,
       updatedAt: nowIso(),
     },
     { onConflict: "id" }

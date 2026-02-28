@@ -11,6 +11,10 @@ import Image from "next/image";
 import { useAuth } from "../../context/AuthContext";
 import { logActivity } from "../../lib/logger"; 
 import {
+  LEAGUE_QUIZ_PROFILES,
+  type LeagueQuizProfile,
+} from "../../constants/leagueQuizProfiles";
+import {
   addLeagueQuizHistory,
   changeLeagueLikeCount,
   fetchLeagueById,
@@ -24,6 +28,71 @@ interface League extends LeagueRecord {
     matchPercent?: number; 
     matchScore?: number;
 }
+
+const normalizeLeagueText = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const splitLeagueTokens = (value: string): string[] =>
+  normalizeLeagueText(value)
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 3);
+
+const KEYWORD_SYNONYMS: Record<string, string[]> = {
+  clinica: ["consultorio", "diagnostico"],
+  familia: ["comunidade", "prevencao", "vinculo"],
+  emergencia: ["urgencia", "trauma", "intensiva"],
+  cardio: ["coracao", "cardiologia"],
+  neuro: ["neurologia", "neurocirurgia"],
+  gineco: ["ginecologia", "obstetricia", "mulheres"],
+  ortopedia: ["ossos", "esportiva", "atletas"],
+  endocrino: ["hormonios", "metabolismo"],
+  psiquiatria: ["saude mental", "cerebro"],
+  onco: ["oncologia", "cancer"],
+  legal: ["forense", "pericia", "etica"],
+  oftalmo: ["oftalmologia", "detalhe"],
+  urologia: ["rins", "nefro"],
+  cirurgia: ["manual", "centro cirurgico", "laparoscopia", "robotica"],
+  pediatria: ["neonatologia", "criancas"],
+};
+
+const expandLeagueKeyword = (keyword: string): string[] => {
+  const base = normalizeLeagueText(keyword);
+  if (!base) return [];
+
+  const synonyms = KEYWORD_SYNONYMS[base] ?? [];
+  return Array.from(new Set([base, ...synonyms.map((item) => normalizeLeagueText(item))]));
+};
+
+const resolveLeagueProfile = (league: League): LeagueQuizProfile | null => {
+  const leagueName = normalizeLeagueText(league.nome || "");
+  const leagueSigla = normalizeLeagueText(league.sigla || "");
+
+  for (const profile of LEAGUE_QUIZ_PROFILES) {
+    const profileSigla = normalizeLeagueText(profile.sigla || "");
+    if (profileSigla && leagueSigla && profileSigla === leagueSigla) {
+      return profile;
+    }
+  }
+
+  for (const profile of LEAGUE_QUIZ_PROFILES) {
+    const profileName = normalizeLeagueText(profile.nome);
+    const aliases = (profile.aliases ?? []).map((item) => normalizeLeagueText(item));
+    const hasNameMatch =
+      (profileName && (leagueName.includes(profileName) || profileName.includes(leagueName))) ||
+      aliases.some((alias) => alias && leagueName.includes(alias));
+
+    if (hasNameMatch) {
+      return profile;
+    }
+  }
+
+  return null;
+};
 
 const QUESTIONS = [
     { id: 1, text: "Qual cenário faz seus olhos brilharem?", options: [{ label: "Centro Cirúrgico", keywords: ["Trauma", "Cirurgia", "Plástica", "Ortopedia"] }, { label: "Emergência", keywords: ["Emergência", "Urgência", "Trauma", "Intensiva"] }, { label: "Consultório", keywords: ["Clínica", "Endocrino", "Dermato", "Gastro"] }, { label: "Comunidade", keywords: ["Família", "Comunidade", "Pediatria", "Gineco"] }, { label: "Laboratório", keywords: ["Patologia", "Radiologia", "Genética"] }] },
@@ -106,7 +175,11 @@ export default function LigasUnitauPage() {
       );
 
       try {
-        await changeLeagueLikeCount({ id: leagueId, delta: isLiked ? -1 : 1 });
+        await changeLeagueLikeCount({
+          id: leagueId,
+          delta: isLiked ? -1 : 1,
+          actorUserId: user.uid,
+        });
       } catch (error: unknown) {
         console.error(error);
       }
@@ -143,32 +216,93 @@ export default function LigasUnitauPage() {
   };
 
   const calculateMatches = async (finalKeywords: string[]) => {
-      const scored = leagues.map(l => {
-          let score = 0; 
-          const txt = ((l.nome||"") + (l.sigla||"") + (l.descricao||"")).toLowerCase();
-          finalKeywords.forEach(w => { if(txt.includes(w.toLowerCase())) score += 10; });
-          return { ...l, matchPercent: Math.min(Math.round((score/150)*100), 99), matchScore: score };
+      const keywordWeight = new Map<string, number>();
+      finalKeywords.forEach((keyword) => {
+          const normalized = normalizeLeagueText(keyword);
+          if (!normalized) return;
+          keywordWeight.set(normalized, (keywordWeight.get(normalized) ?? 0) + 1);
       });
-      
-      scored.sort((a, b) => (b.matchScore||0) - (a.matchScore||0));
-      const top5 = scored.slice(0, 5).filter(l => (l.matchScore||0) > 0);
-      setTopMatches(top5);
-      setShowQuizResult(true);
-      
-      if(user) {
-          await addLeagueQuizHistory({
-              userId: user.uid,
-              topMatch: top5[0]?.nome || "Nenhum",
-              keywords: finalKeywords,
+
+      const totalWeight = Array.from(keywordWeight.values()).reduce((sum, value) => sum + value, 0);
+
+      const scored = leagues
+        .map((league) => {
+          const profile = resolveLeagueProfile(league);
+          const leagueText = normalizeLeagueText(
+            `${league.nome || ""} ${league.sigla || ""} ${league.descricao || ""}`
+          );
+
+          const profileKeywords = new Set<string>();
+          if (profile) {
+            [profile.nome, profile.sigla || "", ...(profile.aliases ?? []), ...profile.keywords]
+              .flatMap((entry) => splitLeagueTokens(entry))
+              .forEach((token) => {
+                profileKeywords.add(token);
+              });
+          }
+
+          splitLeagueTokens(leagueText).forEach((token) => {
+            profileKeywords.add(token);
           });
-          
-          // --- CORREÇÃO DO LOG ---
+
+          const profileKeywordsArray = Array.from(profileKeywords);
+          let score = 0;
+
+          keywordWeight.forEach((weight, selectedKeyword) => {
+            const expanded = expandLeagueKeyword(selectedKeyword);
+
+            const matchedByProfile = expanded.some((candidate) =>
+              profileKeywordsArray.some(
+                (profileKeyword) =>
+                  profileKeyword.includes(candidate) || candidate.includes(profileKeyword)
+              )
+            );
+
+            const matchedByText = expanded.some((candidate) => leagueText.includes(candidate));
+
+            if (matchedByProfile || matchedByText) {
+              score += weight;
+            }
+          });
+
+          const percent = totalWeight > 0 ? Math.round((score / totalWeight) * 100) : 0;
+          return {
+            ...league,
+            matchScore: score,
+            matchPercent: Math.max(0, Math.min(100, percent)),
+          };
+        })
+        .sort((left, right) => {
+          const percentDiff = (right.matchPercent || 0) - (left.matchPercent || 0);
+          if (percentDiff !== 0) return percentDiff;
+          const scoreDiff = (right.matchScore || 0) - (left.matchScore || 0);
+          if (scoreDiff !== 0) return scoreDiff;
+          return (right.likes || 0) - (left.likes || 0);
+        });
+
+      setTopMatches(scored);
+      setShowQuizResult(true);
+
+      const topPositive = scored.find((item) => (item.matchScore || 0) > 0);
+      const topMatchName = topPositive?.nome || "Nenhum";
+
+      if (user) {
+          try {
+              await addLeagueQuizHistory({
+                  userId: user.uid,
+                  topMatch: topMatchName,
+                  keywords: finalKeywords,
+              });
+          } catch (error: unknown) {
+              console.error("Falha ao gravar histórico do quiz:", error);
+          }
+
           logActivity(
               user.uid,
               user.nome || "Atleta",
               "QUIZ",
               "Oráculo",
-              `Realizou o quiz. Top Match: ${top5[0]?.nome || "Nenhum"}`
+              `Realizou o quiz. Top Match: ${topMatchName}`
           );
       }
   };
@@ -202,8 +336,11 @@ export default function LigasUnitauPage() {
                 </>
             ) : (
                 <div className="space-y-4 animate-in fade-in">
-                    <div className="flex justify-between items-center"><h2 className="text-xl font-black italic flex items-center gap-2"><Trophy className="text-yellow-500"/> Seus Matches</h2><button onClick={() => {setQuizStep(0); setShowQuizResult(false);}} className="text-xs text-zinc-500 hover:text-white flex items-center gap-1"><RotateCcw size={12}/> Refazer</button></div>
-                    {topMatches.length === 0 ? <p className="text-xs text-zinc-500 italic">Nenhuma liga encontrada com esse perfil.</p> : topMatches.map((l, i) => (
+                    <div className="flex justify-between items-center"><h2 className="text-xl font-black italic flex items-center gap-2"><Trophy className="text-yellow-500"/> Compatibilidade por Liga</h2><button onClick={() => {setQuizStep(0); setShowQuizResult(false); setSelectedOptions([]); setAllKeywords([]); setTopMatches([]);}} className="text-xs text-zinc-500 hover:text-white flex items-center gap-1"><RotateCcw size={12}/> Refazer</button></div>
+                    {topMatches.length > 0 && topMatches.every((league) => (league.matchPercent || 0) === 0) && (
+                      <p className="text-xs text-zinc-500 italic">Nenhuma liga teve compatibilidade acima de 0% com este perfil.</p>
+                    )}
+                    {topMatches.length === 0 ? <p className="text-xs text-zinc-500 italic">Nenhuma liga cadastrada para comparar.</p> : topMatches.map((l, i) => (
                         <div key={l.id} onClick={() => { void openLeagueDetails(l); }} className="flex items-center gap-4 bg-black/40 p-3 rounded-xl border border-indigo-500/30 cursor-pointer hover:bg-indigo-900/20 transition group">
                             <span className="font-black text-lg text-indigo-800 w-6 text-center group-hover:text-indigo-500">{i+1}</span>
                             <Image

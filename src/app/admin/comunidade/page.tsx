@@ -4,13 +4,16 @@ import React, { useState, useEffect } from "react";
 import { 
   ArrowLeft, Save, MessageSquare, AlertTriangle, 
   Trash2, Pin, ShieldAlert, Palette, Loader2, 
-  Eye, Ban, MessageCircle, X, Search, CheckCircle, Lock, ExternalLink
+  Eye, Ban, MessageCircle, X, Search, CheckCircle, Lock, ExternalLink, Plus
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // 🦈 Importando Image
 import { useToast } from "../../../context/ToastContext";
+import { useAuth } from "../../../context/AuthContext";
+import { logActivity } from "../../../lib/logger";
 import {
   deleteCommunityPost,
+  fetchCommunityCommentPostId,
   deleteCommunityReport,
   fetchCommunityAdminPosts,
   fetchCommunityComments,
@@ -20,6 +23,11 @@ import {
   setCommunityPostPatch,
 } from "../../../lib/communityService";
 import type { DateLike } from "../../../lib/supabaseData";
+import {
+  DEFAULT_COMMUNITY_CATEGORIES,
+  normalizeCommunityCategories,
+  normalizeCommunityCategoryName,
+} from "../../../constants/communityCategories";
 
 // --- TIPAGENS (O Escudo do Código) ---
 interface AppConfig {
@@ -27,6 +35,7 @@ interface AppConfig {
   subtitulo: string;
   capaUrl: string;
   limitMessages: boolean;
+  categorias: string[];
 }
 
 interface PostData {
@@ -46,6 +55,8 @@ interface PostData {
 interface DenunciaData {
   id: string;
   postId: string;
+  targetId?: string;
+  targetType?: "post" | "comment";
   postText: string;
   reporterId: string;
   reason: string;
@@ -60,22 +71,50 @@ interface CommentData {
   createdAt: DateLike;
 }
 
+const normalizeCommunityConfig = (value?: Partial<AppConfig> | null): AppConfig => ({
+  titulo: typeof value?.titulo === "string" ? value.titulo : "",
+  subtitulo: typeof value?.subtitulo === "string" ? value.subtitulo : "",
+  capaUrl: typeof value?.capaUrl === "string" ? value.capaUrl : "",
+  limitMessages: typeof value?.limitMessages === "boolean" ? value.limitMessages : true,
+  categorias: normalizeCommunityCategories(value?.categorias ?? DEFAULT_COMMUNITY_CATEGORIES),
+});
+
+const isValidImageSrc = (value: string): boolean => {
+  const src = value.trim();
+  if (!src) return false;
+  if (src.startsWith("/")) return true;
+  try {
+    const parsed = new URL(src);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const toSafeImageSrc = (value: string | null | undefined, fallback: string): string => {
+  const src = typeof value === "string" ? value.trim() : "";
+  return isValidImageSrc(src) ? src : fallback;
+};
+
 export default function AdminComunidadePage() {
   const { addToast } = useToast();
+  const { user } = useAuth();
   
   // Estados de Controle
   const [activeTab, setActiveTab] = useState<"config" | "posts" | "denuncias">("config");
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   // Dados do Supabase
-  const [config, setConfig] = useState<AppConfig>({ titulo: "", subtitulo: "", capaUrl: "", limitMessages: true });
+  const [config, setConfig] = useState<AppConfig>(normalizeCommunityConfig());
   const [posts, setPosts] = useState<PostData[]>([]);
   const [denuncias, setDenuncias] = useState<DenunciaData[]>([]);
 
   // Estados de Modais
   const [viewCommentsId, setViewCommentsId] = useState<string | null>(null);
   const [adminComments, setAdminComments] = useState<CommentData[]>([]);
+  const coverPreviewSrc = toSafeImageSrc(config.capaUrl, "/carteirinha-bg.jpg");
 
     // 1. CARREGAR DADOS COM LEITURA CONTROLADA
   useEffect(() => {
@@ -93,7 +132,7 @@ export default function AdminComunidadePage() {
         if (!mounted) return;
 
         if (configData) {
-          setConfig((prev) => ({ ...prev, ...(configData as Partial<AppConfig>) }));
+          setConfig(normalizeCommunityConfig(configData as Partial<AppConfig>));
         }
 
         setPosts(
@@ -167,16 +206,66 @@ export default function AdminComunidadePage() {
 
 // --- AÇÕES DE CONFIGURAÇÃO ---
   const handleSaveConfig = async () => {
-    try { 
-        // 🦈 Correção: Usando Partial<AppConfig> para evitar 'any' e garantir segurança de tipo
-        await saveCommunityConfig(config as unknown as Record<string, unknown>); 
-        
-        addToast("Configurações da Resenha salvas!", "success"); 
-        
-    } catch (error: unknown) { 
-        console.error(error); // 🦈 Variável de erro padronizada para 'error'
-        addToast("Erro ao salvar config.", "error"); 
+    const cleanCoverUrl = config.capaUrl.trim();
+    if (cleanCoverUrl && !isValidImageSrc(cleanCoverUrl)) {
+      addToast("URL da capa invalida. Use '/imagem.png' ou URL https://", "error");
+      return;
     }
+
+    try {
+      const normalizedCategories = normalizeCommunityCategories(config.categorias);
+      await saveCommunityConfig({
+        titulo: config.titulo,
+        subtitulo: config.subtitulo,
+        capaUrl: cleanCoverUrl,
+        limitMessages: config.limitMessages,
+        categorias: normalizedCategories,
+      });
+      setConfig((prev) => ({ ...prev, capaUrl: cleanCoverUrl, categorias: normalizedCategories }));
+      addToast("Configuracoes da Resenha salvas!", "success");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao salvar config.", "error");
+    }
+  };
+
+  const handleAddCategory = () => {
+    const cleanName = normalizeCommunityCategoryName(newCategoryName);
+    if (!cleanName) {
+      addToast("Digite um nome de categoria.", "info");
+      return;
+    }
+
+    const alreadyExists = config.categorias.some(
+      (item) => item.toLowerCase() === cleanName.toLowerCase()
+    );
+    if (alreadyExists) {
+      addToast("Essa categoria já existe.", "info");
+      return;
+    }
+
+    setConfig((prev) => ({ ...prev, categorias: [...prev.categorias, cleanName] }));
+    setNewCategoryName("");
+  };
+
+  const handleUpdateCategory = (index: number, value: string) => {
+    setConfig((prev) => {
+      const next = [...prev.categorias];
+      next[index] = value;
+      return { ...prev, categorias: next };
+    });
+  };
+
+  const handleRemoveCategory = (index: number) => {
+    if (config.categorias.length <= 1) {
+      addToast("A comunidade precisa de pelo menos 1 categoria.", "info");
+      return;
+    }
+
+    setConfig((prev) => {
+      const next = prev.categorias.filter((_, currentIndex) => currentIndex !== index);
+      return { ...prev, categorias: next };
+    });
   };
 
   // --- AÇÕES DE POSTAGEM ---
@@ -237,8 +326,44 @@ export default function AdminComunidadePage() {
   };
 
   // --- AÇÕES DE DENÚNCIA ---
-  const resolveDenuncia = async (denunciaId: string, postId: string, action: "ban" | "ignore" | "lock") => {
+  const resolveReportPostId = async (denuncia: DenunciaData): Promise<string> => {
+      const postIdDireto = typeof denuncia.postId === "string" ? denuncia.postId.trim() : "";
+      if (postIdDireto) return postIdDireto;
+
+      const targetId = typeof denuncia.targetId === "string" ? denuncia.targetId.trim() : "";
+      if (!targetId) return "";
+
+      if (denuncia.targetType === "comment") {
+          const mappedPostId = await fetchCommunityCommentPostId(targetId);
+          return mappedPostId || "";
+      }
+
+      return targetId;
+  };
+
+  const handleOpenReportContext = async (denuncia: DenunciaData) => {
       try {
+          const postId = await resolveReportPostId(denuncia);
+          if (!postId) {
+              addToast("Nao foi possivel abrir o contexto desta denuncia.", "info");
+              return;
+          }
+          setViewCommentsId(postId);
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Erro ao abrir contexto da denuncia.", "error");
+      }
+  };
+
+  const resolveDenuncia = async (denuncia: DenunciaData, action: "ban" | "ignore" | "lock") => {
+      try {
+          const postId = await resolveReportPostId(denuncia);
+
+          if ((action === "ban" || action === "lock") && !postId) {
+              addToast("Denuncia sem post vinculado. Use Ignorar.", "info");
+              return;
+          }
+
           if (action === "ban") {
               await setCommunityPostPatch(postId, { blocked: true });
               setPosts((prev) =>
@@ -257,8 +382,18 @@ export default function AdminComunidadePage() {
               addToast("Comentarios trancados por precaucao!", "info");
           }
 
-          await deleteCommunityReport(denunciaId);
-          setDenuncias((prev) => prev.filter((denuncia) => denuncia.id !== denunciaId));
+          await deleteCommunityReport(denuncia.id);
+          setDenuncias((prev) => prev.filter((row) => row.id !== denuncia.id));
+
+          if (user?.uid) {
+              await logActivity(
+                  user.uid,
+                  user.nome || "Admin",
+                  "DELETE",
+                  "Denuncias/Comunidade",
+                  `Excluiu denuncia ${denuncia.id} (acao: ${action})`
+              ).catch(() => {});
+          }
 
           if (action === "ignore") addToast("Denuncia ignorada/removida.", "info");
       } catch (error: unknown) {
@@ -327,9 +462,9 @@ export default function AdminComunidadePage() {
                         <section className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-8 space-y-6">
                             <h3 className="font-bold flex items-center gap-2 text-emerald-400 text-lg uppercase"><Palette size={20}/> Identidade Visual</h3>
                             <div className="space-y-4">
-                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Título da Página</label><input type="text" className="input-admin" value={config.titulo} onChange={e => setConfig({...config, titulo: e.target.value})}/></div>
-                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Subtítulo</label><input type="text" className="input-admin" value={config.subtitulo} onChange={e => setConfig({...config, subtitulo: e.target.value})}/></div>
-                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">URL da Capa (Imagem)</label><input type="text" className="input-admin" value={config.capaUrl} onChange={e => setConfig({...config, capaUrl: e.target.value})}/></div>
+                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Título da Página</label><input type="text" className="input-admin" value={config.titulo || ""} onChange={e => setConfig({...config, titulo: e.target.value})}/></div>
+                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Subtítulo</label><input type="text" className="input-admin" value={config.subtitulo || ""} onChange={e => setConfig({...config, subtitulo: e.target.value})}/></div>
+                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">URL da Capa (Imagem)</label><input type="text" className="input-admin" value={config.capaUrl || ""} onChange={e => setConfig({...config, capaUrl: e.target.value})}/></div>
                                 
                                 <div className="flex items-center justify-between p-4 bg-black rounded-2xl border border-zinc-800 mt-4">
                                     <div>
@@ -342,6 +477,58 @@ export default function AdminComunidadePage() {
                                     >
                                         <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${config.limitMessages ? 'left-7' : 'left-1'}`}/>
                                     </button>
+                                </div>
+
+                                <div className="p-4 bg-black rounded-2xl border border-zinc-800 mt-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-sm font-bold text-white">Categorias Dinâmicas</p>
+                                        <span className="text-[10px] text-zinc-500 uppercase">{config.categorias.length} categorias</span>
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <input
+                                          type="text"
+                                          className="input-admin flex-1 !mt-0"
+                                          placeholder="Nova categoria"
+                                          value={newCategoryName}
+                                          onChange={(e) => setNewCategoryName(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                              e.preventDefault();
+                                              handleAddCategory();
+                                            }
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={handleAddCategory}
+                                          className="px-3 rounded-xl border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 transition flex items-center justify-center"
+                                        >
+                                          <Plus size={14} />
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                                        {config.categorias.map((categoria, index) => (
+                                          <div key={`${categoria}-${index}`} className="flex items-center gap-2">
+                                              <input
+                                                type="text"
+                                                className="input-admin flex-1 !mt-0"
+                                                value={categoria}
+                                                maxLength={40}
+                                                onChange={(e) => handleUpdateCategory(index, e.target.value)}
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => handleRemoveCategory(index)}
+                                                className="p-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition"
+                                                title="Remover categoria"
+                                              >
+                                                <Trash2 size={14} />
+                                              </button>
+                                          </div>
+                                        ))}
+                                    </div>
                                 </div>
 
                                 <button onClick={handleSaveConfig} className="bg-emerald-500 hover:bg-emerald-400 text-black px-8 py-4 rounded-xl font-black uppercase text-xs flex items-center gap-2 w-full justify-center shadow-lg transition mt-4">
@@ -357,11 +544,11 @@ export default function AdminComunidadePage() {
                                 <div className="h-40 w-full bg-black rounded-xl overflow-hidden border border-zinc-700 shadow-2xl relative">
                                     {/* 🦈 Imagem Otimizada */}
                                     <Image 
-                                      src={config.capaUrl || "/carteirinha-bg.jpg"} 
+                                      src={coverPreviewSrc} 
                                       alt="Preview Capa" 
                                       fill 
+                                      sizes="100vw"
                                       className="object-cover opacity-60" 
-                                      unoptimized // 🦈 Para aceitar links externos
                                     />
                                 </div>
                             </div>
@@ -381,8 +568,8 @@ export default function AdminComunidadePage() {
                                         src={post.avatar || "https://github.com/shadcn.png"} 
                                         alt={post.userName} 
                                         fill 
+                                        sizes="48px"
                                         className="object-cover" 
-                                        unoptimized
                                     />
                                     {post.fixado && <div className="absolute -top-2 -right-2 bg-emerald-500 text-black p-1 rounded-full z-10"><Pin size={10} fill="black"/></div>}
                                 </div>
@@ -466,7 +653,7 @@ export default function AdminComunidadePage() {
                                         <div>
                                             <p className="text-[10px] text-zinc-500 font-bold uppercase flex items-center gap-2">
                                                 Conteúdo Denunciado 
-                                                <button onClick={() => setViewCommentsId(den.postId)} className="text-blue-400 underline flex items-center gap-1"><ExternalLink size={10}/> Ver Contexto</button>
+                                                <button onClick={() => void handleOpenReportContext(den)} className="text-blue-400 underline flex items-center gap-1"><ExternalLink size={10}/> Ver Contexto</button>
                                             </p>
                                             {/* 🦈 EXIBIÇÃO DO TEXTO CORRETO DA MENSAGEM */}
                                             <p className="text-zinc-300 text-xs italic mt-1 line-clamp-3 bg-red-950/20 p-3 rounded border border-red-900/30">
@@ -484,13 +671,13 @@ export default function AdminComunidadePage() {
 
                                     {/* Ações */}
                                     <div className="flex flex-col justify-center gap-3 min-w-[160px]">
-                                        <button onClick={() => resolveDenuncia(den.id, den.postId, 'ban')} className="bg-red-600 hover:bg-red-500 text-white py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 shadow-lg transition">
+                                        <button onClick={() => void resolveDenuncia(den, 'ban')} className="bg-red-600 hover:bg-red-500 text-white py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 shadow-lg transition">
                                             <Ban size={14}/> Bloquear Post
                                         </button>
-                                        <button onClick={() => resolveDenuncia(den.id, den.postId, 'lock')} className="bg-yellow-600 hover:bg-yellow-500 text-white py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 shadow-lg transition">
+                                        <button onClick={() => void resolveDenuncia(den, 'lock')} className="bg-yellow-600 hover:bg-yellow-500 text-white py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 shadow-lg transition">
                                             <Lock size={14}/> Trancar Coments
                                         </button>
-                                        <button onClick={() => resolveDenuncia(den.id, den.postId, 'ignore')} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 border border-zinc-700 transition">
+                                        <button onClick={() => void resolveDenuncia(den, 'ignore')} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 border border-zinc-700 transition">
                                             <CheckCircle size={14}/> Ignorar
                                         </button>
                                     </div>
@@ -521,8 +708,8 @@ export default function AdminComunidadePage() {
                                     src={c.avatar || "https://github.com/shadcn.png"} 
                                     alt={c.userName} 
                                     fill 
+                                    sizes="32px"
                                     className="rounded-full object-cover border border-zinc-700" 
-                                    unoptimized
                                   />
                               </div>
                               <div>
@@ -545,6 +732,8 @@ export default function AdminComunidadePage() {
     </div>
   );
 }
+
+
 
 
 

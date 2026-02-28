@@ -1,14 +1,12 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-// 🦈 Importação Namespace para pegar ícones dinamicamente pelo nome
-import * as LucideIcons from "lucide-react";
 import {
   ArrowLeft, CreditCard, ChevronRight,
   QrCode, X, Award
 } from "lucide-react";
 import Link from "next/link";
-import Image from "next/image"; // 🦈 Importado para otimização
+import Image from "next/image"; // ðŸ¦ˆ Importado para otimização
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
@@ -18,54 +16,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import SharkLoader from "@/app/components/SharkLoader";
 import { getTurmaImage } from "@/constants/turmaImages";
-
-// --- TIPAGEM ---
-interface StyleConfig {
-    color: string;
-    border: string;
-    bgBadge: string;
-    glow: string;
-}
-
-// 🦈 CONFIGURAÇÃO VISUAL POR COR
-const COLOR_STYLES: Record<string, StyleConfig> = {
-    yellow: {
-        color: "text-yellow-400",
-        border: "border-yellow-500/50",
-        bgBadge: "bg-yellow-500/20",
-        glow: "shadow-yellow-500/20"
-    },
-    emerald: {
-        color: "text-emerald-400",
-        border: "border-emerald-500/50",
-        bgBadge: "bg-emerald-500/20",
-        glow: "shadow-emerald-500/20"
-    },
-    purple: {
-        color: "text-purple-400",
-        border: "border-purple-500/50",
-        bgBadge: "bg-purple-500/20",
-        glow: "shadow-purple-500/20"
-    },
-    blue: {
-        color: "text-blue-400",
-        border: "border-blue-500/50",
-        bgBadge: "bg-blue-500/20",
-        glow: "shadow-blue-500/20"
-    },
-    red: {
-        color: "text-red-400",
-        border: "border-red-500/50",
-        bgBadge: "bg-red-500/20",
-        glow: "shadow-red-500/20"
-    },
-    zinc: {
-        color: "text-zinc-300",
-        border: "border-zinc-600",
-        bgBadge: "bg-zinc-800",
-        glow: "shadow-zinc-500/10"
-    }
-};
+import { resolvePlanIcon, resolvePlanTheme } from "@/constants/planVisuals";
 
 export default function CarteirinhaPage() {
   const { user, loading } = useAuth();
@@ -99,23 +50,18 @@ export default function CarteirinhaPage() {
   if (loading) return <SharkLoader />;
   if (!user) return null;
 
-  // --- LÓGICA DE FUNDO (BACKGROUND) ---
+  // --- LÃ“GICA DE FUNDO (BACKGROUND) ---
   const bgPadrao = getTurmaImage(user.turma);
   const bgFinal = config?.backgrounds?.[user.turma || ""] || bgPadrao;
   const validadeTexto = config?.validade || "DEZ/2026";
 
-  // --- 🦈 LÓGICA VISUAL DINÂMICA ---
+  // --- ðŸ¦ˆ LÃ“GICA VISUAL DINÃ‚MICA ---
   const userCor = user.plano_cor || "zinc"; 
   const userIconName = user.plano_icon || "ghost";
 
   // Define o estilo
-  const style = COLOR_STYLES[userCor] || COLOR_STYLES.zinc;
-
-  // Resolve o ícone dinamicamente sem usar 'any' inseguro
-  const iconPascalCase = userIconName.charAt(0).toUpperCase() + userIconName.slice(1);
-  const IconModule = LucideIcons as unknown as Record<string, React.ElementType>;
-  const PlanIcon = IconModule[iconPascalCase] || LucideIcons.Ghost;
-
+  const style = resolvePlanTheme(userCor);
+  const PlanIcon = resolvePlanIcon(userIconName, Award);
   const canUpgrade = userCor === 'zinc' || userCor === 'emerald';
 
   return (
@@ -138,10 +84,10 @@ export default function CarteirinhaPage() {
       <main className="flex-1 flex flex-col items-center justify-start pt-8 px-6 relative overflow-hidden space-y-8 w-full max-w-md mx-auto">
         
         {/* Luz de fundo ambiente */}
-        <div className={`absolute top-20 left-1/2 -translate-x-1/2 w-[300px] h-[300px] blur-[100px] rounded-full pointer-events-none opacity-20 ${style.color.replace('text-', 'bg-')}`}></div>
+        <div className={`absolute top-20 left-1/2 -translate-x-1/2 w-[300px] h-[300px] blur-[100px] rounded-full pointer-events-none opacity-20 ${style.bgClass}`}></div>
 
-        {/* --- CARTÃO DIGITAL --- */}
-        <div className={`relative w-full aspect-[1.586/1] rounded-2xl overflow-hidden shadow-2xl transition-all duration-500 border border-white/10 ${style.glow}`}>
+        {/* --- CARTÒO DIGITAL --- */}
+        <div className={`relative w-full aspect-[1.586/1] rounded-2xl overflow-hidden shadow-2xl transition-all duration-500 border border-white/10 ${style.glowClass}`}>
           
           {/* === CAMADA DE FUNDO === */}
           <div className="absolute inset-0 z-0 bg-zinc-900">
@@ -158,7 +104,7 @@ export default function CarteirinhaPage() {
              <div className="absolute inset-0 opacity-[0.07] bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
           </div>
 
-          {/* === CONTEÚDO DO CARTÃO === */}
+          {/* === CONTEÃšDO DO CARTÒO === */}
           <div className="relative z-10 w-full h-full p-5 flex flex-col justify-between">
             
             {/* 1. TOPO: Logo e Status */}
@@ -182,7 +128,7 @@ export default function CarteirinhaPage() {
               </div>
 
               {/* Badge do Plano */}
-              <div className={`px-2.5 py-1 rounded-md border backdrop-blur-md flex items-center gap-1.5 shadow-lg ${style.color} ${style.border} ${style.bgBadge}`}>
+              <div className={`px-2.5 py-1 rounded-md border backdrop-blur-md flex items-center gap-1.5 shadow-lg ${style.textClass} ${style.borderClass} ${style.softBgClass}`}>
                   <PlanIcon size={10} className="stroke-[3]" />
                   <span className="text-[9px] font-black uppercase tracking-wider">{user.plano || "Visitante"}</span>
               </div>
@@ -190,7 +136,7 @@ export default function CarteirinhaPage() {
 
             {/* 2. MEIO: Foto e Dados */}
             <div className="flex items-center gap-4 mt-2">
-              <div className={`w-[72px] h-[96px] flex-shrink-0 rounded-lg border-2 p-[2px] bg-black/50 shadow-xl overflow-hidden relative ${style.border}`}>
+              <div className={`w-[72px] h-[96px] flex-shrink-0 rounded-lg border-2 p-[2px] bg-black/50 shadow-xl overflow-hidden relative ${style.borderClass}`}>
                 <div className="relative w-full h-full overflow-hidden rounded-[4px]">
                     <Image
                       src={user.foto || "https://github.com/shadcn.png"}
@@ -222,7 +168,7 @@ export default function CarteirinhaPage() {
               </div>
             </div>
 
-            {/* 3. RODAPÉ */}
+            {/* 3. RODAPÃ‰ */}
             <div className="flex justify-between items-end border-t border-white/10 pt-2.5 mt-1">
                 <div>
                     <p className="text-[8px] text-zinc-500 uppercase font-bold tracking-widest mb-0.5">Validade</p>
@@ -246,7 +192,7 @@ export default function CarteirinhaPage() {
           </div>
         </div>
 
-        {/* --- AÇÕES INFERIORES --- */}
+        {/* --- AÃ‡Ã•ES INFERIORES --- */}
         <div className="w-full space-y-3">
           
           {canUpgrade && (
@@ -278,7 +224,7 @@ export default function CarteirinhaPage() {
           </button>
 
           <p className="text-zinc-600 text-[10px] text-center uppercase font-medium tracking-widest mt-4">
-             Documento Digital Oficial • AAAKN
+             Documento Digital Oficial ⬢ AAAKN
           </p>
         </div>
       </main>
@@ -323,5 +269,6 @@ export default function CarteirinhaPage() {
     </div>
   );
 }
+
 
 

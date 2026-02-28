@@ -7,7 +7,7 @@ import {
   Smartphone, Instagram, Linkedin, Twitter, Youtube, Music2, Globe
 } from "lucide-react";
 
-// ðŸ¦ˆ IMPORTS DO SISTEMA
+// IMPORTS DO SISTEMA
 import { useAuth } from "@/context/AuthContext"; 
 import { useToast } from "@/context/ToastContext";
 import {
@@ -23,11 +23,11 @@ import { isPermissionError } from "@/lib/backendErrors";
 
 // --- ESTADO INICIAL ---
 const INITIAL_CONFIG: LandingConfig = {
-  tagline: "GestÃ£o Esportiva 2.0",
+  tagline: "Gestão Esportiva 2.0",
   taglineColor: "#10b981",
   heroTitle: "SEJA UM",
-  heroSubtitle: "Centralize sua vida universitÃ¡ria. Carteirinha, Loja e Eventos.",
-  heroHighlight: "CARDUME TUBARÃƒO",
+  heroSubtitle: "Centralize sua vida universitária. Carteirinha, Loja e Eventos.",
+  heroHighlight: "CARDUME TUBARÃO",
   titleColor: "#ffffff",
   gradientStart: "#34d399", 
   gradientEnd: "#10b981",   
@@ -51,7 +51,7 @@ export default function AdminLandingPage() {
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<LandingConfig>(INITIAL_CONFIG);
 
-  // ðŸ“¡ CARREGAR DADOS (COM BLINDAGEM ANTI-CRASH)
+  // CARREGAR DADOS (COM BLINDAGEM ANTI-CRASH)
   useEffect(() => {
     const fetchConfig = async () => {
       try {
@@ -76,7 +76,7 @@ export default function AdminLandingPage() {
     void fetchConfig();
   }, [addToast]);
 
-  // ðŸ’¾ SALVAR DADOS
+  // SALVAR DADOS
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -92,7 +92,7 @@ export default function AdminLandingPage() {
         );
       }
 
-      addToast("AÃ­ sim! O TubarÃ£o atualizou a vitrine! ðŸ¦ˆâœ…", "success");
+      addToast("Aí sim! O Tubarão atualizou a vitrine! 🦈✅", "success");
     } catch (error: unknown) {
       if (isPermissionError(error)) {
         addToast("Sem permissão para salvar a landing.", "error");
@@ -111,7 +111,7 @@ export default function AdminLandingPage() {
   const addSocial = () => {
     setConfig({
         ...config, 
-        // ðŸ¦ˆ FIX: Garante array antes de adicionar
+        // FIX: Garante array antes de adicionar
         socialLinks: [...(config.socialLinks || []), { id: Date.now().toString(), platform: 'instagram', url: '' }]
     });
   };
@@ -158,7 +158,7 @@ export default function AdminLandingPage() {
       }
   };
 
-  if (loading) return <div className="p-8 text-white">Carregando painel do TubarÃ£o... ðŸ¦ˆ</div>;
+  if (loading) return <div className="p-8 text-white">Carregando painel do Tubarão... 🦈</div>;
 
   return (
     <div className="min-h-screen bg-zinc-950 p-6 md:p-12 pb-32">
@@ -168,14 +168,14 @@ export default function AdminLandingPage() {
           <h1 className="text-3xl font-black text-white flex items-center gap-3">
             <LayoutTemplate className="text-emerald-500" /> Editor da Landing Page
           </h1>
-          <p className="text-zinc-400 text-sm">Personalize a vitrine da AtlÃ©tica em tempo real.</p>
+          <p className="text-zinc-400 text-sm">Personalize a vitrine da Atlética em tempo real.</p>
         </div>
         <button 
           onClick={handleSave}
           disabled={saving}
           className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-6 py-3 rounded-xl font-bold uppercase tracking-wider transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/20"
         >
-          {saving ? "Salvando..." : <><Save size={18} /> Publicar AlteraÃ§Ãµes</>}
+          {saving ? "Salvando..." : <><Save size={18} /> Publicar Alterações</>}
         </button>
       </header>
 
@@ -207,7 +207,7 @@ export default function AdminLandingPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">TÃ­tulo Principal</label>
+              <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Título Principal</label>
               <input 
                 value={config.heroTitle}
                 onChange={(e) => setConfig({...config, heroTitle: e.target.value})}
@@ -223,7 +223,7 @@ export default function AdminLandingPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">SubtÃ­tulo</label>
+              <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Subtítulo</label>
               <textarea 
                 value={config.heroSubtitle}
                 onChange={(e) => setConfig({...config, heroSubtitle: e.target.value})}
@@ -234,11 +234,11 @@ export default function AdminLandingPage() {
 
             <div className="grid grid-cols-3 gap-4 pt-4 border-t border-zinc-800">
               <div>
-                <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-2">Cor TÃ­tulo</label>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-2">Cor Título</label>
                 <input type="color" value={config.titleColor} onChange={(e) => setConfig({...config, titleColor: e.target.value})} className="w-full h-10 rounded cursor-pointer"/>
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-2">Gradiente InÃ­cio</label>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-2">Gradiente Início</label>
                 <input type="color" value={config.gradientStart} onChange={(e) => setConfig({...config, gradientStart: e.target.value})} className="w-full h-10 rounded cursor-pointer"/>
               </div>
               <div>
@@ -254,7 +254,7 @@ export default function AdminLandingPage() {
             
             <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl">
                  <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-4">
-                    <Users className="text-purple-400" size={20} /> MÃ©tricas (Stats)
+                    <Users className="text-purple-400" size={20} /> Métricas (Stats)
                  </h2>
                  <div className="grid grid-cols-3 gap-3">
                      <div>
@@ -279,7 +279,7 @@ export default function AdminLandingPage() {
                 
                 <div className="grid grid-cols-1 gap-4">
                     <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase mb-1 flex items-center gap-1"><MapPin size={12}/> EndereÃ§o</label>
+                        <label className="block text-xs font-bold text-zinc-500 uppercase mb-1 flex items-center gap-1"><MapPin size={12}/> Endereço</label>
                         <input value={config.address} onChange={(e) => setConfig({...config, address: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-emerald-500 outline-none" />
                     </div>
                     
@@ -415,4 +415,3 @@ export default function AdminLandingPage() {
     </div>
   );
 }
-

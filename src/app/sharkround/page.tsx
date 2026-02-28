@@ -71,7 +71,7 @@ export default function SharkRoundPage() {
   const { user, loading } = useAuth(); 
   const router = useRouter();
 
-  // ConfiguraÃ§Ã£o (Constantes agora, jÃ¡ que os setters nÃ£o eram usados)
+  // Configuração (Constantes agora, já que os setters não eram usados)
   const boardSide = 11;
   const boardSizeTotal = 40;
 
@@ -158,7 +158,7 @@ export default function SharkRoundPage() {
   // --- 1. INICIALIZAÃ‡ÃƒO ---
   useEffect(() => {
     const initGame = async () => {
-        // Carregar Ligas da coleÃ§Ã£o CORRETA (ligas_config)
+        // Carregar Ligas da coleção CORRETA (ligas_config)
         const ligasLoaded: LigaConfig[] = []; 
         const ligasMap: Record<string, LigaConfig> = {};
 
@@ -177,7 +177,7 @@ export default function SharkRoundPage() {
         setLigasAtivasMap(ligasMap); 
 
         // Fallback tipado
-        const ligasPool = ligasLoaded.length > 0 ? ligasLoaded : [{id: 'demo', nome: "Liga GenÃ©rica", sigla: "LIGA", logoBase64: undefined, perguntas: [], ativa: true} as LigaConfig];
+        const ligasPool = ligasLoaded.length > 0 ? ligasLoaded : [{id: 'demo', nome: "Liga Genérica", sigla: "LIGA", logoBase64: undefined, perguntas: [], ativa: true} as LigaConfig];
         
         // Monta Tabuleiro
         const novoTab: CasaTabuleiro[] = [];
@@ -186,16 +186,16 @@ export default function SharkRoundPage() {
 
         for (let i = 0; i < boardSizeTotal; i++) {
             let tipo: TipoCasa = 'LIGA';
-            let titulo = "", sigla = "", cor = 'bg-zinc-800', desc = "Domine esta Ã¡rea!", bg = undefined;
+            let titulo = "", sigla = "", cor = 'bg-zinc-800', desc = "Domine esta área!", bg = undefined;
             let currentLigaId: string | undefined = undefined;
 
-            if (i === 0) { tipo = 'INICIO'; titulo = "Partida"; sigla="START"; cor = 'bg-emerald-600'; desc="InÃ­cio"; }
-            else if (i === 10) { tipo = 'PRISAO'; titulo = "DP Anatomia"; sigla="DP"; cor = 'bg-zinc-900'; desc="Reprovou? PeÃ§a ajuda!"; }
+            if (i === 0) { tipo = 'INICIO'; titulo = "Partida"; sigla="START"; cor = 'bg-emerald-600'; desc="Início"; }
+            else if (i === 10) { tipo = 'PRISAO'; titulo = "DP Anatomia"; sigla="DP"; cor = 'bg-zinc-900'; desc="Reprovou? Peça ajuda!"; }
             else if (i === 20) { tipo = 'SORTE'; titulo = "Intermed"; sigla="FESTA"; cor = 'bg-yellow-600'; desc="Sorte ou Azar?"; }
-            else if (i === 30) { tipo = 'AZAR'; titulo = "Sem CafÃ©"; sigla="ZOMBIE"; cor = 'bg-red-700'; desc="Volte 3 casas"; }
+            else if (i === 30) { tipo = 'AZAR'; titulo = "Sem Café"; sigla="ZOMBIE"; cor = 'bg-red-700'; desc="Volte 3 casas"; }
             else if ([5, 15, 25, 35].includes(i)) {
                 tipo = Math.random() > 0.5 ? 'SORTE' : 'AZAR';
-                titulo = tipo === 'SORTE' ? "Carimbo!" : "PlantÃ£o";
+                titulo = tipo === 'SORTE' ? "Carimbo!" : "Plantão";
                 sigla = tipo === 'SORTE' ? "SORT" : "AZAR";
                 cor = tipo === 'SORTE' ? 'bg-cyan-600' : 'bg-orange-700';
             } else {
@@ -365,7 +365,7 @@ export default function SharkRoundPage() {
   const analisarCasa = (index: number) => {
     const casa = tabuleiro[index];
 
-    // CobranÃ§a de Aluguel
+    // Cobrança de Aluguel
     if (casa.donoId && casa.donoId !== jogador.id) { 
         const aluguel = 5; 
         const quemRecebe = casa.socios?.[0]?.nome || "Dono"; 
@@ -375,7 +375,7 @@ export default function SharkRoundPage() {
 
     if (casa.tipo === 'PRISAO') { 
         setJogador(p => ({ ...p, preso: true, coracoes: 0 })); 
-        addToast("Vish! Caiu na DP! ðŸš¨", "error"); 
+        addToast("Vish! Caiu na DP! 🚨", "error"); 
     } 
     else if (casa.tipo === 'SORTE') { 
         const bonus = Math.floor(Math.random() * 3) + 1; 
@@ -383,7 +383,7 @@ export default function SharkRoundPage() {
     } 
     else if (casa.tipo === 'AZAR') { 
         const penalty = Math.floor(Math.random() * 3) + 1; 
-        setModalEvento({ titulo: "Sem CafÃ©!", msg: `Volte ${penalty} casas.`, tipo: 'error', move: -penalty }); 
+        setModalEvento({ titulo: "Sem Café!", msg: `Volte ${penalty} casas.`, tipo: 'error', move: -penalty }); 
     }
     else if (casa.tipo === 'LIGA') { 
         if (casa.ligaId && ligasAtivasMap[casa.ligaId]) {
@@ -393,14 +393,14 @@ export default function SharkRoundPage() {
                 setModalPergunta({ pergunta: randomQ, ligaNome: liga.nome });
             } else {
                  setModalPergunta({ 
-                   pergunta: { id: 'fallback', texto: `Pergunta genÃ©rica sobre ${liga.nome}...`, alternativas: ['A','B','C','D'], respostaCorreta: 0 },
+                   pergunta: { id: 'fallback', texto: `Pergunta genérica sobre ${liga.nome}...`, alternativas: ['A','B','C','D'], respostaCorreta: 0 },
                    ligaNome: liga.nome 
                  });
             }
         } else {
              setModalPergunta({ 
-                pergunta: { id: 'fallback', texto: "Pergunta BÃ´nus: Qual a cor do cÃ©u?", alternativas: ['Azul','Verde','Roxo','Preto'], respostaCorreta: 0 },
-                ligaNome: "BÃ´nus"
+                pergunta: { id: 'fallback', texto: "Pergunta Bônus: Qual a cor do céu?", alternativas: ['Azul','Verde','Roxo','Preto'], respostaCorreta: 0 },
+                ligaNome: "Bônus"
              });
         }
     }
@@ -419,14 +419,14 @@ export default function SharkRoundPage() {
           casa.donoId = jogador.id; 
           casa.nivel = 'TERRENO'; 
           casa.socios = [{ uid: jogador.id, nome: jogador.nome, nivel: 'TERRENO' }];
-          addToast(`Conquistou o Terreno!`, "success"); 
+          addToast(`Conquistou o terreno!`, "success"); 
       } else if (casa.donoId === jogador.id) { 
           if (casa.nivel === 'TERRENO') {
             casa.nivel = 'CLINICA_GERAL';
             setGameStats((prev) => ({ ...prev, clinicas: prev.clinicas + 1 }));
           }
           else if (casa.nivel === 'CLINICA_GERAL') casa.nivel = 'HOSPITAL_UNIVERSITARIO';
-          addToast("Evoluiu construÃ§Ã£o!", "success");
+          addToast("Evoluiu construção!", "success");
       }
       setTabuleiro(novoTab);
       setJogador(p => ({...p, questoesAcertadasCiclo: p.questoesAcertadasCiclo + 1}));
@@ -463,7 +463,7 @@ export default function SharkRoundPage() {
       
       {/* HEADER */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 p-4 flex justify-between items-center shadow-lg">
-         <div className="flex items-center gap-3"><Link href="/dashboard" className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition"><ArrowLeft size={24}/></Link><div><h1 className="font-black text-lg italic uppercase text-white">SharkRound</h1><p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">O Jogo da AtlÃ©tica</p></div></div>
+         <div className="flex items-center gap-3"><Link href="/dashboard" className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition"><ArrowLeft size={24}/></Link><div><h1 className="font-black text-lg italic uppercase text-white">SharkRound</h1><p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">O Jogo da Atlética</p></div></div>
          <div className="flex gap-3 items-center">
               <Link href="/sharkround/ranking" className="p-2 bg-zinc-800 rounded-full border border-zinc-700 text-emerald-400 hover:bg-zinc-700 transition">
                 <Trophy size={18}/>
@@ -519,7 +519,7 @@ export default function SharkRoundPage() {
                           <div className="relative z-10 flex flex-col items-center justify-center w-full h-full p-0.5">
                               <div className="text-white drop-shadow-md transform scale-75 md:scale-100">{casa.tipo === 'PRISAO' ? <Lock size={14}/> : casa.tipo === 'SORTE' ? <TrendingUp size={14}/> : casa.tipo === 'AZAR' ? <AlertTriangle size={14}/> : casa.tipo === 'INICIO' ? <MapPin size={14}/> : null}</div>
                               {casa.tipo === 'LIGA' && <span className="text-[7px] font-black text-white/90 drop-shadow-md leading-tight">{casa.sigla}</span>}
-                              {casa.nivel && <div className="absolute top-0.5 right-0.5 text-yellow-300 drop-shadow-md bg-black/50 rounded-full p-0.5">{casa.nivel === 'TERRENO' && <span className="text-[6px]">ðŸš©</span>}{casa.nivel !== 'TERRENO' && <Building2 size={8}/>}</div>}
+                              {casa.nivel && <div className="absolute top-0.5 right-0.5 text-yellow-300 drop-shadow-md bg-black/50 rounded-full p-0.5">{casa.nivel === "TERRENO" && <span className="text-[6px]">🚩</span>}{casa.nivel !== "TERRENO" && <Building2 size={8}/>}</div>}
                           </div>
 
                           {isHere && <div className="absolute inset-0 flex items-center justify-center z-30"><div className="w-6 h-6 rounded-full border-[2px] border-white shadow-xl overflow-hidden bg-black relative animate-bounce-slow"><Image src={jogador.avatar} alt="Me" fill className="object-cover" unoptimized/></div></div>}
@@ -545,7 +545,7 @@ export default function SharkRoundPage() {
                   <button onClick={() => setModalDetalhes(null)} className="absolute top-3 right-3 text-zinc-500 hover:text-white"><XCircle size={20}/></button>
                   <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4 ${modalDetalhes.cor} shadow-lg`}>{modalDetalhes.tipo === 'PRISAO' ? <Lock size={32} className="text-white"/> : <MapPin size={32} className="text-white"/>}</div>
                   <h3 className="text-xl font-black text-white uppercase">{modalDetalhes.titulo}</h3>
-                  <p className="text-zinc-400 text-sm mt-2">{modalDetalhes.descricao || "TerritÃ³rio da Liga"}</p>
+                  <p className="text-zinc-400 text-sm mt-2">{modalDetalhes.descricao || "Território da Liga"}</p>
                   
                   {modalDetalhes.socios && modalDetalhes.socios.length > 0 && (
                       <div className="mt-4 bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-left">
@@ -577,7 +577,7 @@ export default function SharkRoundPage() {
           </div>
       )}
 
-      {/* EVENTO / PRISÃƒO */}
+      {/* EVENTO / PRISÃO */}
       {modalEvento && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in zoom-in">
             <div className="bg-zinc-900 border border-zinc-700 w-full max-w-sm rounded-2xl p-6 text-center shadow-2xl">
@@ -671,5 +671,4 @@ export default function SharkRoundPage() {
     </div>
   );
 }
-
 

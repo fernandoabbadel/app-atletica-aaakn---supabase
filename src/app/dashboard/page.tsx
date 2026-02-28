@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Calendar, Loader2, Target, Users, Heart, 
   CheckCircle, ChevronRight, ChevronLeft, ShoppingBag, 
-  Star, Wallet, Dumbbell, ExternalLink, MessageCircle, Lightbulb, MapPin,
+  Star, Crown, Wallet, Dumbbell, ExternalLink, MessageCircle, Lightbulb, MapPin,
   ScanBarcode, Crosshair
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext'; 
@@ -42,6 +42,24 @@ interface UserData {
     level?: number;
     selos?: number;
 }
+
+type PartnerTier = 'ouro' | 'prata' | 'standard';
+
+const parsePartnerTier = (partner: Parceiro): PartnerTier => {
+    const candidate = `${partner.plano || ''}`.trim().toLowerCase();
+    const fallback = `${partner.categoria || ''}`.trim().toLowerCase();
+    const tierValue = candidate || fallback;
+
+    if (tierValue === 'ouro') return 'ouro';
+    if (tierValue === 'prata') return 'prata';
+    return 'standard';
+};
+
+const getPartnerLogoSrc = (partner: Parceiro): string =>
+    partner.imgLogo || partner.imgCapa || '/logo.png';
+
+const getPartnerCoverSrc = (partner: Parceiro): string =>
+    partner.imgCapa || partner.imgLogo || '/placeholder_liga.png';
 
 // --- SUB-COMPONENTES PADRONIZADOS ---
 
@@ -364,8 +382,9 @@ export default function DashboardPage() {
     const diff = Math.floor((Date.now() - date.getTime()) / 60000);
     return diff < 60 ? `${diff}min` : `${Math.floor(diff / 60)}h`;
   };
-  const parceirosOuro = parceiros.filter(p => p.categoria === 'ouro' || p.plano === 'ouro');
-  const parceirosComuns = parceiros.filter(p => p.categoria !== 'ouro' && p.plano !== 'ouro');
+  const parceirosOuro = parceiros.filter((p) => parsePartnerTier(p) === 'ouro');
+  const parceirosPrata = parceiros.filter((p) => parsePartnerTier(p) === 'prata');
+  const parceirosStandard = parceiros.filter((p) => parsePartnerTier(p) === 'standard');
   const getLigaBizuAtivo = (liga: Liga): string | null => {
     const bizu = (liga.bizu || "").trim();
     if (!bizu) return null;
@@ -403,6 +422,78 @@ export default function DashboardPage() {
         </Link>
       </div>
 
+      {/* 0. PARCEIROS PREMIUM (OURO/PRATA) */}
+      {(parceirosOuro.length > 0 || parceirosPrata.length > 0) && (
+        <div className="space-y-4">
+          <SectionHeader title="Parceiros Premium" icon={Crown} link="/parceiros" colorClass="text-yellow-500" />
+
+          {parceirosOuro.length > 0 && (
+            <div className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-4 pb-2">
+              {parceirosOuro.map((p) => (
+                <Link
+                  href={`/parceiros/${p.id}`}
+                  key={p.id}
+                  className="min-w-full h-[450px] bg-zinc-900 rounded-3xl overflow-hidden border border-yellow-500/30 relative group snap-center active:scale-[0.99] transition"
+                >
+                  <div className="absolute inset-0">
+                    <Image
+                      src={getPartnerCoverSrc(p)}
+                      alt={p.nome}
+                      fill
+                      className="object-cover opacity-35 group-hover:opacity-50 transition"
+                      unoptimized
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/65 to-black" />
+                  </div>
+                  <div className="absolute top-4 left-4 inline-flex items-center gap-2 rounded-full border border-yellow-500/30 bg-black/60 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-yellow-300">
+                    <Crown size={12} className="fill-yellow-400 text-yellow-400" />
+                    Parceiro Ouro
+                  </div>
+                  <div className="relative z-10 h-full flex flex-col justify-end p-6">
+                    <div className="w-24 h-24 rounded-2xl bg-black/70 border border-yellow-500/30 overflow-hidden mb-4 relative shadow-[0_0_20px_rgba(234,179,8,0.15)]">
+                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill className="object-cover" unoptimized />
+                    </div>
+                    <h3 className="text-2xl font-black uppercase italic text-white leading-tight">{p.nome}</h3>
+                    <p className="text-xs font-bold uppercase tracking-widest text-yellow-300/80 mt-2">
+                      Benefícios em destaque para a base
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+
+          {parceirosPrata.length > 0 && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-5">
+              <div className="mb-4 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-300">
+                <Star size={12} className="text-zinc-300 fill-zinc-300" />
+                Parceiros Prata
+              </div>
+              <div className="flex overflow-x-auto gap-4 scrollbar-hide snap-x pb-2">
+                {parceirosPrata.map((p) => (
+                  <Link
+                    href={`/parceiros/${p.id}`}
+                    key={p.id}
+                    className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-700 hover:border-zinc-500"
+                  >
+                    <div className="absolute inset-0">
+                      <Image src={getPartnerCoverSrc(p)} alt="Capa" fill className="object-cover opacity-25 group-hover:opacity-40 transition" unoptimized />
+                      <div className="absolute inset-0 bg-black/50" />
+                    </div>
+                    <div className="w-20 h-20 bg-black rounded-full border-2 border-zinc-500/80 flex items-center justify-center overflow-hidden shadow-2xl relative z-10 group-hover:scale-110 transition">
+                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill className="object-cover" unoptimized />
+                    </div>
+                    <div className="text-center relative z-10 px-2 w-full">
+                      <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 1. CARTEIRINHA */}
       <Link href="/carteirinha" className="relative h-40 w-full overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 active:scale-95 transition group shadow-2xl block">
           <Image 
@@ -422,28 +513,6 @@ export default function DashboardPage() {
               <p className="text-xs text-zinc-400 font-bold uppercase tracking-widest mt-1">Turma {userData?.turma || "Geral"}</p>
           </div>
       </Link>
-
-      {/* PARCEIROS OURO */}
-      {parceirosOuro.length > 0 && (
-          <div className="relative overflow-hidden rounded-3xl p-[1px] bg-gradient-to-r from-yellow-600 via-yellow-300 to-yellow-600 animate-shine bg-[length:200%_100%] shadow-[0_0_20px_rgba(234,179,8,0.2)]">
-              <div className="bg-[#1a1500] rounded-[23px] p-5 relative overflow-hidden">
-                 <div className="absolute top-0 right-0 p-3 opacity-20"><Star size={40} className="text-yellow-400 fill-yellow-400 animate-pulse"/></div>
-                 <h2 className="text-xs font-black text-yellow-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                     <Star size={14} className="fill-yellow-500"/> Parceiros Master
-                 </h2>
-                 <div className="flex gap-4 overflow-x-auto scrollbar-hide snap-x">
-                     {parceirosOuro.map(p => (
-                         <Link href={`/parceiros/${p.id}`} key={p.id} className="min-w-[80px] flex flex-col items-center gap-2 snap-start group">
-                             <div className="w-16 h-16 rounded-full bg-black border-2 border-yellow-500/50 p-1 group-hover:scale-110 transition shadow-[0_0_15px_rgba(234,179,8,0.3)] relative">
-                                 <Image src={p.imgLogo} alt={p.nome} fill className="rounded-full object-cover" unoptimized/>
-                             </div>
-                             <span className="text-[10px] font-bold text-yellow-200/80 truncate max-w-[80px]">{p.nome}</span>
-                         </Link>
-                     ))}
-                 </div>
-              </div>
-          </div>
-      )}
 
       {/* 2. SHARK ROUND (COM FAIXA "EM BREVE") & TREINOS */}
       <div className="grid grid-cols-2 gap-4">
@@ -605,35 +674,50 @@ export default function DashboardPage() {
       )}
 
       {/* 5. LOJA (Tamanho igual Eventos + Contador Turmas) */}
-      {produtos.length > 0 && (
-          <div className="relative group/car">
-              <SectionHeader 
-                  title="Lojinha" 
-                  icon={ShoppingBag} 
-                  link="/loja" 
-                  colorClass="text-purple-500"
-                  onPrev={() => scroll(productsScrollRef, 'left')} 
-                  onNext={() => scroll(productsScrollRef, 'right')} 
-              />
-              <div ref={productsScrollRef} className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-4 pb-4">
-                  {produtos.map(p => <ProductCard key={p.id} prod={p} userId={userData?.uid} onToggleLike={handleProductLike} turmaStats={productTurmaStats[p.id] || []} />)}
+      <div className="relative group/car">
+          <SectionHeader 
+              title="Lojinha" 
+              icon={ShoppingBag} 
+              link="/loja" 
+              colorClass="text-purple-500"
+              onPrev={produtos.length > 0 ? () => scroll(productsScrollRef, 'left') : undefined} 
+              onNext={produtos.length > 0 ? () => scroll(productsScrollRef, 'right') : undefined} 
+          />
+          {produtos.length > 0 ? (
+            <div ref={productsScrollRef} className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-4 pb-4">
+                {produtos.map(p => <ProductCard key={p.id} prod={p} userId={userData?.uid} onToggleLike={handleProductLike} turmaStats={productTurmaStats[p.id] || []} />)}
+            </div>
+          ) : (
+            <Link
+              href="/loja"
+              className="block rounded-3xl border border-dashed border-zinc-700 bg-zinc-900/70 p-6 active:scale-[0.99] transition"
+            >
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-black uppercase tracking-wide text-white">Sem produtos no momento</p>
+                  <p className="text-xs text-zinc-500 mt-2">Clique para abrir a lojinha e acompanhar quando entrar novidade.</p>
+                </div>
+                <div className="w-12 h-12 rounded-2xl border border-purple-500/30 bg-purple-500/10 flex items-center justify-center text-purple-400">
+                  <ShoppingBag size={20} />
+                </div>
               </div>
-          </div>
-      )}
+            </Link>
+          )}
+      </div>
 
-      {/* 6. PARCEIROS (Logo Aumentado) */}
-      {parceirosComuns.length > 0 && (
+      {/* 6. PARCEIROS STANDARD (Logo Aumentado) */}
+      {parceirosStandard.length > 0 && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-6 relative overflow-hidden">
-               <SectionHeader title="Parceiros" icon={Users} link="/parceiros" colorClass="text-zinc-500"/>
+               <SectionHeader title="Parceiros Standard" icon={Users} link="/parceiros" colorClass="text-zinc-500"/>
                <div className="flex overflow-x-auto gap-4 scrollbar-hide snap-x relative z-10 pb-2">
-                   {parceirosComuns.map((p) => (
+                   {parceirosStandard.map((p) => (
                        <Link href={`/parceiros/${p.id}`} key={p.id} className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-800 hover:border-zinc-600">
                            <div className="absolute inset-0">
-                               <Image src={p.imgCapa || "/placeholder.jpg"} alt="Capa" fill className="object-cover opacity-30 group-hover:opacity-50 transition" unoptimized/>
+                               <Image src={getPartnerCoverSrc(p)} alt="Capa" fill className="object-cover opacity-30 group-hover:opacity-50 transition" unoptimized/>
                                <div className="absolute inset-0 bg-black/40"/>
                            </div>
                            <div className="w-20 h-20 bg-black rounded-full border-2 border-zinc-600 flex items-center justify-center overflow-hidden shadow-2xl relative z-10 group-hover:scale-110 transition">
-                               <Image src={p.imgLogo} alt="Logo" fill className="object-cover" unoptimized/>
+                               <Image src={getPartnerLogoSrc(p)} alt="Logo" fill className="object-cover" unoptimized/>
                            </div>
                            <div className="text-center relative z-10 px-2 w-full">
                                <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>

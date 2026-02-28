@@ -12,6 +12,7 @@ import Image from "next/image";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import { uploadImage } from "../../../lib/upload";
+import { logActivity } from "../../../lib/logger";
 import {
   createAdminEventPoll,
   deleteAdminEventById,
@@ -361,6 +362,15 @@ export default function AdminEventosPage() {
                     vendasTotais: { vendidos: 0, total: 500, receita: 0 },
                 },
             });
+            if (currentUser?.uid) {
+                await logActivity(
+                    currentUser.uid,
+                    currentUser.nome || "Admin",
+                    "CREATE",
+                    "Eventos/Admin",
+                    `Criou evento: ${String(novoEvento.titulo || "Evento")}`
+                ).catch(() => {});
+            }
             addToast("Evento criado!", "success");
         }
 
@@ -375,7 +385,17 @@ export default function AdminEventosPage() {
   const handleDelete = async (id: string) => {
     if (confirm("Excluir evento permanentemente?")) {
       try {
+          const targetEvento = eventos.find((row) => row.id === id);
           await deleteAdminEventById(id);
+          if (currentUser?.uid) {
+              await logActivity(
+                  currentUser.uid,
+                  currentUser.nome || "Admin",
+                  "DELETE",
+                  "Eventos/Admin",
+                  `Excluiu evento: ${targetEvento?.titulo || id}`
+              ).catch(() => {});
+          }
           addToast("Evento cancelado.", "info");
           await loadEventos(true);
       } catch (error: unknown) {
@@ -403,12 +423,35 @@ export default function AdminEventosPage() {
   }
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-        setUploading(true);
-        const { url } = await uploadImage(file, "eventos");
-        if (url) setNovoEvento(prev => ({ ...prev, imagem: url }));
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    if (!file || uploading) {
+        input.value = "";
+        return;
+    }
+
+    setUploading(true);
+    try {
+        const { url, error } = await uploadImage(file, "eventos", {
+            scopeKey: "admin:eventos:capa",
+            maxBytes: 3 * 1024 * 1024,
+            maxWidth: 2400,
+            maxHeight: 1800,
+            maxPixels: 3_600_000,
+            compressionMaxWidth: 1800,
+            compressionMaxHeight: 1200,
+            compressionMaxBytes: 200 * 1024,
+            quality: 0.82,
+            rateLimitMax: 4,
+        });
+        if (error || !url) {
+            addToast(error || "Falha no upload da capa.", "error");
+            return;
+        }
+        setNovoEvento((prev) => ({ ...prev, imagem: url }));
+    } finally {
         setUploading(false);
+        input.value = "";
     }
   };
 
@@ -460,7 +503,9 @@ export default function AdminEventosPage() {
       if (p.tipo !== 'venda') return addToast("Apenas vendas podem ser gerenciadas financeiramente.", "error");
       
       const isApproving = p.pagamento !== 'pago';
-      const valorGasto = parseFloat((p.valorTotal || "0").replace(',', '.'));
+      const valorGasto = Number.parseFloat(
+        String(p.valorTotal || "0").replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".")
+      );
 
       if (isApproving) {
           if (!confirm(`Confirmar pagamento de ${p.userName} no valor de R$ ${p.valorTotal}?`)) return;
@@ -480,6 +525,9 @@ export default function AdminEventosPage() {
                   userId: p.userId,
                   isApproving,
                   valorGasto,
+                  lotName: p.lote || "",
+                  eventType: showGestaoModal?.tipo || "",
+                  eventTitle: showGestaoModal?.titulo || "",
               });
           }
 
@@ -489,6 +537,16 @@ export default function AdminEventosPage() {
               dataAprovacao: isApproving ? new Date() : null, 
               aprovadoPor: isApproving ? (currentUser?.nome || "Admin") : null 
           } : item));
+
+          if (currentUser?.uid) {
+              await logActivity(
+                  currentUser.uid,
+                  currentUser.nome || "Admin",
+                  "UPDATE",
+                  "Eventos/Pagamentos",
+                  `${isApproving ? "Aprovou" : "Rejeitou"} comprovante de ${p.userName} (${showGestaoModal?.titulo || "Evento"})`
+              ).catch(() => {});
+          }
 
           addToast(isApproving ? "Pagamento aprovado!" : "Pagamento estornado.", isApproving ? "success" : "info");
       } catch (error: unknown) {
@@ -578,7 +636,7 @@ export default function AdminEventosPage() {
                 {eventos.map((evento) => (
                 <div key={evento.id} className={`rounded-2xl border overflow-hidden group hover:border-emerald-500/30 transition flex flex-col h-full ${evento.status === 'encerrado' ? 'bg-zinc-950 border-zinc-900 grayscale opacity-70' : 'bg-zinc-900 border-zinc-800'}`}>
                     <div className="h-32 bg-black/50 relative overflow-hidden">
-                        <Image src={evento.imagem} alt={evento.titulo} fill className="object-cover opacity-80 group-hover:opacity-100 transition" style={{ objectPosition: `50% ${evento.imagePositionY || 50}%` }} unoptimized/>
+                        <Image src={evento.imagem} alt={evento.titulo} fill sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" className="object-cover opacity-80 group-hover:opacity-100 transition" style={{ objectPosition: `50% ${evento.imagePositionY || 50}%` }}/>
                         <div className="absolute top-2 left-2 flex gap-1 z-10"><span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-black/60 text-white backdrop-blur-sm border border-white/10">{evento.tipo}</span></div>
                         <div className="absolute bottom-2 right-2 bg-black/80 backdrop-blur-md px-2 py-1 rounded text-[10px] font-mono font-bold text-emerald-400 border border-emerald-500/30 z-10">{calculateTimeLeft(evento.data, evento.hora)}</div>
                         <button onClick={(e) => { e.stopPropagation(); toggleLowStock(evento); }} className={`absolute top-2 right-2 p-1.5 rounded-lg border transition shadow-lg z-10 ${evento.isLowStock ? 'bg-yellow-500 text-black border-yellow-400' : 'bg-black/50 text-zinc-400 border-zinc-700 hover:text-white'}`} title="Alternar 'Últimas Vagas'"><Star size={14} className={evento.isLowStock ? 'fill-black' : ''}/></button>
@@ -639,7 +697,7 @@ export default function AdminEventosPage() {
                               <tbody className="divide-y divide-zinc-800">
                                   {participantesReais.map(p => (
                                       <tr key={p.id} className="hover:bg-zinc-800/50 transition">
-                                          <td className="p-3 font-bold"><Link href={`/admin/usuarios/${p.userId}`} className="flex items-center gap-2 hover:text-emerald-400 transition" target="_blank"><div className="relative w-6 h-6 rounded-full overflow-hidden bg-zinc-800"><Image src={p.userAvatar || "https://github.com/shadcn.png"} alt="Avatar" fill className="object-cover" unoptimized/></div>{p.userName}</Link></td>
+                                          <td className="p-3 font-bold"><Link href={`/admin/usuarios/${p.userId}`} className="flex items-center gap-2 hover:text-emerald-400 transition" target="_blank"><div className="relative w-6 h-6 rounded-full overflow-hidden bg-zinc-800"><Image src={p.userAvatar || "https://github.com/shadcn.png"} alt="Avatar" fill sizes="24px" className="object-cover"/></div>{p.userName}</Link></td>
                                           <td className="p-3 text-zinc-400">{p.userTurma || "-"}</td>
                                           <td className="p-3"><span className={`px-2 py-0.5 rounded font-bold uppercase ${p.status === 'going' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-yellow-500/10 text-yellow-500'}`}>{p.status === 'going' ? 'Vou' : 'Talvez'}</span></td>
                                           <td className="p-3"><span className={`px-2 py-0.5 rounded font-bold uppercase ${p.pagamento === 'pago' ? 'bg-blue-500/10 text-blue-500' : p.pagamento === 'analise' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-zinc-800 text-zinc-500'}`}>{p.pagamento === 'pago' ? 'Pago' : p.pagamento === 'analise' ? 'Em Análise' : 'Pendente'}</span></td>
@@ -708,9 +766,9 @@ export default function AdminEventosPage() {
                 {/* UPLOAD IMAGEM */}
                 <div className="space-y-2">
                     <div onClick={() => fileInputRef.current?.click()} className="h-40 border-2 border-dashed border-zinc-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-emerald-500 transition bg-black/20 relative group overflow-hidden">
-                        <input type="file" ref={fileInputRef} className="hidden" onChange={handleImageUpload}/>
+                        <input type="file" ref={fileInputRef} className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={handleImageUpload}/>
                         {uploading ? <span className="text-xs text-emerald-500 animate-pulse">Enviando...</span> : novoEvento.imagem ? (
-                            <Image src={novoEvento.imagem} alt="Capa" fill className="object-cover" style={{ objectPosition: `50% ${novoEvento.imagePositionY || 50}%` }} unoptimized/>
+                            <Image src={novoEvento.imagem} alt="Capa" fill sizes="(max-width: 768px) 100vw, 560px" className="object-cover" style={{ objectPosition: `50% ${novoEvento.imagePositionY || 50}%` }}/>
                         ) : <div className="text-center text-zinc-500"><ImageIcon className="mx-auto mb-1"/><span className="text-xs font-bold uppercase">Capa</span></div>}
                         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition"><span className="text-xs font-bold text-white uppercase bg-black px-3 py-1 rounded-full">Trocar Imagem</span></div>
                     </div>

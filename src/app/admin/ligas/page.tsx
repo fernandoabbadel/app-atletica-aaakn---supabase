@@ -201,8 +201,12 @@ export default function AdminLigasPage() {
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    if (!file || uploading) {
+      input.value = "";
+      return;
+    }
 
     setUploading(true);
     try {
@@ -225,6 +229,7 @@ export default function AdminLigasPage() {
       addToast("Erro ao enviar logo.", "error");
     } finally {
       setUploading(false);
+      input.value = "";
     }
   };
 
@@ -413,7 +418,7 @@ export default function AdminLigasPage() {
                         <div className="flex justify-center mb-4">
                             <label className="relative w-24 h-24 rounded-full bg-zinc-900 border-2 border-dashed border-zinc-700 flex items-center justify-center cursor-pointer hover:border-emerald-500 overflow-hidden group">
                                 {formData.foto ? <Image src={formData.foto} alt="Logo" fill className="object-cover" unoptimized/> : <UploadCloud className="text-zinc-500 group-hover:text-emerald-500"/>}
-                                <input type="file" className="hidden" onChange={handleUpload}/>
+                                <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={handleUpload}/>
                                 {uploading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>}
                             </label>
                         </div>

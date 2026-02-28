@@ -479,8 +479,12 @@ export default function LigasAdminPage() {
 
   // --- UPLOADS ---
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'pergunta' | 'membro', index?: number) => {
-      const file = e.target.files?.[0];
-      if (!file || !ligaData) return;
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      if (!file || !ligaData || uploadingLeagueAsset) {
+          input.value = "";
+          return;
+      }
 
       setUploadingLeagueAsset(true);
       try {
@@ -517,13 +521,17 @@ export default function LigasAdminPage() {
           addToast("Deu ruim no plantão! 🚨 Erro na imagem.", "error");
       } finally {
           setUploadingLeagueAsset(false);
-          e.target.value = "";
+          input.value = "";
       }
   };
 
   const handleEventImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !ligaData) return;
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      if (!file || !ligaData || uploadingEventImg) {
+          input.value = "";
+          return;
+      }
 
       setUploadingEventImg(true);
       try {
@@ -547,7 +555,7 @@ export default function LigasAdminPage() {
           addToast("Deu ruim no plantão! 🚨 Falha no upload da capa.", "error");
       } finally {
           setUploadingEventImg(false);
-          e.target.value = "";
+          input.value = "";
       }
   };
   // --- MEMBROS ---
@@ -800,7 +808,7 @@ export default function LigasAdminPage() {
                               ) : (
                                 <Upload size={20} className="text-zinc-500"/>
                               )}
-                              <input type="file" className="hidden" disabled={uploadingLeagueAsset} onChange={(e) => handleImageUpload(e, 'logo')}/>
+                              <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingLeagueAsset} onChange={(e) => handleImageUpload(e, 'logo')}/>
                           </label>
                           <span className="text-xs text-zinc-500 max-w-[150px]">Clique para alterar a logo.<br/>Recomendado: Quadrado.</span>
                       </div>
@@ -877,7 +885,7 @@ export default function LigasAdminPage() {
                                         alt={ev.titulo}
                                         width={64}
                                         height={64}
-                                        className="rounded-lg object-cover bg-black"
+                                        className="w-16 h-16 rounded-lg object-cover bg-black"
                                         unoptimized
                                       />
                                   ) : (
@@ -1087,7 +1095,7 @@ export default function LigasAdminPage() {
                       <div className="flex justify-between items-center"><h2 className="font-bold text-white text-lg">Evento da Liga</h2><button onClick={() => setEventModal(false)}><X size={20} className="text-zinc-500"/></button></div>
                       
                       <div onClick={() => eventFileRef.current?.click()} className="h-32 border-2 border-dashed border-zinc-700 rounded-xl flex items-center justify-center cursor-pointer bg-black/20 relative group overflow-hidden">
-                          <input type="file" ref={eventFileRef} className="hidden" disabled={uploadingEventImg} onChange={handleEventImageUpload}/>
+                          <input type="file" ref={eventFileRef} className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingEventImg} onChange={handleEventImageUpload}/>
                           {uploadingEventImg ? (
                               <span className="text-xs text-emerald-500 animate-pulse">Enviando...</span>
                           ) : currentEvent.imagem ? (
