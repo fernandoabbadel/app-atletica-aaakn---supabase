@@ -524,6 +524,9 @@ export async function uploadLeagueImageToStorage(options: {
   const isEventImage = options.kind === "event";
   const isLogoImage = options.kind === "logo";
   const isMemberImage = options.kind === "member";
+  const sourceMaxWidth = isEventImage ? 4200 : isLogoImage ? 4000 : isMemberImage ? 3200 : 3600;
+  const sourceMaxHeight = isEventImage ? 3200 : isLogoImage ? 4000 : isMemberImage ? 3200 : 3600;
+  const sourceMaxPixels = isEventImage ? 12_000_000 : isLogoImage ? 16_000_000 : 9_000_000;
   const fileName =
     options.kind === "logo"
       ? "logo"
@@ -539,9 +542,9 @@ export async function uploadLeagueImageToStorage(options: {
     upsert: true,
     appendVersionQuery: true,
     maxBytes: isEventImage ? 3 * 1024 * 1024 : 2 * 1024 * 1024,
-    maxWidth: isEventImage ? 2400 : isLogoImage ? 1600 : isMemberImage ? 1400 : 1800,
-    maxHeight: isEventImage ? 1800 : isLogoImage ? 1600 : isMemberImage ? 1400 : 1800,
-    maxPixels: isEventImage ? 3_600_000 : 2_560_000,
+    maxWidth: sourceMaxWidth,
+    maxHeight: sourceMaxHeight,
+    maxPixels: sourceMaxPixels,
     compressionMaxWidth: isEventImage ? 1800 : 1400,
     compressionMaxHeight: isEventImage ? 1200 : 1400,
     compressionMaxBytes: isEventImage ? 200 * 1024 : 150 * 1024,
