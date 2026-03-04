@@ -220,7 +220,7 @@ export default function DetalheProdutoPage() {
       const stock = typeof variant.estoque === "number" && Number.isFinite(variant.estoque) ? variant.estoque : 0;
       return acc + stock;
     }, 0);
-  }, [checkoutColor, produto, totalStock]);
+  }, [checkoutColor, produto]);
 
   const effectiveCheckoutStock = selectedColorStock >= 0 ? selectedColorStock : totalStock;
   const isSelectedColorUnavailable = checkoutColor.trim().length > 0 && selectedColorStock === 0;

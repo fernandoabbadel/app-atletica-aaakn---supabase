@@ -287,7 +287,8 @@ export default function LigasAdminPage() {
       if (!isLoggedIn || !ligaData) return;
 
       const persist = () => {
-          const { senha: _senha, ...ligaDraft } = ligaData;
+          const { senha, ...ligaDraft } = ligaData;
+          void senha;
           writeLigaEditorDraft(ligaData.id, {
               version: LIGA_EDITOR_DRAFT_VERSION,
               savedAt: Date.now(),

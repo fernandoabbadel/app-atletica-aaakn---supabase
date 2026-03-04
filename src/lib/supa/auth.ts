@@ -163,13 +163,15 @@ export async function signInWithPopup(
   _auth: AuthInstance,
   _provider: GoogleAuthProvider
 ): Promise<{ user: User | null }> {
+  void _auth;
+  void _provider;
   const supabase = getSupabaseClient();
 
   const redirectTo = typeof window !== "undefined"
     ? `${window.location.origin}/dashboard`
     : undefined;
 
-  const { data, error } = await supabase.auth.signInWithOAuth({
+  const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo,
@@ -190,6 +192,7 @@ export async function signInWithPopup(
 }
 
 export async function signOut(_auth: AuthInstance): Promise<void> {
+  void _auth;
   const supabase = getSupabaseClient();
   const { error } = await supabase.auth.signOut();
   if (error) {
