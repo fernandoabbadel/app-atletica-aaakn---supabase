@@ -1,21 +1,11 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  limit,
-  query,
-  updateDoc,
-  where,
-  type QueryConstraint,
-} from "@/lib/supabaseHelpers";
 import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { compressImageFile } from "./imageCompression";
-import { db, functions, storage } from "./backend";
+import { functions, storage } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { throwSupabaseError } from "./supabaseData";
+import { getSupabaseClient } from "./supabase";
 import { validateImageFile } from "./upload";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
@@ -27,6 +17,8 @@ const MAX_GUIDE_ITEMS = 1200;
 const CALLABLE_GUIDE_SEED = "guiaAdminSeed";
 const CALLABLE_GUIDE_UPSERT = "guiaAdminUpsert";
 const CALLABLE_GUIDE_DELETE = "guiaAdminDelete";
+const GUIDE_SELECT_COLUMNS =
+  "id,categoria,ordem,titulo,url,nome,horario,detalhe,descricao,foto,numero,cor";
 
 const guideCache = new Map<string, CacheEntry<Row[]>>();
 
@@ -89,18 +81,23 @@ async function callWithFallback<TReq, TRes>(
   }
 }
 
-async function queryRows(path: string, attempts: QueryConstraint[][]): Promise<Row[]> {
-  for (const constraints of attempts) {
-    try {
-      const snap = await getDocs(query(collection(db, path), ...constraints));
-      return snap.docs.map((entry) => ({ id: entry.id, ...(entry.data() as Row) }));
-    } catch (error: unknown) {
-      const code = getBackendErrorCode(error)?.toLowerCase();
-      const isIndexError = code?.includes("failed-precondition");
-      if (!isIndexError) throw error;
-    }
+async function queryRows(options: {
+  maxResults: number;
+  category?: GuideCategory;
+}): Promise<Row[]> {
+  const supabase = getSupabaseClient();
+  let query = supabase
+    .from("guia_data")
+    .select(GUIDE_SELECT_COLUMNS)
+    .limit(options.maxResults);
+
+  if (options.category) {
+    query = query.eq("categoria", options.category);
   }
-  return [];
+
+  const { data, error } = await query;
+  if (error) throwSupabaseError(error);
+  return (data ?? []) as unknown as Row[];
 }
 
 export async function fetchGuideData(options?: {
@@ -118,11 +115,7 @@ export async function fetchGuideData(options?: {
     if (cached) return cached;
   }
 
-  const attempts: QueryConstraint[][] = category
-    ? [[where("categoria", "==", category), limit(maxResults)]]
-    : [[limit(maxResults)]];
-
-  const rows = await queryRows("guia_data", attempts);
+  const rows = await queryRows({ maxResults, category });
   const sorted = [...rows].sort((left, right) => {
     const leftOrder =
       typeof left.ordem === "number" && Number.isFinite(left.ordem)
@@ -154,8 +147,9 @@ export async function seedGuideDefaults(items: Row[]): Promise<void> {
     CALLABLE_GUIDE_SEED,
     { items },
     async () => {
-      const writes = items.map((item) => addDoc(collection(db, "guia_data"), item));
-      await Promise.all(writes);
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("guia_data").insert(items);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -177,10 +171,13 @@ export async function upsertGuideItem(payload: {
     CALLABLE_GUIDE_UPSERT,
     requestPayload,
     async () => {
+      const supabase = getSupabaseClient();
       if (itemId) {
-        await updateDoc(doc(db, "guia_data", itemId), payload.data);
+        const { error } = await supabase.from("guia_data").update(payload.data).eq("id", itemId);
+        if (error) throwSupabaseError(error);
       } else {
-        await addDoc(collection(db, "guia_data"), payload.data);
+        const { error } = await supabase.from("guia_data").insert(payload.data);
+        if (error) throwSupabaseError(error);
       }
       return { ok: true };
     }
@@ -197,7 +194,9 @@ export async function deleteGuideItem(itemId: string): Promise<void> {
     CALLABLE_GUIDE_DELETE,
     { itemId: cleanId },
     async () => {
-      await deleteDoc(doc(db, "guia_data", cleanId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("guia_data").delete().eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
