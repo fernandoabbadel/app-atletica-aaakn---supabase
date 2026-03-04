@@ -103,7 +103,17 @@ const SectionHeader = ({ title, icon: Icon, link, onPrev, onNext, colorClass = "
 );
 
 // --- COMPONENTE: CARD EVENTO ---
-const EventCardItem = ({ evt, userId, onToggleLike }: { evt: Evento, userId: string, onToggleLike: (id: string, state: boolean) => void }) => {
+const EventCardItem = ({
+  evt,
+  userId,
+  onToggleLike,
+  imagePriority = false,
+}: {
+  evt: Evento;
+  userId: string;
+  onToggleLike: (id: string, state: boolean) => void;
+  imagePriority?: boolean;
+}) => {
   const isLiked = evt.likesList?.includes(userId);
   const isGoing = evt.participantes?.includes(userId);
 
@@ -115,6 +125,8 @@ const EventCardItem = ({ evt, userId, onToggleLike }: { evt: Evento, userId: str
                 src={evt.imagem} 
                 alt={evt.titulo}
                 fill
+                sizes="(max-width: 768px) 100vw, 420px"
+                priority={imagePriority}
                 className="object-cover opacity-80 group-hover:opacity-100 transition duration-500" 
                 style={{ objectPosition: `50% ${evt.imagePositionY || 50}%` }} 
                 
@@ -151,7 +163,19 @@ const EventCardItem = ({ evt, userId, onToggleLike }: { evt: Evento, userId: str
 };
 
 // --- COMPONENTE: CARD PRODUTO COM CONTADOR DE TURMAS ---
-const ProductCard = ({ prod, userId, onToggleLike, turmaStats }: { prod: Produto, userId: string, onToggleLike: (id: string, state: boolean) => void, turmaStats: DashboardTurmaStat[] }) => {
+const ProductCard = ({
+  prod,
+  userId,
+  onToggleLike,
+  turmaStats,
+  imagePriority = false,
+}: {
+  prod: Produto;
+  userId: string;
+  onToggleLike: (id: string, state: boolean) => void;
+  turmaStats: DashboardTurmaStat[];
+  imagePriority?: boolean;
+}) => {
     const isLiked = prod.likes?.includes(userId);
     const likeCount = prod.likes?.length || 0;
 
@@ -162,6 +186,8 @@ const ProductCard = ({ prod, userId, onToggleLike, turmaStats }: { prod: Produto
                     src={prod.img} 
                     alt={prod.nome}
                     fill
+                    sizes="(max-width: 768px) 100vw, 420px"
+                    priority={imagePriority}
                     className="object-cover group-hover:scale-105 transition duration-500" 
                     
                 />
@@ -204,6 +230,7 @@ const ProductCard = ({ prod, userId, onToggleLike, turmaStats }: { prod: Produto
                                               src={getTurmaImage(`T${st.turma}`)} 
                                               alt={`T${st.turma}`}
                                               fill
+                                              sizes="20px"
                                               className="object-cover"
                                               
                                            />
@@ -415,6 +442,7 @@ export default function DashboardPage() {
                     src={userData?.foto || "https://github.com/shadcn.png"} 
                     alt="Perfil" 
                     fill
+                    sizes="48px"
                     className="rounded-full object-cover" 
                     
                 />
@@ -429,7 +457,7 @@ export default function DashboardPage() {
 
           {parceirosOuro.length > 0 && (
             <div className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-4 pb-2">
-              {parceirosOuro.map((p) => (
+              {parceirosOuro.map((p, index) => (
                 <Link
                   href={`/parceiros/${p.id}`}
                   key={p.id}
@@ -440,6 +468,8 @@ export default function DashboardPage() {
                       src={getPartnerCoverSrc(p)}
                       alt={p.nome}
                       fill
+                      sizes="(max-width: 768px) 100vw, 420px"
+                      priority={index === 0}
                       className="object-cover opacity-35 group-hover:opacity-50 transition"
                       
                     />
@@ -451,7 +481,14 @@ export default function DashboardPage() {
                   </div>
                   <div className="relative z-10 h-full flex flex-col justify-end p-6">
                     <div className="w-24 h-24 rounded-2xl bg-black/70 border border-yellow-500/30 overflow-hidden mb-4 relative shadow-[0_0_20px_rgba(234,179,8,0.15)]">
-                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill className="object-cover"  />
+                      <Image
+                        src={getPartnerLogoSrc(p)}
+                        alt={p.nome}
+                        fill
+                        sizes="96px"
+                        priority={index === 0}
+                        className="object-cover"
+                      />
                     </div>
                     <h3 className="text-2xl font-black uppercase italic text-white leading-tight">{p.nome}</h3>
                     <p className="text-xs font-bold uppercase tracking-widest text-yellow-300/80 mt-2">
@@ -470,18 +507,25 @@ export default function DashboardPage() {
                 Parceiros Prata
               </div>
               <div className="flex overflow-x-auto gap-4 scrollbar-hide snap-x pb-2">
-                {parceirosPrata.map((p) => (
+                {parceirosPrata.map((p, index) => (
                   <Link
                     href={`/parceiros/${p.id}`}
                     key={p.id}
                     className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-700 hover:border-zinc-500"
                   >
                     <div className="absolute inset-0">
-                      <Image src={getPartnerCoverSrc(p)} alt="Capa" fill className="object-cover opacity-25 group-hover:opacity-40 transition"  />
+                      <Image
+                        src={getPartnerCoverSrc(p)}
+                        alt="Capa"
+                        fill
+                        sizes="150px"
+                        priority={index === 0 && parceirosOuro.length === 0}
+                        className="object-cover opacity-25 group-hover:opacity-40 transition"
+                      />
                       <div className="absolute inset-0 bg-black/50" />
                     </div>
                     <div className="w-20 h-20 bg-black rounded-full border-2 border-zinc-500/80 flex items-center justify-center overflow-hidden shadow-2xl relative z-10 group-hover:scale-110 transition">
-                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill className="object-cover"  />
+                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill sizes="80px" className="object-cover"  />
                     </div>
                     <div className="text-center relative z-10 px-2 w-full">
                       <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>
@@ -500,6 +544,7 @@ export default function DashboardPage() {
             src={getTurmaImage(userData?.turma)} 
             alt="Carteira BG"
             fill
+            sizes="(max-width: 768px) 100vw, 420px"
             className="object-cover opacity-40 group-hover:opacity-50 transition transform group-hover:scale-105 duration-700" 
             
             priority
@@ -531,7 +576,7 @@ export default function DashboardPage() {
               <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 opacity-30 group-hover:opacity-50 transition">
                   {treinos.length > 0 ? treinos.map((img, i) => (
                     <div key={i} className="relative w-full h-full border-[0.5px] border-black">
-                        <Image src={img} alt="Treino" fill className="object-cover" />
+                        <Image src={img} alt="Treino" fill sizes="25vw" className="object-cover" />
                     </div>
                   )) : (
                       <>
@@ -605,7 +650,15 @@ export default function DashboardPage() {
                   onNext={() => scroll(eventsScrollRef, 'right')} 
               />
               <div ref={eventsScrollRef} className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-4 pb-4">
-                  {events.map(evt => <EventCardItem key={evt.id} evt={evt} userId={userData?.uid} onToggleLike={handleEventLike} />)}
+                  {events.map((evt, index) => (
+                    <EventCardItem
+                      key={evt.id}
+                      evt={evt}
+                      userId={userData?.uid}
+                      onToggleLike={handleEventLike}
+                      imagePriority={index < 2}
+                    />
+                  ))}
               </div>
           </div>
       )}
@@ -637,6 +690,7 @@ export default function DashboardPage() {
                                             src={liga.foto || liga.logoBase64 || liga.logo || "/placeholder_liga.png"} 
                                             alt={liga.nome}
                                             fill
+                                            sizes="96px"
                                             className="rounded-full object-cover"
                                             
                                        />
@@ -685,7 +739,16 @@ export default function DashboardPage() {
           />
           {produtos.length > 0 ? (
             <div ref={productsScrollRef} className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-4 pb-4">
-                {produtos.map(p => <ProductCard key={p.id} prod={p} userId={userData?.uid} onToggleLike={handleProductLike} turmaStats={productTurmaStats[p.id] || []} />)}
+                {produtos.map((p, index) => (
+                  <ProductCard
+                    key={p.id}
+                    prod={p}
+                    userId={userData?.uid}
+                    onToggleLike={handleProductLike}
+                    turmaStats={productTurmaStats[p.id] || []}
+                    imagePriority={index < 2}
+                  />
+                ))}
             </div>
           ) : (
             <Link
@@ -713,11 +776,11 @@ export default function DashboardPage() {
                    {parceirosStandard.map((p) => (
                        <Link href={`/parceiros/${p.id}`} key={p.id} className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-800 hover:border-zinc-600">
                            <div className="absolute inset-0">
-                               <Image src={getPartnerCoverSrc(p)} alt="Capa" fill className="object-cover opacity-30 group-hover:opacity-50 transition" />
+                               <Image src={getPartnerCoverSrc(p)} alt="Capa" fill sizes="150px" className="object-cover opacity-30 group-hover:opacity-50 transition" />
                                <div className="absolute inset-0 bg-black/40"/>
                            </div>
                            <div className="w-20 h-20 bg-black rounded-full border-2 border-zinc-600 flex items-center justify-center overflow-hidden shadow-2xl relative z-10 group-hover:scale-110 transition">
-                               <Image src={getPartnerLogoSrc(p)} alt="Logo" fill className="object-cover" />
+                               <Image src={getPartnerLogoSrc(p)} alt="Logo" fill sizes="80px" className="object-cover" />
                            </div>
                            <div className="text-center relative z-10 px-2 w-full">
                                <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>
@@ -743,6 +806,7 @@ export default function DashboardPage() {
                             src={msg.avatar || "https://github.com/shadcn.png"} 
                             alt="Avatar"
                             fill
+                            sizes="40px"
                             className="object-cover"
                             
                         />

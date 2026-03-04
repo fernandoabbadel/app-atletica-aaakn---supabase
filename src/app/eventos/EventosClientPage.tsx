@@ -180,10 +180,12 @@ function EventCard({
   ev,
   userId,
   onLikeError,
+  imagePriority = false,
 }: {
   ev: Evento;
   userId?: string;
   onLikeError: (message: string) => void;
+  imagePriority?: boolean;
 }) {
   const [liked, setLiked] = useState(Boolean(userId && ev.likesList?.includes(userId)));
   const [likesCount, setLikesCount] = useState(ev.stats?.likes || 0);
@@ -236,6 +238,7 @@ function EventCard({
                 alt={ev.titulo}
                 fill
                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                priority={imagePriority}
                 className="object-cover transition-transform duration-700 group-hover:scale-105 opacity-80 group-hover:opacity-100"
                 style={{ objectPosition: `50% ${ev.imagePositionY || 50}%` }}
             />
@@ -425,8 +428,14 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
 
       {/* GRID RESPONSIVO */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-fr">
-          {filteredEvents.map((ev) => (
-              <EventCard key={ev.id} ev={ev} userId={user?.uid} onLikeError={(message) => addToast(message, "error")} />
+          {filteredEvents.map((ev, index) => (
+              <EventCard
+                key={ev.id}
+                ev={ev}
+                userId={user?.uid}
+                onLikeError={(message) => addToast(message, "error")}
+                imagePriority={index < 2}
+              />
           ))}
 
           {/* Estado Vazio */}

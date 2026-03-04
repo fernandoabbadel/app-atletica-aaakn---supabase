@@ -326,7 +326,7 @@ export default function BottomNavbar() {
         <div className="p-6 pb-4 border-b border-zinc-800 bg-black/40 backdrop-blur-sm flex justify-between items-center">
             <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-900/20 relative">
-                    <OptimizedImage src="/logo.png" alt="Logo" fill sizes="32px" className="object-contain p-1" priority/>
+                    <OptimizedImage src="/logo.png" alt="Logo" fill sizes="32px" className="object-contain p-1" />
                 </div>
                 <div>
                     <h2 className="text-lg font-black italic uppercase text-white leading-none">AAAKN</h2>
