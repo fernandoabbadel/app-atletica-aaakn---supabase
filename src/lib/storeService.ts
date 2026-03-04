@@ -1,29 +1,17 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  arrayRemove,
-  arrayUnion,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-  type QueryConstraint,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 type Row = Record<string, unknown>;
+type QueryAttempt = {
+  limit: number;
+  orderByField?: string;
+  orderAscending?: boolean;
+  filters?: Array<{ field: string; value: unknown }>;
+};
 
 const TTL_MS = 120_000;
 const MAX_PRODUCTS = 240;
@@ -77,6 +65,31 @@ const throwSupabaseError = (error: { message: string; code?: string | null; name
   });
 };
 
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [
+    typeof raw.message === "string" ? raw.message : "",
+    typeof raw.details === "string" ? raw.details : "",
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const nowIso = (): string => new Date().toISOString();
+
 const shouldFallbackToClient = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
@@ -97,16 +110,6 @@ const shouldUseCallable = (): boolean => {
 
   const host = window.location.hostname.toLowerCase();
   return host !== "localhost" && host !== "127.0.0.1";
-};
-
-const isIndexRequired = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase();
-  if (code?.includes("failed-precondition")) return true;
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("index") && message.includes("query");
-  }
-  return false;
 };
 
 async function callWithFallback<TReq, TRes>(
@@ -130,23 +133,35 @@ async function callWithFallback<TReq, TRes>(
   }
 }
 
-async function queryRows(path: string, attempts: QueryConstraint[][]): Promise<Row[]> {
-  const safeAttempts = attempts.filter((entry) => entry.length > 0);
+async function queryRows(path: string, attempts: QueryAttempt[]): Promise<Row[]> {
+  const supabase = getSupabaseClient();
+  const safeAttempts = attempts.filter((entry) => entry.limit > 0);
   if (!safeAttempts.length) return [];
 
-  let lastError: unknown = null;
-  for (let i = 0; i < safeAttempts.length; i += 1) {
-    try {
-      const snap = await getDocs(query(collection(db, path), ...safeAttempts[i]));
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Row) }));
-    } catch (error: unknown) {
-      lastError = error;
-      const isLast = i === safeAttempts.length - 1;
-      if (!isIndexRequired(error) || isLast) throw error;
+  for (const attempt of safeAttempts) {
+    let request = supabase.from(path).select("*").limit(attempt.limit);
+
+    (attempt.filters ?? []).forEach((filter) => {
+      request = request.eq(filter.field, filter.value);
+    });
+
+    if (attempt.orderByField) {
+      request = request.order(attempt.orderByField, {
+        ascending: attempt.orderAscending ?? false,
+      });
+    }
+
+    const { data, error } = await request;
+    if (!error) {
+      return ((data ?? []) as Row[]).map((row) => ({ ...row }));
+    }
+
+    const missingColumn = extractMissingSchemaColumn(error);
+    if (!missingColumn) {
+      throwSupabaseError(error);
     }
   }
 
-  if (lastError) throw lastError;
   return [];
 }
 
@@ -194,10 +209,22 @@ export async function fetchAdminStoreBundle(options?: {
   }
 
   const [produtos, categorias, pedidos, reviews] = await Promise.all([
-    queryRows("produtos", [[orderBy("nome", "asc"), limit(productsLimit)], [limit(productsLimit)]]),
-    queryRows("categorias", [[orderBy("nome", "asc"), limit(categoriesLimit)], [limit(categoriesLimit)]]),
-    queryRows("orders", [[orderBy("createdAt", "desc"), limit(ordersLimit)], [limit(ordersLimit)]]),
-    queryRows("reviews", [[orderBy("createdAt", "desc"), limit(reviewsLimit)], [limit(reviewsLimit)]]),
+    queryRows("produtos", [
+      { orderByField: "nome", orderAscending: true, limit: productsLimit },
+      { limit: productsLimit },
+    ]),
+    queryRows("categorias", [
+      { orderByField: "nome", orderAscending: true, limit: categoriesLimit },
+      { limit: categoriesLimit },
+    ]),
+    queryRows("orders", [
+      { orderByField: "createdAt", orderAscending: false, limit: ordersLimit },
+      { limit: ordersLimit },
+    ]),
+    queryRows("reviews", [
+      { orderByField: "createdAt", orderAscending: false, limit: reviewsLimit },
+      { limit: reviewsLimit },
+    ]),
   ]);
 
   const bundle = { produtos, categorias, pedidos, reviews };
@@ -218,7 +245,10 @@ export async function fetchStoreProducts(options?: {
     if (cached) return cached;
   }
 
-  const rows = await queryRows("produtos", [[orderBy("nome", "asc"), limit(maxResults)], [limit(maxResults)]]);
+  const rows = await queryRows("produtos", [
+    { orderByField: "nome", orderAscending: true, limit: maxResults },
+    { limit: maxResults },
+  ]);
   setCache(productsFeedCache, cacheKey, rows);
   return rows;
 }
@@ -250,20 +280,48 @@ export async function fetchStoreProductDetail(options: {
     if (cached) return cached;
   }
 
-  const produtoSnap = await getDoc(doc(db, "produtos", productId));
-  const produto = produtoSnap.exists()
-    ? ({ id: produtoSnap.id, ...(produtoSnap.data() as Row) } as Row)
-    : null;
+  const supabase = getSupabaseClient();
+  const { data: produtoData, error: produtoError } = await supabase
+    .from("produtos")
+    .select("*")
+    .eq("id", productId)
+    .maybeSingle();
+  if (produtoError) {
+    throwSupabaseError(produtoError);
+  }
+  const produto = (produtoData as Row | null) ?? null;
 
   const reviewsPromise = queryRows("reviews", [
-    [where("productId", "==", productId), orderBy("createdAt", "desc"), limit(reviewsLimit)],
-    [where("productId", "==", productId), limit(reviewsLimit)],
+    {
+      filters: [{ field: "productId", value: productId }],
+      orderByField: "createdAt",
+      orderAscending: false,
+      limit: reviewsLimit,
+    },
+    {
+      filters: [{ field: "productId", value: productId }],
+      limit: reviewsLimit,
+    },
   ]);
 
   const ordersPromise = userId
     ? queryRows("orders", [
-        [where("userId", "==", userId), where("productId", "==", productId), orderBy("createdAt", "desc"), limit(ordersLimit)],
-        [where("userId", "==", userId), where("productId", "==", productId), limit(ordersLimit)],
+        {
+          filters: [
+            { field: "userId", value: userId },
+            { field: "productId", value: productId },
+          ],
+          orderByField: "createdAt",
+          orderAscending: false,
+          limit: ordersLimit,
+        },
+        {
+          filters: [
+            { field: "userId", value: userId },
+            { field: "productId", value: productId },
+          ],
+          limit: ordersLimit,
+        },
       ])
     : Promise.resolve([]);
 
@@ -287,10 +345,36 @@ export async function toggleStoreProductLike(payload: {
     CALLABLE_TOGGLE_LIKE,
     payload,
     async () => {
-      await updateDoc(doc(db, "produtos", productId), {
-        likes: payload.currentlyLiked ? arrayRemove(userId) : arrayUnion(userId),
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const { data: productData, error: productError } = await supabase
+        .from("produtos")
+        .select("likes")
+        .eq("id", productId)
+        .maybeSingle();
+      if (productError) {
+        throwSupabaseError(productError);
+      }
+
+      const currentLikes = Array.isArray(productData?.likes)
+        ? productData.likes.filter((entry): entry is string => typeof entry === "string")
+        : [];
+      const likesSet = new Set(currentLikes);
+      if (payload.currentlyLiked) {
+        likesSet.delete(userId);
+      } else {
+        likesSet.add(userId);
+      }
+
+      const { error: updateError } = await supabase
+        .from("produtos")
+        .update({
+          likes: Array.from(likesSet),
+          updatedAt: nowIso(),
+        })
+        .eq("id", productId);
+      if (updateError) {
+        throwSupabaseError(updateError);
+      }
       return { ok: true };
     }
   );
@@ -317,23 +401,37 @@ export async function createStoreOrder(payload: {
     CALLABLE_CREATE_ORDER,
     requestPayload,
     async () => {
-      const orderRef = await addDoc(collection(db, "orders"), {
-        ...requestPayload,
-        status: "pendente",
-        createdAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const now = nowIso();
 
-      await addDoc(collection(db, "notifications"), {
+      const { data: orderData, error: orderError } = await supabase
+        .from("orders")
+        .insert({
+          ...requestPayload,
+          status: "pendente",
+          createdAt: now,
+          updatedAt: now,
+        })
+        .select("id")
+        .single();
+      if (orderError) {
+        throwSupabaseError(orderError);
+      }
+
+      const { error: notificationError } = await supabase.from("notifications").insert({
         userId: requestPayload.userId,
         title: "Compra em Analise",
         message: `Seu pedido de ${requestPayload.productName} foi enviado para aprovacao.`,
         link: `/loja/${requestPayload.productId}`,
         read: false,
         type: "order",
-        createdAt: serverTimestamp(),
+        createdAt: now,
       });
+      if (notificationError) {
+        throwSupabaseError(notificationError);
+      }
 
-      return { id: orderRef.id };
+      return { id: String((orderData as Row | null)?.id ?? "") };
     }
   );
 
@@ -349,7 +447,11 @@ export async function cancelStoreOrderRequest(orderIdRaw: string): Promise<void>
     CALLABLE_CANCEL_ORDER,
     { orderId },
     async () => {
-      await deleteDoc(doc(db, "orders", orderId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("orders").delete().eq("id", orderId);
+      if (error) {
+        throwSupabaseError(error);
+      }
       return { ok: true };
     }
   );
@@ -378,12 +480,20 @@ export async function createStoreReview(payload: {
     CALLABLE_CREATE_REVIEW,
     requestPayload,
     async () => {
-      const reviewRef = await addDoc(collection(db, "reviews"), {
-        ...requestPayload,
-        createdAt: serverTimestamp(),
-        status: "pending",
-      });
-      return { id: reviewRef.id };
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from("reviews")
+        .insert({
+          ...requestPayload,
+          createdAt: nowIso(),
+          status: "pending",
+        })
+        .select("id")
+        .single();
+      if (error) {
+        throwSupabaseError(error);
+      }
+      return { id: String((data as Row | null)?.id ?? "") };
     }
   );
 
@@ -585,10 +695,18 @@ export async function setStoreReviewStatus(payload: {
     CALLABLE_SET_REVIEW_STATUS,
     payload,
     async () => {
-      await updateDoc(doc(db, "reviews", reviewId), {
-        status: payload.status,
-        approved: payload.status === "approved",
-      });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("reviews")
+        .update({
+          status: payload.status,
+          approved: payload.status === "approved",
+          updatedAt: nowIso(),
+        })
+        .eq("id", reviewId);
+      if (error) {
+        throwSupabaseError(error);
+      }
       return { ok: true };
     }
   );
@@ -610,15 +728,29 @@ export async function upsertStoreProduct(payload: {
     CALLABLE_UPSERT_PRODUCT,
     requestPayload,
     async () => {
+      const supabase = getSupabaseClient();
       if (productId) {
-        await updateDoc(doc(db, "produtos", productId), payload.data);
+        const { error } = await supabase
+          .from("produtos")
+          .update({
+            ...payload.data,
+            updatedAt: nowIso(),
+          })
+          .eq("id", productId);
+        if (error) {
+          throwSupabaseError(error);
+        }
       } else {
-        await addDoc(collection(db, "produtos"), {
+        const { error } = await supabase.from("produtos").insert({
           ...payload.data,
-          createdAt: serverTimestamp(),
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
           vendidos: 0,
           cliques: 0,
         });
+        if (error) {
+          throwSupabaseError(error);
+        }
       }
       return { ok: true };
     }
@@ -635,7 +767,11 @@ export async function deleteStoreProduct(productId: string): Promise<void> {
     CALLABLE_DELETE_PRODUCT,
     { productId: cleanId },
     async () => {
-      await deleteDoc(doc(db, "produtos", cleanId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("produtos").delete().eq("id", cleanId);
+      if (error) {
+        throwSupabaseError(error);
+      }
       return { ok: true };
     }
   );
@@ -651,7 +787,15 @@ export async function createStoreCategory(nome: string): Promise<void> {
     CALLABLE_CREATE_CATEGORY,
     { nome: cleanNome },
     async () => {
-      await addDoc(collection(db, "categorias"), { nome: cleanNome, createdAt: serverTimestamp() });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("categorias").insert({
+        nome: cleanNome,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      });
+      if (error) {
+        throwSupabaseError(error);
+      }
       return { ok: true };
     }
   );
