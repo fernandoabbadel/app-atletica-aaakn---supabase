@@ -1,16 +1,9 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  collection,
-  doc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  updateDoc,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { throwSupabaseError } from "./supabaseData";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -168,14 +161,16 @@ export async function fetchSharkroundLeagues(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, SHARKROUND_LEAGUES_COLLECTION),
-    orderBy("nome", "asc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  const leagues = snap.docs
-    .map((row) => normalizeLeague(row.id, row.data()))
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from(SHARKROUND_LEAGUES_COLLECTION)
+    .select("id,nome,senha,ativa,perguntas,foto,sigla")
+    .order("nome", { ascending: true })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  const leagues = (data ?? [])
+    .map((row) => normalizeLeague(asString((row as Record<string, unknown>).id), row))
     .filter((row): row is SharkroundLeagueRecord => row !== null);
 
   setCachedValue(leaguesCache, cacheKey, leagues);
@@ -191,13 +186,15 @@ export async function setSharkroundLeagueActive(payload: {
 
   const requestPayload = { leagueId, ativa: payload.ativa };
   await callWithFallback<typeof requestPayload, { ok: boolean }>(
-      SHARKROUND_TOGGLE_CALLABLE,
+    SHARKROUND_TOGGLE_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(
-        doc(db, SHARKROUND_LEAGUES_COLLECTION, leagueId),
-        { ativa: payload.ativa }
-      );
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from(SHARKROUND_LEAGUES_COLLECTION)
+        .update({ ativa: payload.ativa, updatedAt: new Date().toISOString() })
+        .eq("id", leagueId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
