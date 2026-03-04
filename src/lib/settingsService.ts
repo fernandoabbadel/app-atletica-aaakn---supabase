@@ -1,23 +1,8 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  deleteField,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -76,11 +61,55 @@ export interface UserOrderRecord {
 
 const ORDER_CONFIG: Record<
   OrdersTab,
-  { collectionName: string; orderField: string }
+  { collectionName: string; orderField: string; selectColumns: string[] }
 > = {
-  eventos: { collectionName: "solicitacoes_ingressos", orderField: "dataSolicitacao" },
-  loja: { collectionName: "pedidos_loja", orderField: "createdAt" },
-  planos: { collectionName: "solicitacoes_adesao", orderField: "dataSolicitacao" },
+  eventos: {
+    collectionName: "solicitacoes_ingressos",
+    orderField: "dataSolicitacao",
+    selectColumns: [
+      "id",
+      "userId",
+      "status",
+      "eventoNome",
+      "quantidade",
+      "loteNome",
+      "valorTotal",
+      "dataSolicitacao",
+      "createdAt",
+      "data",
+    ],
+  },
+  loja: {
+    collectionName: "pedidos_loja",
+    orderField: "createdAt",
+    selectColumns: [
+      "id",
+      "userId",
+      "status",
+      "productName",
+      "productId",
+      "quantidade",
+      "itens",
+      "total",
+      "price",
+      "createdAt",
+      "data",
+    ],
+  },
+  planos: {
+    collectionName: "solicitacoes_adesao",
+    orderField: "dataSolicitacao",
+    selectColumns: [
+      "id",
+      "userId",
+      "status",
+      "planoNome",
+      "valor",
+      "dataSolicitacao",
+      "createdAt",
+      "data",
+    ],
+  },
 };
 
 let menuCache: CacheEntry<MenuConfigSection[] | null> | null = null;
@@ -150,16 +179,34 @@ const shouldFallbackToClientWrites = (error: unknown): boolean => {
   );
 };
 
-const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase();
-  if (code?.includes("failed-precondition")) return true;
-
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("index") && message.includes("query");
-  }
-  return false;
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
 };
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const nowIso = (): string => new Date().toISOString();
 
 async function callWithFallback<TReq, TRes>(
   callableName: string,
@@ -263,6 +310,50 @@ const sortByFieldDesc = (
       toMillis(right.data[orderField]) - toMillis(left.data[orderField])
   );
 
+const mapSupabaseRowsToUserOrders = (rows: unknown[]): UserOrderRecord[] =>
+  rows
+    .map((row) => asObject(row))
+    .filter((row): row is Record<string, unknown> => row !== null)
+    .map((row) => {
+      const { id, ...rest } = row;
+      return {
+        id: asString(id),
+        data: rest,
+      };
+    })
+    .filter((row) => row.id.length > 0);
+
+const removeMissingColumnFromSelection = (
+  columns: string[],
+  missingColumn: string
+): string[] | null => {
+  const next = columns.filter((column) => column.toLowerCase() !== missingColumn.toLowerCase());
+  if (next.length === columns.length) return null;
+  return next;
+};
+
+const updateUsersWithFallback = async (
+  uid: string,
+  patch: Record<string, unknown>
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const mutablePatch = { ...patch };
+
+  while (Object.keys(mutablePatch).length > 0) {
+    const { error } = await supabase.from("users").update(mutablePatch).eq("uid", uid);
+    if (!error) return;
+
+    const missingColumnLower = asString(extractMissingSchemaColumn(error)).toLowerCase();
+    if (!missingColumnLower) throwSupabaseError(error);
+
+    const removableKey = Object.keys(mutablePatch).find(
+      (key) => key.toLowerCase() === missingColumnLower
+    );
+    if (!removableKey) throwSupabaseError(error);
+    delete mutablePatch[String(removableKey)];
+  }
+};
+
 export async function fetchMenuConfig(options?: {
   forceRefresh?: boolean;
 }): Promise<MenuConfigSection[] | null> {
@@ -273,13 +364,20 @@ export async function fetchMenuConfig(options?: {
     if (cached) return cached;
   }
 
-  const snap = await getDoc(doc(db, "app_config", "menu"));
-  if (!snap.exists()) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("app_config")
+    .select("id,sections")
+    .eq("id", "menu")
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  if (!data) {
     menuCache = { cachedAt: Date.now(), value: null };
     return null;
   }
 
-  const sections = sanitizeMenuSections((snap.data() as { sections?: unknown }).sections);
+  const sections = sanitizeMenuSections(data.sections);
   menuCache = { cachedAt: Date.now(), value: sections };
   return sections;
 }
@@ -293,10 +391,16 @@ export async function saveMenuConfig(
     SETTINGS_SAVE_MENU_CALLABLE,
     { sections: normalized },
     async () => {
-      await setDoc(doc(db, "app_config", "menu"), {
-        sections: normalized,
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("app_config").upsert(
+        {
+          id: "menu",
+          sections: normalized,
+          updatedAt: nowIso(),
+        },
+        { onConflict: "id" }
+      );
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -322,12 +426,17 @@ export async function fetchLegalDocs(options?: {
     if (cached) return cached;
   }
 
-  const q = query(collection(db, "legal_docs"), orderBy("titulo", "asc"), limit(maxResults));
-  const snap = await getDocs(q);
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("legal_docs")
+    .select("id,titulo,conteudo,tipo,iconName")
+    .order("titulo", { ascending: true })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
 
   const docs: LegalDocRecord[] = [];
-  snap.forEach((row) => {
-    const normalized = normalizeLegalDoc(row.id, row.data());
+  (data ?? []).forEach((row) => {
+    const normalized = normalizeLegalDoc(asString((row as Record<string, unknown>).id), row);
     if (!normalized) return;
     if (!includeInternal && normalized.tipo !== "publico") return;
     docs.push(normalized);
@@ -354,11 +463,18 @@ export async function createLegalDoc(payload: {
     typeof safePayload,
     { id: string }
   >(SETTINGS_CREATE_DOC_CALLABLE, safePayload, async () => {
-    const ref = await addDoc(collection(db, "legal_docs"), {
-      ...safePayload,
-      createdAt: serverTimestamp(),
-    });
-    return { id: ref.id };
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("legal_docs")
+      .insert({
+        ...safePayload,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      })
+      .select("id")
+      .single();
+    if (error) throwSupabaseError(error);
+    return { id: asString((data as Record<string, unknown> | null)?.id) };
   });
 
   legalDocsCache.clear();
@@ -382,11 +498,16 @@ export async function updateLegalDoc(
     SETTINGS_UPDATE_DOC_CALLABLE,
     safePayload,
     async () => {
-      await updateDoc(doc(db, "legal_docs", cleanId), {
-        titulo: safePayload.titulo,
-        conteudo: safePayload.conteudo,
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("legal_docs")
+        .update({
+          titulo: safePayload.titulo,
+          conteudo: safePayload.conteudo,
+          updatedAt: nowIso(),
+        })
+        .eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -402,7 +523,9 @@ export async function removeLegalDoc(id: string): Promise<void> {
     SETTINGS_DELETE_DOC_CALLABLE,
     { id: cleanId },
     async () => {
-      await deleteDoc(doc(db, "legal_docs", cleanId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("legal_docs").delete().eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -427,39 +550,37 @@ export async function fetchUserOrdersByTab(
     if (cached) return cached;
   }
 
-  const { collectionName, orderField } = ORDER_CONFIG[tab];
+  const { collectionName, orderField, selectColumns } = ORDER_CONFIG[tab];
+  const supabase = getSupabaseClient();
+  let mutableColumns = [...selectColumns];
   let rows: UserOrderRecord[] = [];
 
-  try {
-    const q = query(
-      collection(db, collectionName),
-      where("userId", "==", cleanUserId),
-      orderBy(orderField, "desc"),
-      limit(maxResults)
-    );
-    const snap = await getDocs(q);
-    rows = snap.docs.map((row) => ({
-      id: row.id,
-      data: row.data() as Record<string, unknown>,
-    }));
-  } catch (error: unknown) {
-    if (!isIndexRequiredError(error)) {
-      throw error;
+  while (mutableColumns.length > 0) {
+    let query = supabase
+      .from(collectionName)
+      .select(mutableColumns.join(","))
+      .eq("userId", cleanUserId)
+      .limit(maxResults);
+
+    if (mutableColumns.some((column) => column.toLowerCase() === orderField.toLowerCase())) {
+      query = query.order(orderField, { ascending: false });
     }
 
-    const fallbackQuery = query(
-      collection(db, collectionName),
-      where("userId", "==", cleanUserId),
-      limit(maxResults)
-    );
-    const fallbackSnap = await getDocs(fallbackQuery);
-    rows = sortByFieldDesc(
-      fallbackSnap.docs.map((row) => ({
-        id: row.id,
-        data: row.data() as Record<string, unknown>,
-      })),
-      orderField
-    );
+    const { data, error } = await query;
+    if (!error) {
+      rows = mapSupabaseRowsToUserOrders((data ?? []) as unknown[]);
+      if (!mutableColumns.some((column) => column.toLowerCase() === orderField.toLowerCase())) {
+        rows = sortByFieldDesc(rows, orderField);
+      }
+      break;
+    }
+
+    const missingColumnName = asString(extractMissingSchemaColumn(error));
+    if (!missingColumnName) throwSupabaseError(error);
+
+    const nextColumns = removeMissingColumnFromSelection(mutableColumns, missingColumnName) ?? [];
+    if (nextColumns.length === 0) throwSupabaseError(error);
+    mutableColumns = nextColumns;
   }
 
   setMapCachedValue(userOrdersCache, cacheKey, rows);
@@ -494,11 +615,11 @@ export async function toggleAccountStatus(payload: {
     USER_TOGGLE_STATUS_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "users", uid), {
+      await updateUsersWithFallback(uid, {
         status: nextStatus,
         role: nextRole,
         saved_role: isActive ? currentRole : null,
-        updatedAt: serverTimestamp(),
+        updatedAt: nowIso(),
       });
       return { ok: true };
     }
@@ -525,23 +646,22 @@ export async function softDeleteAccount(payload: {
     USER_SOFT_DELETE_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "users", uid), {
+      await updateUsersWithFallback(uid, {
         nome: "Usuario Excluido",
         email: `deleted_${uid}@aaakn.com`,
         foto: requestPayload.photoUrl || "https://github.com/shadcn.png",
         status: "deleted",
         role: "banned",
         turma: "N/A",
-        deletedAt: serverTimestamp(),
-        cpf: deleteField(),
-        telefone: deleteField(),
-        instagram: deleteField(),
-        linkedin: deleteField(),
-        saved_role: deleteField(),
+        deletedAt: nowIso(),
+        cpf: null,
+        telefone: null,
+        instagram: null,
+        linkedin: null,
+        saved_role: null,
+        updatedAt: nowIso(),
       });
       return { ok: true };
     }
   );
 }
-
-
