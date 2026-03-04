@@ -1,22 +1,9 @@
-import { httpsCallable } from "@/lib/supa/functions";
 import {
-  arrayRemove,
-  arrayUnion,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  query,
-  runTransaction,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from "@/lib/supabaseHelpers";
-
-import { db, functions } from "./backend";
-import { getBackendErrorCode } from "./backendErrors";
+  setEventRsvpDetailed as setEventRsvpNative,
+  toggleEventLike as toggleEventLikeNative,
+} from "./eventsNativeService";
+import { throwSupabaseError } from "./supabaseData";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -26,9 +13,6 @@ type CacheEntry<T> = {
 const READ_CACHE_TTL_MS = 20_000;
 const DEFAULT_PREVIEW_RESULTS = 4;
 const MAX_PREVIEW_RESULTS = 12;
-
-const EVENT_LIKE_CALLABLE = "eventToggleLike";
-const EVENT_RSVP_CALLABLE = "eventSetRsvp";
 
 const eventCardStateCache = new Map<string, CacheEntry<EventCardState>>();
 
@@ -60,37 +44,6 @@ const boundedPreviewLimit = (requested: number): number => {
   if (requested > MAX_PREVIEW_RESULTS) return MAX_PREVIEW_RESULTS;
   return Math.floor(requested);
 };
-
-const shouldFallbackToClientWrites = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase();
-  if (!code) return true;
-
-  return (
-    code.includes("functions/not-found") ||
-    code.includes("functions/unavailable") ||
-    code.includes("functions/internal") ||
-    code.includes("functions/deadline-exceeded") ||
-    code.includes("functions/cancelled") ||
-    code.includes("functions/unknown")
-  );
-};
-
-async function callWithFallback<TReq, TRes>(
-  callableName: string,
-  payload: TReq,
-  fallbackFn: () => Promise<TRes>
-): Promise<TRes> {
-  try {
-    const callable = httpsCallable<TReq, TRes>(functions, callableName);
-    const response = await callable(payload);
-    return response.data;
-  } catch (error: unknown) {
-    if (shouldFallbackToClientWrites(error)) {
-      return fallbackFn();
-    }
-    throw error;
-  }
-}
 
 const toCacheKey = (
   eventId: string,
@@ -139,29 +92,32 @@ async function fetchUserRsvp(
 ): Promise<EventRsvpStatus | null> {
   if (!userId) return null;
 
-  const userDoc = await getDoc(doc(db, "eventos", eventId, "rsvps", userId));
-  if (!userDoc.exists()) return null;
-
-  const data = asObject(userDoc.data());
-  return normalizeStatus(data?.status);
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("eventos_rsvps")
+    .select("status")
+    .eq("eventoId", eventId)
+    .eq("userId", userId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+  return normalizeStatus(asObject(data)?.status ?? data?.status);
 }
 
 async function fetchPreviewAvatars(
   eventId: string,
   previewLimit: number
 ): Promise<string[]> {
-  const q = query(
-    collection(db, "eventos", eventId, "rsvps"),
-    where("status", "==", "going"),
-    limit(previewLimit)
-  );
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("eventos_rsvps")
+    .select("userAvatar")
+    .eq("eventoId", eventId)
+    .eq("status", "going")
+    .limit(previewLimit);
+  if (error) throwSupabaseError(error);
 
-  const snap = await getDocs(q);
-  const avatars = snap.docs
-    .map((entry) => {
-      const data = asObject(entry.data());
-      return asString(data?.userAvatar).trim();
-    })
+  const avatars = (data ?? [])
+    .map((entry) => asString(asObject(entry)?.userAvatar).trim())
     .filter((value) => value.length > 0);
 
   return [...new Set(avatars)].slice(0, previewLimit);
@@ -209,24 +165,11 @@ export async function toggleEventLike(payload: {
   const userId = payload.userId.trim();
   if (!eventId || !userId) return;
 
-  const requestPayload = {
+  await toggleEventLikeNative({
     eventId,
     userId,
     currentlyLiked: payload.currentlyLiked,
-  };
-
-  await callWithFallback<typeof requestPayload, { ok: boolean }>(
-    EVENT_LIKE_CALLABLE,
-    requestPayload,
-    async () => {
-      await updateDoc(doc(db, "eventos", eventId), {
-        likesList: payload.currentlyLiked ? arrayRemove(userId) : arrayUnion(userId),
-        "stats.likes": increment(payload.currentlyLiked ? -1 : 1),
-        updatedAt: serverTimestamp(),
-      });
-      return { ok: true };
-    }
-  );
+  });
 
   invalidateEventCardCache(eventId);
 }
@@ -255,52 +198,14 @@ export async function setEventRsvp(payload: {
     userTurma: payload.userTurma.trim().slice(0, 30) || "Geral",
   };
 
-  await callWithFallback<typeof requestPayload, { ok: boolean }>(
-    EVENT_RSVP_CALLABLE,
-    requestPayload,
-    async () => {
-      await runTransaction(db, async (tx) => {
-        const eventRef = doc(db, "eventos", eventId);
-        const rsvpRef = doc(db, "eventos", eventId, "rsvps", userId);
-
-        const previousSnap = await tx.get(rsvpRef);
-        const previousData = asObject(previousSnap.data());
-        const oldStatus = normalizeStatus(previousData?.status);
-
-        if (oldStatus === status) {
-          tx.delete(rsvpRef);
-          tx.update(eventRef, {
-            [`stats.${status === "going" ? "confirmados" : "talvez"}`]: increment(-1),
-            updatedAt: serverTimestamp(),
-          });
-          return;
-        }
-
-        if (oldStatus) {
-          tx.update(eventRef, {
-            [`stats.${oldStatus === "going" ? "confirmados" : "talvez"}`]:
-              increment(-1),
-          });
-        }
-
-        tx.set(rsvpRef, {
-          userId,
-          status,
-          userName: requestPayload.userName,
-          userAvatar: requestPayload.userAvatar,
-          userTurma: requestPayload.userTurma,
-          timestamp: serverTimestamp(),
-        });
-
-        tx.update(eventRef, {
-          [`stats.${status === "going" ? "confirmados" : "talvez"}`]: increment(1),
-          updatedAt: serverTimestamp(),
-        });
-      });
-
-      return { ok: true };
-    }
-  );
+  await setEventRsvpNative({
+    eventId,
+    userId,
+    status,
+    userName: requestPayload.userName,
+    userAvatar: requestPayload.userAvatar,
+    userTurma: requestPayload.userTurma,
+  });
 
   invalidateEventCardCache(eventId);
 }
