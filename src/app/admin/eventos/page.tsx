@@ -179,7 +179,12 @@ export default function AdminEventosPage() {
 
   const loadEventos = useCallback(async (forceRefresh = true) => {
       try {
-          const rows = await fetchEventsFeed({ maxResults: 50, forceRefresh });
+          const rows = await fetchEventsFeed({
+              maxResults: 50,
+              forceRefresh,
+              includeInactive: true,
+              includePast: true,
+          });
           setEventos(rows.map((row) => mapEventRow(row)));
       } catch (error: unknown) {
           console.error(error);

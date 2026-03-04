@@ -30,7 +30,7 @@ const EVENTOS_SELECT_COLUMNS =
 const EVENTOS_RSVPS_SELECT_COLUMNS =
   "id,eventoId,userId,status,userName,userAvatar,userTurma,timestamp";
 const EVENTOS_COMENTARIOS_SELECT_COLUMNS =
-  "id,eventoId,userId,userName,userAvatar,userTurma,role,userPlanoCor,userPlanoIcon,userPatente,text,texto:text,likes,reports,hidden,createdAt,updatedAt";
+  "id,eventoId,userId,userName,userAvatar,userTurma,role,userPlanoCor,userPlanoIcon,userPatente,text,likes,reports,hidden,createdAt,updatedAt";
 const EVENTOS_ENQUETES_SELECT_COLUMNS =
   "id,eventoId,question,allowUserOptions,options,voters,userVotes,createdAt,updatedAt";
 const PATENTES_SELECT_COLUMNS = "id,titulo,minXp,cor,iconName,bg,border,text";
@@ -38,6 +38,20 @@ const SOLICITACOES_INGRESSOS_SELECT_COLUMNS =
   "id,eventoId,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,dataSolicitacao,dataAprovacao,aprovadoPor";
 const FINANCEIRO_CONFIG_SELECT_COLUMNS =
   "id,data,chave,banco,titular,whatsapp,updatedAt,createdAt";
+const MONTHS_PT_BR: Record<string, number> = {
+  JAN: 0,
+  FEV: 1,
+  MAR: 2,
+  ABR: 3,
+  MAI: 4,
+  JUN: 5,
+  JUL: 6,
+  AGO: 7,
+  SET: 8,
+  OUT: 9,
+  NOV: 10,
+  DEZ: 11,
+};
 
 const feedCache = new Map<string, CacheEntry<Row[]>>();
 const detailsCache = new Map<string, CacheEntry<EventDetailsBundle>>();
@@ -243,29 +257,108 @@ function nextOffsetCursor(offset: number, pageSize: number, hasMore: boolean): s
 export async function fetchEventsFeed(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  includeInactive?: boolean;
+  includePast?: boolean;
 }): Promise<Row[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 60, MAX_EVENTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const includeInactive = options?.includeInactive ?? false;
+  const includePast = options?.includePast ?? false;
+  const cacheKey = `${maxResults}:${includeInactive ? "all" : "active"}:${includePast ? "past" : "future"}`;
 
   if (!forceRefresh) {
     const cached = getCache(feedCache, cacheKey);
     if (cached) return cached;
   }
 
+  const parseEventDateTimeMs = (row: Row): number | null => {
+    const dateRaw = asString(row.data).trim();
+    if (!dateRaw) return null;
+
+    const timeRaw = asString(row.hora, "00:00").trim();
+    const [hoursRaw, minutesRaw] = timeRaw.split(":");
+    const hours = Number.isFinite(Number(hoursRaw)) ? Number(hoursRaw) : 0;
+    const minutes = Number.isFinite(Number(minutesRaw)) ? Number(minutesRaw) : 0;
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) {
+      const [year, month, day] = dateRaw.split("-").map((part) => Number(part));
+      const parsed = new Date(year, month - 1, day, hours, minutes).getTime();
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateRaw)) {
+      const [day, month, year] = dateRaw.split("/").map((part) => Number(part));
+      const parsed = new Date(year, month - 1, day, hours, minutes).getTime();
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    const normalized = dateRaw
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[.,-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const parts = normalized.split(" ").filter((part) => part.length > 0);
+    if (parts.length >= 2) {
+      const day = Number(parts[0]);
+      const monthToken = parts[1].slice(0, 3);
+      const month = MONTHS_PT_BR[monthToken];
+      const year =
+        parts.length >= 3 && /^\d{4}$/.test(parts[2]) ? Number(parts[2]) : new Date().getFullYear();
+      if (Number.isFinite(day) && month !== undefined && Number.isFinite(year)) {
+        const parsed = new Date(year, month, day, hours, minutes).getTime();
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+    }
+
+    const fallback = Date.parse(`${dateRaw} ${timeRaw}`);
+    return Number.isFinite(fallback) ? fallback : null;
+  };
+
+  const isCancelledOrClosed = (row: Row): boolean => {
+    const normalizedStatus = asString(row.status, "ativo").toLowerCase().trim();
+    return normalizedStatus === "encerrado" || normalizedStatus === "cancelado" || normalizedStatus === "inativo";
+  };
+
   let rows: Row[] = [];
+  const fetchLimit = includePast ? maxResults : Math.min(MAX_EVENTS, Math.max(maxResults * 3, maxResults));
   try {
     rows = await selectRows("eventos", {
-      orderBy: { column: "createdAt", ascending: false },
-      limit: maxResults,
+      eq: includeInactive ? undefined : { status: "ativo" },
+      orderBy: { column: includePast ? "createdAt" : "data", ascending: includePast ? false : true },
+      limit: fetchLimit,
     });
   } catch {
-    rows = await selectRows("eventos", { limit: maxResults });
+    rows = await selectRows("eventos", { limit: fetchLimit });
   }
 
+  const nowMs = Date.now();
   const normalized = normalizeRows(rows);
-  setCache(feedCache, cacheKey, normalized);
-  return normalized;
+  const visibleRows = normalized
+    .filter((row) => (includeInactive ? true : !isCancelledOrClosed(row)))
+    .filter((row) => {
+      if (includePast) return true;
+      const eventMs = parseEventDateTimeMs(row);
+      // Sem data parseavel, mantemos no feed somente se estiver ativo.
+      if (eventMs === null) return !isCancelledOrClosed(row);
+      return eventMs >= nowMs;
+    })
+    .sort((left, right) => {
+      if (includePast) {
+        const leftCreated = Date.parse(asString(left.createdAt));
+        const rightCreated = Date.parse(asString(right.createdAt));
+        if (Number.isFinite(leftCreated) && Number.isFinite(rightCreated)) return rightCreated - leftCreated;
+      }
+      const leftEventMs = parseEventDateTimeMs(left) ?? Number.MAX_SAFE_INTEGER;
+      const rightEventMs = parseEventDateTimeMs(right) ?? Number.MAX_SAFE_INTEGER;
+      return leftEventMs - rightEventMs;
+    })
+    .slice(0, maxResults);
+
+  setCache(feedCache, cacheKey, visibleRows);
+  return visibleRows;
 }
 
 async function fetchFinanceiroConfig(forceRefresh = false): Promise<Row | null> {

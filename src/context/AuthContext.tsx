@@ -400,7 +400,7 @@ const buildUserPatchPayload = (
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const USER_SELECT_COLUMNS =
-  "uid,nome,email,foto,role,status,isAnonymous,saved_role,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,heroPower,rankingPosition,stats,sharkCoins,selos,matricula,turma,handle,telefone,instagram,bio,dailyMatchesPlayed,turmaPhoto,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,idade,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,desconto_loja,nivel_prioridade,plano_status,capa,estadoOrigem,extra,createdAt,updatedAt";
+  "uid,nome,email,foto,role,status,ultimoLoginDiario,data_adesao,level,xp,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,capa,estadoOrigem,extra,createdAt,updatedAt";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
