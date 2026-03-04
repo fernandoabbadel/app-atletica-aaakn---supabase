@@ -26,11 +26,11 @@ const DEFAULT_EVENT_DETAILS_COMMENTS_LIMIT = 100;
 const DEFAULT_EVENT_DETAILS_POLLS_LIMIT = 20;
 const DEFAULT_EVENT_DETAILS_PEDIDOS_LIMIT = 20;
 const EVENTOS_SELECT_COLUMNS =
-  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,isLowStock,stats,lotes,interessados,likesList,createdAt,updatedAt";
+  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,isLowStock,stats,lotes,interessados,participantes,likesList,createdAt,updatedAt";
 const EVENTOS_RSVPS_SELECT_COLUMNS =
   "id,eventoId,userId,status,userName,userAvatar,userTurma,timestamp";
 const EVENTOS_COMENTARIOS_SELECT_COLUMNS =
-  "id,eventoId,userId,userName,userAvatar,userTurma,role,userPlanoCor,userPlanoIcon,userPatente,text,likes,reports,hidden,createdAt,updatedAt";
+  "id,eventoId,userId,userName,userAvatar,userTurma,role,userPlanoCor,userPlanoIcon,userPatente,userPatenteIcon,text,texto,likes,reports,hidden,createdAt,updatedAt";
 const EVENTOS_ENQUETES_SELECT_COLUMNS =
   "id,eventoId,question,allowUserOptions,options,voters,userVotes,createdAt,updatedAt";
 const PATENTES_SELECT_COLUMNS = "id,titulo,minXp,cor,iconName,bg,border,text";
@@ -67,6 +67,58 @@ const nowIso = (): string => new Date().toISOString();
 const asNum = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
+const splitSelectColumns = (selectColumns: string): string[] =>
+  selectColumns
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+  const message = [raw.message, raw.details, raw.hint]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!message) return null;
+
+  const normalized = message.toLowerCase();
+  const isMissingColumn =
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    normalized.includes("could not find the");
+  if (!isMissingColumn) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const extracted = match[2] ?? match[1];
+    if (extracted) return extracted;
+  }
+
+  return null;
+};
+
+const removeMissingColumn = (columns: string[], missingColumn: string): string[] | null => {
+  const normalizedMissing = missingColumn.trim().toLowerCase();
+  if (!normalizedMissing) return null;
+
+  const next = columns.filter((column) => {
+    const normalizedColumn = column.trim().toLowerCase();
+    if (!normalizedColumn) return false;
+    if (normalizedColumn === normalizedMissing) return false;
+    return !normalizedColumn.endsWith(`.${normalizedMissing}`);
+  });
+
+  if (next.length === columns.length) return null;
+  return next;
+};
+
 const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
   const cached = cache.get(key);
   if (!cached) return null;
@@ -82,6 +134,13 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
 };
 
 const normalizeRows = (rows: Row[]): Row[] => rows.map((row) => normalizeRowTimestamps(row));
+const normalizeCommentRows = (rows: Row[]): Row[] =>
+  normalizeRows(rows).map((row) => {
+    const text = asString(row.text);
+    const texto = asString(row.texto);
+    if (text || !texto) return row;
+    return { ...row, text: texto };
+  });
 
 const applyEventCommentAuthorVisuals = async (rows: Row[]): Promise<Row[]> => {
   if (rows.length === 0) return rows;
@@ -149,7 +208,7 @@ async function selectRows(
   }
 ): Promise<Row[]> {
   const supabase = getSupabaseClient();
-  const selectColumns =
+  const defaultSelectColumns =
     options?.selectColumns ??
     (table === "eventos"
       ? EVENTOS_SELECT_COLUMNS
@@ -164,25 +223,48 @@ async function selectRows(
       : table === "patentes_config"
       ? PATENTES_SELECT_COLUMNS
       : "id");
-  let query = supabase.from(table).select(selectColumns);
+  let mutableColumns = splitSelectColumns(defaultSelectColumns);
+  let mutableOrderBy = options?.orderBy;
 
-  if (options?.eq) {
-    for (const [column, value] of Object.entries(options.eq)) {
-      query = query.eq(column, value);
+  while (mutableColumns.length > 0) {
+    let query = supabase.from(table).select(mutableColumns.join(","));
+
+    if (options?.eq) {
+      for (const [column, value] of Object.entries(options.eq)) {
+        query = query.eq(column, value);
+      }
     }
-  }
-  if (options?.orderBy) {
-    query = query.order(options.orderBy.column, { ascending: options.orderBy.ascending ?? true });
-  }
-  if (typeof options?.offset === "number" && typeof options?.limit === "number") {
-    query = query.range(options.offset, options.offset + options.limit - 1);
-  } else if (options?.limit) {
-    query = query.limit(options.limit);
+    if (mutableOrderBy) {
+      query = query.order(mutableOrderBy.column, { ascending: mutableOrderBy.ascending ?? true });
+    }
+    if (typeof options?.offset === "number" && typeof options?.limit === "number") {
+      query = query.range(options.offset, options.offset + options.limit - 1);
+    } else if (options?.limit) {
+      query = query.limit(options.limit);
+    }
+
+    const { data, error } = await query;
+    if (!error) return (data ?? []) as unknown as Row[];
+
+    const missingColumn = extractMissingSchemaColumn(error);
+    if (typeof missingColumn !== "string" || missingColumn.length === 0) {
+      throwSupabaseError(error);
+    }
+    const safeMissingColumn = missingColumn as string;
+
+    if (mutableOrderBy && mutableOrderBy.column.toLowerCase() === safeMissingColumn.toLowerCase()) {
+      mutableOrderBy = undefined;
+      continue;
+    }
+
+    const nextColumns = removeMissingColumn(mutableColumns, safeMissingColumn);
+    if (!nextColumns || nextColumns.length === 0) {
+      throwSupabaseError(error);
+    }
+    mutableColumns = nextColumns as string[];
   }
 
-  const { data, error } = await query;
-  if (error) throwSupabaseError(error);
-  return (data ?? []) as unknown as Row[];
+  return [];
 }
 
 async function selectEventById(eventId: string): Promise<Row | null> {
@@ -773,7 +855,7 @@ export async function fetchEventDetailsBundle(options: {
   const bundle: EventDetailsBundle = {
     evento,
     rsvps: normalizeRows(rsvpsRaw),
-    comentarios: normalizeRows(comentariosWithVisuals),
+    comentarios: normalizeCommentRows(comentariosWithVisuals),
     enquetes: normalizeRows(enquetesRaw),
     patentes: normalizeRows(patentesRaw),
     financeiro,

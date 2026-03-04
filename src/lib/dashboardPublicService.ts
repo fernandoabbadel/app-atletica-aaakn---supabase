@@ -18,13 +18,13 @@ const DASHBOARD_USERS_COUNT_FALLBACK_LIMIT = 2_000;
 const DASHBOARD_TOTAL_CACA_RPC = "dashboard_total_caca_calouros";
 
 const DASHBOARD_EVENTS_SELECT =
-  "id,titulo,data,local,imagem,tipo,likesList,interessados,imagePositionY";
+  "id,titulo,data,local,imagem,tipo,likesList,interessados,participantes,imagePositionY";
 const DASHBOARD_PRODUCTS_SELECT = "id,nome,preco,img,likes";
 const DASHBOARD_PARTNERS_SELECT =
-  "id,nome,imgLogo,imgCapa,categoria,tier,status";
+  "id,nome,imgLogo,imgCapa,categoria,plano,tier,status";
 const DASHBOARD_LIGAS_SELECT =
   "id,nome,sigla,foto,logoBase64,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
-const DASHBOARD_POSTS_SELECT = "id,userId,userName,avatar,createdAt,texto,likes";
+const DASHBOARD_POSTS_SELECT = "id,userId,userName,avatar,createdAt,texto,text,likes";
 const DASHBOARD_TREINOS_SELECT = "id,imagem";
 const DASHBOARD_ALBUM_FALLBACK_SELECT = "totalColetado";
 
@@ -92,6 +92,58 @@ const throwSupabaseError = (error: { message: string; code?: string | null; name
   });
 };
 
+const splitSelectColumns = (selectColumns: string): string[] =>
+  selectColumns
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+const removeMissingColumn = (columns: string[], missingColumn: string): string[] | null => {
+  const normalizedMissing = missingColumn.trim().toLowerCase();
+  if (!normalizedMissing) return null;
+
+  const next = columns.filter((column) => {
+    const normalizedColumn = column.trim().toLowerCase();
+    if (!normalizedColumn) return false;
+    if (normalizedColumn === normalizedMissing) return false;
+    return !normalizedColumn.endsWith(`.${normalizedMissing}`);
+  });
+
+  if (next.length === columns.length) return null;
+  return next;
+};
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+  const message = [raw.message, raw.details, raw.hint]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!message) return null;
+
+  const normalized = message.toLowerCase();
+  const isMissingColumn =
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    normalized.includes("could not find the");
+  if (!isMissingColumn) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const extracted = match[2] ?? match[1];
+    if (extracted) return extracted;
+  }
+
+  return null;
+};
+
 async function fetchRowsWithFallback(
   table: string,
   selectColumns: string,
@@ -102,19 +154,38 @@ async function fetchRowsWithFallback(
 
   for (const attempt of attempts) {
     try {
-      let q = supabase.from(table).select(selectColumns);
-      if (attempt.eq) {
-        for (const [key, value] of Object.entries(attempt.eq)) {
-          q = q.eq(key, value);
+      let mutableColumns = splitSelectColumns(selectColumns);
+      let mutableOrderBy = attempt.orderBy;
+
+      while (mutableColumns.length > 0) {
+        let q = supabase.from(table).select(mutableColumns.join(","));
+        if (attempt.eq) {
+          for (const [key, value] of Object.entries(attempt.eq)) {
+            q = q.eq(key, value);
+          }
         }
+        if (mutableOrderBy) {
+          q = q.order(mutableOrderBy.column, { ascending: mutableOrderBy.ascending });
+        }
+        q = q.limit(attempt.limit);
+        const { data, error } = await q;
+        if (!error) return (data ?? []) as unknown as Row[];
+
+        const missingColumn = extractMissingSchemaColumn(error);
+        if (!missingColumn) throw error;
+
+        if (
+          mutableOrderBy &&
+          mutableOrderBy.column.toLowerCase() === missingColumn.toLowerCase()
+        ) {
+          mutableOrderBy = undefined;
+          continue;
+        }
+
+        const nextColumns = removeMissingColumn(mutableColumns, missingColumn);
+        if (!nextColumns || nextColumns.length === 0) throw error;
+        mutableColumns = nextColumns;
       }
-      if (attempt.orderBy) {
-        q = q.order(attempt.orderBy.column, { ascending: attempt.orderBy.ascending });
-      }
-      q = q.limit(attempt.limit);
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data ?? []) as unknown as Row[];
     } catch (error: unknown) {
       lastError = error;
     }
@@ -225,7 +296,7 @@ const normalizePost = (id: string, raw: unknown): DashboardPost | null => {
     userName: asString(data.userName, "Usuario"),
     avatar: asString(data.avatar),
     createdAt: data.createdAt ?? null,
-    texto: asString(data.texto),
+    texto: asString(data.texto) || asString(data.text),
     likes: asStringArray(data.likes),
   };
 };
