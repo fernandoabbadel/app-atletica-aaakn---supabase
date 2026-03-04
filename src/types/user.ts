@@ -1,4 +1,4 @@
-import { Timestamp } from "@/lib/supabaseHelpers";
+type Timestamp = { toDate: () => Date };
 
 // ==========================================
 // 🦈 USUÁRIO (PERFIL COMPLETO)

@@ -10,11 +10,7 @@ import {
 } from 'lucide-react';
 import Image from "next/image";
 import { useToast } from "../../context/ToastContext";
-import { db } from "@/lib/backend";
-import { 
-  collection, updateDoc, doc, 
-  serverTimestamp, setDoc, addDoc
-} from "@/lib/supabaseHelpers";
+import { getSupabaseClient } from "@/lib/supabase";
 import { logActivity } from "../../lib/logger"; 
 import {
   createEventPoll,
@@ -211,6 +207,8 @@ const writeLigaEditorDraft = (ligaId: string, snapshot: LigaEditorDraftSnapshot)
 const clearLigaEditorDraft = (ligaId: string): void => {
     removeSessionStorageValue(getLigaEditorDraftKey(ligaId));
 };
+
+const nowIso = (): string => new Date().toISOString();
 
 export default function LigasAdminPage() {
   const { addToast } = useToast();
@@ -626,72 +624,116 @@ export default function LigasAdminPage() {
   // --- SALVAR TUDO (AQUI ESTÁ O PULO DO GATO 🦈) ---
   const handleSaveAll = async () => {
       if (!ligaData) return;
-      if (ligaData.perguntas.length < 10) return addToast("Mínimo 10 perguntas necessárias.", "error");
+      if (ligaData.perguntas.length < 10) return addToast("Minimo 10 perguntas necessarias.", "error");
       
       setLoading(true);
       try {
+          const supabase = getSupabaseClient();
+          const timestamp = nowIso();
+
           // 1. Cria array auxiliar de IDs para busca
           const membrosIds = ligaData.membros?.map(m => m.id) || [];
 
           // 2. Atualiza Config Liga (COM membrosIds)
-          await updateDoc(doc(db, "ligas_config", ligaData.id), { 
-              ...ligaData,
-              membrosIds: membrosIds // <--- O CAMPO MÁGICO
-          });
+          const ligaUpdatePayload: Record<string, unknown> = {
+              nome: ligaData.nome,
+              sigla: ligaData.sigla,
+              descricao: ligaData.descricao || "",
+              bizu: ligaData.bizu || "",
+              likes: Number.isFinite(Number(ligaData.likes)) ? Number(ligaData.likes) : 0,
+              senha: ligaData.senha,
+              logoUrl: ligaData.logoUrl || null,
+              logoBase64: ligaData.logoBase64 || null,
+              logo: ligaData.logoUrl || ligaData.logoBase64 || null,
+              ativa: Boolean(ligaData.ativa),
+              perguntas: ligaData.perguntas,
+              membros: ligaData.membros || [],
+              eventos: ligaData.eventos || [],
+              membrosIds,
+              updatedAt: timestamp,
+          };
+
+          const { error: ligaUpdateError } = await supabase
+            .from("ligas_config")
+            .update(ligaUpdatePayload)
+            .eq("id", ligaData.id);
+          if (ligaUpdateError) throw ligaUpdateError;
 
           // 3. Sincroniza Eventos (Cria/Atualiza no Global)
           if (ligaData.eventos && ligaData.eventos.length > 0) {
               const batchPromises = ligaData.eventos.map(async (ev) => {
-                  const eventId = ev.globalEventId || doc(collection(db, "eventos")).id;
+                  const alreadyLinkedToGlobal = Boolean(ev.globalEventId);
+                  const eventId = ev.globalEventId || crypto.randomUUID();
                   ev.globalEventId = eventId;
                   ev.linkEvento = `/eventos/${eventId}`;
                   
-                  await setDoc(doc(db, "eventos", eventId), {
-                      titulo: `[${ligaData.sigla}] ${ev.titulo}`,
+                  const eventPayload: Record<string, unknown> = {
+                      id: eventId,
+                      titulo: `[${ligaData.sigla}] ${ev.titulo}` ,
                       data: ev.data,
                       hora: ev.hora,
                       local: ev.local,
                       tipo: "Liga", 
                       destaque: ev.destaque,
-                      imagem: ev.imagem || ligaData.logoUrl || ligaData.logoBase64,
+                      imagem: ev.imagem || ligaData.logoUrl || ligaData.logoBase64 || "",
                       imagePositionY: ev.imagePositionY,
                       lotes: ev.lotes,
                       descricao: ev.descricao, 
                       categoria: "Liga",
-                      criadorId: ligaData.id,
-                      criadorNome: ligaData.sigla,
                       status: "ativo",
-                      createdAt: serverTimestamp() 
-                  }, { merge: true });
+                      updatedAt: timestamp,
+                  };
+                  if (!alreadyLinkedToGlobal) {
+                      eventPayload.createdAt = timestamp;
+                  }
+
+                  const { error: eventUpsertError } = await supabase
+                    .from("eventos")
+                    .upsert(eventPayload, { onConflict: "id" });
+                  if (eventUpsertError) throw eventUpsertError;
 
                   if (ev.pollQuestion) {
-                      await addDoc(collection(db, "eventos", eventId, "enquetes"), {
+                      const { error: pollInsertError } = await supabase
+                        .from("eventos_enquetes")
+                        .insert({
+                          eventoId: eventId,
                           question: ev.pollQuestion,
                           options: [],
                           voters: [],
-                          createdAt: serverTimestamp(),
+                          userVotes: {},
+                          allowUserOptions: true,
+                          createdAt: timestamp,
+                          updatedAt: timestamp,
                           creatorId: ligaData.id,
                           isOfficial: true
-                      });
+                        });
+                      if (pollInsertError) throw pollInsertError;
                       ev.pollQuestion = ""; 
                   }
               });
               
               await Promise.all(batchPromises);
               // Salva de novo a liga para garantir IDs de eventos atualizados
-              await updateDoc(doc(db, "ligas_config", ligaData.id), { eventos: ligaData.eventos });
+              const { error: ligaEventsUpdateError } = await supabase
+                .from("ligas_config")
+                .update({ eventos: ligaData.eventos, updatedAt: timestamp })
+                .eq("id", ligaData.id);
+              if (ligaEventsUpdateError) throw ligaEventsUpdateError;
           }
 
-          // 4. Notificação Bizu
+          // 4. Notificacao Bizu
           if (sendNotification && ligaData.bizu) {
-              await addDoc(collection(db, "notifications"), {
-                  title: `Novo Bizu da ${ligaData.sigla}! 🦈`,
+              const { error: notificationInsertError } = await supabase
+                .from("notifications")
+                .insert({
+                  title: `Novo Bizu da ${ligaData.sigla}!`,
                   message: ligaData.bizu,
                   link: "/ligas_unitau",
                   read: false,
-                  createdAt: serverTimestamp(),
+                  createdAt: timestamp,
                   userId: "GLOBAL"
               });
+              if (notificationInsertError) throw notificationInsertError;
               setSendNotification(false);
           }
 
@@ -704,7 +746,7 @@ export default function LigasAdminPage() {
               ligaData.nome, 
               "UPDATE", 
               "ligas_config", 
-              "Atualização de dados da Liga"
+              "Atualizacao de dados da Liga"
           );
 
       } catch (error) { 

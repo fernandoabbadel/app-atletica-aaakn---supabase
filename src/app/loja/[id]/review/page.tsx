@@ -3,7 +3,6 @@
 import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Timestamp } from "@/lib/supabaseHelpers";
 import { AlertTriangle, ArrowLeft, Loader2, Star } from "lucide-react";
 
 import { createStoreReview, fetchStoreProductDetail } from "../../../../lib/storeService";
@@ -18,11 +17,13 @@ interface Produto {
 interface Order {
   id: string;
   status: "pendente" | "approved" | "rejected" | "delivered" | "cancelado";
-  createdAt: Timestamp | null;
-  updatedAt?: Timestamp | null;
+  createdAt: TimestampLike | null;
+  updatedAt?: TimestampLike | null;
 }
 
-const toMillis = (value?: Timestamp | null): number => {
+type TimestampLike = { toDate: () => Date };
+
+const toMillis = (value?: TimestampLike | null): number => {
   if (!value || typeof value.toDate !== "function") return 0;
   return value.toDate().getTime();
 };

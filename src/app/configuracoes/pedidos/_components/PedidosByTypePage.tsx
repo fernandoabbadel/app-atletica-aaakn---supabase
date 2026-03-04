@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, Clock, Copy, MessageCircle, Package, Wallet, X, XCircle } from "lucide-react";
-import { Timestamp } from "@/lib/supabaseHelpers";
 
 import { useAuth } from "../../../../context/AuthContext";
 import { fetchUserOrdersByTab } from "../../../../lib/settingsService";
@@ -21,8 +20,8 @@ interface PedidoUnificado {
 
 type PedidoRaw = {
   id: string;
-  dataSolicitacao?: Timestamp;
-  createdAt?: Timestamp;
+  dataSolicitacao?: TimestampLike;
+  createdAt?: TimestampLike;
   data?: string | Record<string, unknown>;
   eventoNome?: string;
   quantidade?: number;
@@ -38,6 +37,8 @@ type PedidoRaw = {
   valor?: unknown;
   status?: PedidoUnificado["status"];
 };
+
+type TimestampLike = { toDate: () => Date };
 
 const FINANCE_DEFAULT = {
   chave: "financeiro@aaakn.com.br",
@@ -73,8 +74,8 @@ const normalizePedido = (item: PedidoRaw, tab: "eventos" | "loja" | "planos"): P
   let valor = 0;
   let data = new Date();
 
-  if (item.dataSolicitacao instanceof Timestamp) data = item.dataSolicitacao.toDate();
-  else if (item.createdAt instanceof Timestamp) data = item.createdAt.toDate();
+  if (item.dataSolicitacao && typeof item.dataSolicitacao.toDate === "function") data = item.dataSolicitacao.toDate();
+  else if (item.createdAt && typeof item.createdAt.toDate === "function") data = item.createdAt.toDate();
   else if (typeof item.data === "string" && item.data) data = new Date(item.data);
 
   if (tab === "eventos") {
