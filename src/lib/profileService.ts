@@ -1,20 +1,7 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  collection,
-  doc,
-  getCountFromServer,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  where,
-} from "@/lib/supabaseHelpers";
 import { getSupabaseClient } from "@/lib/supabase";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { uploadImage } from "./upload";
 
@@ -35,6 +22,13 @@ const MAX_FOLLOW_RESULTS = 260;
 
 const PROFILE_TOGGLE_FOLLOW_CALLABLE = "profileToggleFollow";
 const PROFILE_ADMIN_RECOUNT_FOLLOWS_CALLABLE = "profileAdminRecountFollowStats";
+const PROFILE_USER_SELECT_COLUMNS =
+  "uid,nome,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,status,pets,statusRelacionamento,esportes,whatsappPublico,idadePublica,relacionamentoPublico,stats";
+const PROFILE_POST_SELECT_COLUMNS = "id,texto,imagem,createdAt,likes,comentarios,userId";
+const PROFILE_EVENT_SELECT_COLUMNS = "id,titulo,data,local,imagem,imagePositionY,interessados,participantes";
+const PROFILE_TREINO_SELECT_COLUMNS = "id,modalidade,dia,horario,imagem,local,confirmados";
+const PROFILE_LIGA_SELECT_COLUMNS = "id,nome,sigla,foto,logo,logoBase64,membrosIds";
+const PROFILE_FOLLOW_SELECT_COLUMNS = "id,uid,nome,foto,turma,followedAt";
 
 const profileCache = new Map<string, CacheEntry<ProfileUserRecord | null>>();
 const ownBundleCache = new Map<string, CacheEntry<OwnProfileBundle | null>>();
@@ -64,6 +58,19 @@ const asBoolean = (value: unknown, fallback = false): boolean =>
 const asStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
+};
+
+const nowIso = (): string => new Date().toISOString();
+
+const throwSupabaseError = (error: {
+  message: string;
+  code?: string | null;
+  name?: string | null;
+}): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
 };
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
@@ -193,6 +200,31 @@ const isIndexRequiredError = (error: unknown): boolean => {
     return message.includes("index") && message.includes("query");
   }
   return false;
+};
+
+const extractMissingColumnFromSchemaError = (error: unknown): string | null => {
+  if (!(error instanceof Error)) return null;
+  const message = error.message || "";
+  const normalized = message.toLowerCase();
+  const isMissingColumn =
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    normalized.includes("could not find the");
+  if (!isMissingColumn) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const extracted = match[2] ?? match[1];
+    if (extracted) return extracted;
+  }
+
+  return null;
 };
 
 async function callWithFallback<TReq, TRes>(
@@ -474,67 +506,104 @@ const normalizeFollowListItem = (
 
 async function fetchProfilePosts(uid: string): Promise<ProfilePostRecord[]> {
   const maxResults = MAX_POST_RESULTS;
+  const supabase = getSupabaseClient();
   try {
-    const q = query(
-      collection(db, "posts"),
-      where("userId", "==", uid),
-      orderBy("createdAt", "desc"),
-      limit(maxResults)
-    );
-    const snap = await getDocs(q);
-    return snap.docs
-      .map((row) => normalizePost(row.id, row.data()))
+    const { data, error } = await supabase
+      .from("posts")
+      .select(PROFILE_POST_SELECT_COLUMNS)
+      .eq("userId", uid)
+      .order("createdAt", { ascending: false })
+      .limit(maxResults);
+    if (error) throw error;
+
+    return (data ?? [])
+      .map((row) => normalizePost(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is ProfilePostRecord => row !== null);
   } catch (error: unknown) {
-    if (!isIndexRequiredError(error)) throw error;
-    const fallbackQuery = query(
-      collection(db, "posts"),
-      where("userId", "==", uid),
-      limit(maxResults)
-    );
-    const fallbackSnap = await getDocs(fallbackQuery);
-    return fallbackSnap.docs
-      .map((row) => normalizePost(row.id, row.data()))
+    const missingColumn = extractMissingColumnFromSchemaError(error);
+    const shouldFallback =
+      isIndexRequiredError(error) || missingColumn?.toLowerCase() === "createdat";
+    if (!shouldFallback) throw error;
+
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from("posts")
+      .select(PROFILE_POST_SELECT_COLUMNS)
+      .eq("userId", uid)
+      .limit(maxResults);
+    if (fallbackError) throwSupabaseError(fallbackError);
+
+    return (fallbackData ?? [])
+      .map((row) => normalizePost(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is ProfilePostRecord => row !== null)
       .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt));
   }
 }
 
 async function fetchProfileEvents(uid: string): Promise<ProfileEventRecord[]> {
-  const q = query(
-    collection(db, "eventos"),
-    where("interessados", "array-contains", uid),
-    limit(MAX_EVENT_RESULTS)
-  );
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((row) => normalizeEvent(row.id, row.data()))
-    .filter((row): row is ProfileEventRecord => row !== null)
-    .sort((left, right) => toMillis(left.data) - toMillis(right.data));
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase
+      .from("eventos")
+      .select(PROFILE_EVENT_SELECT_COLUMNS)
+      .contains("interessados", [uid])
+      .limit(MAX_EVENT_RESULTS);
+    if (error) throw error;
+
+    return (data ?? [])
+      .map((row) => normalizeEvent(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is ProfileEventRecord => row !== null)
+      .sort((left, right) => toMillis(left.data) - toMillis(right.data));
+  } catch (error: unknown) {
+    const missingColumn = extractMissingColumnFromSchemaError(error);
+    if (missingColumn?.toLowerCase() !== "interessados") {
+      if (
+        typeof (error as { message?: unknown })?.message === "string"
+      ) {
+        throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+      }
+      throw error;
+    }
+
+    const { data, error: fallbackError } = await supabase
+      .from("eventos")
+      .select(PROFILE_EVENT_SELECT_COLUMNS)
+      .contains("participantes", [uid])
+      .limit(MAX_EVENT_RESULTS);
+    if (fallbackError) throwSupabaseError(fallbackError);
+
+    return (data ?? [])
+      .map((row) => normalizeEvent(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is ProfileEventRecord => row !== null)
+      .sort((left, right) => toMillis(left.data) - toMillis(right.data));
+  }
 }
 
 async function fetchProfileTreinos(uid: string): Promise<ProfileTreinoRecord[]> {
-  const q = query(
-    collection(db, "treinos"),
-    where("confirmados", "array-contains", uid),
-    limit(MAX_TREINO_RESULTS)
-  );
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((row) => normalizeTreino(row.id, row.data()))
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("treinos")
+    .select(PROFILE_TREINO_SELECT_COLUMNS)
+    .contains("confirmados", [uid])
+    .limit(MAX_TREINO_RESULTS);
+  if (error) throwSupabaseError(error);
+
+  return (data ?? [])
+    .map((row) => normalizeTreino(asString((row as Record<string, unknown>).id), row))
     .filter((row): row is ProfileTreinoRecord => row !== null)
     .sort((left, right) => toMillis(right.dia) - toMillis(left.dia));
 }
 
 async function fetchProfileLigas(uid: string): Promise<ProfileLigaRecord[]> {
-  const q = query(
-    collection(db, "ligas_config"),
-    where("membrosIds", "array-contains", uid),
-    limit(MAX_LIGA_RESULTS)
-  );
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((row) => normalizeLiga(row.id, row.data()))
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("ligas_config")
+    .select(PROFILE_LIGA_SELECT_COLUMNS)
+    .contains("membrosIds", [uid])
+    .limit(MAX_LIGA_RESULTS);
+  if (error) throwSupabaseError(error);
+
+  return (data ?? [])
+    .map((row) => normalizeLiga(asString((row as Record<string, unknown>).id), row))
     .filter((row): row is ProfileLigaRecord => row !== null);
 }
 
@@ -547,20 +616,36 @@ async function resolveFollowCount(
     return Math.floor(statsValue);
   }
 
+  const tableName = type === "followers" ? "users_followers" : "users_following";
+  const supabase = getSupabaseClient();
   try {
-    const countSnap = await getCountFromServer(collection(db, "users", uid, type));
-    return countSnap.data().count;
+    const { count, error } = await supabase
+      .from(tableName)
+      .select("id", { count: "exact", head: true })
+      .eq("userId", uid);
+    if (error) throw error;
+    return count ?? 0;
   } catch {
-    const fallbackSnap = await getDocs(
-      query(collection(db, "users", uid, type), limit(MAX_FOLLOW_RESULTS))
-    );
-    return fallbackSnap.size;
+    const { data, error } = await supabase
+      .from(tableName)
+      .select("id")
+      .eq("userId", uid)
+      .limit(MAX_FOLLOW_RESULTS);
+    if (error) throwSupabaseError(error);
+    return (data ?? []).length;
   }
 }
 
 async function checkIsFollowing(targetUid: string, viewerUid: string): Promise<boolean> {
-  const snap = await getDoc(doc(db, "users", targetUid, "followers", viewerUid));
-  return snap.exists();
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users_followers")
+    .select("id")
+    .eq("userId", targetUid)
+    .eq("id", viewerUid)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+  return Boolean(data);
 }
 
 export async function fetchProfileById(
@@ -582,14 +667,21 @@ export async function fetchProfileById(
       }
     }
 
-    const snap = await getDoc(doc(db, "users", uid));
-    if (!snap.exists()) {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("users")
+      .select(PROFILE_USER_SELECT_COLUMNS)
+      .eq("uid", uid)
+      .maybeSingle();
+    if (error) throwSupabaseError(error);
+
+    if (!data) {
       setCachedValue(profileCache, uid, null);
       writeSessionCache(`profile:${uid}`, null);
       return null;
     }
 
-    const normalized = normalizeUserProfile(uid, snap.data());
+    const normalized = normalizeUserProfile(uid, data);
     setCachedValue(profileCache, uid, normalized);
     writeSessionCache(`profile:${uid}`, normalized);
     return normalized;
@@ -713,23 +805,37 @@ export async function fetchFollowList(
       }
     }
 
+    const tableName = type === "followers" ? "users_followers" : "users_following";
+    const supabase = getSupabaseClient();
     let rows: FollowListItem[] = [];
     try {
-      const q = query(
-        collection(db, "users", uid, type),
-        orderBy("followedAt", "desc"),
-        limit(maxResults)
-      );
-      const snap = await getDocs(q);
-      rows = snap.docs
-        .map((row) => normalizeFollowListItem(row.data(), row.id))
+      const { data, error } = await supabase
+        .from(tableName)
+        .select(PROFILE_FOLLOW_SELECT_COLUMNS)
+        .eq("userId", uid)
+        .order("followedAt", { ascending: false })
+        .limit(maxResults);
+      if (error) throw error;
+
+      rows = (data ?? [])
+        .map((row) =>
+          normalizeFollowListItem(row, asString((row as Record<string, unknown>).id))
+        )
         .filter((row): row is FollowListItem => row !== null);
     } catch (error: unknown) {
       if (!isIndexRequiredError(error)) throw error;
-      const fallbackQ = query(collection(db, "users", uid, type), limit(maxResults));
-      const fallbackSnap = await getDocs(fallbackQ);
-      rows = fallbackSnap.docs
-        .map((row) => normalizeFollowListItem(row.data(), row.id))
+
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from(tableName)
+        .select(PROFILE_FOLLOW_SELECT_COLUMNS)
+        .eq("userId", uid)
+        .limit(maxResults);
+      if (fallbackError) throwSupabaseError(fallbackError);
+
+      rows = (fallbackData ?? [])
+        .map((row) =>
+          normalizeFollowListItem(row, asString((row as Record<string, unknown>).id))
+        )
         .filter((row): row is FollowListItem => row !== null);
     }
 
@@ -758,14 +864,23 @@ export async function fetchFollowCounts(
       }
     }
 
-    const [followersSnap, followingSnap] = await Promise.all([
-      getCountFromServer(collection(db, "users", uid, "followers")),
-      getCountFromServer(collection(db, "users", uid, "following")),
+    const supabase = getSupabaseClient();
+    const [followersRes, followingRes] = await Promise.all([
+      supabase
+        .from("users_followers")
+        .select("id", { count: "exact", head: true })
+        .eq("userId", uid),
+      supabase
+        .from("users_following")
+        .select("id", { count: "exact", head: true })
+        .eq("userId", uid),
     ]);
+    if (followersRes.error) throwSupabaseError(followersRes.error);
+    if (followingRes.error) throwSupabaseError(followingRes.error);
 
     const counts: FollowCounts = {
-      followersCount: followersSnap.data().count,
-      followingCount: followingSnap.data().count,
+      followersCount: followersRes.count ?? 0,
+      followingCount: followingRes.count ?? 0,
     };
 
     setCachedValue(followCountsCache, uid, counts);
@@ -999,86 +1114,120 @@ export async function toggleFollowProfile(payload: {
     PROFILE_TOGGLE_FOLLOW_CALLABLE,
     requestPayload,
     async () => {
-    const targetFollowerRef = doc(db, "users", targetUid, "followers", viewerUid);
-    const viewerFollowingRef = doc(db, "users", viewerUid, "following", targetUid);
-    const targetUserRef = doc(db, "users", targetUid);
-    const viewerUserRef = doc(db, "users", viewerUid);
-    const notificationRef = doc(collection(db, "notifications"));
+      const supabase = getSupabaseClient();
+      const [targetUserRes, viewerUserRes, followerRes, followingRes] = await Promise.all([
+        supabase.from("users").select("stats").eq("uid", targetUid).maybeSingle(),
+        supabase.from("users").select("stats").eq("uid", viewerUid).maybeSingle(),
+        supabase
+          .from("users_followers")
+          .select("id")
+          .eq("userId", targetUid)
+          .eq("id", viewerUid)
+          .maybeSingle(),
+        supabase
+          .from("users_following")
+          .select("id")
+          .eq("userId", viewerUid)
+          .eq("id", targetUid)
+          .maybeSingle(),
+      ]);
 
-    return runTransaction(db, async (tx) => {
-      const [targetUserSnap, viewerUserSnap, followerSnap, followingSnap] =
-        await Promise.all([
-          tx.get(targetUserRef),
-          tx.get(viewerUserRef),
-          tx.get(targetFollowerRef),
-          tx.get(viewerFollowingRef),
-        ]);
+      if (targetUserRes.error) throwSupabaseError(targetUserRes.error);
+      if (viewerUserRes.error) throwSupabaseError(viewerUserRes.error);
+      if (followerRes.error) throwSupabaseError(followerRes.error);
+      if (followingRes.error) throwSupabaseError(followingRes.error);
 
-      const targetData = asObject(targetUserSnap.data()) || {};
-      const viewerData = asObject(viewerUserSnap.data()) || {};
-      const targetStats = asObject(targetData.stats) || {};
-      const viewerStats = asObject(viewerData.stats) || {};
+      const targetStats = asObject(asObject(targetUserRes.data)?.stats) || {};
+      const viewerStats = asObject(asObject(viewerUserRes.data)?.stats) || {};
 
       let followersCount = Math.max(0, asNumber(targetStats.followersCount, 0));
       let followingCount = Math.max(0, asNumber(viewerStats.followingCount, 0));
 
-      const isFollowingNow = followerSnap.exists() && followingSnap.exists();
+      const isFollowingNow = Boolean(followerRes.data) && Boolean(followingRes.data);
       const shouldUnfollow = payload.currentlyFollowing || isFollowingNow;
 
       if (shouldUnfollow) {
-        if (followerSnap.exists()) tx.delete(targetFollowerRef);
-        if (followingSnap.exists()) tx.delete(viewerFollowingRef);
+        const [{ error: followerDeleteError }, { error: followingDeleteError }] = await Promise.all([
+          supabase
+            .from("users_followers")
+            .delete()
+            .eq("userId", targetUid)
+            .eq("id", viewerUid),
+          supabase
+            .from("users_following")
+            .delete()
+            .eq("userId", viewerUid)
+            .eq("id", targetUid),
+        ]);
+        if (followerDeleteError) throwSupabaseError(followerDeleteError);
+        if (followingDeleteError) throwSupabaseError(followingDeleteError);
+
         followersCount = Math.max(0, followersCount - 1);
         followingCount = Math.max(0, followingCount - 1);
       } else {
-        tx.set(targetFollowerRef, {
-          ...requestPayload.viewerData,
-          followedAt: serverTimestamp(),
-        });
-        tx.set(viewerFollowingRef, {
-          ...requestPayload.targetData,
-          followedAt: serverTimestamp(),
-        });
-        tx.set(notificationRef, {
-          userId: targetUid,
-          title: "Novo Seguidor!",
-          message: `${requestPayload.viewerData.nome} comecou a te seguir.`,
-          link: `/perfil/${viewerUid}`,
-          read: false,
-          type: "social",
-          createdAt: serverTimestamp(),
-        });
+        const followedAt = nowIso();
+        const [{ error: followerInsertError }, { error: followingInsertError }, { error: notificationError }] =
+          await Promise.all([
+            supabase.from("users_followers").insert({
+              id: viewerUid,
+              userId: targetUid,
+              ...requestPayload.viewerData,
+              followedAt,
+            }),
+            supabase.from("users_following").insert({
+              id: targetUid,
+              userId: viewerUid,
+              ...requestPayload.targetData,
+              followedAt,
+            }),
+            supabase.from("notifications").insert({
+              id: crypto.randomUUID(),
+              userId: targetUid,
+              title: "Novo Seguidor!",
+              message: `${requestPayload.viewerData.nome} comecou a te seguir.`,
+              link: `/perfil/${viewerUid}`,
+              read: false,
+              type: "social",
+              createdAt: followedAt,
+            }),
+          ]);
+        if (followerInsertError) throwSupabaseError(followerInsertError);
+        if (followingInsertError) throwSupabaseError(followingInsertError);
+        if (notificationError) throwSupabaseError(notificationError);
+
         followersCount += 1;
         followingCount += 1;
       }
 
-      tx.set(
-        targetUserRef,
-        {
-          stats: { ...targetStats, followersCount },
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-      tx.set(
-        viewerUserRef,
-        {
-          stats: { ...viewerStats, followingCount },
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      const [{ error: targetUserUpdateError }, { error: viewerUserUpdateError }] = await Promise.all([
+        supabase
+          .from("users")
+          .update({
+            stats: { ...targetStats, followersCount },
+            updatedAt: nowIso(),
+          })
+          .eq("uid", targetUid),
+        supabase
+          .from("users")
+          .update({
+            stats: { ...viewerStats, followingCount },
+            updatedAt: nowIso(),
+          })
+          .eq("uid", viewerUid),
+      ]);
+      if (targetUserUpdateError) throwSupabaseError(targetUserUpdateError);
+      if (viewerUserUpdateError) throwSupabaseError(viewerUserUpdateError);
 
       return {
         isFollowing: !shouldUnfollow,
         followersCount,
         followingCount,
       };
-    });
-  },
-  {
-    allowClientFallback: false,
-  });
+    },
+    {
+      allowClientFallback: false,
+    }
+  );
 
   clearProfileCachesForUser(targetUid);
   clearProfileCachesForUser(viewerUid);
