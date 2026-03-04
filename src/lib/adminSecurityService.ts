@@ -1,20 +1,8 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  setDoc,
-  startAfter,
-  updateDoc,
-  type QueryConstraint,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -98,26 +86,32 @@ const shouldUseCallable = (): boolean => {
   return host !== "localhost" && host !== "127.0.0.1";
 };
 
-async function callWithFallback<TReq, TRes>(
-  callableName: string,
-  payload: TReq,
-  fallbackFn: () => Promise<TRes>
-): Promise<TRes> {
-  if (!shouldUseCallable()) {
-    return fallbackFn();
-  }
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
 
-  try {
-    const callable = httpsCallable<TReq, TRes>(functions, callableName);
-    const response = await callable(payload);
-    return response.data;
-  } catch (error: unknown) {
-    if (shouldFallbackToClientWrites(error)) {
-      return fallbackFn();
-    }
-    throw error;
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
   }
-}
+  return null;
+};
 
 const toMillis = (value: unknown): number => {
   if (value instanceof Date) return value.getTime();
@@ -203,7 +197,7 @@ const normalizePermissionUserRecord = (
   const obj = asObject(raw);
   if (!obj) return null;
 
-  const id = asString(obj.id, fallbackId).trim();
+  const id = asString(obj.id, asString(obj.uid, fallbackId)).trim();
   if (!id) return null;
 
   const nome = asString(obj.nome, "Sem nome").trim() || "Sem nome";
@@ -219,6 +213,57 @@ const normalizePermissionUserRecord = (
     ...(role ? { role } : {}),
   };
 };
+
+const upsertSettingsPermissionsWithFallback = async (
+  matrix: PermissionMatrix
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const mutablePayload: Record<string, unknown> = {
+    id: "permissions",
+    data: { permissionMatrix: matrix },
+    permissionMatrix: matrix,
+    updatedAt: new Date().toISOString(),
+  };
+
+  while (Object.keys(mutablePayload).length > 1) {
+    const { error } = await supabase
+      .from("settings")
+      .upsert(mutablePayload, { onConflict: "id" });
+    if (!error) return;
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+
+    const removableKey = Object.keys(mutablePayload).find(
+      (key) => key.toLowerCase() === missingColumn.toLowerCase()
+    );
+    if (typeof removableKey !== "string" || removableKey === "id") {
+      throwSupabaseError(error);
+    }
+    delete mutablePayload[String(removableKey)];
+  }
+};
+
+async function callWithFallback<TReq, TRes>(
+  callableName: string,
+  payload: TReq,
+  fallbackFn: () => Promise<TRes>
+): Promise<TRes> {
+  if (!shouldUseCallable()) {
+    return fallbackFn();
+  }
+
+  try {
+    const callable = httpsCallable<TReq, TRes>(functions, callableName);
+    const response = await callable(payload);
+    return response.data;
+  } catch (error: unknown) {
+    if (shouldFallbackToClientWrites(error)) {
+      return fallbackFn();
+    }
+    throw error;
+  }
+}
 
 export interface AdminActivityLogRecord {
   id: string;
@@ -273,31 +318,21 @@ export async function fetchAdminActivityLogsPage(options?: {
   const cursorId = options?.cursorId?.trim() || "";
   const forceRefresh = options?.forceRefresh ?? false;
 
-  if (forceRefresh) {
-    activityLogsCache.clear();
-  }
+  const allLogs = await fetchAdminActivityLogs({
+    maxResults: MAX_ACTIVITY_LOG_RESULTS,
+    forceRefresh,
+  });
 
-  const constraints: QueryConstraint[] = [
-    orderBy("timestamp", "desc"),
-    limit(pageSize + 1),
-  ];
-
+  let startIndex = 0;
   if (cursorId) {
-    const cursorSnap = await getDoc(doc(db, "activity_logs", cursorId));
-    if (cursorSnap.exists()) {
-      constraints.splice(1, 0, startAfter(cursorSnap));
+    const cursorIndex = allLogs.findIndex((row) => row.id === cursorId);
+    if (cursorIndex >= 0) {
+      startIndex = cursorIndex + 1;
     }
   }
 
-  const snap = await getDocs(query(collection(db, "activity_logs"), ...constraints));
-
-  const pageDocs = snap.docs.slice(0, pageSize);
-  const logs = pageDocs
-    .map((row) => normalizeActivityLogRow(row.id, row.data()))
-    .filter((row): row is AdminActivityLogRecord => row !== null)
-    .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
-
-  const hasMore = snap.docs.length > pageSize;
+  const logs = allLogs.slice(startIndex, startIndex + pageSize);
+  const hasMore = startIndex + pageSize < allLogs.length;
   const nextCursor = logs.length > 0 ? logs[logs.length - 1].id : null;
 
   return { logs, nextCursor, hasMore };
@@ -319,20 +354,35 @@ export async function fetchAdminActivityLogs(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "activity_logs"),
-    orderBy("timestamp", "desc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
+  const supabase = getSupabaseClient();
+  let rowsResult: AdminActivityLogRecord[] = [];
 
-  const rows = snap.docs
-    .map((row) => normalizeActivityLogRow(row.id, row.data()))
-    .filter((row): row is AdminActivityLogRecord => row !== null)
-    .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
+  const primary = await supabase
+    .from("activity_logs")
+    .select("id,userId,userName,action,resource,details,timestamp")
+    .order("timestamp", { ascending: false })
+    .limit(maxResults);
 
-  setMapCacheValue(activityLogsCache, cacheKey, rows);
-  return rows;
+  if (!primary.error) {
+    rowsResult = (primary.data ?? [])
+      .map((row) => normalizeActivityLogRow(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is AdminActivityLogRecord => row !== null);
+  } else if (asString(extractMissingSchemaColumn(primary.error))) {
+    const fallback = await supabase
+      .from("activity_logs")
+      .select("id,userId,userName,action,resource,details,timestamp")
+      .limit(maxResults);
+    if (fallback.error) throwSupabaseError(fallback.error);
+    rowsResult = (fallback.data ?? [])
+      .map((row) => normalizeActivityLogRow(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is AdminActivityLogRecord => row !== null)
+      .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
+  } else {
+    throwSupabaseError(primary.error);
+  }
+
+  setMapCacheValue(activityLogsCache, cacheKey, rowsResult);
+  return rowsResult;
 }
 
 export async function fetchPermissionUsers(options?: {
@@ -358,11 +408,15 @@ export async function fetchPermissionUsers(options?: {
     FETCH_PERMISSION_USERS_CALLABLE,
     { maxResults },
     async () => {
-      const q = query(collection(db, "users"), limit(maxResults));
-      const snap = await getDocs(q);
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from("users")
+        .select("uid,nome,email,foto,role")
+        .limit(maxResults);
+      if (error) throwSupabaseError(error);
       return {
-        users: snap.docs
-          .map((row) => normalizePermissionUserRecord({ id: row.id, ...row.data() }))
+        users: (data ?? [])
+          .map((row) => normalizePermissionUserRecord(row))
           .filter((row): row is PermissionUserRecord => row !== null),
       };
     }
@@ -397,12 +451,29 @@ export async function fetchPermissionMatrix(options?: {
     FETCH_PERMISSION_MATRIX_CALLABLE,
     { forceRefresh },
     async () => {
-      const snap = await getDoc(doc(db, "settings", "permissions"));
-      if (!snap.exists()) {
-        return { matrix: null };
+      const supabase = getSupabaseClient();
+      let selectColumns = ["id", "data", "permissionMatrix"];
+
+      while (selectColumns.length > 0) {
+        const { data, error } = await supabase
+          .from("settings")
+          .select(selectColumns.join(","))
+          .eq("id", "permissions")
+          .maybeSingle();
+
+        if (!error) {
+          if (!data) return { matrix: null };
+          return { matrix: extractPermissionMatrix(data) };
+        }
+
+        const missingColumn = asString(extractMissingSchemaColumn(error));
+        if (!missingColumn) throwSupabaseError(error);
+        selectColumns = selectColumns.filter(
+          (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+        );
       }
 
-      return { matrix: extractPermissionMatrix(snap.data()) };
+      return { matrix: null };
     }
   );
 
@@ -420,11 +491,7 @@ export async function savePermissionMatrix(
     SAVE_PERMISSION_MATRIX_CALLABLE,
     { matrix: sanitized },
     async () => {
-      await setDoc(
-        doc(db, "settings", "permissions"),
-        { data: { permissionMatrix: sanitized } },
-        { merge: true }
-      );
+      await upsertSettingsPermissionsWithFallback(sanitized);
       return { ok: true };
     }
   );
@@ -445,7 +512,12 @@ export async function updatePermissionUserRole(payload: {
     UPDATE_USER_ROLE_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "users", targetUserId), { role });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("users")
+        .update({ role, updatedAt: new Date().toISOString() })
+        .eq("uid", targetUserId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -458,5 +530,3 @@ export function clearAdminSecurityCaches(): void {
   permissionUsersCache.clear();
   permissionMatrixCache = null;
 }
-
-
