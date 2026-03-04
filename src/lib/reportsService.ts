@@ -1,20 +1,8 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -154,6 +142,41 @@ const withInFlight = async <T>(
   return request;
 };
 
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const isMissingTableError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const raw = error as { code?: unknown; message?: unknown };
+  if (typeof raw.code === "string" && raw.code === "42P01") return true;
+  const message = asString(raw.message).toLowerCase();
+  return message.includes("relation") && message.includes("does not exist");
+};
+
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
@@ -166,17 +189,6 @@ const shouldFallbackToClientWrites = (error: unknown): boolean => {
     code.includes("functions/cancelled") ||
     code.includes("functions/unknown")
   );
-};
-
-const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase();
-  if (code?.includes("failed-precondition")) return true;
-
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("index") && message.includes("query");
-  }
-  return false;
 };
 
 async function callWithFallback<TReq, TRes>(
@@ -195,6 +207,63 @@ async function callWithFallback<TReq, TRes>(
     throw error;
   }
 }
+
+const fetchRowsWithFallback = async (payload: {
+  table: string;
+  maxResults: number;
+  orderField?: string;
+  filters?: Array<{ field: string; value: unknown }>;
+  ignoreMissingTable?: boolean;
+}): Promise<Array<Record<string, unknown>>> => {
+  const supabase = getSupabaseClient();
+
+  let request = supabase
+    .from(payload.table)
+    .select("*")
+    .limit(payload.maxResults);
+
+  (payload.filters ?? []).forEach((filter) => {
+    request = request.eq(filter.field, filter.value);
+  });
+
+  if (payload.orderField) {
+    request = request.order(payload.orderField, { ascending: false });
+  }
+
+  const { data, error } = await request;
+  if (!error) {
+    return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({ ...row }));
+  }
+
+  if (payload.ignoreMissingTable && isMissingTableError(error)) {
+    return [];
+  }
+
+  if (payload.orderField && extractMissingSchemaColumn(error)) {
+    let fallback = supabase
+      .from(payload.table)
+      .select("*")
+      .limit(payload.maxResults);
+
+    (payload.filters ?? []).forEach((filter) => {
+      fallback = fallback.eq(filter.field, filter.value);
+    });
+
+    const fallbackResponse = await fallback;
+    if (!fallbackResponse.error) {
+      return ((fallbackResponse.data ?? []) as Array<Record<string, unknown>>).map((row) => ({ ...row }));
+    }
+
+    if (payload.ignoreMissingTable && isMissingTableError(fallbackResponse.error)) {
+      return [];
+    }
+
+    throwSupabaseError(fallbackResponse.error);
+  }
+
+  throwSupabaseError(error);
+  return [];
+};
 
 const toMillis = (value: unknown): number => {
   if (value instanceof Date) return value.getTime();
@@ -401,16 +470,12 @@ export async function fetchBannedAppeals(
       FETCH_BANNED_REPORTS_CALLABLE,
       { maxResults: safeLimit },
       async () => {
-        const q = query(
-          collection(db, "banned_appeals"),
-          orderBy("createdAt", "desc"),
-          limit(safeLimit)
-        );
-        const snap = await getDocs(q);
-        const reports = snap.docs.map((row) => ({
-          id: row.id,
-          ...(row.data() as Record<string, unknown>),
-        }));
+        const reports = await fetchRowsWithFallback({
+          table: "banned_appeals",
+          maxResults: safeLimit,
+          orderField: "createdAt",
+          ignoreMissingTable: true,
+        });
         return { reports };
       }
     );
@@ -440,16 +505,12 @@ export async function fetchSupportReports(
       FETCH_SUPPORT_REPORTS_CALLABLE,
       { maxResults: safeLimit },
       async () => {
-        const q = query(
-          collection(db, "support_requests"),
-          orderBy("createdAt", "desc"),
-          limit(safeLimit)
-        );
-        const snap = await getDocs(q);
-        const reports = snap.docs.map((row) => ({
-          id: row.id,
-          ...(row.data() as Record<string, unknown>),
-        }));
+        const reports = await fetchRowsWithFallback({
+          table: "support_requests",
+          maxResults: safeLimit,
+          orderField: "createdAt",
+          ignoreMissingTable: true,
+        });
         return { reports };
       }
     );
@@ -472,28 +533,12 @@ export async function fetchCommunityModerationReports(
   if (cached) return cached as unknown as AdminModerationRecord[];
 
   return withInFlight(cacheKey, async () => {
-    let rows: Array<Record<string, unknown>> = [];
-
-    try {
-      const q = query(
-        collection(db, "denuncias"),
-        orderBy("timestamp", "desc"),
-        limit(safeLimit)
-      );
-      const snap = await getDocs(q);
-      rows = snap.docs.map((row) => ({
-        id: row.id,
-        ...(row.data() as Record<string, unknown>),
-      }));
-    } catch (error: unknown) {
-      if (!isIndexRequiredError(error)) throw error;
-      const fallbackQuery = query(collection(db, "denuncias"), limit(safeLimit));
-      const snap = await getDocs(fallbackQuery);
-      rows = snap.docs.map((row) => ({
-        id: row.id,
-        ...(row.data() as Record<string, unknown>),
-      }));
-    }
+    const rows = await fetchRowsWithFallback({
+      table: "denuncias",
+      maxResults: safeLimit,
+      orderField: "timestamp",
+      ignoreMissingTable: true,
+    });
 
     const reports = rows
       .map((row) => buildCommunityModerationRecord(asString(row.id), row))
@@ -518,33 +563,13 @@ export async function fetchGymModerationReports(
   if (cached) return cached as unknown as AdminModerationRecord[];
 
   return withInFlight(cacheKey, async () => {
-    let rows: Array<Record<string, unknown>> = [];
-
-    try {
-      const q = query(
-        collection(db, "support_requests"),
-        where("category", "==", "denuncia"),
-        orderBy("createdAt", "desc"),
-        limit(safeLimit)
-      );
-      const snap = await getDocs(q);
-      rows = snap.docs.map((row) => ({
-        id: row.id,
-        ...(row.data() as Record<string, unknown>),
-      }));
-    } catch (error: unknown) {
-      if (!isIndexRequiredError(error)) throw error;
-      const fallbackQuery = query(
-        collection(db, "support_requests"),
-        where("category", "==", "denuncia"),
-        limit(safeLimit)
-      );
-      const snap = await getDocs(fallbackQuery);
-      rows = snap.docs.map((row) => ({
-        id: row.id,
-        ...(row.data() as Record<string, unknown>),
-      }));
-    }
+    const rows = await fetchRowsWithFallback({
+      table: "support_requests",
+      maxResults: safeLimit,
+      orderField: "createdAt",
+      filters: [{ field: "category", value: "denuncia" }],
+      ignoreMissingTable: true,
+    });
 
     const reports = rows
       .map((row) => buildGymModerationRecord(asString(row.id), row))
@@ -585,16 +610,24 @@ export async function resolveAdminReport(payload: {
     callableName,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, payload.originCollection, reportId), {
-        response,
-        status: "resolved",
-        readByAdmin: true,
-        resolvedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const now = new Date().toISOString();
+      const { error: reportError } = await supabase
+        .from(payload.originCollection)
+        .update({
+          response,
+          status: "resolved",
+          readByAdmin: true,
+          resolvedAt: now,
+          updatedAt: now,
+        })
+        .eq("id", reportId);
+      if (reportError) {
+        throwSupabaseError(reportError);
+      }
 
       if (payload.reporterId?.trim()) {
-        await addDoc(collection(db, "notifications"), {
+        const { error: notificationError } = await supabase.from("notifications").insert({
           userId: payload.reporterId.trim(),
           title:
             payload.originCollection === "banned_appeals"
@@ -613,8 +646,11 @@ export async function resolveAdminReport(payload: {
             payload.originCollection === "banned_appeals"
               ? "appeal_response"
               : "support_response",
-          createdAt: serverTimestamp(),
+          createdAt: now,
         });
+        if (notificationError) {
+          throwSupabaseError(notificationError);
+        }
       }
 
       return { ok: true };
@@ -640,7 +676,14 @@ export async function deleteAdminReport(payload: {
     callableName,
     { reportId },
     async () => {
-      await deleteDoc(doc(db, payload.originCollection, reportId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from(payload.originCollection)
+        .delete()
+        .eq("id", reportId);
+      if (error) {
+        throwSupabaseError(error);
+      }
       return { ok: true };
     }
   );
@@ -678,25 +721,38 @@ export async function submitSupportRequest(payload: {
     typeof requestPayload,
     { id: string }
   >(SUBMIT_SUPPORT_CALLABLE, requestPayload, async () => {
-    const ref = await addDoc(collection(db, "support_requests"), {
-      ...requestPayload,
-      status: "pending",
-      readByAdmin: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    const supabase = getSupabaseClient();
+    const now = new Date().toISOString();
 
-    await addDoc(collection(db, "notifications"), {
+    const { data, error } = await supabase
+      .from("support_requests")
+      .insert({
+        ...requestPayload,
+        status: "pending",
+        readByAdmin: false,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      throwSupabaseError(error);
+    }
+
+    const { error: notificationError } = await supabase.from("notifications").insert({
       userId,
       title: "Chamado recebido",
       message: "Seu pedido de suporte foi enviado para analise.",
       link: "/configuracoes/suporte",
       read: false,
       type: "support",
-      createdAt: serverTimestamp(),
+      createdAt: now,
     });
+    if (notificationError) {
+      throwSupabaseError(notificationError);
+    }
 
-    return { id: ref.id };
+    return { id: asString((data as Record<string, unknown> | null)?.id) };
   });
 
   clearReportsCache();
@@ -733,35 +789,13 @@ export async function fetchUserSupportRequests(
       FETCH_USER_SUPPORT_CALLABLE,
       { userId: cleanUserId, maxResults: safeLimit },
       async () => {
-        let rows: Array<Record<string, unknown>> = [];
-        try {
-          const q = query(
-            collection(db, "support_requests"),
-            where("userId", "==", cleanUserId),
-            orderBy("createdAt", "desc"),
-            limit(safeLimit)
-          );
-          const snap = await getDocs(q);
-          rows = snap.docs.map((row) => ({
-            id: row.id,
-            ...(row.data() as Record<string, unknown>),
-          }));
-        } catch (error: unknown) {
-          if (!isIndexRequiredError(error)) {
-            throw error;
-          }
-
-          const fallbackQuery = query(
-            collection(db, "support_requests"),
-            where("userId", "==", cleanUserId),
-            limit(safeLimit)
-          );
-          const snap = await getDocs(fallbackQuery);
-          rows = snap.docs.map((row) => ({
-            id: row.id,
-            ...(row.data() as Record<string, unknown>),
-          }));
-        }
+        const rows = await fetchRowsWithFallback({
+          table: "support_requests",
+          maxResults: safeLimit,
+          orderField: "createdAt",
+          filters: [{ field: "userId", value: cleanUserId }],
+          ignoreMissingTable: true,
+        });
 
         const tickets = rows
           .map((row) => {
