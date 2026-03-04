@@ -1,23 +1,8 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  setDoc,
-  where,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -128,16 +113,34 @@ const shouldFallbackToClientWrites = (error: unknown): boolean => {
   );
 };
 
-const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase();
-  if (code?.includes("failed-precondition")) return true;
-
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("index") && message.includes("query");
-  }
-  return false;
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
 };
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const nowIso = (): string => new Date().toISOString();
 
 async function callWithFallback<TReq, TRes>(
   callableName: string,
@@ -243,6 +246,15 @@ const normalizeHistory = (id: string, raw: unknown): FidelityHistoryItem | null 
   };
 };
 
+const removeMissingColumnFromSelection = (
+  columns: string[],
+  missingColumn: string
+): string[] | null => {
+  const next = columns.filter((column) => column.toLowerCase() !== missingColumn.toLowerCase());
+  if (next.length === columns.length) return null;
+  return next;
+};
+
 export async function fetchFidelityConfig(options?: {
   forceRefresh?: boolean;
 }): Promise<FidelityConfig> {
@@ -251,11 +263,33 @@ export async function fetchFidelityConfig(options?: {
     return configCache.value;
   }
 
-  const snap = await getDoc(doc(db, "app_config", "fidelity"));
-  const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
+  const supabase = getSupabaseClient();
+  let selectColumns = ["id", "xpPerStamp", "rules"];
+  let data: Record<string, unknown> | null = null;
+
+  while (selectColumns.length > 0) {
+    const response = await supabase
+      .from("app_config")
+      .select(selectColumns.join(","))
+      .eq("id", "fidelity")
+      .maybeSingle();
+    if (!response.error) {
+      data = (response.data as Record<string, unknown> | null) ?? null;
+      break;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(response.error));
+    if (!missingColumn) throwSupabaseError(response.error);
+
+    const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+    if (!nextColumns.length) throwSupabaseError(response.error);
+    selectColumns = nextColumns;
+  }
+
+  const row = data ?? {};
   const config = {
-    xpPerStamp: Math.max(1, asNumber(data.xpPerStamp, 100)),
-    rules: normalizeRules(data.rules),
+    xpPerStamp: Math.max(1, asNumber(row.xpPerStamp, 100)),
+    rules: normalizeRules(row.rules),
   } satisfies FidelityConfig;
 
   configCache = { cachedAt: Date.now(), value: config };
@@ -277,20 +311,19 @@ export async function fetchFidelityRewards(options?: {
     if (cached) return cached;
   }
 
-  const constraints = [
-    collection(db, "store_rewards"),
-  ];
-  const baseQuery = activeOnly
-    ? query(
-        constraints[0],
-        where("active", "==", true),
-        limit(maxResults)
-      )
-    : query(constraints[0], limit(maxResults));
+  const supabase = getSupabaseClient();
+  let request = supabase
+    .from("store_rewards")
+    .select("id,title,cost,stock,image,active")
+    .limit(maxResults);
+  if (activeOnly) {
+    request = request.eq("active", true);
+  }
+  const { data, error } = await request;
+  if (error) throwSupabaseError(error);
 
-  const snap = await getDocs(baseQuery);
-  const rewards = snap.docs
-    .map((row) => normalizeReward(row.id, row.data()))
+  const rewards = (data ?? [])
+    .map((row) => normalizeReward(asString((row as Record<string, unknown>).id), row))
     .filter((row): row is FidelityReward => row !== null)
     .sort((left, right) => left.cost - right.cost);
 
@@ -311,14 +344,21 @@ export async function fetchFidelityTopUsers(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "users"),
-    orderBy("xp", "desc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  const users = snap.docs
-    .map((row) => normalizeTopUser(row.id, row.data()))
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("uid,nome,xp,foto,turma")
+    .order("xp", { ascending: false })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  const users = (data ?? [])
+    .map((row) =>
+      normalizeTopUser(
+        asString((row as Record<string, unknown>).uid),
+        row
+      )
+    )
     .filter((row): row is FidelityTopUser => row !== null);
 
   setCacheValue(topUsersCache, cacheKey, users);
@@ -341,34 +381,33 @@ export async function fetchFidelityHistory(
     if (cached) return cached;
   }
 
-  let rows: FidelityHistoryItem[] = [];
-  try {
-    const q = query(
-      collection(db, "achievements_logs"),
-      where("userId", "==", cleanUserId),
-      orderBy("timestamp", "desc"),
-      limit(maxResults)
-    );
-    const snap = await getDocs(q);
-    rows = snap.docs
-      .map((row) => normalizeHistory(row.id, row.data()))
-      .filter((row): row is FidelityHistoryItem => row !== null)
-      .sort((left, right) => right.rawDate.getTime() - left.rawDate.getTime());
-  } catch (error: unknown) {
-    if (!isIndexRequiredError(error)) {
-      throw error;
-    }
+  const supabase = getSupabaseClient();
+  const primary = await supabase
+    .from("achievements_logs")
+    .select("id,userId,achievementTitle,timestamp,xp,tipo")
+    .eq("userId", cleanUserId)
+    .order("timestamp", { ascending: false })
+    .limit(maxResults);
 
-    const fallbackQuery = query(
-      collection(db, "achievements_logs"),
-      where("userId", "==", cleanUserId),
-      limit(maxResults)
-    );
-    const snap = await getDocs(fallbackQuery);
-    rows = snap.docs
-      .map((row) => normalizeHistory(row.id, row.data()))
+  let rows: FidelityHistoryItem[] = [];
+  if (!primary.error) {
+    rows = (primary.data ?? [])
+      .map((row) => normalizeHistory(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is FidelityHistoryItem => row !== null)
       .sort((left, right) => right.rawDate.getTime() - left.rawDate.getTime());
+  } else if (asString(extractMissingSchemaColumn(primary.error))) {
+    const fallback = await supabase
+      .from("achievements_logs")
+      .select("id,userId,achievementTitle,timestamp,xp,tipo")
+      .eq("userId", cleanUserId)
+      .limit(maxResults);
+    if (fallback.error) throwSupabaseError(fallback.error);
+    rows = (fallback.data ?? [])
+      .map((row) => normalizeHistory(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is FidelityHistoryItem => row !== null)
+      .sort((left, right) => right.rawDate.getTime() - left.rawDate.getTime());
+  } else {
+    throwSupabaseError(primary.error);
   }
 
   setCacheValue(historyCache, cacheKey, rows);
@@ -385,11 +424,28 @@ export async function saveFidelityConfig(config: FidelityConfig): Promise<void> 
     SAVE_CONFIG_CALLABLE,
     payload,
     async () => {
-      await setDoc(
-        doc(db, "app_config", "fidelity"),
-        { ...payload, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
+      const supabase = getSupabaseClient();
+      const mutablePayload: Record<string, unknown> = {
+        id: "fidelity",
+        ...payload,
+        updatedAt: nowIso(),
+      };
+
+      while (Object.keys(mutablePayload).length > 1) {
+        const { error } = await supabase
+          .from("app_config")
+          .upsert(mutablePayload, { onConflict: "id" });
+        if (!error) return { ok: true };
+
+        const missingColumn = asString(extractMissingSchemaColumn(error));
+        if (!missingColumn) throwSupabaseError(error);
+        const removableKey = Object.keys(mutablePayload).find(
+          (key) => key.toLowerCase() === missingColumn.toLowerCase()
+        );
+        if (!removableKey || removableKey === "id") throwSupabaseError(error);
+        delete mutablePayload[String(removableKey)];
+      }
+
       return { ok: true };
     }
   );
@@ -417,11 +473,18 @@ export async function createFidelityReward(payload: {
     CREATE_REWARD_CALLABLE,
     safePayload,
     async () => {
-      const ref = await addDoc(collection(db, "store_rewards"), {
-        ...safePayload,
-        createdAt: serverTimestamp(),
-      });
-      return { id: ref.id };
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from("store_rewards")
+        .insert({
+          ...safePayload,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        })
+        .select("id")
+        .single();
+      if (error) throwSupabaseError(error);
+      return { id: asString((data as Record<string, unknown> | null)?.id) };
     }
   );
 
@@ -437,7 +500,9 @@ export async function deleteFidelityReward(id: string): Promise<void> {
     DELETE_REWARD_CALLABLE,
     { id: cleanId },
     async () => {
-      await deleteDoc(doc(db, "store_rewards", cleanId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("store_rewards").delete().eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -472,44 +537,53 @@ export async function requestFidelityRedemption(payload: {
     REDEEM_REWARD_CALLABLE,
     requestPayload,
     async () => {
-      await runTransaction(db, async (transaction) => {
-        const rewardRef = doc(db, "store_rewards", rewardId);
-        const rewardSnap = await transaction.get(rewardRef);
+      const supabase = getSupabaseClient();
+      const now = nowIso();
 
-        if (!rewardSnap.exists()) {
-          throw new Error("Premio nao encontrado.");
-        }
+      const { data: rewardData, error: rewardError } = await supabase
+        .from("store_rewards")
+        .select("id,stock")
+        .eq("id", rewardId)
+        .maybeSingle();
+      if (rewardError) throwSupabaseError(rewardError);
+      if (!rewardData) throw new Error("Premio nao encontrado.");
 
-        const rewardData = rewardSnap.data() as Record<string, unknown>;
-        const stock = Math.max(0, asNumber(rewardData.stock, 0));
-        if (stock <= 0) {
-          throw new Error("Estoque esgotado.");
-        }
+      const stock = Math.max(0, asNumber((rewardData as Record<string, unknown>).stock, 0));
+      if (stock <= 0) {
+        throw new Error("Estoque esgotado.");
+      }
 
-        transaction.update(rewardRef, { stock: increment(-1) });
+      const { error: updateRewardError } = await supabase
+        .from("store_rewards")
+        .update({
+          stock: stock - 1,
+          updatedAt: now,
+        })
+        .eq("id", rewardId);
+      if (updateRewardError) throwSupabaseError(updateRewardError);
 
-        const redemptionRef = doc(collection(db, "store_redemptions"));
-        transaction.set(redemptionRef, {
-          userId,
-          userName: requestPayload.userName,
-          rewardId,
-          rewardTitle: requestPayload.rewardTitle,
-          cost: requestPayload.cost,
-          status: "pendente",
-          createdAt: serverTimestamp(),
-        });
-
-        const notificationRef = doc(collection(db, "notifications"));
-        transaction.set(notificationRef, {
-          userId,
-          title: "Resgate registrado",
-          message: `Seu pedido de ${requestPayload.rewardTitle} foi enviado para a atlética.`,
-          link: "/fidelidade",
-          read: false,
-          type: "fidelity_redemption",
-          createdAt: serverTimestamp(),
-        });
+      const { error: redemptionError } = await supabase.from("store_redemptions").insert({
+        userId,
+        userName: requestPayload.userName,
+        rewardId,
+        rewardTitle: requestPayload.rewardTitle,
+        cost: requestPayload.cost,
+        status: "pendente",
+        createdAt: now,
+        updatedAt: now,
       });
+      if (redemptionError) throwSupabaseError(redemptionError);
+
+      const { error: notificationError } = await supabase.from("notifications").insert({
+        userId,
+        title: "Resgate registrado",
+        message: `Seu pedido de ${requestPayload.rewardTitle} foi enviado para a atletica.`,
+        link: "/fidelidade",
+        read: false,
+        type: "fidelity_redemption",
+        createdAt: now,
+      });
+      if (notificationError) throwSupabaseError(notificationError);
 
       return { ok: true };
     }
@@ -517,5 +591,3 @@ export async function requestFidelityRedemption(payload: {
 
   clearReadCaches();
 }
-
-
