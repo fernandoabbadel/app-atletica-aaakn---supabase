@@ -13,7 +13,7 @@ import {
   serverTimestamp,
   updateDoc,
   type QueryConstraint,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { compressImageFile } from "./imageCompression";
@@ -303,4 +303,5 @@ export async function submitGymCheckin(payload: {
 export function clearGymCaches(): void {
   feedCache.clear();
 }
+
 

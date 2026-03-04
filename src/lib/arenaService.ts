@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   updateDoc,
   type QueryConstraint,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -261,4 +261,5 @@ export async function registerArenaFlee(payload: {
 export function clearArenaCaches(): void {
   usersCache.clear();
 }
+
 

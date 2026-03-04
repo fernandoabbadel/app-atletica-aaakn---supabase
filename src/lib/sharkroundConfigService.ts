@@ -1,5 +1,5 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import { doc, getDoc, setDoc, serverTimestamp } from "@/lib/supa/firestore";
+import { doc, getDoc, setDoc, serverTimestamp } from "@/lib/supabaseHelpers";
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -237,4 +237,5 @@ export function clearSharkroundAppConfigCache(): void {
   configCache.clear();
   inflightConfig = null;
 }
+
 

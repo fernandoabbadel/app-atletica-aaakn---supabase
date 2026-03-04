@@ -13,7 +13,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -308,4 +308,5 @@ export async function setEventRsvp(payload: {
 export function clearEventCardCaches(): void {
   eventCardStateCache.clear();
 }
+
 

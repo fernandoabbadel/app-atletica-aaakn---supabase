@@ -10,7 +10,7 @@ import {
   updateDoc,
   where,
   type QueryConstraint,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { compressImageFile } from "./imageCompression";
@@ -230,4 +230,5 @@ export async function uploadGuidePhoto(file: File): Promise<string> {
 export function clearGuideCaches(): void {
   guideCache.clear();
 }
+
 

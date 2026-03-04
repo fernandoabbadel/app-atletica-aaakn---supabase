@@ -14,7 +14,7 @@ import { db } from "@/lib/backend";
 import { 
   collection, updateDoc, doc, 
   serverTimestamp, setDoc, addDoc
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 import { logActivity } from "../../lib/logger"; 
 import {
   createEventPoll,
@@ -1167,4 +1167,5 @@ export default function LigasAdminPage() {
       </div>
   );
 }
+
 

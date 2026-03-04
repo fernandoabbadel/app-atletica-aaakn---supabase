@@ -3,7 +3,7 @@
 import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Timestamp } from "@/lib/supa/firestore";
+import { Timestamp } from "@/lib/supabaseHelpers";
 import { AlertTriangle, ArrowLeft, Loader2, Star } from "lucide-react";
 
 import { createStoreReview, fetchStoreProductDetail } from "../../../../lib/storeService";

@@ -13,7 +13,7 @@ import {
   setDoc,
   updateDoc,
   writeBatch,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { db, functions, storage } from "./backend";
@@ -341,4 +341,5 @@ export async function seedHistoricEvents(
 
   clearReadCaches();
 }
+
 

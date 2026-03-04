@@ -11,7 +11,7 @@ import {
   startAfter,
   updateDoc,
   type QueryConstraint,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -458,4 +458,5 @@ export function clearAdminSecurityCaches(): void {
   permissionUsersCache.clear();
   permissionMatrixCache = null;
 }
+
 

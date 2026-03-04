@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -807,4 +807,5 @@ export async function fetchUserSupportRequests(
     return tickets;
   });
 }
+
 

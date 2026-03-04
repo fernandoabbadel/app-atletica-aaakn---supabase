@@ -1,4 +1,4 @@
-import { getSupabaseClient } from "../supabase";
+import { getSupabaseClient } from "./supabase";
 
 // Camada de compatibilidade para manter a API usada pelo app,
 // mas executando em tabelas do Supabase (sem realtime por padrao).
@@ -275,7 +275,7 @@ const getCompatTableConfig = (table: string): CompatTableConfig => {
 
   const message =
     `Compat Firestore sem mapeamento explicito para a tabela "${table}". ` +
-    "Adicione a tabela em COMPAT_TABLE_CONFIG (src/lib/supa/firestore.ts) antes de usar.";
+    "Adicione a tabela em COMPAT_TABLE_CONFIG (src/lib/supabaseHelpers.ts) antes de usar.";
   console.error(message);
   throw new Error(message);
 };
@@ -1161,3 +1161,4 @@ export function onSnapshot<T = unknown>(
     void run();
   });
 }
+

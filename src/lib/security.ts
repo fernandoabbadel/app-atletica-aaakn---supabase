@@ -1,5 +1,5 @@
 import { db } from "./backend";
-import { doc, getDoc, updateDoc, serverTimestamp } from "@/lib/supa/firestore";
+import { doc, getDoc, updateDoc, serverTimestamp } from "@/lib/supabaseHelpers";
 import { isPermissionError } from "./backendErrors";
 
 const RULES = {
@@ -117,4 +117,5 @@ export const Security = {
     return Date.now() - lastClickTime > RULES.LIKE_DEBOUNCE;
   },
 };
+
 

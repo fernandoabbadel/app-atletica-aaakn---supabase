@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, Clock, Copy, MessageCircle, Package, Wallet, X, XCircle } from "lucide-react";
-import { Timestamp } from "@/lib/supa/firestore";
+import { Timestamp } from "@/lib/supabaseHelpers";
 
 import { useAuth } from "../../../../context/AuthContext";
 import { fetchUserOrdersByTab } from "../../../../lib/settingsService";
@@ -375,4 +375,5 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
     </main>
   );
 }
+
 

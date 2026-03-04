@@ -11,7 +11,7 @@ import {
   runTransaction,
   serverTimestamp,
   where,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 import { getSupabaseClient } from "@/lib/supabase";
 
 import { db, functions } from "./backend";
@@ -1091,4 +1091,5 @@ export function clearProfileServiceCaches(): void {
   publicBundleCache.clear();
   followListCache.clear();
 }
+
 

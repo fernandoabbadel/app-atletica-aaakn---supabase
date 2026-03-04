@@ -16,7 +16,7 @@ import {
   type QueryConstraint,
   type QueryDocumentSnapshot,
   where,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 
 import { db } from "./backend";
 import { getSupabaseClient } from "./supabase";
@@ -1014,4 +1014,5 @@ export async function registerAlbumCapture(payload: {
     throw error;
   }
 }
+
 

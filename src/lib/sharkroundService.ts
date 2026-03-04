@@ -7,7 +7,7 @@ import {
   orderBy,
   query,
   updateDoc,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -208,4 +208,5 @@ export async function setSharkroundLeagueActive(payload: {
 export function clearSharkroundCache(): void {
   leaguesCache.clear();
 }
+
 

@@ -12,7 +12,7 @@ import {
   query,
   serverTimestamp,
   updateDoc,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -866,4 +866,5 @@ export async function addLeagueQuizHistory(payload: {
 
   clearUsersCache();
 }
+
 

@@ -1,4 +1,4 @@
-import { Timestamp } from "@/lib/supa/firestore";
+import { Timestamp } from "@/lib/supabaseHelpers";
 
 // ==========================================
 // 🦈 USUÁRIO (PERFIL COMPLETO)
@@ -365,3 +365,4 @@ export interface CarteirinhaConfig {
   validade: string;
   backgrounds: Record<string, string>; // { "T1": "url...", "T2": "url..." }
 }
+

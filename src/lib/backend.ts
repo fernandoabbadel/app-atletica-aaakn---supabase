@@ -1,7 +1,7 @@
 import { getApp, getApps, initializeApp } from "@/lib/supa/app";
 import { getAuth, GoogleAuthProvider } from "@/lib/supa/auth";
 import { getFunctions } from "@/lib/supa/functions";
-import { initializeFirestore } from "@/lib/supa/firestore";
+import { initializeFirestore } from "@/lib/supabaseHelpers";
 import { getStorage } from "@/lib/supa/storage";
 
 const appConfig = {
@@ -20,3 +20,4 @@ const functions = getFunctions();
 const googleProvider = new GoogleAuthProvider();
 
 export { app, auth, db, functions, googleProvider, storage };
+

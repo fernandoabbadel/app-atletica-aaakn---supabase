@@ -1,5 +1,5 @@
 import { db } from "@/lib/backend"; // Ajuste se seu path for diferente
-import { doc, updateDoc, getDoc } from "@/lib/supa/firestore";
+import { doc, updateDoc, getDoc } from "@/lib/supabaseHelpers";
 
 // Definição dos valores padrão para referência (Hardcoded para segurança do script)
 const DEFAULT_VALUES = {
@@ -102,4 +102,5 @@ export const repairUserProfile = async (uid: string) => {
     return false;
   }
 };
+
 

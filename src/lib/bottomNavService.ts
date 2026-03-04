@@ -10,7 +10,7 @@ import {
   updateDoc,
   where,
   type QueryConstraint,
-} from "@/lib/supa/firestore";
+} from "@/lib/supabaseHelpers";
 
 import { db, functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -291,4 +291,5 @@ export function clearBottomNavCaches(): void {
   notificationsCache.clear();
   bannedAppealsCountCache = null;
 }
+
 
