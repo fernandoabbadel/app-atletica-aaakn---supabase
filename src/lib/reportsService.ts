@@ -14,6 +14,45 @@ const USER_SUPPORT_CACHE_TTL_MS = 30_000;
 
 const MAX_ADMIN_REPORT_RESULTS = 240;
 const MAX_USER_SUPPORT_RESULTS = 80;
+const REPORT_TABLE_SELECT_COLUMNS: Record<string, string[]> = {
+  banned_appeals: [
+    "id",
+    "userName",
+    "userId",
+    "message",
+    "status",
+    "response",
+    "createdAt",
+    "createdAtMs",
+    "updatedAt",
+  ],
+  support_requests: [
+    "id",
+    "userId",
+    "userName",
+    "category",
+    "subject",
+    "message",
+    "module",
+    "status",
+    "response",
+    "createdAt",
+    "createdAtMs",
+    "updatedAt",
+  ],
+  denuncias: [
+    "id",
+    "reporterId",
+    "reporterName",
+    "targetId",
+    "targetType",
+    "reason",
+    "content",
+    "status",
+    "timestamp",
+    "createdAt",
+  ],
+};
 
 const SUBMIT_SUPPORT_CALLABLE = "supportSubmitRequest";
 const RESOLVE_BANNED_CALLABLE = "adminResolveBannedAppeal";
@@ -169,6 +208,9 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
   return null;
 };
 
+const getReportSelectColumns = (tableName: string): string[] =>
+  [...(REPORT_TABLE_SELECT_COLUMNS[tableName] ?? ["id", "createdAt"])];
+
 const isMissingTableError = (error: unknown): boolean => {
   if (!error || typeof error !== "object") return false;
   const raw = error as { code?: unknown; message?: unknown };
@@ -216,52 +258,61 @@ const fetchRowsWithFallback = async (payload: {
   ignoreMissingTable?: boolean;
 }): Promise<Array<Record<string, unknown>>> => {
   const supabase = getSupabaseClient();
+  let selectColumns = getReportSelectColumns(payload.table);
+  let canOrder = Boolean(payload.orderField);
 
-  let request = supabase
-    .from(payload.table)
-    .select("*")
-    .limit(payload.maxResults);
-
-  (payload.filters ?? []).forEach((filter) => {
-    request = request.eq(filter.field, filter.value);
-  });
-
-  if (payload.orderField) {
-    request = request.order(payload.orderField, { ascending: false });
-  }
-
-  const { data, error } = await request;
-  if (!error) {
-    return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({ ...row }));
-  }
-
-  if (payload.ignoreMissingTable && isMissingTableError(error)) {
-    return [];
-  }
-
-  if (payload.orderField && extractMissingSchemaColumn(error)) {
-    let fallback = supabase
+  while (selectColumns.length > 0) {
+    let request = supabase
       .from(payload.table)
-      .select("*")
+      .select(selectColumns.join(","))
       .limit(payload.maxResults);
 
     (payload.filters ?? []).forEach((filter) => {
-      fallback = fallback.eq(filter.field, filter.value);
+      request = request.eq(filter.field, filter.value);
     });
 
-    const fallbackResponse = await fallback;
-    if (!fallbackResponse.error) {
-      return ((fallbackResponse.data ?? []) as Array<Record<string, unknown>>).map((row) => ({ ...row }));
+    if (canOrder && payload.orderField) {
+      request = request.order(payload.orderField, { ascending: false });
     }
 
-    if (payload.ignoreMissingTable && isMissingTableError(fallbackResponse.error)) {
+    const { data, error } = await request;
+    if (!error) {
+      const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+      return rows.map((row) => ({ ...row }));
+    }
+
+    if (payload.ignoreMissingTable && isMissingTableError(error)) {
       return [];
     }
 
-    throwSupabaseError(fallbackResponse.error);
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (missingColumn) {
+      if (
+        canOrder &&
+        payload.orderField &&
+        missingColumn.toLowerCase() === payload.orderField.toLowerCase()
+      ) {
+        canOrder = false;
+        continue;
+      }
+
+      const nextColumns = selectColumns.filter(
+        (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+      );
+      if (nextColumns.length > 0 && nextColumns.length < selectColumns.length) {
+        selectColumns = nextColumns;
+        continue;
+      }
+    }
+
+    if (canOrder && payload.orderField) {
+      canOrder = false;
+      continue;
+    }
+
+    throwSupabaseError(error);
   }
 
-  throwSupabaseError(error);
   return [];
 };
 

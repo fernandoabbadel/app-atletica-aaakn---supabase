@@ -207,6 +207,18 @@ const clearAdminUsersCache = (): void => {
   userDossierInflight.clear();
 };
 
+const USER_RELATED_TABLE_SELECT_COLUMNS: Record<string, string[]> = {
+  posts: ["id", "userId", "texto", "likes", "comentarios", "createdAt"],
+  store_orders: ["id", "userId", "itens", "total", "status", "createdAt"],
+  orders: ["id", "userId", "itens", "total", "status", "createdAt"],
+  achievements_logs: ["id", "userId", "achievementTitle", "timestamp"],
+  arena_matches: ["id", "userId", "game", "result", "date"],
+  gym_logs: ["id", "userId", "local", "date"],
+};
+
+const getUserRelatedSelectColumns = (tableName: string): string[] =>
+  [...(USER_RELATED_TABLE_SELECT_COLUMNS[tableName] ?? ["id", "userId"])];
+
 const updateUserWithColumnFallback = async (
   userId: string,
   patch: Record<string, unknown>
@@ -237,41 +249,56 @@ const fetchTableRowsForUser = async (
   options: { limit: number; orderField?: string; ignoreMissingTable?: boolean }
 ): Promise<Record<string, unknown>[]> => {
   const supabase = getSupabaseClient();
-  let request = supabase
-    .from(tableName)
-    .select("*")
-    .eq("userId", userId)
-    .limit(options.limit);
+  let selectColumns = getUserRelatedSelectColumns(tableName);
+  let canOrder = Boolean(options.orderField);
 
-  if (options.orderField) {
-    request = request.order(options.orderField, { ascending: false });
-  }
-
-  const { data, error } = await request;
-  if (!error) {
-    return ((data ?? []) as Record<string, unknown>[]).map((row) => ({ ...row }));
-  }
-
-  if (options.ignoreMissingTable && isMissingTableError(error)) {
-    return [];
-  }
-
-  if (options.orderField && asString(extractMissingSchemaColumn(error))) {
-    const fallback = await supabase
+  while (selectColumns.length > 0) {
+    let request = supabase
       .from(tableName)
-      .select("*")
+      .select(selectColumns.join(","))
       .eq("userId", userId)
       .limit(options.limit);
-    if (fallback.error) {
-      if (options.ignoreMissingTable && isMissingTableError(fallback.error)) {
-        return [];
-      }
-      throwSupabaseError(fallback.error);
+
+    if (canOrder && options.orderField) {
+      request = request.order(options.orderField, { ascending: false });
     }
-    return ((fallback.data ?? []) as Record<string, unknown>[]).map((row) => ({ ...row }));
+
+    const { data, error } = await request;
+    if (!error) {
+      const rows = (data ?? []) as unknown as Record<string, unknown>[];
+      return rows.map((row) => ({ ...row }));
+    }
+
+    if (options.ignoreMissingTable && isMissingTableError(error)) {
+      return [];
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (missingColumn) {
+      if (
+        canOrder &&
+        options.orderField &&
+        missingColumn.toLowerCase() === options.orderField.toLowerCase()
+      ) {
+        canOrder = false;
+        continue;
+      }
+
+      const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn);
+      if (nextColumns && nextColumns.length > 0) {
+        selectColumns = nextColumns;
+        continue;
+      }
+    }
+
+    if (canOrder && options.orderField) {
+      canOrder = false;
+      continue;
+    }
+
+    throwSupabaseError(error);
   }
 
-  throwSupabaseError(error);
   return [];
 };
 

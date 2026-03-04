@@ -18,6 +18,19 @@ const MAX_PRODUCTS = 240;
 const MAX_ORDERS = 1200;
 const MAX_REVIEWS = 600;
 const MAX_CATEGORIES = 300;
+const STORE_PRODUCT_SELECT_COLUMNS =
+  "id,nome,categoria,descricao,img,preco,precoAntigo,estoque,cores,variantes,caracteristicas,badge,active,aprovado,vendidos,likes,createdAt,updatedAt";
+const STORE_CATEGORY_SELECT_COLUMNS = "id,nome,createdAt,updatedAt";
+const STORE_ORDER_SELECT_COLUMNS =
+  "id,userId,userName,productId,productName,price,total,quantidade,itens,data,status,approvedBy,createdAt,updatedAt";
+const STORE_REVIEW_SELECT_COLUMNS =
+  "id,productId,userId,userName,userAvatar,rating,comment,status,createdAt,updatedAt";
+const STORE_SELECT_COLUMNS_BY_TABLE: Record<string, string[]> = {
+  produtos: STORE_PRODUCT_SELECT_COLUMNS.split(","),
+  categorias: STORE_CATEGORY_SELECT_COLUMNS.split(","),
+  orders: STORE_ORDER_SELECT_COLUMNS.split(","),
+  reviews: STORE_REVIEW_SELECT_COLUMNS.split(","),
+};
 
 const CALLABLE_TOGGLE_LIKE = "storeToggleLike";
 const CALLABLE_CREATE_ORDER = "storeCreateOrder";
@@ -36,6 +49,9 @@ const productDetailCache = new Map<string, CacheEntry<StoreProductDetailBundle>>
 
 const asNum = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const asString = (value: unknown, fallback = ""): string =>
+  typeof value === "string" ? value : fallback;
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
@@ -88,6 +104,9 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
   return null;
 };
 
+const getStoreSelectColumns = (tableName: string): string[] =>
+  [...(STORE_SELECT_COLUMNS_BY_TABLE[tableName] ?? ["id", "createdAt", "updatedAt"])];
+
 const nowIso = (): string => new Date().toISOString();
 
 const shouldFallbackToClient = (error: unknown): boolean => {
@@ -139,25 +158,56 @@ async function queryRows(path: string, attempts: QueryAttempt[]): Promise<Row[]>
   if (!safeAttempts.length) return [];
 
   for (const attempt of safeAttempts) {
-    let request = supabase.from(path).select("*").limit(attempt.limit);
+    let selectColumns = getStoreSelectColumns(path);
+    let canOrder = Boolean(attempt.orderByField);
 
-    (attempt.filters ?? []).forEach((filter) => {
-      request = request.eq(filter.field, filter.value);
-    });
+    while (selectColumns.length > 0) {
+      let request = supabase
+        .from(path)
+        .select(selectColumns.join(","))
+        .limit(attempt.limit);
 
-    if (attempt.orderByField) {
-      request = request.order(attempt.orderByField, {
-        ascending: attempt.orderAscending ?? false,
+      (attempt.filters ?? []).forEach((filter) => {
+        request = request.eq(filter.field, filter.value);
       });
-    }
 
-    const { data, error } = await request;
-    if (!error) {
-      return ((data ?? []) as Row[]).map((row) => ({ ...row }));
-    }
+      if (canOrder && attempt.orderByField) {
+        request = request.order(attempt.orderByField, {
+          ascending: attempt.orderAscending ?? false,
+        });
+      }
 
-    const missingColumn = extractMissingSchemaColumn(error);
-    if (!missingColumn) {
+      const { data, error } = await request;
+      if (!error) {
+        const rows = (data ?? []) as unknown as Row[];
+        return rows.map((row) => ({ ...row }));
+      }
+
+      const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+      if (missingColumn) {
+        if (
+          canOrder &&
+          attempt.orderByField &&
+          missingColumn.toLowerCase() === attempt.orderByField.toLowerCase()
+        ) {
+          canOrder = false;
+          continue;
+        }
+
+        const nextColumns = selectColumns.filter(
+          (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+        );
+        if (nextColumns.length > 0 && nextColumns.length < selectColumns.length) {
+          selectColumns = nextColumns;
+          continue;
+        }
+      }
+
+      if (canOrder && attempt.orderByField) {
+        canOrder = false;
+        continue;
+      }
+
       throwSupabaseError(error);
     }
   }
@@ -283,7 +333,7 @@ export async function fetchStoreProductDetail(options: {
   const supabase = getSupabaseClient();
   const { data: produtoData, error: produtoError } = await supabase
     .from("produtos")
-    .select("*")
+    .select(STORE_PRODUCT_SELECT_COLUMNS)
     .eq("id", productId)
     .maybeSingle();
   if (produtoError) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { scanFirestoreCollectionFields } from "@/lib/partnersService";
+import { scanSupabaseTableFields } from "@/lib/partnersService";
 
 export default function ScannerPage() {
   const [loading, setLoading] = useState(false);
@@ -9,10 +9,10 @@ export default function ScannerPage() {
 
   const scanDatabase = async () => {
     setLoading(true);
-    const collectionsToScan = ["usuarios", "produtos", "eventos", "pedidos"];
+    const collectionsToScan = ["users", "produtos", "eventos", "orders", "parceiros"];
 
     try {
-      const results = await scanFirestoreCollectionFields({
+      const results = await scanSupabaseTableFields({
         collections: collectionsToScan,
         sampleDocsPerCollection: 40,
       });

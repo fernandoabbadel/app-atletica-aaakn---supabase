@@ -99,6 +99,66 @@ const PARCEIROS_SELECT_COLUMNS: string =
   "id,nome,categoria,tier,status,cnpj,responsavel,email,telefone,descricao,endereco,horario,insta,site,whats,imgCapa,imgLogo,mensalidade,vendasTotal,totalScans,cupons,senha,createdAt";
 const SCANS_SELECT_COLUMNS: string =
   "id,empresaId,empresa,usuario,userId,cupom,valorEconomizado,data,hora,timestamp";
+const SCANNER_FALLBACK_COLUMNS_BY_TABLE: Record<string, string[]> = {
+  users: [
+    "uid",
+    "nome",
+    "email",
+    "role",
+    "status",
+    "turma",
+    "plano",
+    "patente",
+    "createdAt",
+    "updatedAt",
+  ],
+  produtos: [
+    "id",
+    "nome",
+    "categoria",
+    "descricao",
+    "img",
+    "preco",
+    "estoque",
+    "active",
+    "aprovado",
+    "vendidos",
+    "createdAt",
+    "updatedAt",
+  ],
+  eventos: [
+    "id",
+    "titulo",
+    "data",
+    "hora",
+    "local",
+    "status",
+    "categoria",
+    "createdAt",
+    "updatedAt",
+  ],
+  orders: [
+    "id",
+    "userId",
+    "productId",
+    "productName",
+    "status",
+    "total",
+    "createdAt",
+    "updatedAt",
+  ],
+  parceiros: [
+    "id",
+    "nome",
+    "categoria",
+    "tier",
+    "status",
+    "imgLogo",
+    "imgCapa",
+    "totalScans",
+    "createdAt",
+  ],
+};
 
 const PARTNERS_CREATE_LEAD_CALLABLE = "partnersCreateLead";
 const PARTNERS_LOGIN_CALLABLE = "partnersLogin";
@@ -1320,7 +1380,7 @@ export async function updatePartnerProfile(payload: {
   publicPartnersCache.clear();
 }
 
-export async function scanFirestoreCollectionFields(options: {
+export async function scanSupabaseTableFields(options: {
   collections: string[];
   sampleDocsPerCollection?: number;
   forceRefresh?: boolean;
@@ -1344,20 +1404,83 @@ export async function scanFirestoreCollectionFields(options: {
 
   const report: Record<string, string[]> = {};
   const supabase = getSupabaseClient();
-  for (const collectionName of collectionNames) {
-    const { data, error } = await supabase
-      .from(collectionName)
-      .select("*")
-      .limit(sampleDocsPerCollection);
-    if (error) throwSupabaseError(error);
 
-    const fields = new Set<string>();
-    (data ?? []).forEach((row) => {
-      Object.keys(asObject(row) ?? {}).forEach((field) => fields.add(field));
+  const schemaLookup = await supabase
+    .schema("information_schema")
+    .from("columns")
+    .select("table_name,column_name")
+    .eq("table_schema", "public")
+    .in("table_name", collectionNames);
+
+  if (!schemaLookup.error) {
+    const grouped = new Map<string, Set<string>>();
+    (schemaLookup.data ?? []).forEach((row) => {
+      const table = asString((row as Record<string, unknown>).table_name).trim();
+      const column = asString((row as Record<string, unknown>).column_name).trim();
+      if (!table || !column) return;
+      const current = grouped.get(table) ?? new Set<string>();
+      current.add(column);
+      grouped.set(table, current);
     });
-    report[collectionName] = [...fields].sort((left, right) =>
-      left.localeCompare(right, "pt-BR")
-    );
+
+    collectionNames.forEach((tableName) => {
+      const fields = grouped.get(tableName);
+      if (!fields) {
+        report[tableName] = [...(SCANNER_FALLBACK_COLUMNS_BY_TABLE[tableName] ?? [])].sort(
+          (left, right) => left.localeCompare(right, "pt-BR")
+        );
+        return;
+      }
+      report[tableName] = [...fields].sort((left, right) =>
+        left.localeCompare(right, "pt-BR")
+      );
+    });
+
+    setMapCacheValue(scannerFieldsCache, cacheKey, report);
+    return report;
+  }
+
+  for (const tableName of collectionNames) {
+    const fallbackColumns = SCANNER_FALLBACK_COLUMNS_BY_TABLE[tableName] ?? ["id"];
+    const mutableColumns = [...fallbackColumns];
+
+    while (mutableColumns.length > 0) {
+      const { error } = await supabase
+        .from(tableName)
+        .select(mutableColumns.join(","))
+        .limit(sampleDocsPerCollection);
+
+      if (!error) {
+        report[tableName] = [...mutableColumns].sort((left, right) =>
+          left.localeCompare(right, "pt-BR")
+        );
+        break;
+      }
+
+      const errorObj = asObject(error) ?? {};
+      const code = asString(errorObj.code).toUpperCase();
+      if (code === "42P01" || code === "PGRST205") {
+        report[tableName] = [];
+        break;
+      }
+
+      const message = asString(errorObj.message);
+      const match =
+        message.match(/column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i) ||
+        message.match(/could not find the ['"]?(\w+)['"]? column/i);
+      const missingColumn = asString(match?.[1]);
+      if (!missingColumn) throwSupabaseError(error);
+
+      const nextColumns = mutableColumns.filter(
+        (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+      );
+      if (nextColumns.length === mutableColumns.length) throwSupabaseError(error);
+      mutableColumns.splice(0, mutableColumns.length, ...nextColumns);
+    }
+
+    if (!(tableName in report)) {
+      report[tableName] = [];
+    }
   }
 
   setMapCacheValue(scannerFieldsCache, cacheKey, report);
