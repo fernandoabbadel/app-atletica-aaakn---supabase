@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, BarChart3, CheckCircle2, Building2, XCircle } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 
@@ -12,9 +13,21 @@ interface SharkroundStats {
 }
 
 const SHARKROUND_STATS_STORAGE_KEY = "sharkround_local_stats_v1";
+const SHARKROUND_ALLOWED_ROLES = new Set(["master", "admin_geral", "admin_gestor"]);
 
 export default function SharkroundEstatisticasPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  const userRole =
+    typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
+  const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
+
+  useEffect(() => {
+    if (loading) return;
+    if (canAccessSharkround) return;
+    router.replace("/em-breve");
+  }, [loading, canAccessSharkround, router]);
+
   const [stats, setStats] = useState<SharkroundStats>({
     clinicas: 0,
     acertos: 0,
@@ -22,6 +35,7 @@ export default function SharkroundEstatisticasPage() {
   });
 
   useEffect(() => {
+    if (loading || !canAccessSharkround) return;
     if (!user?.uid) return;
     const raw = window.localStorage.getItem(
       `${SHARKROUND_STATS_STORAGE_KEY}:${user.uid}`
@@ -40,13 +54,21 @@ export default function SharkroundEstatisticasPage() {
     } catch {
       setStats({ clinicas: 0, acertos: 0, erros: 0 });
     }
-  }, [user?.uid]);
+  }, [user?.uid, loading, canAccessSharkround]);
 
   const precision = useMemo(() => {
     const total = stats.acertos + stats.erros;
     if (total === 0) return 0;
     return Math.round((stats.acertos / total) * 100);
   }, [stats.acertos, stats.erros]);
+
+  if (loading || !canAccessSharkround) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-white font-sans flex items-center justify-center">
+        <p className="text-xs text-zinc-500 uppercase font-bold">Carregando...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">

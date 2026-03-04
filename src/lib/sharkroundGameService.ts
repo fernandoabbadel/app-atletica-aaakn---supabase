@@ -34,6 +34,48 @@ const boundedLimit = (requested: number, maxAllowed: number): number => {
   return Math.floor(requested);
 };
 
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const parseSelectColumns = (selectColumns: string): string[] =>
+  selectColumns
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+const removeMissingColumnFromSelection = (
+  columns: string[],
+  missingColumn: string
+): string[] | null => {
+  const missingLower = missingColumn.toLowerCase();
+  const next = columns.filter((column) => {
+    const [aliasPart, sourcePart] = column.split(":");
+    const candidateKeys = [column, aliasPart, sourcePart]
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim().toLowerCase());
+    return !candidateKeys.includes(missingLower);
+  });
+  if (next.length === columns.length) return null;
+  return next;
+};
+
 const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
   const cached = cache.get(key);
   if (!cached) return null;
@@ -56,41 +98,52 @@ async function queryRows(options: {
   orderField?: string;
 }): Promise<RawRow[]> {
   const supabase = getSupabaseClient();
-  let lastError: unknown = null;
+  let mutableColumns = parseSelectColumns(options.selectColumns);
+  let mutableOrderField = options.orderField;
 
-  // Tentativa principal: query enxuta com filtro/ordem.
-  let primaryQuery = supabase
-    .from(options.tableName)
-    .select(options.selectColumns)
-    .limit(options.maxResults);
-  if (options.eq) {
-    primaryQuery = primaryQuery.eq(options.eq.field, options.eq.value);
-  }
-  if (options.orderField) {
-    primaryQuery = primaryQuery.order(options.orderField, { ascending: false });
+  while (mutableColumns.length > 0) {
+    let query = supabase
+      .from(options.tableName)
+      .select(mutableColumns.join(","))
+      .limit(options.maxResults);
+
+    if (options.eq) {
+      query = query.eq(options.eq.field, options.eq.value);
+    }
+    if (mutableOrderField) {
+      query = query.order(mutableOrderField, { ascending: false });
+    }
+
+    const { data, error } = await query;
+    if (!error) {
+      return Array.isArray(data) ? (data as unknown as RawRow[]) : [];
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (!missingColumn) {
+      // Fallback final: remove apenas a ordenacao e tenta novamente.
+      if (mutableOrderField) {
+        mutableOrderField = undefined;
+        continue;
+      }
+      throw error;
+    }
+
+    if (
+      mutableOrderField &&
+      mutableOrderField.toLowerCase() === missingColumn.toLowerCase()
+    ) {
+      mutableOrderField = undefined;
+      continue;
+    }
+
+    const nextColumns =
+      removeMissingColumnFromSelection(mutableColumns, missingColumn) ?? [];
+    if (nextColumns.length === 0) throw error;
+    mutableColumns = nextColumns;
   }
 
-  const { data: primaryData, error: primaryError } = await primaryQuery;
-  if (!primaryError && Array.isArray(primaryData)) {
-    return primaryData as unknown as RawRow[];
-  }
-  lastError = primaryError;
-
-  // Fallback sem order para tolerar schema/indice ainda em migracao.
-  let fallbackQuery = supabase
-    .from(options.tableName)
-    .select(options.selectColumns)
-    .limit(options.maxResults);
-  if (options.eq) {
-    fallbackQuery = fallbackQuery.eq(options.eq.field, options.eq.value);
-  }
-
-  const { data: fallbackData, error: fallbackError } = await fallbackQuery;
-  if (fallbackError) {
-    throw fallbackError ?? lastError;
-  }
-
-  return Array.isArray(fallbackData) ? (fallbackData as unknown as RawRow[]) : [];
+  return [];
 }
 
 export interface SharkroundGameQuestionRecord {

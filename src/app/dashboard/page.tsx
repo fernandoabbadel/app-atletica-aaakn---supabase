@@ -39,6 +39,7 @@ interface UserData {
     nome: string;
     foto: string;
     turma: string;
+    role?: string;
     level?: number;
     selos?: number;
 }
@@ -426,6 +427,14 @@ export default function DashboardPage() {
   if (loading || loadingData) return <div className="h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500 w-10 h-10" /></div>;
 
   const userData = user as unknown as UserData; 
+  const userRoleNormalized =
+    typeof userData?.role === "string" ? userData.role.toLowerCase().trim() : "guest";
+  const sharkroundHref =
+    userRoleNormalized === "master" ||
+    userRoleNormalized === "admin_geral" ||
+    userRoleNormalized === "admin_gestor"
+      ? "/sharkround"
+      : "/em-breve";
 
   return (
     <div className="flex flex-col gap-8 p-5 pb-32 max-w-md mx-auto w-full bg-[#050505] min-h-screen text-white font-sans selection:bg-emerald-500">
@@ -561,7 +570,7 @@ export default function DashboardPage() {
 
       {/* 2. SHARK ROUND (COM FAIXA "EM BREVE") & TREINOS */}
       <div className="grid grid-cols-2 gap-4">
-          <Link href="/sharkround" className="bg-emerald-600 rounded-3xl p-5 h-44 flex flex-col justify-between active:scale-95 transition relative overflow-hidden group shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+          <Link href={sharkroundHref} className="bg-emerald-600 rounded-3xl p-5 h-44 flex flex-col justify-between active:scale-95 transition relative overflow-hidden group shadow-[0_0_20px_rgba(16,185,129,0.2)]">
               {/* ID 03: FAIXA EM BREVE */}
               <div className="absolute top-3 -right-8 w-32 bg-orange-500 text-black text-[9px] font-black uppercase text-center py-1 rotate-45 border-2 border-black z-20 shadow-lg">
                   Em Breve

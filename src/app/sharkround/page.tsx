@@ -65,12 +65,47 @@ interface SharkroundStats {
 }
 
 const SHARKROUND_STATS_STORAGE_KEY = "sharkround_local_stats_v1";
+const SHARKROUND_ALLOWED_ROLES = new Set(["master", "admin_geral", "admin_gestor"]);
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim().length > 0) return error;
+
+  if (typeof error === "object" && error !== null) {
+    const raw = error as {
+      message?: unknown;
+      details?: unknown;
+      hint?: unknown;
+      code?: unknown;
+    };
+    const details = [
+      typeof raw.message === "string" ? raw.message : "",
+      typeof raw.details === "string" ? raw.details : "",
+      typeof raw.hint === "string" ? raw.hint : "",
+      typeof raw.code === "string" ? raw.code : "",
+    ]
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+
+    if (details.length > 0) return details.join(" | ");
+  }
+
+  return "Erro desconhecido";
+};
 
 export default function SharkRoundPage() {
   const { addToast } = useToast(); 
   const { user, loading } = useAuth(); 
   const router = useRouter();
+  const userRole =
+    typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
+  const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
 
+  useEffect(() => {
+    if (loading) return;
+    if (canAccessSharkround) return;
+    router.replace("/em-breve");
+  }, [canAccessSharkround, loading, router]);
   // Configuração (Constantes agora, já que os setters não eram usados)
   const boardSide = 11;
   const boardSizeTotal = 40;
@@ -113,12 +148,17 @@ export default function SharkRoundPage() {
   useEffect(() => {
     let mounted = true;
     const loadConfig = async () => {
+      if (loading || !canAccessSharkround) return;
       try {
         const config = await fetchSharkroundAppConfig({ forceRefresh: false });
         if (!mounted) return;
         setGameConfig(config);
       } catch (error: unknown) {
-        console.error(error);
+        console.error(
+          "[sharkround] erro ao carregar configuracao:",
+          getErrorMessage(error),
+          error
+        );
       }
     };
 
@@ -126,7 +166,7 @@ export default function SharkRoundPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [loading, canAccessSharkround]);
 
   useEffect(() => {
     setJogador((previous) => {
@@ -157,6 +197,8 @@ export default function SharkRoundPage() {
 
   // --- 1. INICIALIZAÃ‡ÃƒO ---
   useEffect(() => {
+    if (loading || !canAccessSharkround) return;
+
     const initGame = async () => {
         // Carregar Ligas da coleção CORRETA (ligas_config)
         const ligasLoaded: LigaConfig[] = []; 
@@ -172,7 +214,13 @@ export default function SharkRoundPage() {
               ligasLoaded.push(data);
               ligasMap[league.id] = data;
             });
-        } catch(error: unknown) { console.log("Offline/Erro Ligas", error); }
+        } catch (error: unknown) {
+            console.error(
+              "[sharkround] erro ao carregar ligas:",
+              getErrorMessage(error),
+              error
+            );
+        }
 
         setLigasAtivasMap(ligasMap); 
 
@@ -228,7 +276,11 @@ export default function SharkRoundPage() {
             }));
             setOutrosJogadores(players);
         } catch (error: unknown) {
-             console.error("Erro ao carregar jogadores", error);
+             console.error(
+               "[sharkround] erro ao carregar jogadores:",
+               getErrorMessage(error),
+               error
+             );
              setOutrosJogadores([{ id: 'p2', nome: 'Vivian', avatar: 'https://github.com/shadcn.png', posicao: 10, preso: true, coracoes: 2 }]);
         }
     };
@@ -238,7 +290,7 @@ export default function SharkRoundPage() {
         setJogador(prev => ({...prev, id: user.uid, nome: user.nome || "Atleta", avatar: user.foto || prev.avatar}));
         fetchRanking();
     }
-  }, [user, loading, boardSizeTotal]);
+  }, [user, loading, boardSizeTotal, canAccessSharkround]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -284,7 +336,13 @@ export default function SharkRoundPage() {
             foto: entry.foto,
             tubas: entry.tubas || 0,
           })));
-      } catch (error: unknown) { console.error(error); }
+      } catch (error: unknown) {
+        console.error(
+          "[sharkround] erro ao carregar ranking:",
+          getErrorMessage(error),
+          error
+        );
+      }
   };
 
   // --- MECÃ‚NICA ---
@@ -456,7 +514,13 @@ export default function SharkRoundPage() {
       return { gridRow: boardSide - (i - (boardSide * 3 - 2)) - 1, gridColumn: 1 }; 
   };
 
-  if (loading) return <div className="h-screen bg-black flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>;
+  if (loading || !canAccessSharkround) {
+    return (
+      <div className="h-screen bg-black flex items-center justify-center">
+        <Loader2 className="animate-spin text-emerald-500" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-24 overflow-hidden selection:bg-emerald-500/30">

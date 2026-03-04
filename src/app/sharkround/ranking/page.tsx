@@ -4,17 +4,34 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, Trophy } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { fetchSharkroundTubasRanking, type SharkroundTubasRankingRecord } from "../../../lib/sharkroundGameService";
+import { useAuth } from "../../../context/AuthContext";
 
 const PAGE_SIZE = 20;
+const SHARKROUND_ALLOWED_ROLES = new Set(["master", "admin_geral", "admin_gestor"]);
 
 export default function SharkroundRankingPage() {
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
+  const userRole =
+    typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
+  const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
+
   const [rows, setRows] = useState<SharkroundTubasRankingRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (canAccessSharkround) return;
+    router.replace("/em-breve");
+  }, [authLoading, canAccessSharkround, router]);
+
+  useEffect(() => {
+    if (authLoading || !canAccessSharkround) return;
+
     let mounted = true;
     const load = async () => {
       try {
@@ -30,7 +47,7 @@ export default function SharkroundRankingPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authLoading, canAccessSharkround]);
 
   const paged = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
@@ -38,6 +55,14 @@ export default function SharkroundRankingPage() {
   }, [rows, page]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+
+  if (authLoading || !canAccessSharkround) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-white font-sans flex items-center justify-center">
+        <p className="text-xs text-zinc-500 uppercase font-bold">Carregando...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">

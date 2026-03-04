@@ -16,6 +16,23 @@ const SHARKROUND_CONFIG_PATH = ["app_config", "sharkround"] as const;
 const SHARKROUND_CONFIG_GET_CALLABLE = "sharkroundGetConfig";
 const SHARKROUND_CONFIG_SAVE_CALLABLE = "sharkroundAdminSaveConfig";
 const nowIso = (): string => new Date().toISOString();
+const SHARKROUND_CONFIG_SELECT_COLUMNS = [
+  "id",
+  "data",
+  "dailyRollsLimit",
+  "startingCoins",
+  "bailCost",
+  "heartTarget",
+  "heartHelpReward",
+  "cycleBaseReward",
+  "rules",
+  "daily_rolls_limit",
+  "starting_coins",
+  "bail_cost",
+  "heart_target",
+  "heart_help_reward",
+  "cycle_base_reward",
+];
 
 const configCache = new Map<string, CacheEntry<SharkroundAppConfig>>();
 let inflightConfig: Promise<SharkroundAppConfig> | null = null;
@@ -57,6 +74,9 @@ const asNumber = (value: unknown, fallback: number): number => {
   return value;
 };
 
+const asString = (value: unknown, fallback = ""): string =>
+  typeof value === "string" ? value : fallback;
+
 const clampInt = (value: number, min: number, max: number): number => {
   const rounded = Math.round(value);
   if (rounded < min) return min;
@@ -74,40 +94,119 @@ const normalizeRules = (value: unknown): string[] => {
   return rules.length > 0 ? rules : DEFAULT_SHARKROUND_CONFIG.rules;
 };
 
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const removeMissingColumnFromSelection = (
+  columns: string[],
+  missingColumn: string
+): string[] | null => {
+  const next = columns.filter(
+    (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+  );
+  if (next.length === columns.length) return null;
+  return next;
+};
+
+const pickUnknown = (
+  sources: Array<Record<string, unknown>>,
+  keys: string[]
+): unknown => {
+  for (const source of sources) {
+    for (const key of keys) {
+      if (key in source) return source[key];
+    }
+  }
+  return undefined;
+};
+
+const pickNumber = (
+  sources: Array<Record<string, unknown>>,
+  keys: string[],
+  fallback: number
+): number => {
+  const value = pickUnknown(sources, keys);
+  return asNumber(value, fallback);
+};
+
 const normalizeConfig = (raw: unknown): SharkroundAppConfig => {
   const data = asObject(raw) ?? {};
+  const nestedData = asObject(data.data) ?? {};
+  const sources = [data, nestedData];
+
   return {
     dailyRollsLimit: clampInt(
-      asNumber(data.dailyRollsLimit, DEFAULT_SHARKROUND_CONFIG.dailyRollsLimit),
+      pickNumber(
+        sources,
+        ["dailyRollsLimit", "daily_rolls_limit"],
+        DEFAULT_SHARKROUND_CONFIG.dailyRollsLimit
+      ),
       1,
       20
     ),
     startingCoins: clampInt(
-      asNumber(data.startingCoins, DEFAULT_SHARKROUND_CONFIG.startingCoins),
+      pickNumber(
+        sources,
+        ["startingCoins", "starting_coins"],
+        DEFAULT_SHARKROUND_CONFIG.startingCoins
+      ),
       0,
       10000
     ),
     bailCost: clampInt(
-      asNumber(data.bailCost, DEFAULT_SHARKROUND_CONFIG.bailCost),
+      pickNumber(
+        sources,
+        ["bailCost", "bail_cost"],
+        DEFAULT_SHARKROUND_CONFIG.bailCost
+      ),
       0,
       10000
     ),
     heartTarget: clampInt(
-      asNumber(data.heartTarget, DEFAULT_SHARKROUND_CONFIG.heartTarget),
+      pickNumber(
+        sources,
+        ["heartTarget", "heart_target"],
+        DEFAULT_SHARKROUND_CONFIG.heartTarget
+      ),
       1,
       20
     ),
     heartHelpReward: clampInt(
-      asNumber(data.heartHelpReward, DEFAULT_SHARKROUND_CONFIG.heartHelpReward),
+      pickNumber(
+        sources,
+        ["heartHelpReward", "heart_help_reward"],
+        DEFAULT_SHARKROUND_CONFIG.heartHelpReward
+      ),
       0,
       500
     ),
     cycleBaseReward: clampInt(
-      asNumber(data.cycleBaseReward, DEFAULT_SHARKROUND_CONFIG.cycleBaseReward),
+      pickNumber(
+        sources,
+        ["cycleBaseReward", "cycle_base_reward"],
+        DEFAULT_SHARKROUND_CONFIG.cycleBaseReward
+      ),
       0,
       5000
     ),
-    rules: normalizeRules(data.rules),
+    rules: normalizeRules(pickUnknown(sources, ["rules"])),
   };
 };
 
@@ -188,15 +287,29 @@ export async function fetchSharkroundAppConfig(options?: {
     { forceRefresh },
     async () => {
       const supabase = getSupabaseClient();
-      const { data, error } = await supabase
-        .from(SHARKROUND_CONFIG_PATH[0])
-        .select(
-          "id,dailyRollsLimit,startingCoins,bailCost,heartTarget,heartHelpReward,cycleBaseReward,rules"
-        )
-        .eq("id", SHARKROUND_CONFIG_PATH[1])
-        .maybeSingle();
-      if (error) throwSupabaseError(error);
-      return { config: data ?? DEFAULT_SHARKROUND_CONFIG };
+      let mutableColumns = [...SHARKROUND_CONFIG_SELECT_COLUMNS];
+
+      while (mutableColumns.length > 0) {
+        const { data, error } = await supabase
+          .from(SHARKROUND_CONFIG_PATH[0])
+          .select(mutableColumns.join(","))
+          .eq("id", SHARKROUND_CONFIG_PATH[1])
+          .maybeSingle();
+
+        if (!error) {
+          return { config: data ?? DEFAULT_SHARKROUND_CONFIG };
+        }
+
+        const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+        if (!missingColumn) throwSupabaseError(error);
+
+        const nextColumns =
+          removeMissingColumnFromSelection(mutableColumns, missingColumn) ?? [];
+        if (nextColumns.length === 0) throwSupabaseError(error);
+        mutableColumns = nextColumns;
+      }
+
+      return { config: DEFAULT_SHARKROUND_CONFIG };
     }
   )
     .then((response) => {
@@ -225,18 +338,51 @@ export async function saveSharkroundAppConfig(
     { config: normalized },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
-        .from(SHARKROUND_CONFIG_PATH[0])
-        .upsert(
-          {
-            id: SHARKROUND_CONFIG_PATH[1],
-            ...normalized,
-            updatedAt: nowIso(),
-          },
-          { onConflict: "id" }
+      const dataPayload = {
+        dailyRollsLimit: normalized.dailyRollsLimit,
+        startingCoins: normalized.startingCoins,
+        bailCost: normalized.bailCost,
+        heartTarget: normalized.heartTarget,
+        heartHelpReward: normalized.heartHelpReward,
+        cycleBaseReward: normalized.cycleBaseReward,
+        rules: [...normalized.rules],
+      };
+
+      const mutablePayload: Record<string, unknown> = {
+        id: SHARKROUND_CONFIG_PATH[1],
+        data: dataPayload,
+        ...normalized,
+        daily_rolls_limit: normalized.dailyRollsLimit,
+        starting_coins: normalized.startingCoins,
+        bail_cost: normalized.bailCost,
+        heart_target: normalized.heartTarget,
+        heart_help_reward: normalized.heartHelpReward,
+        cycle_base_reward: normalized.cycleBaseReward,
+        updatedAt: nowIso(),
+      };
+
+      while (Object.keys(mutablePayload).length > 0) {
+        const { error } = await supabase
+          .from(SHARKROUND_CONFIG_PATH[0])
+          .upsert(mutablePayload, { onConflict: "id" });
+
+        if (!error) return { ok: true };
+
+        const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+        if (!missingColumn) throwSupabaseError(error);
+
+        const removableKey = Object.keys(mutablePayload).find(
+          (key) => key.toLowerCase() === missingColumn.toLowerCase()
         );
-      if (error) throwSupabaseError(error);
-      return { ok: true };
+        const safeRemovableKey =
+          typeof removableKey === "string" ? removableKey : "";
+        if (!safeRemovableKey || safeRemovableKey === "id") {
+          throwSupabaseError(error);
+        }
+        delete mutablePayload[safeRemovableKey];
+      }
+
+      throw new Error("Falha ao salvar configuracao SharkRound.");
     }
   );
 
