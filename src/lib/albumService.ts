@@ -1,24 +1,3 @@
-import {
-  arrayUnion,
-  collection,
-  doc,
-  type DocumentData,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  setDoc,
-  startAfter,
-  type QueryConstraint,
-  type QueryDocumentSnapshot,
-  where,
-} from "@/lib/supabaseHelpers";
-
-import { db } from "./backend";
 import { getSupabaseClient } from "./supabase";
 
 const DEFAULT_AVATAR_URL = "https://github.com/shadcn.png";
@@ -30,6 +9,15 @@ const ALBUM_UI_DOC_COLLECTION = "app_config";
 const ALBUM_UI_DOC_ID = "album_ui";
 const ALBUM_SUMMARY_COLLECTION = "album_summary";
 const READ_CACHE_TTL_MS = 120_000;
+const ALBUM_RANKINGS_SELECT_COLUMNS =
+  "id,userId,nome,foto,turma,totalColetado,scansT8";
+const ALBUM_USERS_SELECT_COLUMNS =
+  "uid,nome,turma,foto,apelido,dataNascimento,idadePublica,esportes,pets,cidadeOrigem,relacionamentoPublico,statusRelacionamento,bio,instagram";
+const ALBUM_SUMMARY_SELECT_COLUMNS =
+  "userId,totalCollected,capturedByTurma,lastCaptureId,lastCaptureAt,updatedAt";
+const ALBUM_CONFIG_SELECT_COLUMNS = "id,capa,titulo,subtitulo,updatedAt";
+const ALBUM_UI_SELECT_COLUMNS = "id,capa,titulo,subtitulo,updatedAt";
+const ALBUM_CAPTURES_SELECT_COLUMNS = "id,collectorUserId,targetUserId,nome,turma,dataColada";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -55,6 +43,19 @@ const asString = (value: unknown, fallback = ""): string =>
 
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const nowIso = (): string => new Date().toISOString();
+
+const throwSupabaseError = (error: {
+  message: string;
+  code?: string | null;
+  name?: string | null;
+}): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
 
 const boundedLimit = (requested: number, max: number): number => {
   if (!Number.isFinite(requested)) return max;
@@ -170,20 +171,6 @@ export interface AlbumCaptureResult {
   targetTurma?: string;
 }
 
-const isIndexRequiredError = (error: unknown): boolean => {
-  const code =
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof (error as { code?: unknown }).code === "string"
-      ? ((error as { code: string }).code || "").toLowerCase()
-      : "";
-  if (code.includes("failed-precondition")) return true;
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return message.includes("index") && message.includes("query");
-};
-
 const toRankingEntry = (
   docId: string,
   raw: Record<string, unknown>
@@ -298,30 +285,6 @@ const isUniqueViolationError = (error: unknown): boolean => {
   return details.includes("duplicate key") || details.includes("unique");
 };
 
-const isMissingTableError = (error: unknown): boolean => {
-  if (typeof error !== "object" || error === null) return false;
-  const code = "code" in error && typeof (error as { code?: unknown }).code === "string"
-    ? (error as { code: string }).code.toLowerCase()
-    : "";
-  if (code === "42p01" || code === "pgrst205") return true;
-
-  const details = [
-    "message" in error && typeof (error as { message?: unknown }).message === "string"
-      ? (error as { message: string }).message
-      : "",
-    "details" in error && typeof (error as { details?: unknown }).details === "string"
-      ? (error as { details: string }).details
-      : "",
-  ]
-    .join(" ")
-    .toLowerCase();
-
-  return (
-    details.includes("relation") &&
-    details.includes("does not exist")
-  ) || details.includes("could not find the table");
-};
-
 export async function fetchAlbumRankings(
   maxResults = MAX_RANKING_RESULTS,
   options?: { turma?: string }
@@ -333,15 +296,16 @@ export async function fetchAlbumRankings(
     const cached = getCacheValue(rankingsCache, cacheKey);
     if (cached) return cached;
 
+    const supabase = getSupabaseClient();
     const fetchFilteredByTurma = async (turmaValue: string): Promise<AlbumRankingEntry[]> => {
-      const q = query(
-        collection(db, "album_rankings"),
-        where("turma", "==", turmaValue),
-        limit(safeLimit)
-      );
-      const snap = await getDocs(q);
-      return snap.docs.map((row) =>
-        toRankingEntry(row.id, row.data() as Record<string, unknown>)
+      const { data, error } = await supabase
+        .from("album_rankings")
+        .select(ALBUM_RANKINGS_SELECT_COLUMNS)
+        .eq("turma", turmaValue)
+        .limit(safeLimit);
+      if (error) throwSupabaseError(error);
+      return ((data as unknown as Record<string, unknown>[] | null) ?? []).map((row) =>
+        toRankingEntry(asString(row.id), row)
       );
     };
 
@@ -355,14 +319,14 @@ export async function fetchAlbumRankings(
         (left, right) => (right.totalColetado || 0) - (left.totalColetado || 0)
       );
     } else {
-      const q = query(
-        collection(db, "album_rankings"),
-        orderBy("totalColetado", "desc"),
-        limit(safeLimit)
-      );
-      const snap = await getDocs(q);
-      rows = snap.docs.map((row) =>
-        toRankingEntry(row.id, row.data() as Record<string, unknown>)
+      const { data, error } = await supabase
+        .from("album_rankings")
+        .select(ALBUM_RANKINGS_SELECT_COLUMNS)
+        .order("totalColetado", { ascending: false })
+        .limit(safeLimit);
+      if (error) throwSupabaseError(error);
+      rows = ((data as unknown as Record<string, unknown>[] | null) ?? []).map((row) =>
+        toRankingEntry(asString(row.id), row)
       );
     }
 
@@ -412,95 +376,42 @@ export async function fetchUsersByTurmaPage(
       if (cached) return cached;
     }
 
-    const runIndexedQuery = async (
-      turmaValue: string
-    ): Promise<{
-      pageDocs: QueryDocumentSnapshot<DocumentData>[];
-      users: AlbumUserEntry[];
-      hasMore: boolean;
-    }> => {
-      const constraints: QueryConstraint[] = [
-        where("turma", "==", turmaValue),
-        orderBy("nome", "asc"),
-        limit(pageSize + 1),
-      ];
+    const supabase = getSupabaseClient();
+    const turmaCandidates = Array.from(
+      new Set([turmaCode, turmaCode.toLowerCase()])
+    );
+    const allRows: AlbumUserEntry[] = [];
 
-      if (cursorId) {
-        const cursorSnap = await getDoc(doc(db, "users", cursorId));
-        if (cursorSnap.exists()) {
-          constraints.splice(2, 0, startAfter(cursorSnap));
-        }
+    for (const turmaCandidate of turmaCandidates) {
+      const { data, error } = await supabase
+        .from("users")
+        .select(ALBUM_USERS_SELECT_COLUMNS)
+        .eq("turma", turmaCandidate)
+        .order("nome", { ascending: true })
+        .limit(MAX_USERS_PER_CLASS);
+      if (error) throwSupabaseError(error);
+
+      for (const row of (data as unknown as Record<string, unknown>[] | null) ?? []) {
+        allRows.push(toUserEntry(asString(row.uid), row));
       }
-
-      const snap = await getDocs(query(collection(db, "users"), ...constraints));
-      const pageDocs = snap.docs.slice(0, pageSize);
-      const users = pageDocs.map((row) =>
-        toUserEntry(row.id, row.data() as Record<string, unknown>)
-      );
-
-      return { pageDocs, users, hasMore: snap.docs.length > pageSize };
-    };
-
-    let users: AlbumUserEntry[] = [];
-    let hasMore = false;
-    let nextCursorId: string | null = null;
-
-    try {
-      let orderedResult = await runIndexedQuery(turmaCode);
-      const turmaLower = turmaCode.toLowerCase();
-      if (orderedResult.users.length === 0 && turmaLower !== turmaCode) {
-        orderedResult = await runIndexedQuery(turmaLower);
-      }
-
-      users = orderedResult.users;
-      hasMore = orderedResult.hasMore;
-      nextCursorId =
-        orderedResult.pageDocs.length > 0
-          ? orderedResult.pageDocs[orderedResult.pageDocs.length - 1].id
-          : null;
-    } catch (error: unknown) {
-      if (!isIndexRequiredError(error)) {
-        throw error;
-      }
-
-      const turmaCandidates = Array.from(
-        new Set([turmaCode, turmaCode.toLowerCase()])
-      );
-
-      const allRows: AlbumUserEntry[] = [];
-      for (const turmaCandidate of turmaCandidates) {
-        const fallbackSnap = await getDocs(
-          query(
-            collection(db, "users"),
-            where("turma", "==", turmaCandidate),
-            limit(MAX_USERS_PER_CLASS)
-          )
-        );
-
-        for (const row of fallbackSnap.docs) {
-          allRows.push(
-            toUserEntry(row.id, row.data() as Record<string, unknown>)
-          );
-        }
-      }
-
-      const deduped = Array.from(
-        new Map(allRows.map((entry) => [entry.id, entry])).values()
-      ).sort((left, right) =>
-        left.nome.localeCompare(right.nome, "pt-BR", { sensitivity: "base" })
-      );
-
-      const startIndex = cursorId
-        ? Math.max(
-            0,
-            deduped.findIndex((entry) => entry.id === cursorId) + 1
-          )
-        : 0;
-      const pageRows = deduped.slice(startIndex, startIndex + pageSize);
-      users = pageRows;
-      hasMore = startIndex + pageRows.length < deduped.length;
-      nextCursorId = pageRows.length > 0 ? pageRows[pageRows.length - 1].id : null;
     }
+
+    const deduped = Array.from(
+      new Map(allRows.map((entry) => [entry.id, entry])).values()
+    ).sort((left, right) =>
+      left.nome.localeCompare(right.nome, "pt-BR", { sensitivity: "base" })
+    );
+
+    const startIndex = cursorId
+      ? Math.max(
+          0,
+          deduped.findIndex((entry) => entry.id === cursorId) + 1
+        )
+      : 0;
+    const pageRows = deduped.slice(startIndex, startIndex + pageSize);
+    const users = pageRows;
+    const hasMore = startIndex + pageRows.length < deduped.length;
+    const nextCursorId = pageRows.length > 0 ? pageRows[pageRows.length - 1].id : null;
 
     const result: AlbumUsersPageResult = {
       users,
@@ -544,131 +455,70 @@ export async function fetchAlbumCollectedIds(
       return rows;
     }
 
-    const fetchFromLegacyCollection = async (): Promise<string[]> => {
-      const baseRef = collection(db, "users", userId, "albumColado");
-      const constraints = [
-        ...(turma ? [where("turma", "==", turma)] : []),
-        limit(maxResults),
-      ];
+    const supabase = getSupabaseClient();
+    let capturesQuery = supabase
+      .from(ALBUM_CAPTURES_TABLE)
+      .select(ALBUM_CAPTURES_SELECT_COLUMNS)
+      .eq("collectorUserId", userId)
+      .order("dataColada", { ascending: false })
+      .limit(maxResults);
 
-      const snap = await getDocs(query(baseRef, ...constraints));
-      const ids = snap.docs.map((row) => row.id);
+    if (turma) {
+      capturesQuery = capturesQuery.eq("turma", normalizeTurmaCode(turma));
+    }
 
-      if (!turma && ids.length > 0) {
-        const capturedByTurma = snap.docs.reduce<Record<string, string[]>>(
-          (acc, row) => {
-            const rowTurma = normalizeTurmaCode(
-              (row.data() as Record<string, unknown>).turma
-            );
-            if (!acc[rowTurma]) acc[rowTurma] = [];
-            acc[rowTurma].push(row.id);
-            return acc;
-          },
-          {}
-        );
+    const { data, error } = await capturesQuery;
+    if (error) throwSupabaseError(error);
 
-        const hydratedSummary: AlbumSummary = {
-          userId,
-          totalCollected: ids.length,
-          capturedByTurma,
-        };
+    const rowsRaw = (data as unknown as Array<Record<string, unknown>> | null) ?? [];
+    const ids = Array.from(
+      new Set(
+        rowsRaw
+          .map((row) => asString(row.targetUserId).trim())
+          .filter(Boolean)
+      )
+    );
 
-        try {
-          await setDoc(
-            doc(db, ALBUM_SUMMARY_COLLECTION, userId),
-            {
-              userId,
-              totalCollected: hydratedSummary.totalCollected,
-              capturedByTurma: hydratedSummary.capturedByTurma,
-              updatedAt: serverTimestamp(),
-              migratedFromLegacyAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
-        } catch {
-          // Regras antigas podem bloquear o write do resumo. Nao interrompe a tela.
-        }
-        setCacheValue(albumSummaryCache, userId, hydratedSummary);
-      }
-
-      setCacheValue(collectedIdsCache, cacheKey, ids);
-      return ids;
-    };
-
-    try {
-      const supabase = getSupabaseClient();
-      let capturesQuery = supabase
-        .from(ALBUM_CAPTURES_TABLE)
-        .select("targetUserId,turma,dataColada")
-        .eq("collectorUserId", userId)
-        .order("dataColada", { ascending: false })
-        .limit(maxResults);
-
-      if (turma) {
-        capturesQuery = capturesQuery.eq("turma", normalizeTurmaCode(turma));
-      }
-
-      const { data, error } = await capturesQuery;
-      if (error) throw error;
-
-      const rowsRaw = Array.isArray(data)
-        ? (data as Array<Record<string, unknown>>)
-        : [];
-
-      const ids = Array.from(
-        new Set(
-          rowsRaw
-            .map((row) => asString(row.targetUserId).trim())
-            .filter(Boolean)
-        )
+    if (!turma && ids.length > 0) {
+      const capturedByTurma = rowsRaw.reduce<Record<string, string[]>>(
+        (acc, row) => {
+          const targetId = asString(row.targetUserId).trim();
+          if (!targetId) return acc;
+          const turmaKey = normalizeTurmaCode(row.turma);
+          if (!acc[turmaKey]) acc[turmaKey] = [];
+          acc[turmaKey].push(targetId);
+          return acc;
+        },
+        {}
       );
 
-      if (!turma && ids.length > 0) {
-        const capturedByTurma = rowsRaw.reduce<Record<string, string[]>>(
-          (acc, row) => {
-            const targetId = asString(row.targetUserId).trim();
-            if (!targetId) return acc;
-            const turmaKey = normalizeTurmaCode(row.turma);
-            if (!acc[turmaKey]) acc[turmaKey] = [];
-            acc[turmaKey].push(targetId);
-            return acc;
-          },
-          {}
-        );
+      const hydratedSummary: AlbumSummary = {
+        userId,
+        totalCollected: ids.length,
+        capturedByTurma,
+      };
 
-        const hydratedSummary: AlbumSummary = {
-          userId,
-          totalCollected: ids.length,
-          capturedByTurma,
-        };
-
-        try {
-          await setDoc(
-            doc(db, ALBUM_SUMMARY_COLLECTION, userId),
+      try {
+        await supabase
+          .from(ALBUM_SUMMARY_COLLECTION)
+          .upsert(
             {
               userId,
               totalCollected: hydratedSummary.totalCollected,
               capturedByTurma: hydratedSummary.capturedByTurma,
-              updatedAt: serverTimestamp(),
-              migratedFromCapturesAt: serverTimestamp(),
+              updatedAt: nowIso(),
+              migratedFromCapturesAt: nowIso(),
             },
-            { merge: true }
+            { onConflict: "userId" }
           );
-        } catch {
-          // Regras podem bloquear write do resumo. Nao interrompe a tela.
-        }
-        setCacheValue(albumSummaryCache, userId, hydratedSummary);
+      } catch {
+        // Regras podem bloquear write do resumo. Nao interrompe a tela.
       }
-
-      if (ids.length === 0) {
-        return fetchFromLegacyCollection();
-      }
-
-      setCacheValue(collectedIdsCache, cacheKey, ids);
-      return ids;
-    } catch {
-      return fetchFromLegacyCollection();
+      setCacheValue(albumSummaryCache, userId, hydratedSummary);
     }
+
+    setCacheValue(collectedIdsCache, cacheKey, ids);
+    return ids;
   });
 }
 
@@ -690,16 +540,19 @@ export async function fetchAlbumSummary(
       }
     }
 
-    const snap = await getDoc(doc(db, ALBUM_SUMMARY_COLLECTION, userId));
-    if (!snap.exists()) {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from(ALBUM_SUMMARY_COLLECTION)
+      .select(ALBUM_SUMMARY_SELECT_COLUMNS)
+      .eq("userId", userId)
+      .maybeSingle();
+    if (error) throwSupabaseError(error);
+    if (!data) {
       setCacheValue(albumSummaryCache, userId, null);
       return null;
     }
 
-    const summary = toAlbumSummary(
-      userId,
-      snap.data() as Record<string, unknown>
-    );
+    const summary = toAlbumSummary(userId, data as Record<string, unknown>);
     setCacheValue(albumSummaryCache, userId, summary);
     return summary;
   });
@@ -715,15 +568,21 @@ export async function fetchAlbumConfig(
     const cached = getCacheValue(albumConfigCache, turmaCode);
     if (cached) return cached;
 
+    const supabase = getSupabaseClient();
     const candidates = Array.from(
       new Set([turmaCode, turma.trim(), turma.trim().toLowerCase()])
     ).filter((value) => Boolean(value));
 
     for (const candidate of candidates) {
-      const snap = await getDoc(doc(db, "album_config", candidate));
-      if (!snap.exists()) continue;
+      const { data, error } = await supabase
+        .from("album_config")
+        .select(ALBUM_CONFIG_SELECT_COLUMNS)
+        .eq("id", candidate)
+        .maybeSingle();
+      if (error) throwSupabaseError(error);
+      if (!data) continue;
 
-      const config = toAlbumConfig(snap.data() as Record<string, unknown>);
+      const config = toAlbumConfig(data as Record<string, unknown>);
       setCacheValue(albumConfigCache, turmaCode, config);
       return config;
     }
@@ -738,11 +597,13 @@ export async function saveAlbumConfig(
   config: AlbumCmsData
 ): Promise<void> {
   const turmaCode = turma.trim().toUpperCase();
-  await setDoc(
-    doc(db, "album_config", turmaCode),
-    { ...config, updatedAt: serverTimestamp() },
-    { merge: true }
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("album_config").upsert(
+    { id: turmaCode, ...config, updatedAt: nowIso() },
+    { onConflict: "id" }
   );
+  if (error) throwSupabaseError(error);
+
   albumConfigCache.delete(turmaCode);
   usersByTurmaCache.clear();
   usersByTurmaPageCache.clear();
@@ -753,23 +614,33 @@ export async function fetchAlbumUiConfig(): Promise<AlbumUiConfig | null> {
     if (albumUiCache && Date.now() - albumUiCache.cachedAt <= READ_CACHE_TTL_MS) {
       return albumUiCache.value;
     }
-    const snap = await getDoc(doc(db, ALBUM_UI_DOC_COLLECTION, ALBUM_UI_DOC_ID));
-    if (!snap.exists()) return null;
-    const config = toAlbumUiConfig(snap.data() as Record<string, unknown>);
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from(ALBUM_UI_DOC_COLLECTION)
+      .select(ALBUM_UI_SELECT_COLUMNS)
+      .eq("id", ALBUM_UI_DOC_ID)
+      .maybeSingle();
+    if (error) throwSupabaseError(error);
+    if (!data) return null;
+
+    const config = toAlbumUiConfig(data as Record<string, unknown>);
     albumUiCache = { cachedAt: Date.now(), value: config };
     return config;
   });
 }
 
 export async function saveAlbumUiConfig(config: AlbumUiConfig): Promise<void> {
-  await setDoc(
-    doc(db, ALBUM_UI_DOC_COLLECTION, ALBUM_UI_DOC_ID),
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from(ALBUM_UI_DOC_COLLECTION).upsert(
     {
+      id: ALBUM_UI_DOC_ID,
       ...config,
-      updatedAt: serverTimestamp(),
+      updatedAt: nowIso(),
     },
-    { merge: true }
+    { onConflict: "id" }
   );
+  if (error) throwSupabaseError(error);
+
   albumUiCache = { cachedAt: Date.now(), value: config };
 }
 
@@ -788,231 +659,173 @@ export async function registerAlbumCapture(payload: {
     rankingsCache.clear();
     albumSummaryCache.clear();
   };
-
-  const registerViaLegacyCollection = async (): Promise<AlbumCaptureResult> => {
-    const collectorRef = doc(db, "users", collectorUid);
-    const targetRef = doc(db, "users", targetId);
-    const albumRef = doc(db, "users", collectorUid, "albumColado", targetId);
-    const rankingRef = doc(db, "album_rankings", collectorUid);
-    const summaryRef = doc(db, ALBUM_SUMMARY_COLLECTION, collectorUid);
-    const notificationRef = doc(collection(db, "notifications"));
-
-    const transactionResult = await runTransaction(db, async (tx) => {
-      const [collectorSnap, targetSnap, albumSnap] = await Promise.all([
-        tx.get(collectorRef),
-        tx.get(targetRef),
-        tx.get(albumRef),
-      ]);
-
-      if (!targetSnap.exists()) {
-        return { status: "invalid-target" } as AlbumCaptureResult;
-      }
-
-      if (albumSnap.exists()) {
-        return { status: "duplicate" } as AlbumCaptureResult;
-      }
-
-      const collectorData = collectorSnap.data() as Record<string, unknown> | undefined;
-      const targetData = targetSnap.data() as Record<string, unknown> | undefined;
-
-      const targetName = asString(targetData?.nome, "Integrante");
-      const targetTurma = asString(targetData?.turma, "");
-      const collectorName = asString(
-        payload.collector.nome || collectorData?.nome,
-        "Tubarao"
-      );
-      const collectorTurma = asString(
-        payload.collector.turma || collectorData?.turma,
-        ""
-      );
-      const collectorFoto = asString(
-        payload.collector.foto || collectorData?.foto,
-        DEFAULT_AVATAR_URL
-      );
-
-      tx.set(albumRef, {
-        nome: targetName,
-        turma: targetTurma,
-        dataColada: serverTimestamp(),
-      });
-
-      tx.set(
-        rankingRef,
-        {
-          userId: collectorUid,
-          nome: collectorName,
-          turma: collectorTurma,
-          foto: collectorFoto,
-          totalColetado: increment(1),
-          scansT8: increment(targetTurma.toUpperCase() === "T8" ? 1 : 0),
-          ultimoScan: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      tx.set(
-        collectorRef,
-        {
-          stats: {
-            albumCollected: increment(1),
-          },
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      const targetTurmaKey = normalizeTurmaCode(targetTurma);
-      tx.set(
-        summaryRef,
-        {
-          userId: collectorUid,
-          totalCollected: increment(1),
-          [`capturedByTurma.${targetTurmaKey}`]: arrayUnion(targetId),
-          lastCaptureId: targetId,
-          lastCaptureAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      tx.set(notificationRef, {
-        userId: collectorUid,
-        title: "Nova captura no Album",
-        message: `${targetName} entrou para sua colecao.`,
-        link: "/album",
-        read: false,
-        type: "album",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      return { status: "ok", targetName, targetTurma } as AlbumCaptureResult;
-    });
-
-    clearCaptureCaches();
-    return transactionResult;
-  };
-
-  const registerViaSupabase = async (): Promise<AlbumCaptureResult> => {
-    const collectorRef = doc(db, "users", collectorUid);
-    const targetRef = doc(db, "users", targetId);
-    const rankingRef = doc(db, "album_rankings", collectorUid);
-    const summaryRef = doc(db, ALBUM_SUMMARY_COLLECTION, collectorUid);
-    const notificationRef = doc(collection(db, "notifications"));
-
-    const [collectorSnap, targetSnap] = await Promise.all([
-      getDoc(collectorRef),
-      getDoc(targetRef),
-    ]);
-
-    if (!targetSnap.exists()) {
-      return { status: "invalid-target" };
-    }
-
-    const collectorData = collectorSnap.exists()
-      ? (collectorSnap.data() as Record<string, unknown>)
-      : undefined;
-    const targetData = targetSnap.data() as Record<string, unknown>;
-
-    const targetName = asString(targetData.nome, "Integrante");
-    const targetTurma = asString(targetData.turma, "");
-    const targetTurmaKey = normalizeTurmaCode(targetTurma);
-    const collectorName = asString(
-      payload.collector.nome || collectorData?.nome,
-      "Tubarao"
-    );
-    const collectorTurma = asString(
-      payload.collector.turma || collectorData?.turma,
-      ""
-    );
-    const collectorFoto = asString(
-      payload.collector.foto || collectorData?.foto,
-      DEFAULT_AVATAR_URL
-    );
-
-    const supabase = getSupabaseClient();
-    const captureId = `${collectorUid}__${targetId}`;
-    const { error: insertCaptureError } = await supabase
-      .from(ALBUM_CAPTURES_TABLE)
-      .insert({
-        id: captureId,
-        collectorUserId: collectorUid,
-        targetUserId: targetId,
-        nome: targetName,
-        turma: targetTurmaKey,
-      });
-
-    if (insertCaptureError) {
-      if (isUniqueViolationError(insertCaptureError)) {
-        return { status: "duplicate", targetName, targetTurma };
-      }
-      throw insertCaptureError;
-    }
-
-    const sideEffects = await Promise.allSettled([
-      setDoc(
-        rankingRef,
-        {
-          userId: collectorUid,
-          nome: collectorName,
-          turma: collectorTurma,
-          foto: collectorFoto,
-          totalColetado: increment(1),
-          scansT8: increment(targetTurmaKey === "T8" ? 1 : 0),
-          ultimoScan: serverTimestamp(),
-        },
-        { merge: true }
-      ),
-      setDoc(
-        collectorRef,
-        {
-          stats: {
-            albumCollected: increment(1),
-          },
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      ),
-      setDoc(
-        summaryRef,
-        {
-          userId: collectorUid,
-          totalCollected: increment(1),
-          [`capturedByTurma.${targetTurmaKey}`]: arrayUnion(targetId),
-          lastCaptureId: targetId,
-          lastCaptureAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      ),
-      setDoc(notificationRef, {
-        userId: collectorUid,
-        title: "Nova captura no Album",
-        message: `${targetName} entrou para sua colecao.`,
-        link: "/album",
-        read: false,
-        type: "album",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }),
-    ]);
-
-    if (sideEffects.some((effect) => effect.status === "rejected")) {
-      console.warn("Album capture: side-effects com falha parcial.", sideEffects);
-    }
-
-    clearCaptureCaches();
-    return { status: "ok", targetName, targetTurma };
-  };
-
-  try {
-    return await registerViaSupabase();
-  } catch (error: unknown) {
-    if (isMissingTableError(error)) {
-      return registerViaLegacyCollection();
-    }
-    throw error;
+  const supabase = getSupabaseClient();
+  const [collectorRes, targetRes] = await Promise.all([
+    supabase
+      .from("users")
+      .select("uid,nome,turma,foto,stats")
+      .eq("uid", collectorUid)
+      .maybeSingle(),
+    supabase
+      .from("users")
+      .select("uid,nome,turma")
+      .eq("uid", targetId)
+      .maybeSingle(),
+  ]);
+  if (collectorRes.error) throwSupabaseError(collectorRes.error);
+  if (targetRes.error) throwSupabaseError(targetRes.error);
+  if (!targetRes.data) {
+    return { status: "invalid-target" };
   }
+
+  const collectorData = (collectorRes.data ?? {}) as Record<string, unknown>;
+  const targetData = targetRes.data as Record<string, unknown>;
+
+  const targetName = asString(targetData.nome, "Integrante");
+  const targetTurma = asString(targetData.turma, "");
+  const targetTurmaKey = normalizeTurmaCode(targetTurma);
+  const collectorName = asString(
+    payload.collector.nome || collectorData.nome,
+    "Tubarao"
+  );
+  const collectorTurma = asString(
+    payload.collector.turma || collectorData.turma,
+    ""
+  );
+  const collectorFoto = asString(
+    payload.collector.foto || collectorData.foto,
+    DEFAULT_AVATAR_URL
+  );
+
+  const captureId = `${collectorUid}__${targetId}`;
+  const { error: insertCaptureError } = await supabase
+    .from(ALBUM_CAPTURES_TABLE)
+    .insert({
+      id: captureId,
+      collectorUserId: collectorUid,
+      targetUserId: targetId,
+      nome: targetName,
+      turma: targetTurmaKey,
+      dataColada: nowIso(),
+    });
+  if (insertCaptureError) {
+    if (isUniqueViolationError(insertCaptureError)) {
+      return { status: "duplicate", targetName, targetTurma };
+    }
+    throwSupabaseError(insertCaptureError);
+  }
+
+  const rankingWrite = async (): Promise<void> => {
+    const { data: rankingData, error: rankingReadError } = await supabase
+      .from("album_rankings")
+      .select("id,totalColetado,scansT8")
+      .eq("id", collectorUid)
+      .maybeSingle();
+    if (rankingReadError) throwSupabaseError(rankingReadError);
+
+    const rankingRaw = (rankingData ?? {}) as Record<string, unknown>;
+    const nextTotalColetado = asNumber(rankingRaw.totalColetado, 0) + 1;
+    const nextScansT8 =
+      asNumber(rankingRaw.scansT8, 0) + (targetTurmaKey === "T8" ? 1 : 0);
+
+    const { error: rankingWriteError } = await supabase.from("album_rankings").upsert(
+      {
+        id: collectorUid,
+        userId: collectorUid,
+        nome: collectorName,
+        turma: collectorTurma,
+        foto: collectorFoto,
+        totalColetado: nextTotalColetado,
+        scansT8: nextScansT8,
+        ultimoScan: nowIso(),
+      },
+      { onConflict: "id" }
+    );
+    if (rankingWriteError) throwSupabaseError(rankingWriteError);
+  };
+
+  const userStatsWrite = async (): Promise<void> => {
+    const currentStats = (collectorData.stats &&
+    typeof collectorData.stats === "object"
+      ? (collectorData.stats as Record<string, unknown>)
+      : {}) as Record<string, unknown>;
+    const nextStats = {
+      ...currentStats,
+      albumCollected: asNumber(currentStats.albumCollected, 0) + 1,
+    };
+
+    const { error } = await supabase
+      .from("users")
+      .update({ stats: nextStats, updatedAt: nowIso() })
+      .eq("uid", collectorUid);
+    if (error) throwSupabaseError(error);
+  };
+
+  const summaryWrite = async (): Promise<void> => {
+    const { data: summaryData, error: summaryReadError } = await supabase
+      .from(ALBUM_SUMMARY_COLLECTION)
+      .select(ALBUM_SUMMARY_SELECT_COLUMNS)
+      .eq("userId", collectorUid)
+      .maybeSingle();
+    if (summaryReadError) throwSupabaseError(summaryReadError);
+
+    const currentSummary = summaryData
+      ? toAlbumSummary(collectorUid, summaryData as Record<string, unknown>)
+      : {
+          userId: collectorUid,
+          totalCollected: 0,
+          capturedByTurma: {} as Record<string, string[]>,
+        };
+
+    const nextCapturedByTurma = { ...currentSummary.capturedByTurma };
+    const turmaIds = Array.from(
+      new Set([...(nextCapturedByTurma[targetTurmaKey] || []), targetId])
+    );
+    nextCapturedByTurma[targetTurmaKey] = turmaIds;
+
+    const { error: summaryWriteError } = await supabase
+      .from(ALBUM_SUMMARY_COLLECTION)
+      .upsert(
+        {
+          userId: collectorUid,
+          totalCollected: currentSummary.totalCollected + 1,
+          capturedByTurma: nextCapturedByTurma,
+          lastCaptureId: targetId,
+          lastCaptureAt: nowIso(),
+          updatedAt: nowIso(),
+        },
+        { onConflict: "userId" }
+      );
+    if (summaryWriteError) throwSupabaseError(summaryWriteError);
+  };
+
+  const notificationWrite = async (): Promise<void> => {
+    const { error } = await supabase.from("notifications").insert({
+      id: crypto.randomUUID(),
+      userId: collectorUid,
+      title: "Nova captura no Album",
+      message: `${targetName} entrou para sua colecao.`,
+      link: "/album",
+      read: false,
+      type: "album",
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+    if (error) throwSupabaseError(error);
+  };
+
+  const sideEffects = await Promise.allSettled([
+    rankingWrite(),
+    userStatsWrite(),
+    summaryWrite(),
+    notificationWrite(),
+  ]);
+  if (sideEffects.some((effect) => effect.status === "rejected")) {
+    console.warn("Album capture: side-effects com falha parcial.", sideEffects);
+  }
+
+  clearCaptureCaches();
+  return { status: "ok", targetName, targetTurma };
 }
 
 
