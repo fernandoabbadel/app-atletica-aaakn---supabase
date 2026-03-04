@@ -15,7 +15,6 @@ const remotePatterns: Array<{
   pathname?: string;
 }> = [
   { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" },
-  { protocol: "https", hostname: "firebasestorage.googleapis.com" },
   { protocol: "https", hostname: "lh3.googleusercontent.com" },
   { protocol: "https", hostname: "www.google.com" },
   { protocol: "https", hostname: "i.pravatar.cc" },

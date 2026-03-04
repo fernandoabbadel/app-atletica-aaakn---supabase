@@ -48,7 +48,7 @@ export default function TurmaRankingPage({
 
               setAlunos(data);
           } catch (error: unknown) {
-              console.error("Erro ao carregar turma. Verifique indices do Firestore.", error);
+              console.error("Erro ao carregar turma. Verifique indices/colunas no Supabase.", error);
           } finally {
               setLoading(false);
           }

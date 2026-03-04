@@ -7,7 +7,7 @@
 ## Arquitetura (pastas e responsabilidades)
 - `src/app/`: rotas/telas (App Router), incluindo `admin/` e páginas públicas.
 - `src/context/`: contextos React (ex.: toasts).
-- `src/lib/`: integrações e infraestrutura (ex.: Firebase).
+- `src/lib/`: integrações e infraestrutura (ex.: Supabase).
 - `src/hooks/`: hooks compartilhados.
 - `src/utils/`: utilitários.
 - `src/types/`: tipagens compartilhadas.

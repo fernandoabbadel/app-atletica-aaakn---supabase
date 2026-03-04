@@ -4,7 +4,7 @@ import { getFunctions } from "@/lib/supa/functions";
 import { getStorage } from "@/lib/supa/storage";
 
 interface BackendDb {
-  kind: "supa-firestore";
+  kind: "supa-db";
   options: {
     preferPolling: boolean;
   };
@@ -18,7 +18,7 @@ const appConfig = {
 const app = getApps().length ? getApp() : initializeApp(appConfig);
 const auth = getAuth();
 const db = {
-  kind: "supa-firestore",
+  kind: "supa-db",
   options: {
     // Sem realtime por padrao para reduzir custo de leitura no plano free.
     preferPolling: false,

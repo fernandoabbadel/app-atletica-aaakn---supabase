@@ -8,7 +8,7 @@ import { fetchLegalDocs } from "../../../lib/settingsService";
 // --- TIPAGEM ---
 type DocTipo = "publico" | "interno";
 
-// Interface para dados brutos do Firestore
+// Interface para dados brutos retornados do Supabase
 interface TermDocData {
   tipo?: string;
   titulo?: string;

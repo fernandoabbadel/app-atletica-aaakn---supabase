@@ -17,7 +17,7 @@ interface AdminUser {
     turma: string;
     foto: string;
     stats?: Record<string, number>;
-    [key: string]: unknown; // Flexibilidade para outros campos do Firestore
+    [key: string]: unknown; // Flexibilidade para outros campos persistidos no Supabase
 }
 
 export default function AdminGamesPage() {

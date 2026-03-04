@@ -1,37 +1,63 @@
-const admin = require("firebase-admin");
+const { createClient } = require("@supabase/supabase-js");
 
-// 1. Carrega a chave que você baixou e renomeou para service-account.json
-// SE DER ERRO AQUI, É PORQUE O ARQUIVO NÃO ESTÁ NA RAIZ OU ESTÁ COM OUTRO NOME
-const serviceAccount = require("./service-account.json"); 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const TARGET_UID = process.env.TARGET_UID || "BvOxvOOHefZQi9pLaNlauXGrZTS2";
 
-// 2. Inicia o Firebase com poder total
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-
-// 🦈 SEU UID (Já peguei do código que você mandou)
-const SEU_UID = "BvOxvOOHefZQi9pLaNlauXGrZTS2"; 
-
-async function setMaster() {
-  console.log(`🦈 Iniciando protocolo Master para o Tubarão: ${SEU_UID}...`);
-
-  try {
-    // A MÁGICA: Isso grava 'role: master' no seu token de autenticação
-    // CUSTO DE LEITURA FUTURA: ZERO
-    await admin.auth().setCustomUserClaims(SEU_UID, { role: 'master' });
-    
-    // Atualiza também no banco visualmente para o painel Admin não ficar confuso
-    await admin.firestore().collection("users").doc(SEU_UID).set({
-      role: 'master'
-    }, { merge: true });
-
-    console.log("✅ SUCESSO! A tatuagem digital 'Master' foi aplicada.");
-    console.log("👉 IMPORTANTE: Faça LOGOUT e LOGIN no app para o novo token valer.");
-    
-  } catch (error) {
-    console.error("❌ ERRO:", error);
-    console.log("DICA: Verifique se o arquivo service-account.json está na pasta certa.");
-  }
+if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+  console.error(
+    "Deu ruim no plantao! Configure NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY antes de rodar setMaster.js."
+  );
+  process.exit(1);
 }
 
-setMaster();
+const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+async function setMaster() {
+  const uid = String(TARGET_UID).trim();
+  if (!uid) {
+    console.error("UID alvo invalido.");
+    process.exit(1);
+  }
+
+  console.log(`Atualizando role master para uid=${uid}...`);
+
+  const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(uid);
+  if (authError || !authUser?.user) {
+    console.error("Falha ao localizar usuario no Auth:", authError || "usuario nao encontrado");
+    process.exit(1);
+  }
+
+  const currentMetadata =
+    authUser.user.user_metadata && typeof authUser.user.user_metadata === "object"
+      ? authUser.user.user_metadata
+      : {};
+  const nextMetadata = { ...currentMetadata, role: "master" };
+
+  const { error: updateAuthError } = await supabaseAdmin.auth.admin.updateUserById(uid, {
+    user_metadata: nextMetadata,
+  });
+  if (updateAuthError) {
+    console.error("Falha ao atualizar metadata no Auth:", updateAuthError);
+    process.exit(1);
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: updateUserError } = await supabaseAdmin
+    .from("users")
+    .update({ role: "master", updatedAt: nowIso })
+    .eq("uid", uid);
+  if (updateUserError) {
+    console.error("Falha ao atualizar role na tabela public.users:", updateUserError);
+    process.exit(1);
+  }
+
+  console.log("Aí sim! O Tubarão aprovou! role=master aplicado com sucesso.");
+}
+
+setMaster().catch((error) => {
+  console.error("Deu ruim no plantao! Erro inesperado ao aplicar role master:", error);
+  process.exit(1);
+});
