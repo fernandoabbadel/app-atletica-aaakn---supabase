@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { 
   ArrowLeft, Calendar, MapPin, 
-  Loader2, ArrowRight, Heart, Clock, Zap, Users
+  Loader2, ArrowRight, Heart, Clock, Zap, Users, Search
 } from "lucide-react";
 import Link from "next/link";
 import { OptimizedImage } from "@/app/components/shared/OptimizedImage";
@@ -24,6 +24,7 @@ export interface Evento {
   tipo: string;
   destaque?: string;
   categoria?: string;
+  status?: string;
   isLowStock?: boolean;
   stats?: {
     confirmados: number;
@@ -315,6 +316,7 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
   const [eventos, setEventos] = useState<Evento[]>(initialEventos);
   const [loading, setLoading] = useState(initialEventos.length === 0);
   const [filter, setFilter] = useState("Todos");
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     if (initialEventos.length > 0) {
@@ -343,9 +345,36 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
     };
   }, [addToast, initialEventos.length]);
 
-  const filteredEvents = filter === "Todos" 
-      ? eventos 
-      : eventos.filter(e => e.tipo === filter || e.categoria === filter);
+  const activeEvents = eventos.filter((event) => {
+    const status = String(event.status || "ativo").toLowerCase().trim();
+    if (status !== "ativo") return false;
+
+    const parsedDate = parseEventDate(event.data, event.hora);
+    if (!parsedDate) return true;
+    return parsedDate.getTime() >= Date.now();
+  });
+
+  const categoryFilteredEvents =
+    filter === "Todos"
+      ? activeEvents
+      : activeEvents.filter((event) => event.tipo === filter || event.categoria === filter);
+
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredEvents =
+    normalizedSearch.length === 0
+      ? categoryFilteredEvents
+      : categoryFilteredEvents.filter((event) => {
+          const haystack = [
+            event.titulo,
+            event.local,
+            event.tipo,
+            event.categoria || "",
+            event.destaque || "",
+          ]
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(normalizedSearch);
+        });
 
   if (loading) return (
       <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-emerald-500 gap-3">
@@ -371,6 +400,17 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
       </header>
 
       {/* FILTROS */}
+      <div className="relative mb-4">
+          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar evento por nome, local ou tipo..."
+              className="w-full bg-zinc-900 border border-zinc-800 text-sm text-white rounded-xl py-3 pl-11 pr-4 outline-none focus:border-emerald-500 transition"
+          />
+      </div>
+
       <div className="flex gap-3 mb-8 overflow-x-auto pb-2 custom-scrollbar">
           {["Todos", "Festa", "Esporte", "Liga"].map(f => (
               <button 
@@ -397,7 +437,9 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
                   </div>
                   <div>
                       <p className="text-zinc-300 font-bold uppercase">Nada por aqui...</p>
-                      <p className="text-zinc-600 text-xs mt-1">Nenhum evento encontrado nesta categoria.</p>
+                      <p className="text-zinc-600 text-xs mt-1">
+                        Nenhum evento ativo encontrado para este filtro/pesquisa.
+                      </p>
                   </div>
               </div>
           )}
