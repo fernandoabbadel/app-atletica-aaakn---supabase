@@ -1,21 +1,8 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  startAfter,
-  updateDoc,
-  where,
-  type QueryConstraint,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -39,10 +26,7 @@ const usersListCache = new Map<string, CacheEntry<AdminUserListItem[]>>();
 const userProfileCache = new Map<string, CacheEntry<AdminUserProfileRecord | null>>();
 const userDossierCache = new Map<string, CacheEntry<AdminUserDossier | null>>();
 const usersPageInflight = new Map<string, Promise<AdminUsersPageResult>>();
-const userProfileInflight = new Map<
-  string,
-  Promise<AdminUserProfileRecord | null>
->();
+const userProfileInflight = new Map<string, Promise<AdminUserProfileRecord | null>>();
 const userDossierInflight = new Map<string, Promise<AdminUserDossier | null>>();
 
 const asObject = (value: unknown): Record<string, unknown> | null => {
@@ -89,17 +73,6 @@ const setCachedValue = <T>(
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
-const isIndexRequiredError = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase();
-  if (code?.includes("failed-precondition")) return true;
-
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("index") && message.includes("query");
-  }
-  return false;
-};
-
 async function callCallable<TReq, TRes>(
   callableName: string,
   payload: TReq
@@ -131,24 +104,51 @@ const shouldUseCallable = (): boolean => {
   return host !== "localhost" && host !== "127.0.0.1";
 };
 
-async function callCallableWithFallback<TReq, TRes>(
-  callableName: string,
-  payload: TReq,
-  fallbackFn: () => Promise<TRes>
-): Promise<TRes> {
-  if (!shouldUseCallable()) {
-    return fallbackFn();
-  }
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
 
-  try {
-    return await callCallable<TReq, TRes>(callableName, payload);
-  } catch (error: unknown) {
-    if (shouldFallbackToClientWrites(error)) {
-      return fallbackFn();
-    }
-    throw error;
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
   }
-}
+  return null;
+};
+
+const isMissingTableError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const raw = error as { code?: unknown; message?: unknown };
+  if (typeof raw.code === "string" && raw.code === "42P01") return true;
+  const message = asString(raw.message).toLowerCase();
+  return message.includes("relation") && message.includes("does not exist");
+};
+
+const removeMissingColumnFromSelection = (
+  columns: string[],
+  missingColumn: string
+): string[] | null => {
+  const next = columns.filter((column) => column.toLowerCase() !== missingColumn.toLowerCase());
+  if (next.length === columns.length) return null;
+  return next;
+};
+
+const nowIso = (): string => new Date().toISOString();
 
 const toMillis = (value: unknown): number => {
   if (value instanceof Date) return value.getTime();
@@ -173,6 +173,31 @@ const sortRowsByFieldDesc = <T extends Record<string, unknown>>(
 ): T[] =>
   [...rows].sort((left, right) => toMillis(right[field]) - toMillis(left[field]));
 
+const rowIdFromUnknown = (row: unknown, fallback = ""): string => {
+  const obj = asObject(row);
+  if (!obj) return fallback;
+  return asString(obj.uid, asString(obj.id, fallback));
+};
+
+async function callCallableWithFallback<TReq, TRes>(
+  callableName: string,
+  payload: TReq,
+  fallbackFn: () => Promise<TRes>
+): Promise<TRes> {
+  if (!shouldUseCallable()) {
+    return fallbackFn();
+  }
+
+  try {
+    return await callCallable<TReq, TRes>(callableName, payload);
+  } catch (error: unknown) {
+    if (shouldFallbackToClientWrites(error)) {
+      return fallbackFn();
+    }
+    throw error;
+  }
+}
+
 const clearAdminUsersCache = (): void => {
   usersListCache.clear();
   userProfileCache.clear();
@@ -180,6 +205,74 @@ const clearAdminUsersCache = (): void => {
   usersPageInflight.clear();
   userProfileInflight.clear();
   userDossierInflight.clear();
+};
+
+const updateUserWithColumnFallback = async (
+  userId: string,
+  patch: Record<string, unknown>
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const mutablePatch = { ...patch };
+
+  while (Object.keys(mutablePatch).length > 0) {
+    const { error } = await supabase
+      .from("users")
+      .update(mutablePatch)
+      .eq("uid", userId);
+    if (!error) return;
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+    const removableKey = Object.keys(mutablePatch).find(
+      (key) => key.toLowerCase() === missingColumn.toLowerCase()
+    );
+    if (!removableKey) throwSupabaseError(error);
+    delete mutablePatch[String(removableKey)];
+  }
+};
+
+const fetchTableRowsForUser = async (
+  tableName: string,
+  userId: string,
+  options: { limit: number; orderField?: string; ignoreMissingTable?: boolean }
+): Promise<Record<string, unknown>[]> => {
+  const supabase = getSupabaseClient();
+  let request = supabase
+    .from(tableName)
+    .select("*")
+    .eq("userId", userId)
+    .limit(options.limit);
+
+  if (options.orderField) {
+    request = request.order(options.orderField, { ascending: false });
+  }
+
+  const { data, error } = await request;
+  if (!error) {
+    return ((data ?? []) as Record<string, unknown>[]).map((row) => ({ ...row }));
+  }
+
+  if (options.ignoreMissingTable && isMissingTableError(error)) {
+    return [];
+  }
+
+  if (options.orderField && asString(extractMissingSchemaColumn(error))) {
+    const fallback = await supabase
+      .from(tableName)
+      .select("*")
+      .eq("userId", userId)
+      .limit(options.limit);
+    if (fallback.error) {
+      if (options.ignoreMissingTable && isMissingTableError(fallback.error)) {
+        return [];
+      }
+      throwSupabaseError(fallback.error);
+    }
+    return ((fallback.data ?? []) as Record<string, unknown>[]).map((row) => ({ ...row }));
+  }
+
+  throwSupabaseError(error);
+  return [];
 };
 
 export interface AdminUserListItem {
@@ -399,21 +492,6 @@ const normalizeGymLog = (id: string, raw: unknown): AdminUserGymRecord | null =>
   };
 };
 
-async function fetchCollectionWithFallback(
-  collectionName: string,
-  constraints: QueryConstraint[],
-  fallbackConstraints: QueryConstraint[]
-): Promise<Record<string, unknown>[]> {
-  try {
-    const snap = await getDocs(query(collection(db, collectionName), ...constraints));
-    return snap.docs.map((row) => ({ id: row.id, ...(row.data() as Record<string, unknown>) }));
-  } catch (error: unknown) {
-    if (!isIndexRequiredError(error)) throw error;
-    const snap = await getDocs(query(collection(db, collectionName), ...fallbackConstraints));
-    return snap.docs.map((row) => ({ id: row.id, ...(row.data() as Record<string, unknown>) }));
-  }
-}
-
 export async function fetchAdminUsersList(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
@@ -427,11 +505,46 @@ export async function fetchAdminUsersList(options?: {
     if (cached) return cached;
   }
 
-  const q = query(collection(db, "users"), orderBy("nome", "asc"), limit(maxResults));
-  const snap = await getDocs(q);
-  const rows = snap.docs
-    .map((row) => normalizeAdminUserListItem(row.id, row.data()))
-    .filter((row): row is AdminUserListItem => row !== null);
+  const supabase = getSupabaseClient();
+  let selectColumns = [
+    "uid",
+    "nome",
+    "email",
+    "telefone",
+    "turma",
+    "matricula",
+    "status",
+    "tier",
+    "foto",
+    "xp",
+    "role",
+  ];
+  let rows: AdminUserListItem[] = [];
+
+  while (selectColumns.length > 0) {
+    const { data, error } = await supabase
+      .from("users")
+      .select(selectColumns.join(","))
+      .order("nome", { ascending: true })
+      .limit(maxResults);
+    if (!error) {
+      rows = (data ?? [])
+        .map((row) =>
+          normalizeAdminUserListItem(
+            rowIdFromUnknown(row),
+            row
+          )
+        )
+        .filter((row): row is AdminUserListItem => row !== null);
+      break;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+    const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+    if (!nextColumns.length) throwSupabaseError(error);
+    selectColumns = nextColumns;
+  }
 
   setCachedValue(usersListCache, cacheKey, rows);
   return rows;
@@ -455,27 +568,22 @@ export async function fetchAdminUsersPage(options?: {
   }
 
   const requestPromise = (async () => {
-    const constraints: QueryConstraint[] = [
-      orderBy("nome", "asc"),
-      limit(pageSize + 1),
-    ];
+    const allUsers = await fetchAdminUsersList({
+      maxResults: MAX_USERS_RESULTS,
+      forceRefresh,
+    });
 
+    let startIndex = 0;
     if (cursorId) {
-      const cursorSnap = await getDoc(doc(db, "users", cursorId));
-      if (cursorSnap.exists()) {
-        constraints.splice(1, 0, startAfter(cursorSnap));
+      const cursorIndex = allUsers.findIndex((row) => row.id === cursorId);
+      if (cursorIndex >= 0) {
+        startIndex = cursorIndex + 1;
       }
     }
 
-    const snap = await getDocs(query(collection(db, "users"), ...constraints));
-    const pageDocs = snap.docs.slice(0, pageSize);
-    const users = pageDocs
-      .map((row) => normalizeAdminUserListItem(row.id, row.data()))
-      .filter((row): row is AdminUserListItem => row !== null);
-
-    const hasMore = snap.docs.length > pageSize;
+    const users = allUsers.slice(startIndex, startIndex + pageSize);
+    const hasMore = startIndex + pageSize < allUsers.length;
     const nextCursor = users.length > 0 ? users[users.length - 1].id : null;
-
     return { users, nextCursor, hasMore };
   })();
 
@@ -513,13 +621,14 @@ export async function updateAdminUser(payload: {
     ADMIN_USERS_UPDATE_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "users", userId), {
+      await updateUserWithColumnFallback(userId, {
         nome: requestPayload.nome,
         telefone: requestPayload.telefone,
         matricula: requestPayload.matricula,
         turma: requestPayload.turma,
         status: requestPayload.status,
         tier: requestPayload.tier,
+        updatedAt: nowIso(),
       });
       return { ok: true };
     }
@@ -540,7 +649,10 @@ export async function setAdminUserStatus(payload: {
     ADMIN_USERS_STATUS_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "users", userId), { status: requestPayload.status });
+      await updateUserWithColumnFallback(userId, {
+        status: requestPayload.status,
+        updatedAt: nowIso(),
+      });
       return { ok: true };
     }
   );
@@ -556,7 +668,9 @@ export async function deleteAdminUser(userIdRaw: string): Promise<void> {
     ADMIN_USERS_DELETE_CALLABLE,
     { userId },
     async () => {
-      await deleteDoc(doc(db, "users", userId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("users").delete().eq("uid", userId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -586,15 +700,52 @@ export async function fetchAdminUserProfile(
   }
 
   const requestPromise = (async () => {
-    const userSnap = await getDoc(doc(db, "users", userId));
-    if (!userSnap.exists()) {
-      setCachedValue(userProfileCache, userId, null);
-      return null;
+    const supabase = getSupabaseClient();
+    let selectColumns = [
+      "uid",
+      "nome",
+      "email",
+      "foto",
+      "matricula",
+      "turma",
+      "telefone",
+      "status",
+      "level",
+      "xp",
+      "sharkCoins",
+      "plano_badge",
+      "tier",
+      "patente",
+      "createdAt",
+      "role",
+    ];
+
+    while (selectColumns.length > 0) {
+      const { data, error } = await supabase
+        .from("users")
+        .select(selectColumns.join(","))
+        .eq("uid", userId)
+        .maybeSingle();
+      if (!error) {
+        const profile = data
+          ? normalizeAdminUserProfile(
+              rowIdFromUnknown(data),
+              data
+            )
+          : null;
+        setCachedValue(userProfileCache, userId, profile);
+        return profile;
+      }
+
+      const missingColumn = asString(extractMissingSchemaColumn(error));
+      if (!missingColumn) throwSupabaseError(error);
+      const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+      if (!nextColumns.length) throwSupabaseError(error);
+      selectColumns = nextColumns;
     }
 
-    const profile = normalizeAdminUserProfile(userSnap.id, userSnap.data());
-    setCachedValue(userProfileCache, userId, profile);
-    return profile;
+    setCachedValue(userProfileCache, userId, null);
+    return null;
   })();
 
   userProfileInflight.set(userId, requestPromise);
@@ -627,74 +778,55 @@ export async function fetchAdminUserDossier(
   }
 
   const requestPromise = (async () => {
-    const userSnap = await getDoc(doc(db, "users", userId));
-    if (!userSnap.exists()) {
-      setCachedValue(userDossierCache, userId, null);
-      return null;
-    }
-
-    const userData = normalizeAdminUserProfile(userSnap.id, userSnap.data());
+    const userData = await fetchAdminUserProfile(userId, { forceRefresh });
     if (!userData) {
       setCachedValue(userDossierCache, userId, null);
       return null;
     }
 
-    const [postsRows, ordersRows, achievementsRows, matchesRows, gymRows] =
+    const [postsRows, storeOrdersRows, ordersRows, achievementsRows, matchesRows, gymRows] =
       await Promise.all([
-        fetchCollectionWithFallback(
-          "posts",
-          [
-            where("userId", "==", userId),
-            orderBy("createdAt", "desc"),
-            limit(MAX_POST_RESULTS),
-          ],
-          [where("userId", "==", userId), limit(MAX_POST_RESULTS)]
-        ),
-        fetchCollectionWithFallback(
-          "store_orders",
-          [
-            where("userId", "==", userId),
-            orderBy("createdAt", "desc"),
-            limit(MAX_ORDER_RESULTS),
-          ],
-          [where("userId", "==", userId), limit(MAX_ORDER_RESULTS)]
-        ),
-        fetchCollectionWithFallback(
-          "achievements_logs",
-          [
-            where("userId", "==", userId),
-            orderBy("timestamp", "desc"),
-            limit(MAX_ACHIEVEMENT_RESULTS),
-          ],
-          [where("userId", "==", userId), limit(MAX_ACHIEVEMENT_RESULTS)]
-        ),
-        fetchCollectionWithFallback(
-          "arena_matches",
-          [
-            where("userId", "==", userId),
-            orderBy("date", "desc"),
-            limit(MAX_MATCH_RESULTS),
-          ],
-          [where("userId", "==", userId), limit(MAX_MATCH_RESULTS)]
-        ),
-        fetchCollectionWithFallback(
-          "gym_logs",
-          [
-            where("userId", "==", userId),
-            orderBy("date", "desc"),
-            limit(MAX_GYM_RESULTS),
-          ],
-          [where("userId", "==", userId), limit(MAX_GYM_RESULTS)]
-        ),
+        fetchTableRowsForUser("posts", userId, {
+          orderField: "createdAt",
+          limit: MAX_POST_RESULTS,
+          ignoreMissingTable: true,
+        }),
+        fetchTableRowsForUser("store_orders", userId, {
+          orderField: "createdAt",
+          limit: MAX_ORDER_RESULTS,
+          ignoreMissingTable: true,
+        }),
+        fetchTableRowsForUser("orders", userId, {
+          orderField: "createdAt",
+          limit: MAX_ORDER_RESULTS,
+          ignoreMissingTable: true,
+        }),
+        fetchTableRowsForUser("achievements_logs", userId, {
+          orderField: "timestamp",
+          limit: MAX_ACHIEVEMENT_RESULTS,
+          ignoreMissingTable: true,
+        }),
+        fetchTableRowsForUser("arena_matches", userId, {
+          orderField: "date",
+          limit: MAX_MATCH_RESULTS,
+          ignoreMissingTable: true,
+        }),
+        fetchTableRowsForUser("gym_logs", userId, {
+          orderField: "date",
+          limit: MAX_GYM_RESULTS,
+          ignoreMissingTable: true,
+        }),
       ]);
 
     const posts = postsRows
       .map((row) => normalizePost(asString(row.id), row))
       .filter((row): row is AdminUserPostRecord => row !== null);
 
-    const orders = sortRowsByFieldDesc(ordersRows, "createdAt")
+    const mergedOrders = [...storeOrdersRows, ...ordersRows];
+    const orders = sortRowsByFieldDesc(mergedOrders, "createdAt")
       .map((row) => normalizeOrder(asString(row.id), row))
-      .filter((row): row is AdminUserOrderRecord => row !== null);
+      .filter((row): row is AdminUserOrderRecord => row !== null)
+      .slice(0, MAX_ORDER_RESULTS);
 
     const achievements = sortRowsByFieldDesc(achievementsRows, "timestamp")
       .map((row) => normalizeAchievement(asString(row.id), row))
@@ -732,5 +864,3 @@ export async function fetchAdminUserDossier(
 export function clearAdminUsersCaches(): void {
   clearAdminUsersCache();
 }
-
-
