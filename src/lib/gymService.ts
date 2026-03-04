@@ -1,24 +1,10 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  arrayRemove,
-  arrayUnion,
-  collection,
-  doc,
-  getDocs,
-  increment,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-  type QueryConstraint,
-} from "@/lib/supabaseHelpers";
 import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { compressImageFile } from "./imageCompression";
-import { db, functions, storage } from "./backend";
+import { functions, storage } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { getSupabaseClient } from "./supabase";
 import { validateImageFile } from "./upload";
 
 type CacheEntry<T> = {
@@ -34,6 +20,9 @@ const CHECKIN_XP_REWARD = 50;
 
 const CALLABLE_GYM_TOGGLE_LIKE = "gymTogglePostLike";
 const CALLABLE_GYM_CREATE_CHECKIN = "gymCreateCheckin";
+
+const POSTS_SELECT_COLUMNS =
+  "id,usuarioId,usuarioNome,usuarioAvatar,titulo,modalidade,legenda,data,tempo,foto,isChallenge,validado,likes,likedBy,comentarios,createdAt";
 
 const feedCache = new Map<string, CacheEntry<GymPostRecord[]>>();
 
@@ -67,14 +56,12 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
-const isIndexRequired = (error: unknown): boolean => {
-  const code = getBackendErrorCode(error)?.toLowerCase();
-  if (code?.includes("failed-precondition")) return true;
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("index") && message.includes("query");
-  }
-  return false;
+const isMissingColumnError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const raw = error as { code?: unknown; message?: unknown };
+  if (typeof raw.code === "string" && raw.code === "42703") return true;
+  const message = typeof raw.message === "string" ? raw.message.toLowerCase() : "";
+  return message.includes("column") && message.includes("does not exist");
 };
 
 const shouldFallbackToClient = (error: unknown): boolean => {
@@ -88,6 +75,13 @@ const shouldFallbackToClient = (error: unknown): boolean => {
     code.includes("functions/cancelled") ||
     code.includes("functions/unknown")
   );
+};
+
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
 };
 
 async function callWithFallback<TReq, TRes>(
@@ -107,23 +101,24 @@ async function callWithFallback<TReq, TRes>(
   }
 }
 
-async function queryRows(path: string, attempts: QueryConstraint[][]): Promise<RawRow[]> {
-  const safeAttempts = attempts.filter((entry) => entry.length > 0);
-  if (!safeAttempts.length) return [];
+async function queryPostsWithFallback(maxResults: number): Promise<RawRow[]> {
+  const supabase = getSupabaseClient();
+  const attempts: Array<"createdAt" | "data" | null> = ["createdAt", "data", null];
 
-  let lastError: unknown = null;
-  for (let i = 0; i < safeAttempts.length; i += 1) {
-    try {
-      const snap = await getDocs(query(collection(db, path), ...safeAttempts[i]));
-      return snap.docs.map((entry) => ({ id: entry.id, ...(entry.data() as RawRow) }));
-    } catch (error: unknown) {
-      lastError = error;
-      const isLast = i === safeAttempts.length - 1;
-      if (!isIndexRequired(error) || isLast) throw error;
+  for (const orderField of attempts) {
+    let request = supabase.from("posts").select(POSTS_SELECT_COLUMNS).limit(maxResults);
+    if (orderField) {
+      request = request.order(orderField, { ascending: false });
     }
+
+    const { data, error } = await request;
+    if (!error) return (data ?? []) as RawRow[];
+    if (orderField && isMissingColumnError(error)) {
+      continue;
+    }
+    throwSupabaseError(error);
   }
 
-  if (lastError) throw lastError;
   return [];
 }
 
@@ -176,12 +171,7 @@ export async function fetchGymFeed(options?: {
     if (cached) return cached;
   }
 
-  const rows = await queryRows("posts", [
-    [orderBy("createdAt", "desc"), limit(maxResults)],
-    [orderBy("data", "desc"), limit(maxResults)],
-    [limit(maxResults)],
-  ]);
-
+  const rows = await queryPostsWithFallback(maxResults);
   const posts = rows.map((entry) => normalizePost(entry));
   setCache(feedCache, cacheKey, posts);
   return posts;
@@ -200,10 +190,34 @@ export async function toggleGymPostLike(payload: {
     CALLABLE_GYM_TOGGLE_LIKE,
     payload,
     async () => {
-      await updateDoc(doc(db, "posts", postId), {
-        likes: increment(payload.currentlyLiked ? -1 : 1),
-        likedBy: payload.currentlyLiked ? arrayRemove(userId) : arrayUnion(userId),
-      });
+      const supabase = getSupabaseClient();
+      const { data: postData, error: postError } = await supabase
+        .from("posts")
+        .select("likedBy,likes")
+        .eq("id", postId)
+        .maybeSingle();
+      if (postError) throwSupabaseError(postError);
+
+      const currentLikedBy = asStringList(postData?.likedBy);
+      const likedBySet = new Set(currentLikedBy);
+      if (payload.currentlyLiked) {
+        likedBySet.delete(userId);
+      } else {
+        likedBySet.add(userId);
+      }
+      const nextLikedBy = Array.from(likedBySet);
+      const nextLikes = Math.max(0, asNumber(postData?.likes, currentLikedBy.length) + (payload.currentlyLiked ? -1 : 1));
+
+      const { error: updateError } = await supabase
+        .from("posts")
+        .update({
+          likes: nextLikes,
+          likedBy: nextLikedBy,
+          updatedAt: new Date().toISOString(),
+        })
+        .eq("id", postId);
+      if (updateError) throwSupabaseError(updateError);
+
       return { ok: true };
     }
   );
@@ -267,32 +281,52 @@ export async function submitGymCheckin(payload: {
     CALLABLE_GYM_CREATE_CHECKIN,
     requestPayload,
     async () => {
-      const postRef = await addDoc(collection(db, "posts"), {
-        usuarioId: requestPayload.userId,
-        usuarioNome: requestPayload.userName,
-        usuarioAvatar: requestPayload.userAvatar,
-        titulo: requestPayload.title,
-        modalidade: requestPayload.selectedType,
-        legenda: `Treino de ${requestPayload.selectedType} pago!`,
-        foto: requestPayload.photoUrl,
-        isChallenge: false,
-        validado: true,
-        likes: 0,
-        likedBy: [],
-        comentarios: [],
-        createdAt: serverTimestamp(),
-        data: "Hoje",
-        tempo: new Date().toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      });
+      const supabase = getSupabaseClient();
+      const now = new Date();
+      const nowIso = now.toISOString();
 
-      await updateDoc(doc(db, "users", requestPayload.userId), {
-        xp: increment(CHECKIN_XP_REWARD),
-      });
+      const { data: postRow, error: postError } = await supabase
+        .from("posts")
+        .insert({
+          usuarioId: requestPayload.userId,
+          usuarioNome: requestPayload.userName,
+          usuarioAvatar: requestPayload.userAvatar,
+          titulo: requestPayload.title,
+          modalidade: requestPayload.selectedType,
+          legenda: `Treino de ${requestPayload.selectedType} pago!`,
+          foto: requestPayload.photoUrl,
+          isChallenge: false,
+          validado: true,
+          likes: 0,
+          likedBy: [],
+          comentarios: [],
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          data: "Hoje",
+          tempo: now.toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        })
+        .select("id")
+        .single();
+      if (postError) throwSupabaseError(postError);
 
-      return { postId: postRef.id };
+      const { data: userRow, error: userError } = await supabase
+        .from("users")
+        .select("xp")
+        .eq("uid", requestPayload.userId)
+        .maybeSingle();
+      if (userError) throwSupabaseError(userError);
+
+      const nextXp = asNumber(userRow?.xp, 0) + CHECKIN_XP_REWARD;
+      const { error: userUpdateError } = await supabase
+        .from("users")
+        .update({ xp: nextXp, updatedAt: nowIso })
+        .eq("uid", requestPayload.userId);
+      if (userUpdateError) throwSupabaseError(userUpdateError);
+
+      return { postId: asString((postRow as RawRow | null)?.id) };
     }
   );
 
@@ -303,5 +337,3 @@ export async function submitGymCheckin(payload: {
 export function clearGymCaches(): void {
   feedCache.clear();
 }
-
-
