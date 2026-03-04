@@ -1,23 +1,10 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  writeBatch,
-} from "@/lib/supabaseHelpers";
 import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
-import { db, functions, storage } from "./backend";
+import { functions, storage } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { throwSupabaseError } from "./supabaseData";
+import { getSupabaseClient } from "./supabase";
 import { validateImageFile } from "./upload";
 
 type CacheEntry<T> = {
@@ -33,6 +20,7 @@ const HISTORY_UPDATE_EVENT_CALLABLE = "historyUpdateEvent";
 const HISTORY_DELETE_EVENT_CALLABLE = "historyDeleteEvent";
 const HISTORY_SAVE_CONFIG_CALLABLE = "historySavePageConfig";
 const HISTORY_SEED_CALLABLE = "historySeedEvents";
+const nowIso = (): string => new Date().toISOString();
 
 const eventsCache = new Map<string, CacheEntry<HistoricEventRecord[]>>();
 let configCache: CacheEntry<HistoryPageConfig | null> | null = null;
@@ -168,15 +156,16 @@ export async function fetchHistoricEvents(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "historic_events"),
-    orderBy("data", order),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("historic_events")
+    .select("id,titulo,data,ano,descricao,local,foto")
+    .order("data", { ascending: order === "asc" })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
 
-  const events = snap.docs
-    .map((row) => normalizeHistoricEvent(row.id, row.data()))
+  const events = (data ?? [])
+    .map((row) => normalizeHistoricEvent(asString((row as Record<string, unknown>).id), row))
     .filter((row): row is HistoricEventRecord => row !== null);
 
   setCacheValue(eventsCache, cacheKey, events);
@@ -191,13 +180,19 @@ export async function fetchHistoryPageConfig(options?: {
     return configCache.value;
   }
 
-  const snap = await getDoc(doc(db, "app_config", "historico"));
-  if (!snap.exists()) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("app_config")
+    .select("id,tituloPagina,subtituloPagina,fotoCapa")
+    .eq("id", "historico")
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+  if (!data) {
     configCache = { cachedAt: Date.now(), value: null };
     return null;
   }
 
-  const config = normalizePageConfig(snap.data());
+  const config = normalizePageConfig(data);
   configCache = { cachedAt: Date.now(), value: config };
   return config;
 }
@@ -232,11 +227,20 @@ export async function createHistoricEvent(
     typeof requestPayload,
     { id: string }
   >(HISTORY_CREATE_EVENT_CALLABLE, requestPayload, async () => {
-    const ref = await addDoc(collection(db, "historic_events"), {
-      ...requestPayload,
-      updatedAt: serverTimestamp(),
-    });
-    return { id: ref.id };
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("historic_events")
+      .insert({
+        ...requestPayload,
+        updatedAt: nowIso(),
+      })
+      .select("id")
+      .single();
+    if (error) throwSupabaseError(error);
+
+    const id = asString((data as Record<string, unknown> | null)?.id);
+    if (!id) throw new Error("Falha ao criar evento historico.");
+    return { id };
   });
 
   clearReadCaches();
@@ -258,12 +262,17 @@ export async function updateHistoricEvent(
     HISTORY_UPDATE_EVENT_CALLABLE,
     requestPayload,
     async () => {
+      const supabase = getSupabaseClient();
       const { id: payloadId, ...docPayload } = requestPayload;
       void payloadId;
-      await updateDoc(doc(db, "historic_events", cleanId), {
-        ...docPayload,
-        updatedAt: serverTimestamp(),
-      });
+      const { error } = await supabase
+        .from("historic_events")
+        .update({
+          ...docPayload,
+          updatedAt: nowIso(),
+        })
+        .eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -279,7 +288,9 @@ export async function deleteHistoricEvent(id: string): Promise<void> {
     HISTORY_DELETE_EVENT_CALLABLE,
     { id: cleanId },
     async () => {
-      await deleteDoc(doc(db, "historic_events", cleanId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("historic_events").delete().eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -295,11 +306,18 @@ export async function saveHistoryPageConfig(
     HISTORY_SAVE_CONFIG_CALLABLE,
     payload,
     async () => {
-      await setDoc(
-        doc(db, "app_config", "historico"),
-        { ...payload, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("app_config")
+        .upsert(
+          {
+            id: "historico",
+            ...payload,
+            updatedAt: nowIso(),
+          },
+          { onConflict: "id" }
+        );
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -329,12 +347,11 @@ export async function seedHistoricEvents(
     HISTORY_SEED_CALLABLE,
     { events: safeEvents },
     async () => {
-      const batch = writeBatch(db);
-      safeEvents.forEach((eventData) => {
-        const ref = doc(collection(db, "historic_events"));
-        batch.set(ref, { ...eventData, updatedAt: serverTimestamp() });
-      });
-      await batch.commit();
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("historic_events")
+        .insert(safeEvents.map((eventData) => ({ ...eventData, updatedAt: nowIso() })));
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
