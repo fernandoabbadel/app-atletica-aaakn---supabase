@@ -697,7 +697,7 @@ export async function fetchAdminPartnerScansPage(options?: {
       }
     }
 
-    let rows = data
+    const rows = data
       .map((row) => normalizeScan(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is PartnerScanRecord => row !== null)
       .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
