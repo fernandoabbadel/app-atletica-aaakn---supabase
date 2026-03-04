@@ -1,8 +1,9 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import { doc, getDoc, setDoc, serverTimestamp } from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { throwSupabaseError } from "./supabaseData";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -14,6 +15,7 @@ const READ_CACHE_TTL_MS = 30_000;
 const SHARKROUND_CONFIG_PATH = ["app_config", "sharkround"] as const;
 const SHARKROUND_CONFIG_GET_CALLABLE = "sharkroundGetConfig";
 const SHARKROUND_CONFIG_SAVE_CALLABLE = "sharkroundAdminSaveConfig";
+const nowIso = (): string => new Date().toISOString();
 
 const configCache = new Map<string, CacheEntry<SharkroundAppConfig>>();
 let inflightConfig: Promise<SharkroundAppConfig> | null = null;
@@ -185,8 +187,16 @@ export async function fetchSharkroundAppConfig(options?: {
     SHARKROUND_CONFIG_GET_CALLABLE,
     { forceRefresh },
     async () => {
-      const snap = await getDoc(doc(db, SHARKROUND_CONFIG_PATH[0], SHARKROUND_CONFIG_PATH[1]));
-      return { config: snap.exists() ? snap.data() : DEFAULT_SHARKROUND_CONFIG };
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from(SHARKROUND_CONFIG_PATH[0])
+        .select(
+          "id,dailyRollsLimit,startingCoins,bailCost,heartTarget,heartHelpReward,cycleBaseReward,rules"
+        )
+        .eq("id", SHARKROUND_CONFIG_PATH[1])
+        .maybeSingle();
+      if (error) throwSupabaseError(error);
+      return { config: data ?? DEFAULT_SHARKROUND_CONFIG };
     }
   )
     .then((response) => {
@@ -214,14 +224,18 @@ export async function saveSharkroundAppConfig(
     SHARKROUND_CONFIG_SAVE_CALLABLE,
     { config: normalized },
     async () => {
-      await setDoc(
-        doc(db, SHARKROUND_CONFIG_PATH[0], SHARKROUND_CONFIG_PATH[1]),
-        {
-          ...normalized,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from(SHARKROUND_CONFIG_PATH[0])
+        .upsert(
+          {
+            id: SHARKROUND_CONFIG_PATH[1],
+            ...normalized,
+            updatedAt: nowIso(),
+          },
+          { onConflict: "id" }
+        );
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
