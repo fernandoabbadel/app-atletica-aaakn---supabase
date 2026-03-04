@@ -59,6 +59,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
     { name: "Comunidade", path: "/admin/comunidade", icon: <MessageSquare size={18} /> },
     { name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
+    { name: "Treinos Antigos", path: "/admin/treinos/antigos", icon: <History size={18} /> },
     { name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
     { name: "Usuários", path: "/admin/usuarios", icon: <Users size={18} /> },
     { name: "Álbum da Galera", path: "/admin/album", icon: <Camera size={18} /> },

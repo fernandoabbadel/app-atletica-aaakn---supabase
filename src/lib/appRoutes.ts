@@ -64,6 +64,7 @@ export const APP_PAGES = [
     { path: '/admin/scanner', label: '📷 Scanner QR' },
     { path: '/admin/sharkround', label: '🦈 Adm SharkRound' },
     { path: '/admin/treinos', label: '💪 Adm Treinos' },
+    { path: '/admin/treinos/antigos', label: '🗃️ Adm Treinos Antigos' },
     { path: '/admin/usuarios', label: '👥 Gerenciar Usuários' },
 
     // --- PÚBLICO / MEMBROS ---
@@ -90,3 +91,4 @@ export const APP_PAGES = [
     { path: '/sharkround', label: '🦈 SharkRound' },
     { path: '/treinos', label: '💪 Treinos' },
 ].sort((a, b) => a.path.localeCompare(b.path));
+

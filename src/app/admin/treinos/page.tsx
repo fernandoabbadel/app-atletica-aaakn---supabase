@@ -658,6 +658,9 @@ export default function AdminTreinosPage() {
             <h1 className="text-lg font-black uppercase tracking-tighter">Gestão Treinos</h1>
         </div>
         <div className="flex gap-2">
+            <Link href="/admin/treinos/antigos" className="bg-zinc-900 text-zinc-200 px-4 py-2 rounded-xl text-xs font-bold uppercase hover:bg-zinc-800 flex items-center gap-2 border border-zinc-700">
+                <CalendarRange size={14}/> Treinos Antigos
+            </Link>
             {activeTab === 'grade' && (
                 <>
                     <button onClick={handleOpenNovaModalidade} className="bg-zinc-800 text-zinc-300 px-4 py-2 rounded-xl text-xs font-bold uppercase hover:bg-zinc-700 flex items-center gap-2 border border-zinc-700">

@@ -7,6 +7,7 @@ import { logActivity } from "../lib/logger";
 import LoadingScreen from "../app/loading";
 import { DEFAULT_STATS, DEFAULT_USER_PROPS } from "../constants/userDefaults";
 import { getBackendErrorCode, isPermissionError } from "@/lib/backendErrors";
+import { ensureAlbumSelfCollected } from "@/lib/albumService";
 
 // --- TIPAGEM ---
 export type UserRole = "guest" | "user" | "treinador" | "empresa" | "admin_treino" | "admin_geral" | "admin_gestor" | "master" | "vendas";
@@ -571,6 +572,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(normalized);
           setIsAdmin(["master", "admin_geral", "admin_gestor"].includes(String(normalized.role)));
           setLoading(false);
+          void ensureAlbumSelfCollected(normalized.uid).catch(() => {});
           return;
         }
 
@@ -610,6 +612,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(normalized);
         setIsAdmin(false);
         setLoading(false);
+        void ensureAlbumSelfCollected(normalized.uid).catch(() => {});
         void logActivity(normalized.uid, normalized.nome, "CREATE", "Usuarios", "Novo cadastro via Google");
       } catch (error: unknown) {
         if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {

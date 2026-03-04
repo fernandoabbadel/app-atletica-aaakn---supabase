@@ -37,6 +37,7 @@ const inflightCollectedIdsCache = new Map<string, Promise<string[]>>();
 const inflightAlbumConfigCache = new Map<string, Promise<AlbumCmsData | null>>();
 const inflightAlbumSummaryCache = new Map<string, Promise<AlbumSummary | null>>();
 const inflightAlbumUiCache = new Map<string, Promise<AlbumUiConfig | null>>();
+const inflightEnsureSelfCollectedCache = new Map<string, Promise<void>>();
 
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
@@ -285,6 +286,17 @@ const isUniqueViolationError = (error: unknown): boolean => {
   return details.includes("duplicate key") || details.includes("unique");
 };
 
+const resolveUserTurmaCode = async (userId: string): Promise<string> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("turma")
+    .eq("uid", userId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+  return normalizeTurmaCode((data as Record<string, unknown> | null)?.turma);
+};
+
 export async function fetchAlbumRankings(
   maxResults = MAX_RANKING_RESULTS,
   options?: { turma?: string }
@@ -430,6 +442,12 @@ export async function fetchAlbumCollectedIds(
 ): Promise<string[]> {
   if (!userId) return [];
 
+  try {
+    await ensureAlbumSelfCollected(userId);
+  } catch {
+    // Se a semente falhar por politica/RLS, seguimos com leitura sem quebrar a tela.
+  }
+
   const turma = options?.turma?.trim();
   const maxResults = boundedLimit(
     options?.maxResults ?? MAX_USERS_PER_CLASS * 2,
@@ -450,7 +468,7 @@ export async function fetchAlbumCollectedIds(
         ? summary.capturedByTurma[normalizeTurmaCode(turma)] || []
         : Object.values(summary.capturedByTurma).flat();
 
-      const rows = Array.from(new Set(source)).slice(0, maxResults);
+      const rows = Array.from(new Set([userId, ...source])).slice(0, maxResults);
       setCacheValue(collectedIdsCache, cacheKey, rows);
       return rows;
     }
@@ -473,9 +491,11 @@ export async function fetchAlbumCollectedIds(
     const rowsRaw = (data as unknown as Array<Record<string, unknown>> | null) ?? [];
     const ids = Array.from(
       new Set(
+        [userId].concat(
         rowsRaw
           .map((row) => asString(row.targetUserId).trim())
           .filter(Boolean)
+        )
       )
     );
 
@@ -491,10 +511,20 @@ export async function fetchAlbumCollectedIds(
         },
         {}
       );
+      try {
+        const userTurma = await resolveUserTurmaCode(userId);
+        capturedByTurma[userTurma] = Array.from(
+          new Set([...(capturedByTurma[userTurma] || []), userId])
+        );
+      } catch {
+        capturedByTurma.OUTROS = Array.from(
+          new Set([...(capturedByTurma.OUTROS || []), userId])
+        );
+      }
 
       const hydratedSummary: AlbumSummary = {
         userId,
-        totalCollected: ids.length,
+        totalCollected: Array.from(new Set(Object.values(capturedByTurma).flat())).length,
         capturedByTurma,
       };
 
@@ -520,6 +550,63 @@ export async function fetchAlbumCollectedIds(
     setCacheValue(collectedIdsCache, cacheKey, ids);
     return ids;
   });
+}
+
+export async function ensureAlbumSelfCollected(userId: string): Promise<void> {
+  const cleanUserId = userId.trim();
+  if (!cleanUserId) return;
+
+  return runWithInflight(
+    inflightEnsureSelfCollectedCache,
+    cleanUserId,
+    async () => {
+      const userTurma = await resolveUserTurmaCode(cleanUserId);
+      const summary = await fetchAlbumSummary(cleanUserId, { forceRefresh: true });
+      const currentSummary = summary ?? {
+        userId: cleanUserId,
+        totalCollected: 0,
+        capturedByTurma: {} as Record<string, string[]>,
+      };
+
+      const turmaRows = currentSummary.capturedByTurma[userTurma] || [];
+      if (turmaRows.includes(cleanUserId)) return;
+
+      const nextCapturedByTurma = {
+        ...currentSummary.capturedByTurma,
+        [userTurma]: Array.from(new Set([...turmaRows, cleanUserId])),
+      };
+      const uniqueCollected = Array.from(
+        new Set(Object.values(nextCapturedByTurma).flat())
+      );
+      const nextSummary: AlbumSummary = {
+        userId: cleanUserId,
+        totalCollected: uniqueCollected.length,
+        capturedByTurma: nextCapturedByTurma,
+        lastCaptureId: currentSummary.lastCaptureId,
+        lastCaptureAt: currentSummary.lastCaptureAt,
+        updatedAt: nowIso(),
+      };
+
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from(ALBUM_SUMMARY_COLLECTION)
+        .upsert(
+          {
+            userId: nextSummary.userId,
+            totalCollected: nextSummary.totalCollected,
+            capturedByTurma: nextSummary.capturedByTurma,
+            lastCaptureId: nextSummary.lastCaptureId,
+            lastCaptureAt: nextSummary.lastCaptureAt,
+            updatedAt: nowIso(),
+          },
+          { onConflict: "userId" }
+        );
+      if (error) throwSupabaseError(error);
+
+      setCacheValue(albumSummaryCache, cleanUserId, nextSummary);
+      collectedIdsCache.clear();
+    }
+  );
 }
 
 export async function fetchAlbumSummary(

@@ -20,7 +20,7 @@ const DEFAULT_MODALIDADES = ["Futsal", "Volei"];
 const TREINOS_SELECT_COLUMNS =
   "id,modalidade,diaSemana,dia,horario,local,treinador,treinadorId,treinadorAvatar,descricao,imagem,ordemDia,status,confirmados,createdAt,updatedAt";
 const TREINOS_RSVPS_SELECT_COLUMNS =
-  "id,treinoId,userId,userName,userAvatar,userTurma,status,timestamp,createdAt,updatedAt";
+  "id,treinoId,userId,userName,userAvatar,userTurma,status,timestamp";
 const TREINOS_CHAMADA_SELECT_COLUMNS =
   "id,treinoId,userId,nome,avatar,turma,status,origem,pagamento,timestamp,updatedAt";
 

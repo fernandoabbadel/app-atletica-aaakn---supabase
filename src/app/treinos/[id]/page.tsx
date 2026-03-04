@@ -55,6 +55,23 @@ interface AlunoLista {
   statusVisual: "confirmado" | "presente" | "falta";
 }
 
+const TREINO_HISTORICO_ALLOWED_ROLES = new Set([
+  "master",
+  "admin",
+  "admin_geral",
+  "admin_gestor",
+  "admin_treino",
+  "treinador",
+  "coach",
+]);
+
+const isTreinoPast = (dia?: string): boolean => {
+  if (!dia) return false;
+  const endOfDay = new Date(`${dia}T23:59:59`);
+  if (Number.isNaN(endOfDay.getTime())) return false;
+  return endOfDay.getTime() < Date.now();
+};
+
 export default function TreinoDetalhesPage() {
   const params = useParams();
   const router = useRouter();
@@ -72,6 +89,9 @@ export default function TreinoDetalhesPage() {
   // 1. CARREGAR DADOS (TREINO + RSVPS + CHAMADA OFICIAL)
   const treinoId = typeof params.id === "string" ? params.id : "";
   const userId = user?.uid ?? null;
+  const userRole =
+    typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
+  const canAccessExpiredTreino = TREINO_HISTORICO_ALLOWED_ROLES.has(userRole);
 
   useEffect(() => {
       if (!treinoId) return;
@@ -86,8 +106,13 @@ export default function TreinoDetalhesPage() {
               ]);
 
               if (!treinoDoc) {
-                  addToast("Treino não encontrado.", "error");
+                  addToast("Treino nao encontrado.", "error");
                   router.push("/treinos");
+                  return;
+              }
+              if (isTreinoPast(treinoDoc.dia) && !canAccessExpiredTreino) {
+                  addToast("Treino encerrado. Consulte a agenda atual.", "info");
+                  router.replace("/treinos");
                   return;
               }
 
@@ -115,7 +140,7 @@ export default function TreinoDetalhesPage() {
       };
 
       void loadData();
-  }, [treinoId, userId, router, addToast]);
+  }, [treinoId, userId, canAccessExpiredTreino, router, addToast]);
 
   // 2. FUSÃO INTELIGENTE DAS LISTAS (RSVP + ADMIN)
   const listaFinal = useMemo(() => {
@@ -421,3 +446,4 @@ export default function TreinoDetalhesPage() {
     </div>
   );
 }
+
