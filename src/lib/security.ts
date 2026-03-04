@@ -1,5 +1,4 @@
-import { db } from "./backend";
-import { doc, getDoc, updateDoc, serverTimestamp } from "@/lib/supabaseHelpers";
+import { getSupabaseClient } from "./supabase";
 import { isPermissionError } from "./backendErrors";
 
 const RULES = {
@@ -45,15 +44,31 @@ const isMissingSchemaColumnError = (error: unknown, columnName: string): boolean
 export const Security = {
   async canUserPost(userId: string): Promise<SecurityResult> {
     try {
-      const userRef = doc(db, "users", userId);
-      const snap = await getDoc(userRef);
+      const supabase = getSupabaseClient();
+      const { data: userRow, error: userError } = await supabase
+        .from("users")
+        .select("uid")
+        .eq("uid", userId)
+        .maybeSingle();
+      if (userError) throw userError;
 
-      if (!snap.exists()) {
+      if (!userRow) {
         return { allowed: false, reason: "Usuario nao encontrado." };
       }
 
-      const userData = snap.data() as { lastPostTime?: unknown };
-      const persistedLastPost = toDateSafe(userData.lastPostTime)?.getTime() || 0;
+      let persistedLastPost = 0;
+      try {
+        const { data: cooldownRow, error: cooldownError } = await supabase
+          .from("users")
+          .select("uid,lastPostTime")
+          .eq("uid", userId)
+          .maybeSingle();
+        if (cooldownError) throw cooldownError;
+        persistedLastPost = toDateSafe(cooldownRow?.lastPostTime)?.getTime() || 0;
+      } catch (error: unknown) {
+        if (!isMissingSchemaColumnError(error, "lastPostTime")) throw error;
+      }
+
       const localLastPost = localPostCooldownFallback.get(userId) || 0;
       const lastPost = Math.max(persistedLastPost, localLastPost);
       const now = Date.now();
@@ -64,7 +79,14 @@ export const Security = {
       }
 
       try {
-        await updateDoc(userRef, { lastPostTime: serverTimestamp() });
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({
+            lastPostTime: new Date(now).toISOString(),
+            updatedAt: new Date(now).toISOString(),
+          })
+          .eq("uid", userId);
+        if (updateError) throw updateError;
       } catch (error: unknown) {
         if (!isMissingSchemaColumnError(error, "lastPostTime")) {
           throw error;
@@ -85,15 +107,32 @@ export const Security = {
 
   async canCheckInGym(userId: string): Promise<SecurityResult> {
     try {
-      const userRef = doc(db, "users", userId);
-      const snap = await getDoc(userRef);
+      const supabase = getSupabaseClient();
+      const { data: userRow, error: userError } = await supabase
+        .from("users")
+        .select("uid")
+        .eq("uid", userId)
+        .maybeSingle();
+      if (userError) throw userError;
 
-      if (!snap.exists()) {
+      if (!userRow) {
         return { allowed: false };
       }
 
-      const userData = snap.data() as { lastGymCheckIn?: unknown };
-      const lastCheckIn = toDateSafe(userData.lastGymCheckIn) || new Date(0);
+      let lastGymCheckInRaw: unknown = null;
+      try {
+        const { data: gymRow, error: gymError } = await supabase
+          .from("users")
+          .select("uid,lastGymCheckIn")
+          .eq("uid", userId)
+          .maybeSingle();
+        if (gymError) throw gymError;
+        lastGymCheckInRaw = gymRow?.lastGymCheckIn;
+      } catch (error: unknown) {
+        if (!isMissingSchemaColumnError(error, "lastGymCheckIn")) throw error;
+      }
+
+      const lastCheckIn = toDateSafe(lastGymCheckInRaw) || new Date(0);
       const today = new Date();
 
       if (
