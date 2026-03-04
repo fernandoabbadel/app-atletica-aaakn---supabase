@@ -1,20 +1,5 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-} from "@/lib/supabaseHelpers";
-
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { clearDashboardCaches as clearAuthenticatedDashboardCaches } from "./dashboardService";
 import { clearDashboardCaches as clearPublicDashboardCaches } from "./dashboardPublicService";
@@ -48,6 +33,45 @@ const usersCache = new Map<string, CacheEntry<LeagueUserRecord[]>>();
 const leagueByIdCache = new Map<string, CacheEntry<LeagueRecord | null>>();
 const pollsCache = new Map<string, CacheEntry<LeaguePollRecord[]>>();
 
+const LEAGUES_SELECT_COLUMNS = [
+  "id",
+  "nome",
+  "sigla",
+  "presidente",
+  "descricao",
+  "senha",
+  "foto",
+  "logoUrl",
+  "logoBase64",
+  "visivel",
+  "ativa",
+  "membros",
+  "eventos",
+  "perguntas",
+  "bizu",
+  "likes",
+  "membrosIds",
+  "status",
+  "createdAt",
+  "updatedAt",
+] as const;
+
+const LEAGUE_USERS_SELECT_COLUMNS = ["uid", "nome", "foto", "turma"] as const;
+
+const EVENT_POLLS_SELECT_COLUMNS = [
+  "id",
+  "eventoId",
+  "question",
+  "options",
+  "allowUserOptions",
+  "voters",
+  "userVotes",
+  "creatorId",
+  "isOfficial",
+  "createdAt",
+  "updatedAt",
+] as const;
+
 const asObject = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== "object" || value === null) return null;
   return value as Record<string, unknown>;
@@ -61,6 +85,12 @@ const asNumber = (value: unknown, fallback = 0): number =>
 
 const asBoolean = (value: unknown, fallback = false): boolean =>
   typeof value === "boolean" ? value : fallback;
+
+const rowIdFromUnknown = (row: unknown, fallback = ""): string => {
+  const obj = asObject(row);
+  if (!obj) return fallback;
+  return asString(obj.id, asString(obj.uid, fallback));
+};
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
@@ -106,6 +136,44 @@ const clearLeagueDependentCaches = (): void => {
 const clearUsersCache = (): void => {
   usersCache.clear();
 };
+
+const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const removeMissingColumnFromSelection = (
+  columns: readonly string[] | string[],
+  missingColumn: string
+): string[] | null => {
+  const next = [...columns].filter((column) => column.toLowerCase() !== missingColumn.toLowerCase());
+  if (next.length === columns.length) return null;
+  return next;
+};
+
+const nowIso = (): string => new Date().toISOString();
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
@@ -504,15 +572,29 @@ export async function fetchLeagues(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "ligas_config"),
-    orderBy(orderByField, orderDirection),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  const leagues = snap.docs
-    .map((row) => normalizeLeague(row.id, row.data()))
-    .filter((row): row is LeagueRecord => row !== null);
+  const supabase = getSupabaseClient();
+  let selectColumns: string[] = [...LEAGUES_SELECT_COLUMNS];
+  let leagues: LeagueRecord[] = [];
+
+  while (selectColumns.length > 0) {
+    const { data, error } = await supabase
+      .from("ligas_config")
+      .select(selectColumns.join(","))
+      .order(orderByField, { ascending: orderDirection === "asc" })
+      .limit(maxResults);
+    if (!error) {
+      leagues = (data ?? [])
+        .map((row) => normalizeLeague(rowIdFromUnknown(row), row))
+        .filter((row): row is LeagueRecord => row !== null);
+      break;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+    const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+    if (!nextColumns.length) throwSupabaseError(error);
+    selectColumns = nextColumns;
+  }
 
   setCacheValue(leaguesCache, cacheKey, leagues);
   return leagues;
@@ -535,25 +617,12 @@ export async function fetchLeagueSummaries(options?: {
     if (cached) return cached;
   }
 
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("ligas_config")
-    .select(
-      "id,nome,sigla,descricao,foto,logoUrl,logoBase64,bizu,likes,membrosIds,visivel,ativa,status,createdAt,updatedAt"
-    )
-    .order(orderByField, { ascending: orderDirection === "asc" })
-    .limit(maxResults);
-
-  if (error) {
-    throw Object.assign(new Error(error.message || "Falha ao carregar ligas."), {
-      code: error.code ? `db/${error.code}` : "db/leagues-summaries-failed",
-      cause: error,
-    });
-  }
-
-  const leagues = (data ?? [])
-    .map((row) => normalizeLeague(asString((row as Record<string, unknown>).id), row))
-    .filter((row): row is LeagueRecord => row !== null);
+  const leagues = await fetchLeagues({
+    orderByField,
+    orderDirection,
+    maxResults,
+    forceRefresh,
+  });
 
   setCacheValue(leagueSummariesCache, cacheKey, leagues);
   return leagues;
@@ -572,13 +641,32 @@ export async function fetchLeagueById(
     if (cached !== null) return cached;
   }
 
-  const snap = await getDoc(doc(db, "ligas_config", cleanId));
-  if (!snap.exists()) {
-    setCacheValue(leagueByIdCache, cleanId, null);
-    return null;
+  const supabase = getSupabaseClient();
+  let selectColumns: string[] = [...LEAGUES_SELECT_COLUMNS];
+  let league: LeagueRecord | null = null;
+
+  while (selectColumns.length > 0) {
+    const { data, error } = await supabase
+      .from("ligas_config")
+      .select(selectColumns.join(","))
+      .eq("id", cleanId)
+      .maybeSingle();
+    if (!error) {
+      if (!data) {
+        setCacheValue(leagueByIdCache, cleanId, null);
+        return null;
+      }
+      league = normalizeLeague(rowIdFromUnknown(data), data);
+      break;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+    const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+    if (!nextColumns.length) throwSupabaseError(error);
+    selectColumns = nextColumns;
   }
 
-  const league = normalizeLeague(snap.id, snap.data());
   setCacheValue(leagueByIdCache, cleanId, league);
   return league;
 }
@@ -596,14 +684,36 @@ export async function fetchLeagueUsers(options?: {
     if (cached) return cached;
   }
 
-  const q = query(collection(db, "users"), limit(maxResults));
-  const snap = await getDocs(q);
-  const users = snap.docs
-    .map((row) => normalizeLeagueUser(row.id, row.data()))
-    .filter((row): row is LeagueUserRecord => row !== null)
-    .sort((left, right) =>
-      (left.nome || "").localeCompare(right.nome || "", "pt-BR")
-    );
+  const supabase = getSupabaseClient();
+  let selectColumns: string[] = [...LEAGUE_USERS_SELECT_COLUMNS];
+  let users: LeagueUserRecord[] = [];
+
+  while (selectColumns.length > 0) {
+    const { data, error } = await supabase
+      .from("users")
+      .select(selectColumns.join(","))
+      .limit(maxResults);
+    if (!error) {
+      users = (data ?? [])
+        .map((row) =>
+          normalizeLeagueUser(
+            rowIdFromUnknown(row),
+            row
+          )
+        )
+        .filter((row): row is LeagueUserRecord => row !== null)
+        .sort((left, right) =>
+          (left.nome || "").localeCompare(right.nome || "", "pt-BR")
+        );
+      break;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+    const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+    if (!nextColumns.length) throwSupabaseError(error);
+    selectColumns = nextColumns;
+  }
 
   setCacheValue(usersCache, cacheKey, users);
   return users;
@@ -621,20 +731,31 @@ export async function saveLeagueConfig(payload: {
     LEAGUE_SAVE_CALLABLE,
     requestPayload,
     async () => {
+      const supabase = getSupabaseClient();
       if (id) {
-        await updateDoc(doc(db, "ligas_config", id), {
-          ...normalizedData,
-          updatedAt: serverTimestamp(),
-        });
+        const { error } = await supabase
+          .from("ligas_config")
+          .update({
+            ...normalizedData,
+            updatedAt: nowIso(),
+          })
+          .eq("id", id);
+        if (error) throwSupabaseError(error);
+
         return { id };
       }
 
-      const ref = await addDoc(collection(db, "ligas_config"), {
-        ...normalizedData,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      return { id: ref.id };
+      const { data, error } = await supabase
+        .from("ligas_config")
+        .insert({
+          ...normalizedData,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        })
+        .select("id")
+        .single();
+      if (error) throwSupabaseError(error);
+      return { id: asString((data as Record<string, unknown> | null)?.id) };
     }
   );
 
@@ -650,7 +771,9 @@ export async function deleteLeagueConfig(id: string): Promise<void> {
     LEAGUE_DELETE_CALLABLE,
     { id: cleanId },
     async () => {
-      await deleteDoc(doc(db, "ligas_config", cleanId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("ligas_config").delete().eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -670,10 +793,15 @@ export async function setLeagueVisibility(payload: {
     LEAGUE_VISIBILITY_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "ligas_config", cleanId), {
-        visivel: payload.visivel,
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("ligas_config")
+        .update({
+          visivel: payload.visivel,
+          updatedAt: nowIso(),
+        })
+        .eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -693,10 +821,24 @@ export async function changeLeagueLikeCount(payload: {
     LEAGUE_LIKE_CALLABLE,
     payload,
     async () => {
-      await updateDoc(doc(db, "ligas_config", cleanId), {
-        likes: increment(payload.delta),
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const { data: leagueRow, error: selectError } = await supabase
+        .from("ligas_config")
+        .select("likes")
+        .eq("id", cleanId)
+        .maybeSingle();
+      if (selectError) throwSupabaseError(selectError);
+      const currentLikes = Math.max(0, asNumber(asObject(leagueRow)?.likes, 0));
+      const nextLikes = Math.max(0, currentLikes + payload.delta);
+
+      const { error: updateError } = await supabase
+        .from("ligas_config")
+        .update({
+          likes: nextLikes,
+          updatedAt: nowIso(),
+        })
+        .eq("id", cleanId);
+      if (updateError) throwSupabaseError(updateError);
       return { ok: true };
     }
   );
@@ -729,11 +871,29 @@ export async function fetchEventPolls(
     if (cached) return cached;
   }
 
-  const q = query(collection(db, "eventos", cleanEventId, "enquetes"), limit(maxResults));
-  const snap = await getDocs(q);
-  const polls = snap.docs
-    .map((row) => normalizePoll(row.id, row.data()))
-    .filter((row): row is LeaguePollRecord => row !== null);
+  const supabase = getSupabaseClient();
+  let selectColumns: string[] = [...EVENT_POLLS_SELECT_COLUMNS];
+  let polls: LeaguePollRecord[] = [];
+
+  while (selectColumns.length > 0) {
+    const { data, error } = await supabase
+      .from("eventos_enquetes")
+      .select(selectColumns.join(","))
+      .eq("eventoId", cleanEventId)
+      .limit(maxResults);
+    if (!error) {
+      polls = (data ?? [])
+        .map((row) => normalizePoll(rowIdFromUnknown(row), row))
+        .filter((row): row is LeaguePollRecord => row !== null);
+      break;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+    const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+    if (!nextColumns.length) throwSupabaseError(error);
+    selectColumns = nextColumns;
+  }
 
   setCacheValue(pollsCache, cacheKey, polls);
   return polls;
@@ -759,16 +919,25 @@ export async function createEventPoll(payload: {
     LEAGUE_POLL_CREATE_CALLABLE,
     requestPayload,
     async () => {
-      const ref = await addDoc(collection(db, "eventos", eventId, "enquetes"), {
-        question: requestPayload.question,
-        allowUserOptions: requestPayload.allowUserOptions,
-        options: [],
-        voters: [],
-        createdAt: serverTimestamp(),
-        creatorId: requestPayload.creatorId || null,
-        isOfficial: true,
-      });
-      return { id: ref.id };
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from("eventos_enquetes")
+        .insert({
+          eventoId: eventId,
+          question: requestPayload.question,
+          allowUserOptions: requestPayload.allowUserOptions,
+          options: [],
+          voters: [],
+          userVotes: {},
+          creatorId: requestPayload.creatorId || null,
+          isOfficial: true,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        })
+        .select("id")
+        .single();
+      if (error) throwSupabaseError(error);
+      return { id: asString((data as Record<string, unknown> | null)?.id) };
     }
   );
 
@@ -788,7 +957,13 @@ export async function deleteEventPoll(payload: {
     LEAGUE_POLL_DELETE_CALLABLE,
     payload,
     async () => {
-      await deleteDoc(doc(db, "eventos", eventId, "enquetes", pollId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("eventos_enquetes")
+        .delete()
+        .eq("id", pollId)
+        .eq("eventoId", eventId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -818,10 +993,16 @@ export async function updateEventPollOptions(payload: {
     LEAGUE_POLL_UPDATE_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "eventos", eventId, "enquetes", pollId), {
-        options: normalizedOptions,
-        updatedAt: serverTimestamp(),
-      });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("eventos_enquetes")
+        .update({
+          options: normalizedOptions,
+          updatedAt: nowIso(),
+        })
+        .eq("id", pollId)
+        .eq("eventoId", eventId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -849,11 +1030,18 @@ export async function addLeagueQuizHistory(payload: {
     LEAGUE_QUIZ_CALLABLE,
     requestPayload,
     async () => {
-      await addDoc(collection(db, "users", userId, "quiz_history"), {
-        date: serverTimestamp(),
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("quiz_history").insert({
+        userId,
+        date: nowIso(),
         topMatch: requestPayload.topMatch,
         keywords: requestPayload.keywords,
       });
+      if (error) {
+        if (asString(getBackendErrorCode(error)).toLowerCase() !== "42p01") {
+          throwSupabaseError(error);
+        }
+      }
       return { ok: true };
     }
   );
