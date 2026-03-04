@@ -524,7 +524,7 @@ export async function uploadLeagueImageToStorage(options: {
   const isEventImage = options.kind === "event";
   const isLogoImage = options.kind === "logo";
   const isMemberImage = options.kind === "member";
-  const sourceMaxBytes = isEventImage ? 5 * 1024 * 1024 : isLogoImage ? 6 * 1024 * 1024 : 4 * 1024 * 1024;
+  const sourceMaxBytes = isEventImage ? 3 * 1024 * 1024 : 2 * 1024 * 1024;
   const sourceMaxWidth = isEventImage ? 4200 : isLogoImage ? 4000 : isMemberImage ? 3200 : 3600;
   const sourceMaxHeight = isEventImage ? 3200 : isLogoImage ? 4000 : isMemberImage ? 3200 : 3600;
   const sourceMaxPixels = isEventImage ? 12_000_000 : isLogoImage ? 16_000_000 : 9_000_000;

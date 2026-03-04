@@ -475,7 +475,30 @@ export default function LigasAdminPage() {
       setLigaData(null);
       setIsLoggedIn(false);
   };
+  const classifyUploadError = (error: unknown): { message: string; type: "info" | "error" } => {
+      const rawMessage = error instanceof Error ? error.message : String(error || "");
+      const message = rawMessage.trim();
+      const normalized = message.toLowerCase();
 
+      if (!message) {
+          return { message: "Deu ruim no plantao! Erro na imagem.", type: "error" };
+      }
+      if (
+          normalized.includes("excede") &&
+          (normalized.includes("mb") || normalized.includes("kb") || normalized.includes("byte"))
+      ) {
+          return { message: "Bizu do Tubarao... " + message, type: "info" };
+      }
+      if (
+          normalized.includes("resolucao maxima") ||
+          normalized.includes("resolução máxima") ||
+          normalized.includes("imagem muito grande")
+      ) {
+          return { message: "Bizu do Tubarao... " + message, type: "info" };
+      }
+
+      return { message: "Deu ruim no plantao! " + message, type: "error" };
+  };
   // --- UPLOADS ---
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'pergunta' | 'membro', index?: number) => {
       const input = e.currentTarget;
@@ -517,7 +540,8 @@ export default function LigasAdminPage() {
           );
       } catch (error: unknown) {
           console.error(error);
-          addToast("Deu ruim no plantão! 🚨 Erro na imagem.", "error");
+          const uploadToast = classifyUploadError(error);
+          addToast(uploadToast.message, uploadToast.type);
       } finally {
           setUploadingLeagueAsset(false);
           input.value = "";
@@ -551,7 +575,8 @@ export default function LigasAdminPage() {
           );
       } catch (error: unknown) {
           console.error(error);
-          addToast("Deu ruim no plantão! 🚨 Falha no upload da capa.", "error");
+          const uploadToast = classifyUploadError(error);
+          addToast(uploadToast.message, uploadToast.type);
       } finally {
           setUploadingEventImg(false);
           input.value = "";
@@ -1210,5 +1235,6 @@ export default function LigasAdminPage() {
       </div>
   );
 }
+
 
 
