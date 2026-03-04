@@ -1,24 +1,7 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getCountFromServer,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  orderBy,
-  query,
-  runTransaction,
-  startAfter,
-  updateDoc,
-  where,
-  type QueryConstraint,
-} from "@/lib/supabaseHelpers";
+import { getSupabaseClient } from "./supabase";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { uploadImage } from "./upload";
 
@@ -112,6 +95,10 @@ const READ_CACHE_TTL_MS = 30_000;
 const MAX_PARTNERS_RESULTS = 600;
 const MAX_SCANS_RESULTS = 1_200;
 const MAX_SCANNER_SAMPLE_DOCS = 80;
+const PARCEIROS_SELECT_COLUMNS: string =
+  "id,nome,categoria,tier,status,cnpj,responsavel,email,telefone,descricao,endereco,horario,insta,site,whats,imgCapa,imgLogo,mensalidade,vendasTotal,totalScans,cupons,senha,createdAt";
+const SCANS_SELECT_COLUMNS: string =
+  "id,empresaId,empresa,usuario,userId,cupom,valorEconomizado,data,hora,timestamp";
 
 const PARTNERS_CREATE_LEAD_CALLABLE = "partnersCreateLead";
 const PARTNERS_LOGIN_CALLABLE = "partnersLogin";
@@ -176,6 +163,17 @@ const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+const throwSupabaseError = (error: {
+  message: string;
+  code?: string | null;
+  name?: string | null;
+}): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
@@ -376,33 +374,61 @@ async function callWithFallback<TReq, TRes>(
   }
 }
 
+type RowsFetchAttempt = {
+  limit: number;
+  eq?: Record<string, string>;
+  orderBy?: { column: string; ascending: boolean };
+};
+
 async function fetchRowsWithFallback(
-  collectionName: string,
-  attempts: QueryConstraint[][]
+  tableName: "parceiros" | "scans",
+  attempts: RowsFetchAttempt[]
 ): Promise<Record<string, unknown>[]> {
-  const safeAttempts = attempts.filter((entry) => entry.length > 0);
+  const safeAttempts = attempts.filter((entry) => entry.limit > 0);
   if (!safeAttempts.length) return [];
 
+  const supabase = getSupabaseClient();
+  const selectColumns =
+    tableName === "parceiros" ? PARCEIROS_SELECT_COLUMNS : SCANS_SELECT_COLUMNS;
   let lastError: unknown = null;
+
   for (let index = 0; index < safeAttempts.length; index += 1) {
+    const attempt = safeAttempts[index];
     try {
-      const snap = await getDocs(
-        query(collection(db, collectionName), ...safeAttempts[index])
-      );
-      return snap.docs.map((row) => ({
-        id: row.id,
-        ...(row.data() as Record<string, unknown>),
-      }));
+      let q = supabase.from(tableName).select(selectColumns).limit(attempt.limit);
+
+      if (attempt.eq) {
+        for (const [column, value] of Object.entries(attempt.eq)) {
+          q = q.eq(column, value);
+        }
+      }
+      if (attempt.orderBy) {
+        q = q.order(attempt.orderBy.column, { ascending: attempt.orderBy.ascending });
+      }
+
+      const { data, error } = await q;
+      if (error) throw error;
+      return ((data as unknown as Record<string, unknown>[] | null) ?? []);
     } catch (error: unknown) {
       lastError = error;
       const isLastAttempt = index === safeAttempts.length - 1;
       if (!isIndexRequiredError(error) || isLastAttempt) {
+        if (
+          typeof (error as { message?: unknown })?.message === "string"
+        ) {
+          throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+        }
         throw error;
       }
     }
   }
 
-  if (lastError) throw lastError;
+  if (
+    lastError &&
+    typeof (lastError as { message?: unknown })?.message === "string"
+  ) {
+    throwSupabaseError(lastError as { message: string; code?: string | null; name?: string | null });
+  }
   return [];
 }
 
@@ -519,13 +545,13 @@ export async function fetchAdminPartnersBundle(options?: {
 
   const [partnersRows, scansRows] = await Promise.all([
     fetchRowsWithFallback("parceiros", [
-      [orderBy("nome", "asc"), limit(partnersLimit)],
-      [limit(partnersLimit)],
+      { orderBy: { column: "nome", ascending: true }, limit: partnersLimit },
+      { limit: partnersLimit },
     ]),
     fetchRowsWithFallback("scans", [
-      [orderBy("timestamp", "desc"), limit(scansLimit)],
-      [orderBy("data", "desc"), limit(scansLimit)],
-      [limit(scansLimit)],
+      { orderBy: { column: "timestamp", ascending: false }, limit: scansLimit },
+      { orderBy: { column: "data", ascending: false }, limit: scansLimit },
+      { limit: scansLimit },
     ]),
   ]);
 
@@ -567,69 +593,40 @@ export async function fetchAdminPartnersPage(options?: {
   }
 
   const requestPromise = (async () => {
-    const cursorSnap = cursorId ? await getDoc(doc(db, "parceiros", cursorId)) : null;
+    const supabase = getSupabaseClient();
+    const windowLimit = Math.min(MAX_PARTNERS_RESULTS, Math.max(pageSize * 12, 120));
 
-    const makeBaseConstraints = (requestedLimit: number): QueryConstraint[] => {
-      const constraints: QueryConstraint[] = [
-        orderBy("nome", "asc"),
-        limit(requestedLimit),
-      ];
-      if (cursorSnap?.exists()) {
-        constraints.splice(1, 0, startAfter(cursorSnap));
-      }
-      return constraints;
-    };
-
-    const normalizeRows = (
-      docs: Array<{ id: string; data: () => Record<string, unknown> }>
-    ): PartnerRecord[] =>
-      docs
-        .map((row) => normalizePartner(row.id, row.data()))
-        .filter((row): row is PartnerRecord => row !== null);
-
-    const buildResult = (rows: PartnerRecord[]): AdminPartnersPageResult => {
-      const pageRows = rows.slice(0, pageSize);
-      return {
-        partners: pageRows,
-        hasMore: rows.length > pageSize,
-        nextCursor: pageRows.length ? pageRows[pageRows.length - 1].id : null,
-      };
-    };
-
-    try {
-      const baseConstraints = makeBaseConstraints(pageSize + 1);
-      const constraints =
-        statusFilter === "all"
-          ? baseConstraints
-          : [where("status", "==", statusFilter), ...baseConstraints];
-
-      const snap = await getDocs(query(collection(db, "parceiros"), ...constraints));
-      const normalizedRows = normalizeRows(snap.docs);
-      const filteredRows =
-        statusFilter === "all"
-          ? normalizedRows
-          : normalizedRows.filter((row) => row.status === statusFilter);
-
-      const result = buildResult(filteredRows);
-      setMapCacheValue(adminPartnersPageCache, cacheKey, result);
-      return result;
-    } catch (error: unknown) {
-      if (statusFilter === "all" || !isIndexRequiredError(error)) {
-        throw error;
-      }
-
-      const fallbackConstraints = makeBaseConstraints(pageSize * 4 + 1);
-      const snap = await getDocs(
-        query(collection(db, "parceiros"), ...fallbackConstraints)
-      );
-      const filteredRows = normalizeRows(snap.docs).filter(
-        (row) => row.status === statusFilter
-      );
-
-      const result = buildResult(filteredRows);
-      setMapCacheValue(adminPartnersPageCache, cacheKey, result);
-      return result;
+    let q = supabase
+      .from("parceiros")
+      .select(PARCEIROS_SELECT_COLUMNS)
+      .order("nome", { ascending: true })
+      .limit(windowLimit);
+    if (statusFilter !== "all") {
+      q = q.eq("status", statusFilter);
     }
+
+    const { data, error } = await q;
+    if (error) throwSupabaseError(error);
+
+    const rawRows = (data as unknown as Record<string, unknown>[] | null) ?? [];
+    let rows = rawRows
+      .map((row) => normalizePartner(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is PartnerRecord => row !== null);
+
+    if (statusFilter !== "all") {
+      rows = rows.filter((row) => row.status === statusFilter);
+    }
+
+    const cursorIndex = cursorId ? rows.findIndex((row) => row.id === cursorId) : -1;
+    const slicedRows = cursorIndex >= 0 ? rows.slice(cursorIndex + 1) : rows;
+    const pageRows = slicedRows.slice(0, pageSize);
+    const result: AdminPartnersPageResult = {
+      partners: pageRows,
+      hasMore: slicedRows.length > pageSize,
+      nextCursor: pageRows.length ? pageRows[pageRows.length - 1].id : null,
+    };
+    setMapCacheValue(adminPartnersPageCache, cacheKey, result);
+    return result;
   })();
 
   partnersPageInflight.set(cacheKey, requestPromise);
@@ -663,61 +660,58 @@ export async function fetchAdminPartnerScansPage(options?: {
   }
 
   const requestPromise = (async () => {
-    const cursorSnap = cursorId ? await getDoc(doc(db, "scans", cursorId)) : null;
+    const supabase = getSupabaseClient();
+    const windowLimit = Math.min(MAX_SCANS_RESULTS, Math.max(pageSize * 12, 120));
 
-    const makeConstraints = (requestedLimit: number): QueryConstraint[] => {
-      const constraints: QueryConstraint[] = [orderBy("timestamp", "desc"), limit(requestedLimit)];
-      if (cursorSnap?.exists()) {
-        constraints.splice(1, 0, startAfter(cursorSnap));
-      }
+    const runQuery = async (orderColumn: "timestamp" | "data" | null) => {
+      let q = supabase.from("scans").select(SCANS_SELECT_COLUMNS).limit(windowLimit);
       if (partnerId) {
-        constraints.unshift(where("empresaId", "==", partnerId));
+        q = q.eq("empresaId", partnerId);
       }
-      return constraints;
+      if (orderColumn) {
+        q = q.order(orderColumn, { ascending: false });
+      }
+      return q;
     };
 
-    const buildResult = (rows: PartnerScanRecord[]): AdminPartnerScansPageResult => {
-      const pageRows = rows.slice(0, pageSize);
-      return {
-        scans: pageRows,
-        hasMore: rows.length > pageSize,
-        nextCursor: pageRows.length ? pageRows[pageRows.length - 1].id : null,
-      };
-    };
-
-    const normalizeRows = (
-      docs: Array<{ id: string; data: () => Record<string, unknown> }>
-    ): PartnerScanRecord[] =>
-      docs
-        .map((row) => normalizeScan(row.id, row.data()))
-        .filter((row): row is PartnerScanRecord => row !== null)
-        .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
-
+    let data: Record<string, unknown>[] = [];
     try {
-      const snap = await getDocs(
-        query(collection(db, "scans"), ...makeConstraints(pageSize + 1))
-      );
-      const result = buildResult(normalizeRows(snap.docs));
-      setMapCacheValue(adminScansPageCache, cacheKey, result);
-      return result;
+      const { data: orderedRows, error } = await runQuery("timestamp");
+      if (error) throw error;
+      data = (orderedRows as unknown as Record<string, unknown>[] | null) ?? [];
     } catch (error: unknown) {
       if (!isIndexRequiredError(error)) {
+        if (typeof (error as { message?: unknown })?.message === "string") {
+          throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+        }
         throw error;
       }
 
-      const fallbackConstraints: QueryConstraint[] = [
-        ...(partnerId ? [where("empresaId", "==", partnerId)] : []),
-        limit(pageSize + 1),
-      ];
-      if (cursorSnap?.exists()) {
-        fallbackConstraints.splice(1, 0, startAfter(cursorSnap));
+      const { data: fallbackRows, error: fallbackError } = await runQuery("data");
+      if (fallbackError) {
+        const { data: noOrderRows, error: noOrderError } = await runQuery(null);
+        if (noOrderError) throwSupabaseError(noOrderError);
+        data = (noOrderRows as unknown as Record<string, unknown>[] | null) ?? [];
+      } else {
+        data = (fallbackRows as unknown as Record<string, unknown>[] | null) ?? [];
       }
-
-      const snap = await getDocs(query(collection(db, "scans"), ...fallbackConstraints));
-      const result = buildResult(normalizeRows(snap.docs));
-      setMapCacheValue(adminScansPageCache, cacheKey, result);
-      return result;
     }
+
+    let rows = data
+      .map((row) => normalizeScan(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is PartnerScanRecord => row !== null)
+      .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
+
+    const cursorIndex = cursorId ? rows.findIndex((row) => row.id === cursorId) : -1;
+    const slicedRows = cursorIndex >= 0 ? rows.slice(cursorIndex + 1) : rows;
+    const pageRows = slicedRows.slice(0, pageSize);
+    const result: AdminPartnerScansPageResult = {
+      scans: pageRows,
+      hasMore: slicedRows.length > pageSize,
+      nextCursor: pageRows.length ? pageRows[pageRows.length - 1].id : null,
+    };
+    setMapCacheValue(adminScansPageCache, cacheKey, result);
+    return result;
   })();
 
   scansPageInflight.set(cacheKey, requestPromise);
@@ -746,45 +740,61 @@ export async function fetchAdminPartnersTierCounts(options?: {
 
   const requestPromise = (async () => {
     try {
-      const baseCollection = collection(db, "parceiros");
-
-      const [totalSnap, activeSnap, pendingSnap, disabledSnap, ouroSnap, prataSnap, standardSnap] =
-        await Promise.all([
-          getCountFromServer(baseCollection),
-          getCountFromServer(query(baseCollection, where("status", "==", "active"))),
-          getCountFromServer(query(baseCollection, where("status", "==", "pending"))),
-          getCountFromServer(query(baseCollection, where("status", "==", "disabled"))),
-          getCountFromServer(
-            query(
-              baseCollection,
-              where("status", "==", "active"),
-              where("tier", "==", "ouro")
-            )
-          ),
-          getCountFromServer(
-            query(
-              baseCollection,
-              where("status", "==", "active"),
-              where("tier", "==", "prata")
-            )
-          ),
-          getCountFromServer(
-            query(
-              baseCollection,
-              where("status", "==", "active"),
-              where("tier", "==", "standard")
-            )
-          ),
-        ]);
+      const supabase = getSupabaseClient();
+      const [
+        totalSnap,
+        activeSnap,
+        pendingSnap,
+        disabledSnap,
+        ouroSnap,
+        prataSnap,
+        standardSnap,
+      ] = await Promise.all([
+        supabase.from("parceiros").select("id", { count: "exact", head: true }),
+        supabase
+          .from("parceiros")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "active"),
+        supabase
+          .from("parceiros")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending"),
+        supabase
+          .from("parceiros")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "disabled"),
+        supabase
+          .from("parceiros")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "active")
+          .eq("tier", "ouro"),
+        supabase
+          .from("parceiros")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "active")
+          .eq("tier", "prata"),
+        supabase
+          .from("parceiros")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "active")
+          .eq("tier", "standard"),
+      ]);
+      if (totalSnap.error) throw totalSnap.error;
+      if (activeSnap.error) throw activeSnap.error;
+      if (pendingSnap.error) throw pendingSnap.error;
+      if (disabledSnap.error) throw disabledSnap.error;
+      if (ouroSnap.error) throw ouroSnap.error;
+      if (prataSnap.error) throw prataSnap.error;
+      if (standardSnap.error) throw standardSnap.error;
 
       const result: AdminPartnersTierCounts = {
-        total: totalSnap.data().count,
-        ativos: activeSnap.data().count,
-        pendentes: pendingSnap.data().count,
-        desativados: disabledSnap.data().count,
-        ouro: ouroSnap.data().count,
-        prata: prataSnap.data().count,
-        standard: standardSnap.data().count,
+        total: totalSnap.count ?? 0,
+        ativos: activeSnap.count ?? 0,
+        pendentes: pendingSnap.count ?? 0,
+        desativados: disabledSnap.count ?? 0,
+        ouro: ouroSnap.count ?? 0,
+        prata: prataSnap.count ?? 0,
+        standard: standardSnap.count ?? 0,
       };
       setMapCacheValue(adminTierCountsCache, cacheKey, result);
       return result;
@@ -793,7 +803,7 @@ export async function fetchAdminPartnersTierCounts(options?: {
         throw error;
       }
 
-      const rows = await fetchRowsWithFallback("parceiros", [[limit(MAX_PARTNERS_RESULTS)]]);
+      const rows = await fetchRowsWithFallback("parceiros", [{ limit: MAX_PARTNERS_RESULTS }]);
       const normalized = rows
         .map((row) => normalizePartner(asString(row.id), row))
         .filter((row): row is PartnerRecord => row !== null);
@@ -846,15 +856,10 @@ export async function fetchPublicPartners(options?: {
   }
 
   const rows = await fetchRowsWithFallback("parceiros", [
-    [
-      where("status", "==", "active"),
-      orderBy("tier", "asc"),
-      orderBy("nome", "asc"),
-      limit(maxResults),
-    ],
-    [where("status", "==", "active"), orderBy("nome", "asc"), limit(maxResults)],
-    [where("status", "==", "active"), limit(maxResults)],
-    [orderBy("nome", "asc"), limit(maxResults)],
+    { eq: { status: "active" }, orderBy: { column: "tier", ascending: true }, limit: maxResults },
+    { eq: { status: "active" }, orderBy: { column: "nome", ascending: true }, limit: maxResults },
+    { eq: { status: "active" }, limit: maxResults },
+    { orderBy: { column: "nome", ascending: true }, limit: maxResults },
   ]);
 
   const partners = rows
@@ -885,13 +890,20 @@ export async function fetchPartnerById(
     if (cached !== null) return cached;
   }
 
-  const snap = await getDoc(doc(db, "parceiros", cleanPartnerId));
-  if (!snap.exists()) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("parceiros")
+    .select(PARCEIROS_SELECT_COLUMNS)
+    .eq("id", cleanPartnerId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  if (!data) {
     setMapCacheValue(partnerByIdCache, cleanPartnerId, null);
     return null;
   }
 
-  const partner = normalizePartner(snap.id, snap.data());
+  const partner = normalizePartner(cleanPartnerId, data);
   setMapCacheValue(partnerByIdCache, cleanPartnerId, partner);
   return partner;
 }
@@ -914,9 +926,9 @@ export async function fetchPartnerScans(options: {
   }
 
   const rows = await fetchRowsWithFallback("scans", [
-    [where("empresaId", "==", partnerId), orderBy("timestamp", "desc"), limit(maxResults)],
-    [where("empresaId", "==", partnerId), orderBy("data", "desc"), limit(maxResults)],
-    [where("empresaId", "==", partnerId), limit(maxResults)],
+    { eq: { empresaId: partnerId }, orderBy: { column: "timestamp", ascending: false }, limit: maxResults },
+    { eq: { empresaId: partnerId }, orderBy: { column: "data", ascending: false }, limit: maxResults },
+    { eq: { empresaId: partnerId }, limit: maxResults },
   ]);
 
   const scans = rows
@@ -938,12 +950,18 @@ export async function loginPartnerByEmail(payload: {
   if (!email || !senha) return null;
 
   const fallback = async (): Promise<PartnerLoginResult | null> => {
-    const snap = await getDocs(
-      query(collection(db, "parceiros"), where("email", "==", email), limit(1))
-    );
-    if (snap.empty) return null;
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("parceiros")
+      .select(PARCEIROS_SELECT_COLUMNS)
+      .eq("email", email)
+      .limit(1)
+      .maybeSingle();
+    if (error) throwSupabaseError(error);
+    if (!data) return null;
 
-    const row = normalizePartner(snap.docs[0].id, snap.docs[0].data());
+    const safeData = data as unknown as Record<string, unknown>;
+    const row = normalizePartner(asString(safeData.id), safeData);
     if (!row) return null;
 
     return {
@@ -1016,6 +1034,7 @@ export async function createPartnerLead(payload: {
     PARTNERS_CREATE_LEAD_CALLABLE,
     leadPayload,
     async () => {
+      const supabase = getSupabaseClient();
       const sanitized = sanitizePartnerWritePayload({
         ...leadPayload,
         status: "pending",
@@ -1023,11 +1042,16 @@ export async function createPartnerLead(payload: {
         totalScans: 0,
         cupons: [],
       });
-      const docRef = await addDoc(collection(db, "parceiros"), {
-        ...sanitized,
-        createdAt: new Date().toISOString(),
-      });
-      return { id: docRef.id };
+      const { data, error } = await supabase
+        .from("parceiros")
+        .insert({
+          ...sanitized,
+          createdAt: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+      if (error) throwSupabaseError(error);
+      return { id: asString((data as Record<string, unknown> | null)?.id) };
     }
   );
 
@@ -1050,7 +1074,12 @@ export async function setPartnerStatus(payload: {
     PARTNERS_ADMIN_STATUS_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "parceiros", partnerId), { status });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("parceiros")
+        .update({ status })
+        .eq("id", partnerId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -1076,18 +1105,34 @@ export async function upsertPartner(payload: {
     PARTNERS_ADMIN_UPSERT_CALLABLE,
     requestPayload,
     async () => {
+      const supabase = getSupabaseClient();
       if (partnerId) {
-        await updateDoc(doc(db, "parceiros", partnerId), sanitized);
-        const updated = await getDoc(doc(db, "parceiros", partnerId));
-        if (!updated.exists()) return null;
-        return { id: updated.id, ...(updated.data() as Record<string, unknown>) };
+        const { error: updateError } = await supabase
+          .from("parceiros")
+          .update(sanitized)
+          .eq("id", partnerId);
+        if (updateError) throwSupabaseError(updateError);
+
+        const { data: updatedRow, error: selectError } = await supabase
+          .from("parceiros")
+          .select(PARCEIROS_SELECT_COLUMNS)
+          .eq("id", partnerId)
+          .maybeSingle();
+        if (selectError) throwSupabaseError(selectError);
+        if (!updatedRow) return null;
+        return updatedRow;
       }
 
-      const created = await addDoc(collection(db, "parceiros"), {
-        ...sanitized,
-        createdAt: new Date().toISOString(),
-      });
-      return { id: created.id, ...sanitized };
+      const { data: createdRow, error: createError } = await supabase
+        .from("parceiros")
+        .insert({
+          ...sanitized,
+          createdAt: new Date().toISOString(),
+        })
+        .select(PARCEIROS_SELECT_COLUMNS)
+        .single();
+      if (createError) throwSupabaseError(createError);
+      return createdRow;
     }
   );
 
@@ -1115,7 +1160,12 @@ export async function deletePartnerById(partnerId: string): Promise<void> {
     PARTNERS_ADMIN_DELETE_CALLABLE,
     { partnerId: cleanPartnerId },
     async () => {
-      await deleteDoc(doc(db, "parceiros", cleanPartnerId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("parceiros")
+        .delete()
+        .eq("id", cleanPartnerId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -1155,16 +1205,24 @@ export async function createPartnerScan(payload: {
     PARTNERS_CREATE_SCAN_CALLABLE,
     requestPayload,
     async () => {
-      const scanRef = doc(collection(db, "scans"));
-      const partnerRef = doc(db, "parceiros", partnerId);
+      const supabase = getSupabaseClient();
+      const { data: partnerRow, error: partnerError } = await supabase
+        .from("parceiros")
+        .select("totalScans,scansCount")
+        .eq("id", partnerId)
+        .maybeSingle();
+      if (partnerError) throwSupabaseError(partnerError);
 
-      const totalScans = await runTransaction(db, async (tx) => {
-        const partnerSnap = await tx.get(partnerRef);
-        const partnerData = asObject(partnerSnap.data());
-        const currentTotal = asNumber(partnerData?.totalScans, 0);
-        const nextTotal = currentTotal + 1;
+      const partnerData = asObject(partnerRow);
+      const currentTotal = asNumber(partnerData?.totalScans, 0);
+      const currentScansCount = asNumber(partnerData?.scansCount, currentTotal);
+      const nextTotal = currentTotal + 1;
+      const nextScansCount = currentScansCount + 1;
+      const timestampIso = new Date().toISOString();
 
-        tx.set(scanRef, {
+      const { data: insertedScan, error: scanInsertError } = await supabase
+        .from("scans")
+        .insert({
           empresaId: partnerId,
           empresa: requestPayload.partnerName,
           usuario: requestPayload.usuario,
@@ -1173,29 +1231,28 @@ export async function createPartnerScan(payload: {
           valorEconomizado: requestPayload.valorEconomizado,
           data: requestPayload.data,
           hora: requestPayload.hora,
-          timestamp: new Date(),
-        });
-        tx.update(partnerRef, {
+          timestamp: timestampIso,
+        })
+        .select(SCANS_SELECT_COLUMNS)
+        .single();
+      if (scanInsertError) throwSupabaseError(scanInsertError);
+
+      const { error: partnerUpdateError } = await supabase
+        .from("parceiros")
+        .update({
           totalScans: nextTotal,
-          scansCount: increment(1),
-        });
-        return nextTotal;
-      });
+          scansCount: nextScansCount,
+        })
+        .eq("id", partnerId);
+      if (partnerUpdateError) throwSupabaseError(partnerUpdateError);
 
       return {
         scan: {
-          id: scanRef.id,
-          empresaId: partnerId,
-          empresa: requestPayload.partnerName,
-          usuario: requestPayload.usuario,
-          userId: requestPayload.userId,
-          cupom: requestPayload.cupom,
-          valorEconomizado: requestPayload.valorEconomizado,
-          data: requestPayload.data,
-          hora: requestPayload.hora,
-          timestamp: new Date(),
+          ...(asObject(insertedScan) ?? {}),
+          id: asString(asObject(insertedScan)?.id || crypto.randomUUID()),
+          timestamp: asObject(insertedScan)?.timestamp ?? timestampIso,
         },
-        totalScans,
+        totalScans: nextTotal,
       };
     }
   );
@@ -1248,7 +1305,12 @@ export async function updatePartnerProfile(payload: {
     PARTNERS_UPDATE_PROFILE_CALLABLE,
     requestPayload,
     async () => {
-      await updateDoc(doc(db, "parceiros", partnerId), sanitized);
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("parceiros")
+        .update(sanitized)
+        .eq("id", partnerId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -1281,13 +1343,17 @@ export async function scanFirestoreCollectionFields(options: {
   }
 
   const report: Record<string, string[]> = {};
+  const supabase = getSupabaseClient();
   for (const collectionName of collectionNames) {
-    const snap = await getDocs(
-      query(collection(db, collectionName), limit(sampleDocsPerCollection))
-    );
+    const { data, error } = await supabase
+      .from(collectionName)
+      .select("*")
+      .limit(sampleDocsPerCollection);
+    if (error) throwSupabaseError(error);
+
     const fields = new Set<string>();
-    snap.forEach((row) => {
-      Object.keys(row.data()).forEach((field) => fields.add(field));
+    (data ?? []).forEach((row) => {
+      Object.keys(asObject(row) ?? {}).forEach((field) => fields.add(field));
     });
     report[collectionName] = [...fields].sort((left, right) =>
       left.localeCompare(right, "pt-BR")
