@@ -1,20 +1,9 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  doc,
-  getDocs,
-  increment,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-  type QueryConstraint,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { throwSupabaseError } from "./supabaseData";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -104,24 +93,62 @@ async function callWithFallback<TReq, TRes>(
   }
 }
 
-async function queryRows(path: string, attempts: QueryConstraint[][]): Promise<RawRow[]> {
-  const safeAttempts = attempts.filter((entry) => entry.length > 0);
-  if (!safeAttempts.length) return [];
+async function queryRows(maxResults: number): Promise<RawRow[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("uid,nome,apelido,turma,foto,xp,sharkCoins,stats")
+    .order("xp", { ascending: false })
+    .limit(maxResults);
+  if (error) {
+    if (!isIndexRequired(error)) throwSupabaseError(error);
+    const fallback = await supabase
+      .from("users")
+      .select("uid,nome,apelido,turma,foto,xp,sharkCoins,stats")
+      .limit(maxResults);
+    if (fallback.error) throwSupabaseError(fallback.error);
+    return (fallback.data ?? []) as unknown as RawRow[];
+  }
+  return (data ?? []) as unknown as RawRow[];
+}
 
-  let lastError: unknown = null;
-  for (let i = 0; i < safeAttempts.length; i += 1) {
-    try {
-      const snap = await getDocs(query(collection(db, path), ...safeAttempts[i]));
-      return snap.docs.map((entry) => ({ id: entry.id, ...(entry.data() as RawRow) }));
-    } catch (error: unknown) {
-      lastError = error;
-      const isLast = i === safeAttempts.length - 1;
-      if (!isIndexRequired(error) || isLast) throw error;
-    }
+const nowIso = (): string => new Date().toISOString();
+
+async function applyArenaUserDelta(payload: {
+  userId: string;
+  xpDelta?: number;
+  sharkCoinsDelta?: number;
+  winsDelta?: number;
+  lossesDelta?: number;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("uid,xp,sharkCoins,stats")
+    .eq("uid", payload.userId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+  if (!data) return;
+
+  const stats = asObject(data.stats) ?? {};
+  const nextStats: Record<string, unknown> = { ...stats };
+  if (payload.winsDelta) {
+    nextStats.arenaWins = asNumber(stats.arenaWins, 0) + payload.winsDelta;
+  }
+  if (payload.lossesDelta) {
+    nextStats.arenaLosses = asNumber(stats.arenaLosses, 0) + payload.lossesDelta;
   }
 
-  if (lastError) throw lastError;
-  return [];
+  const { error: updateError } = await supabase
+    .from("users")
+    .update({
+      xp: Math.max(0, asNumber(data.xp, 0) + (payload.xpDelta ?? 0)),
+      sharkCoins: Math.max(0, asNumber(data.sharkCoins, 0) + (payload.sharkCoinsDelta ?? 0)),
+      stats: nextStats,
+      updatedAt: nowIso(),
+    })
+    .eq("uid", payload.userId);
+  if (updateError) throwSupabaseError(updateError);
 }
 
 export interface ArenaUserRecord {
@@ -138,7 +165,7 @@ export interface ArenaUserRecord {
 const normalizeArenaUser = (raw: RawRow): ArenaUserRecord => {
   const stats = asObject(raw.stats) ?? {};
   return {
-    id: asString(raw.id),
+    id: asString(raw.uid || raw.id),
     nome: asString(raw.nome, "Atleta"),
     apelido: asString(raw.apelido),
     turma: asString(raw.turma, "Geral"),
@@ -162,10 +189,7 @@ export async function fetchArenaUsers(options?: {
     if (cached) return cached;
   }
 
-  const rows = await queryRows("users", [
-    [orderBy("xp", "desc"), limit(maxResults)],
-    [limit(maxResults)],
-  ]);
+  const rows = await queryRows(maxResults);
 
   const users = rows
     .map((row) => normalizeArenaUser(row))
@@ -201,31 +225,36 @@ export async function registerArenaBattleResult(payload: {
     CALLABLE_ARENA_BATTLE_RESULT,
     requestPayload,
     async () => {
-      await addDoc(collection(db, "arena_matches"), {
+      const supabase = getSupabaseClient();
+      const { error: insertError } = await supabase.from("arena_matches").insert({
         attackerId,
         attackerName: payload.attackerName.trim() || "Atleta",
         defenderId,
         defenderName: payload.defenderName.trim() || "Rival",
         result: payload.result,
         rounds: Math.max(1, Math.floor(payload.rounds)),
-        date: serverTimestamp(),
+        date: nowIso(),
       });
+      if (insertError) throwSupabaseError(insertError);
 
       if (payload.result === "victory" || payload.result === "draw") {
-        await updateDoc(doc(db, "users", attackerId), {
-          xp: increment(Math.max(1, rewardXp)),
-          "stats.arenaWins": increment(1),
-          sharkCoins: increment(10),
+        await applyArenaUserDelta({
+          userId: attackerId,
+          xpDelta: Math.max(1, rewardXp),
+          winsDelta: 1,
+          sharkCoinsDelta: 10,
         });
       } else {
-        await updateDoc(doc(db, "users", attackerId), {
-          "stats.arenaLosses": increment(1),
-          xp: increment(5),
+        await applyArenaUserDelta({
+          userId: attackerId,
+          lossesDelta: 1,
+          xpDelta: 5,
         });
         if (defenderId !== attackerId) {
-          await updateDoc(doc(db, "users", defenderId), {
-            xp: increment(10),
-            "stats.arenaWins": increment(1),
+          await applyArenaUserDelta({
+            userId: defenderId,
+            xpDelta: 10,
+            winsDelta: 1,
           });
         }
       }
@@ -247,10 +276,7 @@ export async function registerArenaFlee(payload: {
     CALLABLE_ARENA_FLEE,
     payload,
     async () => {
-      await updateDoc(doc(db, "users", defenderId), {
-        xp: increment(5),
-        "stats.arenaWins": increment(1),
-      });
+      await applyArenaUserDelta({ userId: defenderId, xpDelta: 5, winsDelta: 1 });
       return { ok: true };
     }
   );
