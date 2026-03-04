@@ -1,19 +1,9 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  collection,
-  doc,
-  getCountFromServer,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  updateDoc,
-  where,
-  type QueryConstraint,
-} from "@/lib/supabaseHelpers";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { throwSupabaseError } from "./supabaseData";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -149,31 +139,34 @@ async function callWithFallback<TReq, TRes>(
   }
 }
 
-async function fetchRowsWithFallback(
-  constraintsAttempts: QueryConstraint[][]
-): Promise<Record<string, unknown>[]> {
-  const attempts = constraintsAttempts.filter((row) => row.length > 0);
-  if (!attempts.length) return [];
+async function fetchRowsWithFallback(payload: {
+  userId: string;
+  maxResults: number;
+}): Promise<Record<string, unknown>[]> {
+  const supabase = getSupabaseClient();
 
-  let lastError: unknown = null;
-  for (let index = 0; index < attempts.length; index += 1) {
-    try {
-      const snap = await getDocs(query(collection(db, "notifications"), ...attempts[index]));
-      return snap.docs.map((row) => ({
-        id: row.id,
-        ...(row.data() as Record<string, unknown>),
-      }));
-    } catch (error: unknown) {
-      lastError = error;
-      const isLast = index === attempts.length - 1;
-      if (!isIndexRequiredError(error) || isLast) {
-        throw error;
-      }
+  try {
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("id,userId,title,message,link,read,createdAt")
+      .eq("userId", payload.userId)
+      .order("createdAt", { ascending: false })
+      .limit(payload.maxResults);
+    if (error) throw error;
+    return (data ?? []) as Record<string, unknown>[];
+  } catch (error: unknown) {
+    if (!isIndexRequiredError(error)) {
+      throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
     }
   }
 
-  if (lastError) throw lastError;
-  return [];
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from("notifications")
+    .select("id,userId,title,message,link,read,createdAt")
+    .eq("userId", payload.userId)
+    .limit(payload.maxResults);
+  if (fallbackError) throwSupabaseError(fallbackError);
+  return (fallbackData ?? []) as Record<string, unknown>[];
 }
 
 const normalizeNotification = (
@@ -216,10 +209,7 @@ export async function fetchBottomNavNotifications(options: {
     if (cached) return cached;
   }
 
-  const rows = await fetchRowsWithFallback([
-    [where("userId", "==", userId), orderBy("createdAt", "desc"), limit(maxResults)],
-    [where("userId", "==", userId), limit(maxResults)],
-  ]);
+  const rows = await fetchRowsWithFallback({ userId, maxResults });
 
   const notifications = rows
     .map((row) => normalizeNotification(asString(row.id), row))
@@ -249,20 +239,22 @@ export async function fetchBottomNavBannedAppealsCount(options?: {
   }
 
   let count = 0;
+  const supabase = getSupabaseClient();
   try {
-    const snap = await getCountFromServer(
-      query(collection(db, "banned_appeals"), where("readByAdmin", "==", false))
-    );
-    count = snap.data().count;
+    const { count: exactCount, error } = await supabase
+      .from("banned_appeals")
+      .select("id", { count: "exact", head: true })
+      .eq("readByAdmin", false);
+    if (error) throw error;
+    count = exactCount ?? 0;
   } catch {
-    const fallbackSnap = await getDocs(
-      query(
-        collection(db, "banned_appeals"),
-        where("readByAdmin", "==", false),
-        limit(BANNED_APPEALS_FALLBACK_LIMIT)
-      )
-    );
-    count = fallbackSnap.size;
+    const { data, error } = await supabase
+      .from("banned_appeals")
+      .select("id")
+      .eq("readByAdmin", false)
+      .limit(BANNED_APPEALS_FALLBACK_LIMIT);
+    if (error) throwSupabaseError(error);
+    count = (data ?? []).length;
   }
 
   bannedAppealsCountCache = { cachedAt: Date.now(), value: count };
@@ -279,7 +271,12 @@ export async function markBottomNavNotificationRead(
     NOTIFICATION_READ_CALLABLE,
     { notificationId: notificationIdClean },
     async () => {
-      await updateDoc(doc(db, "notifications", notificationIdClean), { read: true });
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read: true, updatedAt: new Date().toISOString() })
+        .eq("id", notificationIdClean);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
