@@ -1,22 +1,7 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-  writeBatch,
-} from "@/lib/supabaseHelpers";
+import { getSupabaseClient } from "./supabase";
 
-import { db, functions } from "./backend";
+import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 
 type CacheEntry<T> = {
@@ -40,6 +25,14 @@ const PLAN_APPROVE_CALLABLE = "planAdminApproveRequest";
 const PLAN_REJECT_CALLABLE = "planAdminRejectRequest";
 const PLAN_DELETE_REQUEST_CALLABLE = "planAdminDeleteRequest";
 const PLAN_SAVE_BANNER_CALLABLE = "planAdminSaveBanner";
+const PLANOS_SELECT_COLUMNS =
+  "id,nome,preco,precoVal,parcelamento,descricao,cor,icon,destaque,beneficios,xpMultiplier,nivelPrioridade,descontoLoja";
+const ASSINATURAS_SELECT_COLUMNS =
+  "id,aluno,turma,foto,planoId,planoNome,valorPago,dataInicio,status,metodo,userId";
+const SOLICITACOES_ADESAO_SELECT_COLUMNS =
+  "id,userId,userName,userTurma,planoId,planoNome,valor,comprovanteUrl,dataSolicitacao,status,metodo";
+const APP_CONFIG_BANNER_SELECT_COLUMNS = "id,titulo,subtitulo,cor";
+const APP_CONFIG_FINANCEIRO_SELECT_COLUMNS = "id,chave,banco,titular,whatsapp";
 
 const plansCache = new Map<string, CacheEntry<PlanRecord[]>>();
 const planByIdCache = new Map<string, CacheEntry<PlanRecord | null>>();
@@ -66,6 +59,19 @@ const asBoolean = (value: unknown, fallback = false): boolean =>
 const asStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+};
+
+const nowIso = (): string => new Date().toISOString();
+
+const throwSupabaseError = (error: {
+  message: string;
+  code?: string | null;
+  name?: string | null;
+}): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
 };
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
@@ -171,11 +177,16 @@ const updateUserWithSchemaFallback = async (
   userId: string,
   patch: Record<string, unknown>
 ): Promise<void> => {
+  const supabase = getSupabaseClient();
   const mutablePatch: Record<string, unknown> = { ...patch };
 
   while (Object.keys(mutablePatch).length > 0) {
     try {
-      await updateDoc(doc(db, "users", userId), mutablePatch);
+      const { error } = await supabase
+        .from("users")
+        .update(mutablePatch)
+        .eq("uid", userId);
+      if (error) throw error;
       return;
     } catch (error: unknown) {
       const missingColumn = extractMissingColumnFromSchemaError(error);
@@ -242,23 +253,31 @@ async function syncPlanVisualSnapshotsForUser(payload: {
     collectionName: "posts" | "posts_comments" | "eventos_comentarios",
     patch: Record<string, unknown>
   ) => {
-    const snap = await getDocs(
-      query(
-        collection(db, collectionName),
-        where("userId", "==", userId),
-        limit(PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT)
-      )
-    );
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from(collectionName)
+      .select("id")
+      .eq("userId", userId)
+      .limit(PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT);
+    if (error) throw error;
 
-    if (snap.docs.length === 0) return;
+    const rows = (data ?? []) as Array<{ id?: unknown }>;
+    const ids = rows
+      .map((row) => asString(row.id).trim())
+      .filter((value): value is string => value.length > 0);
+    if (ids.length === 0) return;
 
     await Promise.all(
-      snap.docs.map((row) =>
-        updateDoc(doc(db, collectionName, row.id), patch)
-      )
+      ids.map(async (id) => {
+        const { error: updateError } = await supabase
+          .from(collectionName)
+          .update(patch)
+          .eq("id", id);
+        if (updateError) throw updateError;
+      })
     );
 
-    if (snap.docs.length >= PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT) {
+    if (ids.length >= PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT) {
       console.warn(
         `Plan snapshot sync atingiu limite de ${PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT} em ${collectionName} para user ${userId}.`
       );
@@ -270,18 +289,18 @@ async function syncPlanVisualSnapshotsForUser(payload: {
       plano: payload.plano,
       plano_cor: payload.planoCor,
       plano_icon: payload.planoIcon,
-      updatedAt: serverTimestamp(),
+      updatedAt: nowIso(),
     }),
     syncCollection("posts_comments", {
       plano: payload.plano,
       plano_cor: payload.planoCor,
       plano_icon: payload.planoIcon,
-      updatedAt: serverTimestamp(),
+      updatedAt: nowIso(),
     }),
     syncCollection("eventos_comentarios", {
       userPlanoCor: payload.planoCor,
       userPlanoIcon: payload.planoIcon,
-      updatedAt: serverTimestamp(),
+      updatedAt: nowIso(),
     }),
   ];
 
@@ -604,10 +623,16 @@ export async function fetchPlanCatalog(options?: {
     if (cached) return cached;
   }
 
-  const q = query(collection(db, "planos"), orderBy("precoVal", "asc"), limit(maxResults));
-  const snap = await getDocs(q);
-  const plans = snap.docs
-    .map((row) => normalizePlan(row.id, row.data()))
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("planos")
+    .select(PLANOS_SELECT_COLUMNS)
+    .order("precoVal", { ascending: true })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  const plans = (data ?? [])
+    .map((row) => normalizePlan(asString((row as Record<string, unknown>).id), row))
     .filter((row): row is PlanRecord => row !== null);
 
   setMapCachedValue(plansCache, cacheKey, plans);
@@ -632,13 +657,20 @@ export async function fetchPlanById(
     }
   }
 
-  const snap = await getDoc(doc(db, "planos", cleanId));
-  if (!snap.exists()) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("planos")
+    .select(PLANOS_SELECT_COLUMNS)
+    .eq("id", cleanId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  if (!data) {
     setMapCachedValue(planByIdCache, cleanId, null);
     return null;
   }
 
-  const plan = normalizePlan(snap.id, snap.data());
+  const plan = normalizePlan(cleanId, data);
   setMapCachedValue(planByIdCache, cleanId, plan);
   return plan;
 }
@@ -659,14 +691,18 @@ export async function fetchPlanSubscriptions(options?: {
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "assinaturas"),
-    orderBy("dataInicio", "desc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  const rows = snap.docs
-    .map((row) => normalizeSubscription(row.id, row.data()))
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("assinaturas")
+    .select(ASSINATURAS_SELECT_COLUMNS)
+    .order("dataInicio", { ascending: false })
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  const rows = (data ?? [])
+    .map((row) =>
+      normalizeSubscription(asString((row as Record<string, unknown>).id), row)
+    )
     .filter((row): row is PlanSubscriptionRecord => row !== null);
 
   setMapCachedValue(subscriptionsCache, cacheKey, rows);
@@ -687,26 +723,34 @@ export async function fetchPlanRequests(options?: {
   }
 
   let rows: PlanRequestRecord[] = [];
+  const supabase = getSupabaseClient();
   try {
-    const q = query(
-      collection(db, "solicitacoes_adesao"),
-      orderBy("dataSolicitacao", "desc"),
-      limit(maxResults)
-    );
-    const snap = await getDocs(q);
-    rows = snap.docs
-      .map((row) => normalizeRequest(row.id, row.data()))
+    const { data, error } = await supabase
+      .from("solicitacoes_adesao")
+      .select(SOLICITACOES_ADESAO_SELECT_COLUMNS)
+      .order("dataSolicitacao", { ascending: false })
+      .limit(maxResults);
+    if (error) throw error;
+
+    rows = (data ?? [])
+      .map((row) => normalizeRequest(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is PlanRequestRecord => row !== null);
   } catch (error: unknown) {
     if (!isIndexRequiredError(error)) {
+      const e = error as { message?: string; code?: string | null; name?: string | null };
+      if (typeof e?.message === "string") throwSupabaseError(e as { message: string; code?: string | null; name?: string | null });
       throw error;
     }
 
-    const fallbackQ = query(collection(db, "solicitacoes_adesao"), limit(maxResults));
-    const fallbackSnap = await getDocs(fallbackQ);
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from("solicitacoes_adesao")
+      .select(SOLICITACOES_ADESAO_SELECT_COLUMNS)
+      .limit(maxResults);
+    if (fallbackError) throwSupabaseError(fallbackError);
+
     rows = sortByDateDesc(
-      fallbackSnap.docs
-        .map((row) => normalizeRequest(row.id, row.data()))
+      (fallbackData ?? [])
+        .map((row) => normalizeRequest(asString((row as Record<string, unknown>).id), row))
         .filter((row): row is PlanRequestRecord => row !== null),
       (entry) => entry.dataSolicitacao
     );
@@ -735,15 +779,17 @@ export async function fetchUserPlanRequests(
     if (cached) return cached;
   }
 
-  const q = query(
-    collection(db, "solicitacoes_adesao"),
-    where("userId", "==", cleanUserId),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("solicitacoes_adesao")
+    .select(SOLICITACOES_ADESAO_SELECT_COLUMNS)
+    .eq("userId", cleanUserId)
+    .limit(maxResults);
+  if (error) throwSupabaseError(error);
+
   const rows = sortByDateDesc(
-    snap.docs
-      .map((row) => normalizeRequest(row.id, row.data()))
+    (data ?? [])
+      .map((row) => normalizeRequest(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is PlanRequestRecord => row !== null),
     (entry) => entry.dataSolicitacao
   );
@@ -764,10 +810,15 @@ export async function fetchMarketingBannerConfig(options?: {
     return bannerCache.value;
   }
 
-  const snap = await getDoc(doc(db, "app_config", "marketing_banner"));
-  const normalized = snap.exists()
-    ? normalizeBannerConfig(snap.data())
-    : DEFAULT_BANNER_CONFIG;
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("app_config")
+    .select(APP_CONFIG_BANNER_SELECT_COLUMNS)
+    .eq("id", "marketing_banner")
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const normalized = data ? normalizeBannerConfig(data) : DEFAULT_BANNER_CONFIG;
 
   bannerCache = { cachedAt: Date.now(), value: normalized };
   return normalized;
@@ -785,10 +836,15 @@ export async function fetchFinanceConfig(options?: {
     return financeConfigCache.value;
   }
 
-  const snap = await getDoc(doc(db, "app_config", "financeiro"));
-  const normalized = snap.exists()
-    ? normalizeFinanceConfig(snap.data())
-    : DEFAULT_FINANCE_CONFIG;
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("app_config")
+    .select(APP_CONFIG_FINANCEIRO_SELECT_COLUMNS)
+    .eq("id", "financeiro")
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const normalized = data ? normalizeFinanceConfig(data) : DEFAULT_FINANCE_CONFIG;
 
   financeConfigCache = { cachedAt: Date.now(), value: normalized };
   return normalized;
@@ -819,13 +875,20 @@ export async function createPlanRequest(payload: {
     PLAN_CREATE_REQUEST_CALLABLE,
     requestPayload,
     async () => {
-      const ref = await addDoc(collection(db, "solicitacoes_adesao"), {
-        ...requestPayload,
-        dataSolicitacao: serverTimestamp(),
-        status: "pendente",
-        metodo: "whatsapp",
-      });
-      return { id: ref.id };
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from("solicitacoes_adesao")
+        .insert({
+          ...requestPayload,
+          dataSolicitacao: nowIso(),
+          status: "pendente",
+          metodo: "whatsapp",
+        })
+        .select("id")
+        .single();
+      if (error) throwSupabaseError(error);
+
+      return { id: asString((data as Record<string, unknown> | null)?.id) };
     }
   );
 
@@ -845,13 +908,23 @@ export async function upsertPlan(payload: {
     PLAN_UPSERT_CALLABLE,
     requestPayload,
     async () => {
+      const supabase = getSupabaseClient();
       if (id) {
-        await updateDoc(doc(db, "planos", id), normalizedData);
+        const { error } = await supabase
+          .from("planos")
+          .update(normalizedData)
+          .eq("id", id);
+        if (error) throwSupabaseError(error);
         return { id };
       }
 
-      const ref = await addDoc(collection(db, "planos"), normalizedData);
-      return { id: ref.id };
+      const { data, error } = await supabase
+        .from("planos")
+        .insert(normalizedData)
+        .select("id")
+        .single();
+      if (error) throwSupabaseError(error);
+      return { id: asString((data as Record<string, unknown> | null)?.id) };
     }
   );
 
@@ -867,7 +940,9 @@ export async function deletePlan(planId: string): Promise<void> {
     PLAN_DELETE_CALLABLE,
     { id: cleanId },
     async () => {
-      await deleteDoc(doc(db, "planos", cleanId));
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("planos").delete().eq("id", cleanId);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -884,9 +959,10 @@ export async function seedDefaultPlans(entries: Partial<PlanRecord>[]): Promise<
     PLAN_SEED_CALLABLE,
     { plans: safeEntries },
     async () => {
-      for (const entry of safeEntries) {
-        await addDoc(collection(db, "planos"), entry);
-      }
+      if (safeEntries.length === 0) return { ok: true };
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("planos").insert(safeEntries);
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -907,18 +983,21 @@ export async function restoreDefaultPlanCatalog(options?: {
     return { restored: 0, skipped: true };
   }
 
-  const writes = DEFAULT_PLAN_CATALOG.map((entry) =>
-    setDoc(
-      doc(db, "planos", entry.id),
-      {
-        ...entry.data,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    )
-  );
-
+  const supabase = getSupabaseClient();
+  const writes = DEFAULT_PLAN_CATALOG.map(async (entry) => {
+    const { error } = await supabase
+      .from("planos")
+      .upsert(
+        {
+          id: entry.id,
+          ...entry.data,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        },
+        { onConflict: "id" }
+      );
+    if (error) throwSupabaseError(error);
+  });
   await Promise.all(writes);
   clearPlanReadCaches();
   return { restored: DEFAULT_PLAN_CATALOG.length, skipped: false };
@@ -933,7 +1012,15 @@ export async function saveMarketingBannerConfig(
     PLAN_SAVE_BANNER_CALLABLE,
     { config: normalized },
     async () => {
-      await setDoc(doc(db, "app_config", "marketing_banner"), normalized);
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from("app_config").upsert(
+        {
+          id: "marketing_banner",
+          ...normalized,
+        },
+        { onConflict: "id" }
+      );
+      if (error) throwSupabaseError(error);
       return { ok: true };
     }
   );
@@ -1002,27 +1089,34 @@ export async function approvePlanRequest(payload: {
     typeof requestPayload,
     { subscriptionId: string }
   >(PLAN_APPROVE_CALLABLE, requestPayload, async () => {
-    const batch = writeBatch(db);
-    batch.update(doc(db, "solicitacoes_adesao", requestPayload.requestId), {
-      status: "aprovado",
-    });
+    const supabase = getSupabaseClient();
+    const { error: requestUpdateError } = await supabase
+      .from("solicitacoes_adesao")
+      .update({ status: "aprovado" })
+      .eq("id", requestPayload.requestId);
+    if (requestUpdateError) throwSupabaseError(requestUpdateError);
 
-    const subscriptionRef = doc(collection(db, "assinaturas"));
-    batch.set(subscriptionRef, {
-      aluno: requestPayload.userName,
-      turma: requestPayload.userTurma,
-      planoId: requestPayload.planoId,
-      planoNome: requestPayload.planoNome,
-      valorPago: requestPayload.valor,
-      dataInicio: new Date().toLocaleDateString("pt-BR"),
-      status: "ativo",
-      metodo: "pix",
-      userId: requestPayload.userId,
-      createdAt: serverTimestamp(),
-    });
+    const { data: subscriptionData, error: subscriptionError } = await supabase
+      .from("assinaturas")
+      .insert({
+        aluno: requestPayload.userName,
+        turma: requestPayload.userTurma,
+        planoId: requestPayload.planoId,
+        planoNome: requestPayload.planoNome,
+        valorPago: requestPayload.valor,
+        dataInicio: new Date().toLocaleDateString("pt-BR"),
+        status: "ativo",
+        metodo: "pix",
+        userId: requestPayload.userId,
+        createdAt: nowIso(),
+      })
+      .select("id")
+      .single();
+    if (subscriptionError) throwSupabaseError(subscriptionError);
 
-    await batch.commit();
-    return { subscriptionId: subscriptionRef.id };
+    return {
+      subscriptionId: asString((subscriptionData as Record<string, unknown> | null)?.id),
+    };
   });
 
   // Garante sincronizacao dos campos visuais/beneficios no users mesmo quando
@@ -1054,14 +1148,18 @@ export async function rejectPlanRequest(payload: {
     PLAN_REJECT_CALLABLE,
     requestPayload,
     async () => {
-      const batch = writeBatch(db);
-      batch.update(doc(db, "solicitacoes_adesao", requestPayload.requestId), {
-        status: "rejeitado",
-      });
-      batch.update(doc(db, "users", requestPayload.userId), {
-        plano_status: "ativo",
-      });
-      await batch.commit();
+      const supabase = getSupabaseClient();
+      const { error: requestError } = await supabase
+        .from("solicitacoes_adesao")
+        .update({ status: "rejeitado" })
+        .eq("id", requestPayload.requestId);
+      if (requestError) throwSupabaseError(requestError);
+
+      const { error: userError } = await supabase
+        .from("users")
+        .update({ plano_status: "ativo" })
+        .eq("uid", requestPayload.userId);
+      if (userError) throwSupabaseError(userError);
       return { ok: true };
     }
   );
@@ -1083,12 +1181,18 @@ export async function deletePlanRequestAndUnlock(payload: {
     PLAN_DELETE_REQUEST_CALLABLE,
     requestPayload,
     async () => {
-      const batch = writeBatch(db);
-      batch.delete(doc(db, "solicitacoes_adesao", requestPayload.requestId));
-      batch.update(doc(db, "users", requestPayload.userId), {
-        plano_status: "ativo",
-      });
-      await batch.commit();
+      const supabase = getSupabaseClient();
+      const { error: deleteError } = await supabase
+        .from("solicitacoes_adesao")
+        .delete()
+        .eq("id", requestPayload.requestId);
+      if (deleteError) throwSupabaseError(deleteError);
+
+      const { error: userError } = await supabase
+        .from("users")
+        .update({ plano_status: "ativo" })
+        .eq("uid", requestPayload.userId);
+      if (userError) throwSupabaseError(userError);
       return { ok: true };
     }
   );
