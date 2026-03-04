@@ -401,6 +401,42 @@ const buildUserPatchPayload = (
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const USER_SELECT_COLUMNS =
   "uid,nome,email,foto,role,status,ultimoLoginDiario,data_adesao,level,xp,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,capa,estadoOrigem,extra,createdAt,updatedAt";
+const USER_SELECT_COLUMNS_LIST = USER_SELECT_COLUMNS.split(",")
+  .map((entry) => entry.trim())
+  .filter((entry) => entry.length > 0);
+
+const removeMissingColumnFromSelection = (
+  currentColumns: string[],
+  missingColumn: string
+): string[] | null => {
+  const nextColumns = currentColumns.filter(
+    (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+  );
+  if (nextColumns.length === currentColumns.length) return null;
+  return nextColumns;
+};
+
+const runUsersRowQueryWithSelectFallback = async (
+  runQuery: (
+    selectColumns: string
+  ) => PromiseLike<{ data: unknown; error: unknown }>
+): Promise<Record<string, unknown> | null> => {
+  let mutableColumns = [...USER_SELECT_COLUMNS_LIST];
+
+  while (mutableColumns.length > 0) {
+    const { data, error } = await runQuery(mutableColumns.join(","));
+    if (!error) return asRecord(data) ?? null;
+
+    const missingColumn = extractMissingSchemaColumn(error);
+    if (!missingColumn) throw error;
+
+    const nextColumns = removeMissingColumnFromSelection(mutableColumns, missingColumn);
+    if (!nextColumns || nextColumns.length === 0) throw error;
+    mutableColumns = nextColumns;
+  }
+
+  return null;
+};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -520,13 +556,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       syncingAuthUidRef.current = authUid;
 
       try {
-        const { data: existingRow, error: selectError } = await supabase
-          .from("users")
-          .select(USER_SELECT_COLUMNS)
-          .eq("uid", authUser.id)
-          .maybeSingle();
-
-        if (selectError) throw selectError;
+        const existingRow = await runUsersRowQueryWithSelectFallback((columns) =>
+          supabase
+            .from("users")
+            .select(columns)
+            .eq("uid", authUser.id)
+            .maybeSingle()
+        );
 
         if (existingRow) {
           if (!active || currentToken !== syncToken) return;
@@ -541,29 +577,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const newUserPayload = buildNewUserInsertPayload(authUser);
 
         let insertedRow: Record<string, unknown> | null = null;
-        const { data: insertData, error: insertError } = await supabase
-          .from("users")
-          .insert(newUserPayload)
-          .select(USER_SELECT_COLUMNS)
-          .single();
-
-        if (insertError) {
-          if (!isDuplicateKeyError(insertError)) {
-            throw insertError;
-          }
+        try {
+          insertedRow = await runUsersRowQueryWithSelectFallback((columns) =>
+            supabase
+              .from("users")
+              .insert(newUserPayload)
+              .select(columns)
+              .single()
+          );
+        } catch (insertError: unknown) {
+          if (!isDuplicateKeyError(insertError)) throw insertError;
 
           // Corrida comum: onAuthStateChange e getSession disparam em paralelo no primeiro login.
-          const { data: concurrentRow, error: concurrentSelectError } = await supabase
-            .from("users")
-            .select(USER_SELECT_COLUMNS)
-            .eq("uid", authUser.id)
-            .maybeSingle();
-
-          if (concurrentSelectError) throw concurrentSelectError;
+          const concurrentRow = await runUsersRowQueryWithSelectFallback((columns) =>
+            supabase
+              .from("users")
+              .select(columns)
+              .eq("uid", authUser.id)
+              .maybeSingle()
+          );
           if (!concurrentRow) throw insertError;
-          insertedRow = concurrentRow as Record<string, unknown>;
-        } else {
-          insertedRow = (insertData as Record<string, unknown>) ?? null;
+          insertedRow = concurrentRow;
         }
 
         if (!insertedRow) {
@@ -668,13 +702,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { dbPatch } = buildUserPatchPayload(currentUser, patch);
       const mutablePatch: Record<string, unknown> = { ...dbPatch };
       let data: Record<string, unknown> | null = null;
+      let mutableSelectColumns = [...USER_SELECT_COLUMNS_LIST];
 
-      while (Object.keys(mutablePatch).length > 0) {
+      while (Object.keys(mutablePatch).length > 0 && mutableSelectColumns.length > 0) {
         const updateResult = await supabase
           .from("users")
           .update(mutablePatch)
           .eq("uid", currentUser.uid)
-          .select(USER_SELECT_COLUMNS)
+          .select(mutableSelectColumns.join(","))
           .maybeSingle();
 
         if (!updateResult.error) {
@@ -687,8 +722,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const removableKey =
           Object.keys(mutablePatch).find((key) => key.toLowerCase() === missingColumn.toLowerCase()) ?? null;
-        if (!removableKey) throw updateResult.error;
-        delete mutablePatch[removableKey];
+        if (removableKey) {
+          delete mutablePatch[removableKey];
+          continue;
+        }
+
+        const nextSelectColumns = removeMissingColumnFromSelection(
+          mutableSelectColumns,
+          missingColumn
+        );
+        if (!nextSelectColumns || nextSelectColumns.length === 0) throw updateResult.error;
+        mutableSelectColumns = nextSelectColumns;
       }
 
       if (!data) {
@@ -707,13 +751,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ...mutablePatch,
         };
 
-        const { data: recoveredRow, error: recoveryError } = await supabase
-          .from("users")
-          .upsert(recoveryPayload, { onConflict: "uid" })
-          .select(USER_SELECT_COLUMNS)
-          .single();
-
-        if (recoveryError) throw recoveryError;
+        const recoveredRow = await runUsersRowQueryWithSelectFallback((columns) =>
+          supabase
+            .from("users")
+            .upsert(recoveryPayload, { onConflict: "uid" })
+            .select(columns)
+            .single()
+        );
+        if (!recoveredRow) throw new Error("Falha ao recuperar perfil do usuario.");
 
         const recoveredNormalized = normalizeUserRow(recoveredRow);
         setUser(recoveredNormalized);
@@ -1101,13 +1146,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const refresh = async () => {
       try {
-        const { data, error } = await supabase
-          .from("users")
-          .select(USER_SELECT_COLUMNS)
-          .eq("uid", user.uid)
-          .maybeSingle();
-
-        if (error) throw error;
+        const data = await runUsersRowQueryWithSelectFallback((columns) =>
+          supabase
+            .from("users")
+            .select(columns)
+            .eq("uid", user.uid)
+            .maybeSingle()
+        );
         if (!data) return;
 
         const normalized = normalizeUserRow(data);

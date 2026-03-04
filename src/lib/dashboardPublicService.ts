@@ -18,10 +18,10 @@ const DASHBOARD_USERS_COUNT_FALLBACK_LIMIT = 2_000;
 const DASHBOARD_TOTAL_CACA_RPC = "dashboard_total_caca_calouros";
 
 const DASHBOARD_EVENTS_SELECT =
-  "id,titulo,data,local,imagem,tipo,likesList,participantes:interessados,imagePositionY";
+  "id,titulo,data,local,imagem,tipo,likesList,interessados,imagePositionY";
 const DASHBOARD_PRODUCTS_SELECT = "id,nome,preco,img,likes";
 const DASHBOARD_PARTNERS_SELECT =
-  "id,nome,imgLogo,imgCapa,categoria,plano:tier,status";
+  "id,nome,imgLogo,imgCapa,categoria,tier,status";
 const DASHBOARD_LIGAS_SELECT =
   "id,nome,sigla,foto,logoBase64,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
 const DASHBOARD_POSTS_SELECT = "id,userId,userName,avatar,createdAt,texto,likes";
@@ -163,7 +163,7 @@ const normalizeEvento = (id: string, raw: unknown): DashboardEvent | null => {
     imagem: asString(data.imagem),
     tipo: asString(data.tipo),
     likesList: asStringArray(data.likesList),
-    participantes: asStringArray(data.participantes ?? data.interessados),
+    participantes: asStringArray(data.interessados ?? data.participantes),
     imagePositionY: asNumber(data.imagePositionY, 50),
   };
 };
