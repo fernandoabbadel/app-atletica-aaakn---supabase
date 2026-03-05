@@ -7,6 +7,7 @@ type Row = Record<string, unknown>;
 
 const READ_CACHE_TTL_MS = 30_000;
 const DASHBOARD_EVENTS_LIMIT = 5;
+const DASHBOARD_EVENTS_FETCH_LIMIT = 40;
 const DASHBOARD_PRODUCTS_LIMIT = 8;
 const DASHBOARD_POSTS_LIMIT = 2;
 const DASHBOARD_TREINOS_LIMIT = 4;
@@ -480,9 +481,9 @@ export async function fetchDashboardBundle(options?: { forceRefresh?: boolean })
   const [eventRows, productRows, partnerRows, ligaRows, postRows, treinoRows, totalAlunos, totalCaca] =
     await Promise.all([
       fetchRowsWithFallback("eventos", DASHBOARD_EVENTS_SELECT, [
-        { orderBy: { column: "data", ascending: true }, limit: DASHBOARD_EVENTS_LIMIT },
-        { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_EVENTS_LIMIT },
-        { limit: DASHBOARD_EVENTS_LIMIT },
+        { orderBy: { column: "data", ascending: true }, limit: DASHBOARD_EVENTS_FETCH_LIMIT },
+        { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_EVENTS_FETCH_LIMIT },
+        { limit: DASHBOARD_EVENTS_FETCH_LIMIT },
       ]),
       fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [{ limit: DASHBOARD_PRODUCTS_LIMIT }]),
       fetchRowsWithFallback("parceiros", DASHBOARD_PARTNERS_SELECT, [
@@ -515,7 +516,8 @@ export async function fetchDashboardBundle(options?: { forceRefresh?: boolean })
         return false;
       }
       return !isEventExpiredByGrace(event.data, event.hora, DASHBOARD_EVENT_GRACE_MS);
-    });
+    })
+    .slice(0, DASHBOARD_EVENTS_LIMIT);
   const produtos = productRows.map((row) => normalizeProduto(asString(row.id), row)).filter((row): row is DashboardProduct => row !== null);
   const parceiros = partnerRows
     .map((row) => normalizeParceiro(asString(row.id), row))
