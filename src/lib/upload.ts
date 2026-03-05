@@ -108,6 +108,9 @@ const resolveOutputFileName = (file: File, options?: UploadImageOptions): string
   return `${Date.now()}-${cleanName}`;
 };
 
+const buildUploadFingerprint = (file: File): string =>
+  `${file.name.toLowerCase()}::${file.type}::${file.size}::${file.lastModified}`;
+
 const readImageDimensions = async (
   file: File
 ): Promise<{ width: number; height: number } | null> => {
@@ -218,7 +221,7 @@ const reserveUploadSlot = (
     return "Limite de uploads por minuto atingido.";
   }
 
-  const fingerprint = `${file.name.toLowerCase()}::${file.type}::${file.size}::${file.lastModified}`;
+  const fingerprint = buildUploadFingerprint(file);
   const fingerprintCache = recentFingerprintByScope.get(scope) ?? new Map<string, number>();
   const previousFingerprintAt = fingerprintCache.get(fingerprint);
   if (typeof previousFingerprintAt === "number" && now - previousFingerprintAt <= dedupeWindowMs) {
@@ -226,8 +229,6 @@ const reserveUploadSlot = (
   }
 
   uploadHistoryByScope.set(scope, [...recent, now]);
-  fingerprintCache.set(fingerprint, now);
-  recentFingerprintByScope.set(scope, fingerprintCache);
   inFlightScopes.add(scope);
   return null;
 };
@@ -310,6 +311,12 @@ export async function uploadImage(
     const url = options?.appendVersionQuery && urlBase
       ? `${urlBase}${urlBase.includes("?") ? "&" : "?"}v=${Date.now()}`
       : urlBase;
+
+    // Registramos dedupe apenas apos upload valido no Storage.
+    const dedupeFingerprint = buildUploadFingerprint(file);
+    const dedupeCache = recentFingerprintByScope.get(scope) ?? new Map<string, number>();
+    dedupeCache.set(dedupeFingerprint, Date.now());
+    recentFingerprintByScope.set(scope, dedupeCache);
 
     return { url, error: null };
   } catch (error: unknown) {
