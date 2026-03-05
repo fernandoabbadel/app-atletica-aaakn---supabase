@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, Loader2, Star } from "lucide-react";
 
-import { createStoreReview, fetchStoreProductDetail } from "../../../../lib/storeService";
+import { createStoreReview, fetchStoreProductDetail } from "../../../../lib/storePublicService";
 import { useAuth } from "../../../../context/AuthContext";
 import { useToast } from "../../../../context/ToastContext";
 
@@ -19,6 +19,11 @@ interface Order {
   status: "pendente" | "approved" | "rejected" | "delivered" | "cancelado";
   createdAt: TimestampLike | null;
   updatedAt?: TimestampLike | null;
+}
+
+interface Review {
+  id: string;
+  userId: string;
 }
 
 type TimestampLike = { toDate: () => Date };
@@ -38,10 +43,12 @@ export default function LojaProdutoReviewPage() {
 
   const [produto, setProduto] = useState<Produto | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [reasonToastShown, setReasonToastShown] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!productId) {
@@ -54,7 +61,7 @@ export default function LojaProdutoReviewPage() {
       const bundle = await fetchStoreProductDetail({
         productId,
         userId: user?.uid || null,
-        reviewsLimit: 1,
+        reviewsLimit: 120,
         ordersLimit: 20,
         forceRefresh: false,
       });
@@ -64,9 +71,15 @@ export default function LojaProdutoReviewPage() {
         (left, right) => toMillis(right.createdAt) - toMillis(left.createdAt)
       );
       setOrders(rows);
+      setReviews(bundle.reviews as unknown as Review[]);
+      setReasonToastShown(false);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao carregar dados para avaliacao.", "error");
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Erro ao carregar dados para avaliacao.";
+      addToast(message, "error");
     } finally {
       setLoading(false);
     }
@@ -76,23 +89,60 @@ export default function LojaProdutoReviewPage() {
     void refresh();
   }, [refresh]);
 
-  const latestApprovedOrder = useMemo(() => {
-    return orders.find((order) => order.status === "approved") || null;
-  }, [orders]);
+  const approvedOrders = useMemo(
+    () => orders.filter((order) => order.status === "approved"),
+    [orders]
+  );
 
-  const canReview = useMemo(() => {
-    if (!latestApprovedOrder) return false;
+  const eligibleApprovedOrders = useMemo(() => {
+    return approvedOrders.filter((order) => {
+      const reference = order.updatedAt || order.createdAt;
+      if (!reference || typeof reference.toDate !== "function") return false;
+      const days = Math.ceil(Math.abs(Date.now() - reference.toDate().getTime()) / (1000 * 60 * 60 * 24));
+      return days <= 5;
+    });
+  }, [approvedOrders]);
 
-    const reference = latestApprovedOrder.updatedAt || latestApprovedOrder.createdAt;
-    if (!reference || typeof reference.toDate !== "function") return false;
+  const userReviewCount = useMemo(() => {
+    const uid = user?.uid || "";
+    if (!uid) return 0;
+    return reviews.filter((review) => review.userId === uid).length;
+  }, [reviews, user?.uid]);
 
-    const days = Math.ceil(Math.abs(Date.now() - reference.toDate().getTime()) / (1000 * 60 * 60 * 24));
-    return days <= 5;
-  }, [latestApprovedOrder]);
+  const remainingReviewSlots = useMemo(
+    () => Math.max(0, eligibleApprovedOrders.length - userReviewCount),
+    [eligibleApprovedOrders.length, userReviewCount]
+  );
+
+  const canReview = remainingReviewSlots > 0;
+
+  const reviewBlockReason = useMemo(() => {
+    if (approvedOrders.length === 0) {
+      return "Voce precisa de um pedido aprovado para avaliar.";
+    }
+    if (eligibleApprovedOrders.length === 0) {
+      return "Prazo encerrado: a avaliacao vale por 5 dias apos a aprovacao.";
+    }
+    if (remainingReviewSlots <= 0) {
+      return "Todas as avaliacoes permitidas para este produto ja foram usadas.";
+    }
+    return "";
+  }, [approvedOrders.length, eligibleApprovedOrders.length, remainingReviewSlots]);
+
+  useEffect(() => {
+    if (loading || canReview || reasonToastShown) return;
+    if (!reviewBlockReason) return;
+    addToast(reviewBlockReason, "info");
+    setReasonToastShown(true);
+  }, [addToast, canReview, loading, reasonToastShown, reviewBlockReason]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!user || !produto) return;
+    if (!canReview) {
+      addToast(reviewBlockReason || "Avaliacao indisponivel para este produto.", "info");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -148,7 +198,7 @@ export default function LojaProdutoReviewPage() {
           <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-center">
             <AlertTriangle size={26} className="mx-auto mb-2 text-red-400" />
             <p className="text-sm text-red-300 font-bold">
-              Avaliacao liberada apenas para pedidos aprovados nos ultimos 5 dias.
+              {reviewBlockReason}
             </p>
             <Link
               href={`/loja/${produto.id}`}
@@ -160,6 +210,9 @@ export default function LojaProdutoReviewPage() {
         ) : (
           <form onSubmit={handleSubmit} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 space-y-4">
             <h2 className="text-sm font-black uppercase">Como foi sua experiencia?</h2>
+            <p className="text-[11px] text-zinc-500">
+              Avaliacoes disponiveis agora: {remainingReviewSlots}
+            </p>
 
             <div className="flex items-center gap-2">
               {[1, 2, 3, 4, 5].map((value) => (

@@ -26,7 +26,7 @@ const DASHBOARD_PRODUCTS_SELECT = "id,nome,preco,img,likes";
 const DASHBOARD_PARTNERS_SELECT =
   "id,nome,imgLogo,imgCapa,categoria,plano,tier,status";
 const DASHBOARD_LIGAS_SELECT =
-  "id,nome,sigla,foto,logoBase64,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
+  "id,nome,sigla,foto,logoUrl,logoBase64,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
 const DASHBOARD_POSTS_SELECT = "id,userId,userName,avatar,createdAt,texto,text,likes";
 const DASHBOARD_TREINOS_SELECT = "id,imagem";
 const DASHBOARD_ALBUM_FALLBACK_SELECT = "totalColetado";
@@ -275,13 +275,17 @@ const normalizeParceiro = (id: string, raw: unknown): DashboardPartner | null =>
 const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
   const data = asObject(raw);
   if (!data) return null;
+  const logoUrl = asString(data.logoUrl) || undefined;
+  const logoBase64 = asString(data.logoBase64) || undefined;
+  const logoLegacy = asString(data.logo) || undefined;
   return {
     id,
     nome: asString(data.nome, "Liga"),
     sigla: asString(data.sigla),
     foto: asString(data.foto) || undefined,
-    logoBase64: asString(data.logoBase64) || undefined,
-    logo: asString(data.logo) || undefined,
+    logoUrl,
+    logoBase64: logoBase64 || logoUrl || logoLegacy,
+    logo: logoLegacy || logoUrl || logoBase64,
     descricao: asString(data.descricao) || undefined,
     bizu: asString(data.bizu) || undefined,
     ativa: asBoolean(data.ativa, false),
@@ -427,6 +431,7 @@ export interface DashboardLiga {
   nome: string;
   sigla: string;
   foto?: string;
+  logoUrl?: string;
   logoBase64?: string;
   logo?: string;
   descricao?: string;

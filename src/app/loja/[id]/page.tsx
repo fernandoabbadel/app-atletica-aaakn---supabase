@@ -275,20 +275,48 @@ export default function DetalheProdutoPage() {
     void refreshProductData(true);
   }, [refreshProductData]);
 
-  const latestApprovedOrder = useMemo(() => {
-    return userOrders.find((order) => order.status === "approved") || null;
-  }, [userOrders]);
+  const approvedOrders = useMemo(
+    () => userOrders.filter((order) => order.status === "approved"),
+    [userOrders]
+  );
 
-  const canReview = useMemo(() => {
-    if (!latestApprovedOrder) return false;
+  const latestApprovedOrder = useMemo(() => approvedOrders[0] || null, [approvedOrders]);
 
-    const referenceDate = latestApprovedOrder.updatedAt || latestApprovedOrder.createdAt;
-    if (!referenceDate || typeof referenceDate.toDate !== "function") return false;
+  const eligibleApprovedOrders = useMemo(() => {
+    return approvedOrders.filter((order) => {
+      const referenceDate = order.updatedAt || order.createdAt;
+      if (!referenceDate || typeof referenceDate.toDate !== "function") return false;
+      const diffMs = Date.now() - referenceDate.toDate().getTime();
+      const diffDays = Math.ceil(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
+      return diffDays <= 5;
+    });
+  }, [approvedOrders]);
 
-    const diffMs = Date.now() - referenceDate.toDate().getTime();
-    const diffDays = Math.ceil(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
-    return diffDays <= 5;
-  }, [latestApprovedOrder]);
+  const userReviewCount = useMemo(() => {
+    const uid = user?.uid || "";
+    if (!uid) return 0;
+    return reviews.filter((review) => review.userId === uid).length;
+  }, [reviews, user?.uid]);
+
+  const remainingReviewSlots = useMemo(
+    () => Math.max(0, eligibleApprovedOrders.length - userReviewCount),
+    [eligibleApprovedOrders.length, userReviewCount]
+  );
+
+  const canReview = remainingReviewSlots > 0;
+
+  const reviewBlockReason = useMemo(() => {
+    if (approvedOrders.length === 0) {
+      return "Para avaliar, voce precisa de um pedido aprovado.";
+    }
+    if (eligibleApprovedOrders.length === 0) {
+      return "Prazo encerrado: avaliacoes ficam abertas por 5 dias apos a aprovacao.";
+    }
+    if (remainingReviewSlots <= 0) {
+      return "Voce ja usou todas as avaliacoes liberadas para este produto.";
+    }
+    return "";
+  }, [approvedOrders.length, eligibleApprovedOrders.length, remainingReviewSlots]);
 
   const pendingOrders = useMemo(
     () => userOrders.filter((order) => order.status === "pendente"),
@@ -385,7 +413,7 @@ export default function DetalheProdutoPage() {
       return;
     }
     if (checkoutQuantity < 1 || checkoutQuantity > checkoutMaxQuantity) {
-      addToast(`Quantidade invalida. Maximo disponivel: ${checkoutMaxQuantity}.`, "error");
+      addToast("Quantidade invalida para o estoque atual.", "error");
       return;
     }
 
@@ -454,6 +482,10 @@ export default function DetalheProdutoPage() {
   const handleSubmitReview = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!user || !produto) return;
+    if (!canReview) {
+      addToast(reviewBlockReason || "Avaliacao indisponivel para este pedido.", "info");
+      return;
+    }
 
     setSubmittingReview(true);
     try {
@@ -566,7 +598,7 @@ export default function DetalheProdutoPage() {
             <div className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-black uppercase">
                 <span className="px-2 py-1 rounded-md border border-zinc-700 bg-black text-zinc-300">
-                  Estoque: {totalStock}
+                  Estoque disponivel
                 </span>
                 {isOutOfStock && (
                   <span className="px-2 py-1 rounded-md border border-red-500/30 bg-red-500/10 text-red-300">
@@ -631,15 +663,6 @@ export default function DetalheProdutoPage() {
             >
               <ShoppingBag size={20} /> {isOutOfStock ? "Produto Esgotado" : "Comprar Agora"}
             </button>
-
-            {latestApprovedOrder && (
-              <Link
-                href={`/loja/${produto.id}/review`}
-                className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 text-xs font-black uppercase hover:border-emerald-500/40 hover:text-emerald-300 transition"
-              >
-                <Star size={14} /> Avaliar em tela dedicada
-              </Link>
-            )}
 
             <section className="space-y-4 pt-2 border-t border-zinc-800">
               <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500">Seus pedidos</h3>
@@ -709,9 +732,21 @@ export default function DetalheProdutoPage() {
 
         {activeTab === "avaliacoes" && (
           <div className="space-y-6 animate-in fade-in">
+            {latestApprovedOrder && (
+              <Link
+                href={`/loja/${produto.id}/review`}
+                className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 text-xs font-black uppercase hover:border-emerald-500/40 hover:text-emerald-300 transition"
+              >
+                <Star size={14} /> Avaliacoes
+              </Link>
+            )}
+
             {canReview ? (
               <form onSubmit={handleSubmitReview} className="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 mb-6">
                 <h3 className="text-sm font-bold text-white uppercase mb-3">Deixe sua avaliacao</h3>
+                <p className="text-[11px] text-zinc-500 mb-3">
+                  Avaliacoes disponiveis agora: {remainingReviewSlots}
+                </p>
                 <div className="flex gap-2 mb-4">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button key={star} type="button" onClick={() => setRating(star)}>
@@ -739,16 +774,8 @@ export default function DetalheProdutoPage() {
               <div className="p-4 bg-red-900/20 border border-red-500/30 rounded-xl text-center">
                 <AlertTriangle size={24} className="mx-auto text-red-500 mb-2" />
                 <p className="text-xs text-red-400 font-bold">
-                  Para avaliar, voce precisa de um pedido aprovado nos ultimos 5 dias.
+                  {reviewBlockReason}
                 </p>
-                {latestApprovedOrder && (
-                  <Link
-                    href={`/loja/${produto.id}/review`}
-                    className="mt-3 inline-flex items-center gap-2 text-[11px] font-black uppercase text-red-300 hover:text-red-200"
-                  >
-                    Abrir tela de avaliacao
-                  </Link>
-                )}
               </div>
             )}
 
@@ -847,8 +874,8 @@ export default function DetalheProdutoPage() {
                       {isOutOfStock
                         ? "Sem estoque disponivel no momento."
                         : isSelectedColorUnavailable
-                        ? `Sem estoque para a cor selecionada. Disponivel total: ${totalStock} un.`
-                        : `Disponivel para este pedido: ${effectiveCheckoutStock} un.`}
+                        ? "Sem estoque para a cor selecionada."
+                        : "Estoque confirmado para este pedido."}
                     </p>
                     <div className="space-y-1">
                       <label className="text-xs text-zinc-400 font-bold uppercase">Cor (opcional)</label>

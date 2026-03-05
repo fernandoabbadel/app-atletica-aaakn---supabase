@@ -49,7 +49,7 @@ export const APP_PAGES = [
     { path: '/admin/conquistas', label: 'ðŸ… Adm Conquistas' },
     { path: '/admin/denuncias', label: 'ðŸš¨ DenÃºncias' },
     { path: '/admin/eventos', label: 'ðŸ“… Adm Eventos' },
-    { path: '/admin/eventos/enve', label: '🗃️ Adm Eventos Encerrados' },
+    { path: '/admin/eventos/encerrados', label: '🗃️ Adm Eventos Encerrados' },
     { path: '/admin/fidelidade', label: 'ðŸ’Ž Adm Fidelidade' },
     { path: '/admin/games', label: 'ðŸŽ® Adm Games' },
     { path: '/admin/guia', label: 'ðŸ“˜ Adm Guia' },

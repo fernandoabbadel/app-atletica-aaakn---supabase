@@ -354,7 +354,7 @@ export default function LojaClientPage({
                                 {/* BADGE DE ESTOQUE BAIXO */}
                                 {estoqueTotal > 0 && estoqueTotal < 5 && (
                                     <div className="absolute bottom-2 right-2 bg-orange-500/90 text-white text-[8px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 shadow-lg backdrop-blur-sm">
-                                        <AlertCircle size={10}/> Restam {estoqueTotal}
+                                        <AlertCircle size={10}/> Poucas unidades
                                     </div>
                                 )}
                             </div>

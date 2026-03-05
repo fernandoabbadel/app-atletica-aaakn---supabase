@@ -640,7 +640,7 @@ export default function AdminEventosPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/admin/eventos/enve"
+            href="/admin/eventos/encerrados"
             className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-zinc-200 transition hover:border-emerald-500/40 hover:text-emerald-300"
           >
             Encerrados ({eventosArquivados.length})

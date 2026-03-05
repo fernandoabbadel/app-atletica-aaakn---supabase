@@ -696,7 +696,7 @@ export default function DashboardPage() {
                                    <div className="absolute inset-0 rounded-full border-2 border-dashed border-yellow-500/50 animate-spin-slow pointer-events-none"></div>
                                    <div className="w-full h-full rounded-full bg-zinc-950 p-1.5 relative z-10 overflow-hidden shadow-lg group-hover:scale-105 transition">
                                        <Image 
-                                            src={liga.foto || liga.logoBase64 || liga.logo || "/placeholder_liga.png"} 
+                                            src={liga.logoUrl || liga.logoBase64 || liga.logo || liga.foto || "/placeholder_liga.png"} 
                                             alt={liga.nome}
                                             fill
                                             sizes="96px"
