@@ -13,6 +13,7 @@ import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import { uploadImage } from "../../../lib/upload";
 import { logActivity } from "../../../lib/logger";
+import { isEventExpiredByGrace } from "../../../lib/eventDateUtils";
 import {
   createAdminEventPoll,
   deleteAdminEventById,
@@ -28,6 +29,8 @@ import {
   upsertAdminEvent,
   type DateLike,
 } from "../../../lib/eventsNativeService";
+
+const EVENT_DASHBOARD_GRACE_MS = 24 * 60 * 60 * 1000;
 
 // --- TIPAGEM ---
 type StatusLote = "ativo" | "encerrado" | "agendado";
@@ -312,6 +315,22 @@ export default function AdminEventosPage() {
       const receitaEstimada = totalIngressos * 60; 
       return { totalEventos, totalIngressos, receitaEstimada };
   }, [eventos]);
+
+  const eventosAtivosPainel = useMemo(
+      () =>
+          eventos.filter(
+              (evento) => !isEventExpiredByGrace(evento.data, evento.hora, EVENT_DASHBOARD_GRACE_MS)
+          ),
+      [eventos]
+  );
+
+  const eventosArquivados = useMemo(
+      () =>
+          eventos.filter((evento) =>
+              isEventExpiredByGrace(evento.data, evento.hora, EVENT_DASHBOARD_GRACE_MS)
+          ),
+      [eventos]
+  );
 
   // --- ACTIONS ---
 
@@ -619,9 +638,17 @@ export default function AdminEventosPage() {
           <Link href="/admin" className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400" /></Link>
           <h1 className="text-lg font-black text-white uppercase tracking-tighter">Gestão de Eventos</h1>
         </div>
-        <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
-          <Plus size={16} /> Novo Evento
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/eventos/enve"
+            className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-zinc-200 transition hover:border-emerald-500/40 hover:text-emerald-300"
+          >
+            Encerrados ({eventosArquivados.length})
+          </Link>
+          <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
+            <Plus size={16} /> Novo Evento
+          </button>
+        </div>
       </header>
 
       <main className="p-6 space-y-8">
@@ -636,9 +663,9 @@ export default function AdminEventosPage() {
 
         {/* LISTA DE EVENTOS */}
         <div>
-            <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest mb-4 flex items-center gap-2"><BarChart3 size={16}/> Eventos Ativos</h2>
+            <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest mb-4 flex items-center gap-2"><BarChart3 size={16}/> Eventos Ativos (janela +1 dia)</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {eventos.map((evento) => (
+                {eventosAtivosPainel.map((evento) => (
                 <div key={evento.id} className={`rounded-2xl border overflow-hidden group hover:border-emerald-500/30 transition flex flex-col h-full ${evento.status === 'encerrado' ? 'bg-zinc-950 border-zinc-900 grayscale opacity-70' : 'bg-zinc-900 border-zinc-800'}`}>
                     <div className="h-32 bg-black/50 relative overflow-hidden">
                         <Image src={evento.imagem} alt={evento.titulo} fill sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" className="object-cover opacity-80 group-hover:opacity-100 transition" style={{ objectPosition: `50% ${evento.imagePositionY || 50}%` }}/>
@@ -660,6 +687,11 @@ export default function AdminEventosPage() {
                 </div>
                 ))}
             </div>
+            {eventosAtivosPainel.length === 0 && (
+              <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center text-sm text-zinc-400">
+                Nenhum evento ativo para exibicao no painel principal.
+              </div>
+            )}
         </div>
       </main>
 

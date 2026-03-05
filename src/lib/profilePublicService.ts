@@ -1,4 +1,5 @@
 ﻿import { getSupabaseClient } from "./supabase";
+import { isTreinoDayExpired } from "./eventDateUtils";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 const TTL_MS = 120_000;
@@ -330,6 +331,7 @@ async function fetchProfileTreinos(uid: string): Promise<ProfileTreinoRecord[]> 
   return (data ?? [])
     .map(normalizeTreino)
     .filter((row): row is ProfileTreinoRecord => row !== null)
+    .filter((row) => !isTreinoDayExpired(row.dia))
     .sort((left, right) => toMillis(right.dia) - toMillis(left.dia));
 }
 
@@ -582,3 +584,5 @@ export async function toggleFollowProfile(payload: {
     followingCount,
   };
 }
+
+

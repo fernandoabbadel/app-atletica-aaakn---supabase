@@ -3,6 +3,7 @@ import { getSupabaseClient } from "@/lib/supabase";
 
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { isTreinoDayExpired } from "./eventDateUtils";
 import { uploadImage } from "./upload";
 
 type CacheEntry<T> = {
@@ -590,6 +591,7 @@ async function fetchProfileTreinos(uid: string): Promise<ProfileTreinoRecord[]> 
   return (data ?? [])
     .map((row) => normalizeTreino(asString((row as Record<string, unknown>).id), row))
     .filter((row): row is ProfileTreinoRecord => row !== null)
+    .filter((row) => !isTreinoDayExpired(row.dia))
     .sort((left, right) => toMillis(right.dia) - toMillis(left.dia));
 }
 

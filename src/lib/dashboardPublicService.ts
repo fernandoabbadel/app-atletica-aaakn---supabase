@@ -1,4 +1,5 @@
 ﻿import { getSupabaseClient } from "./supabase";
+import { isEventExpiredByGrace } from "./eventDateUtils";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 
@@ -16,9 +17,10 @@ const DASHBOARD_LIKES_SAMPLE_PER_PRODUCT = 10;
 const DASHBOARD_USERS_IN_CHUNK = 10;
 const DASHBOARD_USERS_COUNT_FALLBACK_LIMIT = 2_000;
 const DASHBOARD_TOTAL_CACA_RPC = "dashboard_total_caca_calouros";
+const DASHBOARD_EVENT_GRACE_MS = 24 * 60 * 60 * 1000;
 
 const DASHBOARD_EVENTS_SELECT =
-  "id,titulo,data,local,imagem,tipo,likesList,interessados,participantes,imagePositionY";
+  "id,titulo,data,hora,local,imagem,tipo,status,likesList,interessados,participantes,imagePositionY";
 const DASHBOARD_PRODUCTS_SELECT = "id,nome,preco,img,likes";
 const DASHBOARD_PARTNERS_SELECT =
   "id,nome,imgLogo,imgCapa,categoria,plano,tier,status";
@@ -230,9 +232,11 @@ const normalizeEvento = (id: string, raw: unknown): DashboardEvent | null => {
     id,
     titulo: asString(data.titulo, "Evento"),
     data: asString(data.data),
+    hora: asString(data.hora),
     local: asString(data.local),
     imagem: asString(data.imagem),
     tipo: asString(data.tipo),
+    status: asString(data.status, "ativo"),
     likesList: asStringArray(data.likesList),
     participantes: asStringArray(data.interessados ?? data.participantes),
     imagePositionY: asNumber(data.imagePositionY, 50),
@@ -399,9 +403,11 @@ export interface DashboardEvent {
   id: string;
   titulo: string;
   data: string;
+  hora?: string;
   local: string;
   imagem: string;
   tipo: string;
+  status?: string;
   likesList: string[];
   participantes: string[];
   imagePositionY?: number;
@@ -496,7 +502,20 @@ export async function fetchDashboardBundle(options?: { forceRefresh?: boolean })
       fetchDashboardTotalCaca(),
     ]);
 
-  const events = eventRows.map((row) => normalizeEvento(asString(row.id), row)).filter((row): row is DashboardEvent => row !== null);
+  const events = eventRows
+    .map((row) => normalizeEvento(asString(row.id), row))
+    .filter((row): row is DashboardEvent => row !== null)
+    .filter((event) => {
+      const normalizedStatus = asString(event.status, "ativo").toLowerCase().trim();
+      if (
+        normalizedStatus === "encerrado" ||
+        normalizedStatus === "cancelado" ||
+        normalizedStatus === "inativo"
+      ) {
+        return false;
+      }
+      return !isEventExpiredByGrace(event.data, event.hora, DASHBOARD_EVENT_GRACE_MS);
+    });
   const produtos = productRows.map((row) => normalizeProduto(asString(row.id), row)).filter((row): row is DashboardProduct => row !== null);
   const parceiros = partnerRows
     .map((row) => normalizeParceiro(asString(row.id), row))
@@ -550,3 +569,5 @@ export async function toggleDashboardPostLike(payload: { postId: string; userId:
 export function clearDashboardCaches(): void {
   dashboardCache.clear();
 }
+
+
