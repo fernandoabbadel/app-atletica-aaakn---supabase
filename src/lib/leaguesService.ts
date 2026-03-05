@@ -558,6 +558,7 @@ export async function uploadLeagueImageToStorage(options: {
     compressionMaxWidth,
     compressionMaxHeight,
     compressionMaxBytes: compressedMaxBytes,
+    allowOriginalOnCompressionFail: true,
     quality: 0.82,
     cacheControl: "86400",
   });

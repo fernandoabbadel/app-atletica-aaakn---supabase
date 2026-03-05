@@ -26,6 +26,7 @@ export interface UploadImageOptions {
   rateLimitWindowMs?: number;
   rateLimitMax?: number;
   dedupeWindowMs?: number;
+  allowOriginalOnCompressionFail?: boolean;
 }
 
 export const MAX_UPLOAD_IMAGE_MB = 2;
@@ -278,26 +279,39 @@ export async function uploadImage(
       maxBytes: compressedMaxBytes,
       allowedTypes: options?.allowedTypes,
     });
+    let uploadCandidate = optimizedFile;
     if (optimizedError) {
-      return { url: null, error: optimizedError };
+      const canFallbackToOriginal = Boolean(options?.allowOriginalOnCompressionFail);
+      if (!canFallbackToOriginal) {
+        return { url: null, error: optimizedError };
+      }
+
+      const originalStillValid = validateImageFile(file, {
+        maxBytes: options?.maxBytes,
+        allowedTypes: options?.allowedTypes,
+      });
+      if (originalStillValid) {
+        return { url: null, error: optimizedError };
+      }
+      uploadCandidate = file;
     }
 
-    const optimizedDimensionsError = await validateImageDimensions(optimizedFile, options);
-    if (optimizedDimensionsError) {
-      return { url: null, error: optimizedDimensionsError };
+    const candidateDimensionsError = await validateImageDimensions(uploadCandidate, options);
+    if (candidateDimensionsError) {
+      return { url: null, error: candidateDimensionsError };
     }
 
     const supabase = getSupabaseClient();
     const bucket = (process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET || "uploads").trim() || "uploads";
-    const filename = resolveOutputFileName(optimizedFile, options);
+    const filename = resolveOutputFileName(uploadCandidate, options);
     const objectPath = `${safePath}/${filename}`;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
-      .upload(objectPath, optimizedFile, {
+      .upload(objectPath, uploadCandidate, {
         upsert: options?.upsert ?? false,
         cacheControl: options?.cacheControl ?? "3600",
-        contentType: optimizedFile.type || undefined,
+        contentType: uploadCandidate.type || undefined,
       });
 
     if (uploadError) {
