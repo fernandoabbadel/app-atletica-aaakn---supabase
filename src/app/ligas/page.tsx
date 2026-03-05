@@ -238,6 +238,7 @@ export default function LigasAdminPage() {
   const [editingEventIdx, setEditingEventIdx] = useState<number | null>(null);
   const [currentEvent, setCurrentEvent] = useState<Partial<LeagueEvent>>({});
   const eventFileRef = useRef<HTMLInputElement>(null);
+  const isLoggingOutRef = useRef(false);
   const [uploadingLeagueAsset, setUploadingLeagueAsset] = useState(false);
   const [uploadingEventImg, setUploadingEventImg] = useState(false);
   const [novoLote, setNovoLote] = useState<NovoLoteDraft>({ nome: "", preco: "", status: "ativo" });
@@ -255,6 +256,7 @@ export default function LigasAdminPage() {
   }, []);
 
   useEffect(() => {
+      if (isLoggingOutRef.current) return;
       if (isLoggedIn || ligaData) return;
 
       const lastSelected = readSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY);
@@ -287,6 +289,7 @@ export default function LigasAdminPage() {
       if (!isLoggedIn || !ligaData) return;
 
       const persist = () => {
+          if (isLoggingOutRef.current) return;
           const { senha, ...ligaDraft } = ligaData;
           void senha;
           writeLigaEditorDraft(ligaData.id, {
@@ -306,6 +309,7 @@ export default function LigasAdminPage() {
       const timer = window.setTimeout(persist, 120);
       return () => {
           window.clearTimeout(timer);
+          if (isLoggingOutRef.current) return;
           persist();
       };
   }, [
@@ -464,16 +468,24 @@ export default function LigasAdminPage() {
   };
 
   const handleLeaguePanelLogout = () => {
+      isLoggingOutRef.current = true;
       if (ligaData?.id) {
           clearLigaEditorDraft(ligaData.id);
       }
+      removeSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY);
       setEventModal(false);
       setEditingEventIdx(null);
       setCurrentEvent({});
       setNovoLote({ nome: "", preco: "", status: "ativo" });
       setSendNotification(false);
+      setSenhaInput("");
+      setSelectedLigaId("");
       setLigaData(null);
       setIsLoggedIn(false);
+      addToast("Bizu do Tubarao... Sessao da liga encerrada.", "info");
+      window.setTimeout(() => {
+          isLoggingOutRef.current = false;
+      }, 0);
   };
   const classifyUploadError = (error: unknown): { message: string; type: "info" | "error" } => {
       const rawMessage = error instanceof Error ? error.message : String(error || "");
@@ -1171,7 +1183,7 @@ export default function LigasAdminPage() {
                                 src={currentEvent.imagem}
                                 alt="Evento"
                                 fill
-                                sizes="100vw"
+                                sizes="(max-width: 768px) 90vw, 512px"
                                 className="object-cover"
                                 style={{ objectPosition: `50% ${currentEvent.imagePositionY || 50}%` }}
                                 

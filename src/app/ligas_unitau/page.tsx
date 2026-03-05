@@ -367,7 +367,7 @@ export default function LigasUnitauPage() {
                       src={l.logoBase64 || "https://github.com/shadcn.png"}
                       alt={l.nome}
                       fill
-                      sizes="100vw"
+                      sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
                       className="object-cover opacity-60 transition duration-500 hover:opacity-80"
                       
                     />
@@ -398,7 +398,7 @@ export default function LigasUnitauPage() {
                         src={selectedLeague.logoBase64 || "https://github.com/shadcn.png"}
                         alt="Logo"
                         fill
-                        sizes="100vw"
+                        sizes="(max-width: 768px) 100vw, 672px"
                         className="object-cover opacity-50"
                         
                       />
