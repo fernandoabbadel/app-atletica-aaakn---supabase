@@ -317,7 +317,11 @@ export async function fetchStoreProductDetail(options: {
   const userId = options.userId?.trim() || "";
   if (!productId) return { produto: null, reviews: [], userOrders: [] };
 
-  const reviewsLimit = boundedLimit(options.reviewsLimit ?? 40, MAX_REVIEWS);
+  const requestedReviewsLimit = Number(options.reviewsLimit ?? 40);
+  const shouldFetchReviews = Number.isFinite(requestedReviewsLimit) ? requestedReviewsLimit > 0 : true;
+  const reviewsLimit = shouldFetchReviews
+    ? boundedLimit(requestedReviewsLimit, MAX_REVIEWS)
+    : 0;
   const ordersLimit = boundedLimit(options.ordersLimit ?? 20, MAX_ORDERS);
   const forceRefresh = options.forceRefresh ?? false;
   const cacheKey = `${productId}:${userId}:${reviewsLimit}:${ordersLimit}`;
@@ -340,18 +344,20 @@ export async function fetchStoreProductDetail(options: {
       ? null
       : produtoCandidate;
 
-  const reviewsPromise = queryRows("reviews", {
-    selectColumns: STORE_REVIEW_SELECT_COLUMNS,
-    eq: { productId },
-    orderBy: { column: "createdAt", ascending: false },
-    limit: reviewsLimit,
-  }).catch(() =>
-    queryRows("reviews", {
+  const reviewsPromise = shouldFetchReviews
+    ? queryRows("reviews", {
       selectColumns: STORE_REVIEW_SELECT_COLUMNS,
       eq: { productId },
+      orderBy: { column: "createdAt", ascending: false },
       limit: reviewsLimit,
-    })
-  );
+    }).catch(() =>
+      queryRows("reviews", {
+        selectColumns: STORE_REVIEW_SELECT_COLUMNS,
+        eq: { productId },
+        limit: reviewsLimit,
+      })
+    )
+    : Promise.resolve([] as Row[]);
 
   const ordersPromise = userId
     ? queryRows("orders", {

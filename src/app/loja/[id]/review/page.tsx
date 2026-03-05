@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { AlertTriangle, ArrowLeft, Loader2, Star } from "lucide-react";
 
 import { createStoreReview, fetchStoreProductDetail } from "../../../../lib/storePublicService";
@@ -24,6 +24,11 @@ interface Order {
 interface Review {
   id: string;
   userId: string;
+  userName: string;
+  userAvatar?: string;
+  rating: number;
+  comment: string;
+  createdAt?: TimestampLike | null;
 }
 
 type TimestampLike = { toDate: () => Date };
@@ -33,9 +38,13 @@ const toMillis = (value?: TimestampLike | null): number => {
   return value.toDate().getTime();
 };
 
+const formatReviewDate = (value?: TimestampLike | null): string => {
+  if (!value || typeof value.toDate !== "function") return "";
+  return value.toDate().toLocaleDateString("pt-BR");
+};
+
 export default function LojaProdutoReviewPage() {
   const params = useParams();
-  const router = useRouter();
   const { user } = useAuth();
   const { addToast } = useToast();
 
@@ -50,7 +59,7 @@ export default function LojaProdutoReviewPage() {
   const [submitting, setSubmitting] = useState(false);
   const [reasonToastShown, setReasonToastShown] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceRefresh = false) => {
     if (!productId) {
       setLoading(false);
       return;
@@ -63,7 +72,7 @@ export default function LojaProdutoReviewPage() {
         userId: user?.uid || null,
         reviewsLimit: 120,
         ordersLimit: 20,
-        forceRefresh: false,
+        forceRefresh,
       });
 
       setProduto(bundle.produto as unknown as Produto | null);
@@ -156,7 +165,9 @@ export default function LojaProdutoReviewPage() {
       });
 
       addToast("Avaliacao enviada com sucesso.", "success");
-      router.push(`/loja/${produto.id}`);
+      setComment("");
+      setRating(5);
+      await refresh(true);
     } catch (error: unknown) {
       console.error(error);
       addToast("Erro ao enviar avaliacao.", "error");
@@ -240,6 +251,42 @@ export default function LojaProdutoReviewPage() {
             </button>
           </form>
         )}
+
+        <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <h2 className="text-sm font-black uppercase text-white">Avaliacoes da Galera</h2>
+          <p className="text-[11px] text-zinc-500 mt-1">Total: {reviews.length}</p>
+
+          <div className="mt-4 space-y-4">
+            {reviews.length === 0 && (
+              <p className="text-zinc-500 text-xs text-center italic">Seja o primeiro a avaliar.</p>
+            )}
+
+            {reviews.map((review) => (
+              <article key={review.id} className="border-b border-zinc-800 pb-4 last:border-b-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-white">{review.userName || "Aluno"}</p>
+                    {formatReviewDate(review.createdAt) && (
+                      <p className="text-[11px] text-zinc-500">{formatReviewDate(review.createdAt)}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-0.5 text-yellow-500">
+                    {[1, 2, 3, 4, 5].map((index) => (
+                      <Star
+                        key={`${review.id}-star-${index}`}
+                        size={12}
+                        className={index <= Math.max(1, Math.min(5, review.rating || 0)) ? "fill-current" : "text-zinc-700"}
+                      />
+                    ))}
+                  </div>
+                </div>
+                {review.comment?.trim() && (
+                  <p className="mt-2 text-xs text-zinc-300 leading-relaxed">{review.comment}</p>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
       </main>
     </div>
   );

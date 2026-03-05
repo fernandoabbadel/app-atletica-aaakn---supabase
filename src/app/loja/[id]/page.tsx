@@ -8,19 +8,16 @@ import { useParams, useRouter } from "next/navigation";
 import {
   cancelStoreOrderRequest,
   createStoreOrder,
-  createStoreReview,
   fetchStoreProductDetail,
   toggleStoreProductLike,
 } from "../../../lib/storePublicService";
 import {
-  AlertTriangle,
   ArrowLeft,
   Copy,
   Heart,
   Loader2,
   MessageCircle,
   ShoppingBag,
-  Star,
   Wallet,
   X,
 } from "lucide-react";
@@ -49,17 +46,6 @@ interface Produto {
   cores?: string | string[];
   variantes?: ProdutoVariante[];
   caracteristicas?: string[];
-}
-
-interface Review {
-  id: string;
-  productId: string;
-  userId: string;
-  userName: string;
-  userAvatar?: string;
-  rating: number;
-  comment: string;
-  createdAt: DateLike | null;
 }
 
 interface Order {
@@ -146,14 +132,8 @@ export default function DetalheProdutoPage() {
   const { addToast } = useToast();
 
   const [produto, setProduto] = useState<Produto | null>(null);
-  const [reviews, setReviews] = useState<Review[]>([]);
   const [userOrders, setUserOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"detalhes" | "avaliacoes">("detalhes");
-
-  const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState("");
-  const [submittingReview, setSubmittingReview] = useState(false);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<1 | 2 | 3>(1);
@@ -245,17 +225,12 @@ export default function DetalheProdutoPage() {
         const bundle = await fetchStoreProductDetail({
           productId,
           userId: user?.uid || null,
-          reviewsLimit: 60,
+          reviewsLimit: 0,
           ordersLimit: 50,
           forceRefresh,
         });
 
         setProduto(bundle.produto as unknown as Produto | null);
-
-        const reviewsList = (bundle.reviews as unknown as Review[]).sort(
-          (left, right) => orderMillis(right.createdAt) - orderMillis(left.createdAt)
-        );
-        setReviews(reviewsList);
 
         const ordersList = (bundle.userOrders as unknown as Order[]).sort(
           (left, right) => orderMillis(right.createdAt) - orderMillis(left.createdAt)
@@ -274,49 +249,6 @@ export default function DetalheProdutoPage() {
   useEffect(() => {
     void refreshProductData(true);
   }, [refreshProductData]);
-
-  const approvedOrders = useMemo(
-    () => userOrders.filter((order) => order.status === "approved"),
-    [userOrders]
-  );
-
-  const latestApprovedOrder = useMemo(() => approvedOrders[0] || null, [approvedOrders]);
-
-  const eligibleApprovedOrders = useMemo(() => {
-    return approvedOrders.filter((order) => {
-      const referenceDate = order.updatedAt || order.createdAt;
-      if (!referenceDate || typeof referenceDate.toDate !== "function") return false;
-      const diffMs = Date.now() - referenceDate.toDate().getTime();
-      const diffDays = Math.ceil(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
-      return diffDays <= 5;
-    });
-  }, [approvedOrders]);
-
-  const userReviewCount = useMemo(() => {
-    const uid = user?.uid || "";
-    if (!uid) return 0;
-    return reviews.filter((review) => review.userId === uid).length;
-  }, [reviews, user?.uid]);
-
-  const remainingReviewSlots = useMemo(
-    () => Math.max(0, eligibleApprovedOrders.length - userReviewCount),
-    [eligibleApprovedOrders.length, userReviewCount]
-  );
-
-  const canReview = remainingReviewSlots > 0;
-
-  const reviewBlockReason = useMemo(() => {
-    if (approvedOrders.length === 0) {
-      return "Para avaliar, voce precisa de um pedido aprovado.";
-    }
-    if (eligibleApprovedOrders.length === 0) {
-      return "Prazo encerrado: avaliacoes ficam abertas por 5 dias apos a aprovacao.";
-    }
-    if (remainingReviewSlots <= 0) {
-      return "Voce ja usou todas as avaliacoes liberadas para este produto.";
-    }
-    return "";
-  }, [approvedOrders.length, eligibleApprovedOrders.length, remainingReviewSlots]);
 
   const pendingOrders = useMemo(
     () => userOrders.filter((order) => order.status === "pendente"),
@@ -479,37 +411,6 @@ export default function DetalheProdutoPage() {
     }
   };
 
-  const handleSubmitReview = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!user || !produto) return;
-    if (!canReview) {
-      addToast(reviewBlockReason || "Avaliacao indisponivel para este pedido.", "info");
-      return;
-    }
-
-    setSubmittingReview(true);
-    try {
-      await createStoreReview({
-        productId: produto.id,
-        userId: user.uid,
-        userName: user.nome || "Aluno",
-        userAvatar: user.foto || "",
-        rating,
-        comment,
-      });
-
-      setComment("");
-      setRating(5);
-      addToast("Avaliacao enviada!", "success");
-      await refreshProductData(true);
-    } catch (error: unknown) {
-      console.error(error);
-      addToast("Erro ao avaliar.", "error");
-    } finally {
-      setSubmittingReview(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="h-screen bg-[#050505] flex items-center justify-center">
@@ -572,27 +473,11 @@ export default function DetalheProdutoPage() {
           </div>
         </div>
 
-        <div className="flex gap-4 border-b border-zinc-800 mb-6">
-          <button
-            onClick={() => setActiveTab("detalhes")}
-            className={`pb-3 text-sm font-bold uppercase tracking-wide transition ${
-              activeTab === "detalhes" ? "text-white border-b-2 border-emerald-500" : "text-zinc-500"
-            }`}
-          >
-            Detalhes
-          </button>
-          <button
-            onClick={() => setActiveTab("avaliacoes")}
-            className={`pb-3 text-sm font-bold uppercase tracking-wide transition ${
-              activeTab === "avaliacoes" ? "text-white border-b-2 border-emerald-500" : "text-zinc-500"
-            }`}
-          >
-            Avaliacoes ({reviews.length})
-          </button>
+        <div className="mb-6 border-b border-zinc-800 pb-3">
+          <span className="text-sm font-bold uppercase tracking-wide text-white">Detalhes</span>
         </div>
 
-        {activeTab === "detalhes" && (
-          <div className="space-y-6 animate-in fade-in">
+        <div className="space-y-6 animate-in fade-in">
             <p className="text-zinc-300 text-sm leading-relaxed whitespace-pre-wrap">{produto.descricao}</p>
 
             <div className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
@@ -664,6 +549,13 @@ export default function DetalheProdutoPage() {
               <ShoppingBag size={20} /> {isOutOfStock ? "Produto Esgotado" : "Comprar Agora"}
             </button>
 
+            <Link
+              href={`/loja/${produto.id}/review`}
+              className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 text-xs font-black uppercase hover:border-emerald-500/40 hover:text-emerald-300 transition"
+            >
+              Avaliacoes
+            </Link>
+
             <section className="space-y-4 pt-2 border-t border-zinc-800">
               <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500">Seus pedidos</h3>
 
@@ -727,88 +619,7 @@ export default function DetalheProdutoPage() {
                 </div>
               )}
             </section>
-          </div>
-        )}
-
-        {activeTab === "avaliacoes" && (
-          <div className="space-y-6 animate-in fade-in">
-            {latestApprovedOrder && (
-              <Link
-                href={`/loja/${produto.id}/review`}
-                className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 text-xs font-black uppercase hover:border-emerald-500/40 hover:text-emerald-300 transition"
-              >
-                <Star size={14} /> Avaliacoes
-              </Link>
-            )}
-
-            {canReview ? (
-              <form onSubmit={handleSubmitReview} className="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 mb-6">
-                <h3 className="text-sm font-bold text-white uppercase mb-3">Deixe sua avaliacao</h3>
-                <p className="text-[11px] text-zinc-500 mb-3">
-                  Avaliacoes disponiveis agora: {remainingReviewSlots}
-                </p>
-                <div className="flex gap-2 mb-4">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <button key={star} type="button" onClick={() => setRating(star)}>
-                      <Star size={24} className={star <= rating ? "fill-yellow-500 text-yellow-500" : "text-zinc-600"} />
-                    </button>
-                  ))}
-                </div>
-                <textarea
-                  className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white focus:border-emerald-500 outline-none"
-                  placeholder="O que achou do produto?"
-                  rows={3}
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  required
-                />
-                <button
-                  disabled={submittingReview}
-                  type="submit"
-                  className="w-full mt-3 bg-emerald-600 py-2 rounded-lg font-bold text-xs uppercase hover:bg-emerald-500 transition"
-                >
-                  {submittingReview ? "Enviando..." : "Publicar Avaliacao"}
-                </button>
-              </form>
-            ) : (
-              <div className="p-4 bg-red-900/20 border border-red-500/30 rounded-xl text-center">
-                <AlertTriangle size={24} className="mx-auto text-red-500 mb-2" />
-                <p className="text-xs text-red-400 font-bold">
-                  {reviewBlockReason}
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              {reviews.length === 0 && <p className="text-zinc-500 text-xs text-center italic">Seja o primeiro a avaliar.</p>}
-              {reviews.map((rev) => (
-                <div key={rev.id} className="border-b border-zinc-800 pb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="relative w-8 h-8 bg-zinc-800 rounded-full overflow-hidden">
-                        <Image
-                          src={rev.userAvatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(rev.userName)}`}
-                          alt={rev.userName}
-                          fill
-                          sizes="32px"
-                          className="object-cover"
-                          
-                        />
-                      </div>
-                      <span className="text-xs font-bold text-white">{rev.userName}</span>
-                    </div>
-                    <div className="flex text-yellow-500">
-                      {[...Array(5)].map((_, index) => (
-                        <Star key={index} size={10} className={index < rev.rating ? "fill-current" : "text-zinc-700"} />
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-zinc-400 text-xs leading-relaxed">{rev.comment}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        </div>
       </div>
 
       {checkoutOpen && (
