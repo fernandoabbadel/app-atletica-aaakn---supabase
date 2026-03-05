@@ -71,6 +71,46 @@ const throwSupabaseError = (error: { message: string; code?: string | null; name
   });
 };
 
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+  const message = [raw.message, raw.details, raw.hint]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!message) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const extracted = match[2] ?? match[1];
+    if (extracted) return extracted;
+  }
+
+  return null;
+};
+
+const extractNonDefaultLockedColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const message = [raw.message, raw.details]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!message) return null;
+
+  const match =
+    message.match(/non-DEFAULT value into column\s+"([a-z0-9_]+)"/i) ??
+    message.match(/non-default value into column\s+'([a-z0-9_]+)'/i);
+  return match?.[1] ?? null;
+};
+
 const toDateLike = (value: unknown): DateLike | null => {
   if (!value) return null;
   if (typeof value === "object" && value !== null && "toDate" in (value as Record<string, unknown>)) {
@@ -381,23 +421,70 @@ export async function createStoreOrder(payload: {
     productName: payload.productName.trim() || "Produto",
     price: totalPrice,
     quantidade: quantity,
-    itens: quantity,
     total: totalPrice,
     data: payload.color?.trim()
       ? { corSelecionada: payload.color.trim() }
       : undefined,
   };
 
-  const { data, error } = await supabase
-    .from("orders")
-    .insert({
-      ...requestPayload,
-      status: "pendente",
-      createdAt: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-  if (error) throwSupabaseError(error);
+  const baseInsertPayload: Record<string, unknown> = {
+    ...requestPayload,
+    status: "pendente",
+    createdAt: new Date().toISOString(),
+  };
+  if (baseInsertPayload.data === undefined) {
+    delete baseInsertPayload.data;
+  }
+
+  const nonRemovableColumns = new Set([
+    "userId",
+    "userName",
+    "productId",
+    "productName",
+    "price",
+    "status",
+  ]);
+
+  let mutableInsertPayload = { ...baseInsertPayload };
+  let createdOrderId = "";
+
+  while (Object.keys(mutableInsertPayload).length > 0) {
+    const { data, error } = await supabase
+      .from("orders")
+      .insert(mutableInsertPayload)
+      .select("id")
+      .single();
+
+    if (!error) {
+      createdOrderId = asString(asObject(data)?.id);
+      break;
+    }
+
+    const problematicColumn =
+      extractMissingSchemaColumn(error) || extractNonDefaultLockedColumn(error);
+    const resolvedProblematicColumn = problematicColumn ?? "";
+
+    if (!resolvedProblematicColumn || nonRemovableColumns.has(resolvedProblematicColumn)) {
+      throwSupabaseError(error);
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(mutableInsertPayload, resolvedProblematicColumn)) {
+      throwSupabaseError(error);
+    }
+
+    const removableColumn = resolvedProblematicColumn;
+    const nextPayload = { ...mutableInsertPayload };
+    delete nextPayload[removableColumn];
+
+    if (Object.keys(nextPayload).length === Object.keys(mutableInsertPayload).length) {
+      throwSupabaseError(error);
+    }
+    mutableInsertPayload = nextPayload;
+  }
+
+  if (!createdOrderId) {
+    throw new Error("Nao foi possivel registrar o pedido.");
+  }
 
   await supabase.from("notifications").insert({
     userId: requestPayload.userId,
@@ -410,7 +497,7 @@ export async function createStoreOrder(payload: {
   });
 
   invalidateStoreCaches(requestPayload.productId);
-  return { id: asString(asObject(data)?.id) };
+  return { id: createdOrderId };
 }
 
 export async function cancelStoreOrderRequest(orderIdRaw: string): Promise<void> {
