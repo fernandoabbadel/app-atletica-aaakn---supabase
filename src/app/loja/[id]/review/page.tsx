@@ -5,7 +5,12 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { AlertTriangle, ArrowLeft, Loader2, Star } from "lucide-react";
 
-import { createStoreReview, fetchStoreProductDetail } from "../../../../lib/storePublicService";
+import {
+  createStoreReview,
+  fetchStoreProductDetail,
+  fetchStoreProductReviewsPage,
+  fetchStoreProductUserReviewCount,
+} from "../../../../lib/storePublicService";
 import { useAuth } from "../../../../context/AuthContext";
 import { useToast } from "../../../../context/ToastContext";
 
@@ -32,6 +37,7 @@ interface Review {
 }
 
 type TimestampLike = { toDate: () => Date };
+const REVIEWS_PAGE_SIZE = 20;
 
 const toMillis = (value?: TimestampLike | null): number => {
   if (!value || typeof value.toDate !== "function") return 0;
@@ -53,7 +59,12 @@ export default function LojaProdutoReviewPage() {
   const [produto, setProduto] = useState<Produto | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [userReviewCount, setUserReviewCount] = useState(0);
+  const [reviewsPage, setReviewsPage] = useState(1);
+  const [hasMoreReviews, setHasMoreReviews] = useState(false);
+  const [totalReviews, setTotalReviews] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -67,20 +78,39 @@ export default function LojaProdutoReviewPage() {
 
     setLoading(true);
     try {
-      const bundle = await fetchStoreProductDetail({
-        productId,
-        userId: user?.uid || null,
-        reviewsLimit: 120,
-        ordersLimit: 20,
-        forceRefresh,
-      });
+      const [bundle, firstPage, currentUserReviewCount] = await Promise.all([
+        fetchStoreProductDetail({
+          productId,
+          userId: user?.uid || null,
+          reviewsLimit: 0,
+          ordersLimit: 20,
+          forceRefresh,
+        }),
+        fetchStoreProductReviewsPage({
+          productId,
+          page: 1,
+          pageSize: REVIEWS_PAGE_SIZE,
+          forceRefresh,
+        }),
+        user?.uid
+          ? fetchStoreProductUserReviewCount({
+              productId,
+              userId: user.uid,
+              forceRefresh,
+            })
+          : Promise.resolve(0),
+      ]);
 
       setProduto(bundle.produto as unknown as Produto | null);
       const rows = (bundle.userOrders as unknown as Order[]).sort(
         (left, right) => toMillis(right.createdAt) - toMillis(left.createdAt)
       );
       setOrders(rows);
-      setReviews(bundle.reviews as unknown as Review[]);
+      setReviews(firstPage.reviews as unknown as Review[]);
+      setUserReviewCount(currentUserReviewCount);
+      setReviewsPage(1);
+      setHasMoreReviews(firstPage.hasMore);
+      setTotalReviews(firstPage.totalCount);
       setReasonToastShown(false);
     } catch (error: unknown) {
       console.error(error);
@@ -111,12 +141,6 @@ export default function LojaProdutoReviewPage() {
       return days <= 5;
     });
   }, [approvedOrders]);
-
-  const userReviewCount = useMemo(() => {
-    const uid = user?.uid || "";
-    if (!uid) return 0;
-    return reviews.filter((review) => review.userId === uid).length;
-  }, [reviews, user?.uid]);
 
   const remainingReviewSlots = useMemo(
     () => Math.max(0, eligibleApprovedOrders.length - userReviewCount),
@@ -173,6 +197,40 @@ export default function LojaProdutoReviewPage() {
       addToast("Erro ao enviar avaliacao.", "error");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleLoadMoreReviews = async () => {
+    if (!produto || loadingMoreReviews || !hasMoreReviews) return;
+
+    const nextPage = reviewsPage + 1;
+    setLoadingMoreReviews(true);
+    try {
+      const next = await fetchStoreProductReviewsPage({
+        productId: produto.id,
+        page: nextPage,
+        pageSize: REVIEWS_PAGE_SIZE,
+        forceRefresh: false,
+      });
+
+      setReviews((prev) => {
+        const knownIds = new Set(prev.map((entry) => entry.id));
+        const merged = [...prev];
+        (next.reviews as unknown as Review[]).forEach((entry) => {
+          if (knownIds.has(entry.id)) return;
+          knownIds.add(entry.id);
+          merged.push(entry);
+        });
+        return merged;
+      });
+      setReviewsPage(nextPage);
+      setHasMoreReviews(next.hasMore);
+      if (next.totalCount !== null) setTotalReviews(next.totalCount);
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao carregar mais avaliacoes.", "error");
+    } finally {
+      setLoadingMoreReviews(false);
     }
   };
 
@@ -254,7 +312,9 @@ export default function LojaProdutoReviewPage() {
 
         <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
           <h2 className="text-sm font-black uppercase text-white">Avaliacoes da Galera</h2>
-          <p className="text-[11px] text-zinc-500 mt-1">Total: {reviews.length}</p>
+          <p className="text-[11px] text-zinc-500 mt-1">
+            Total: {totalReviews ?? reviews.length}
+          </p>
 
           <div className="mt-4 space-y-4">
             {reviews.length === 0 && (
@@ -286,6 +346,25 @@ export default function LojaProdutoReviewPage() {
               </article>
             ))}
           </div>
+
+          {hasMoreReviews && (
+            <div className="mt-4 flex justify-center">
+              <button
+                onClick={() => void handleLoadMoreReviews()}
+                disabled={loadingMoreReviews}
+                className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-xs font-black uppercase text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+              >
+                {loadingMoreReviews ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    Carregando
+                  </>
+                ) : (
+                  "Carregar mais avaliacoes"
+                )}
+              </button>
+            </div>
+          )}
         </section>
       </main>
     </div>

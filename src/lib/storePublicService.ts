@@ -21,6 +21,8 @@ const productsFeedCache = new Map<string, CacheEntry<Row[]>>();
 const productsPageCache = new Map<string, CacheEntry<StoreProductsPageResult>>();
 const categoriesCache = new Map<string, CacheEntry<Row[]>>();
 const productDetailCache = new Map<string, CacheEntry<StoreProductDetailBundle>>();
+const productReviewsPageCache = new Map<string, CacheEntry<StoreProductReviewsPageResult>>();
+const productUserReviewCountCache = new Map<string, CacheEntry<number>>();
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -57,10 +59,18 @@ const invalidateStoreCaches = (productId?: string): void => {
   categoriesCache.clear();
   if (!productId) {
     productDetailCache.clear();
+    productReviewsPageCache.clear();
+    productUserReviewCountCache.clear();
     return;
   }
   productDetailCache.forEach((_, key) => {
     if (key.startsWith(`${productId}:`)) productDetailCache.delete(key);
+  });
+  productReviewsPageCache.forEach((_, key) => {
+    if (key.startsWith(`${productId}:`)) productReviewsPageCache.delete(key);
+  });
+  productUserReviewCountCache.forEach((_, key) => {
+    if (key.startsWith(`${productId}:`)) productUserReviewCountCache.delete(key);
   });
 };
 
@@ -170,6 +180,14 @@ export interface StoreProductDetailBundle {
   produto: Row | null;
   reviews: Row[];
   userOrders: Row[];
+}
+
+export interface StoreProductReviewsPageResult {
+  reviews: Row[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  totalCount: number | null;
 }
 
 export interface StoreProductsPageResult {
@@ -378,6 +396,117 @@ export async function fetchStoreProductDetail(options: {
   const bundle = { produto, reviews, userOrders };
   setCache(productDetailCache, cacheKey, bundle);
   return bundle;
+}
+
+export async function fetchStoreProductReviewsPage(options: {
+  productId: string;
+  page?: number;
+  pageSize?: number;
+  forceRefresh?: boolean;
+}): Promise<StoreProductReviewsPageResult> {
+  const supabase = getSupabaseClient();
+  const productId = options.productId.trim();
+  if (!productId) {
+    return { reviews: [], page: 1, pageSize: 20, hasMore: false, totalCount: 0 };
+  }
+
+  const page = Math.max(1, Math.floor(options.page ?? 1));
+  const pageSize = boundedLimit(options.pageSize ?? 20, 60);
+  const forceRefresh = options.forceRefresh ?? false;
+  const cacheKey = `${productId}:${page}:${pageSize}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(productReviewsPageCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const runQuery = async (withOrder: boolean) => {
+    let query = supabase
+      .from("reviews")
+      .select(STORE_REVIEW_SELECT_COLUMNS, { count: "exact" })
+      .eq("productId", productId)
+      .range(from, to);
+    if (withOrder) {
+      query = query.order("createdAt", { ascending: false });
+    }
+    return query;
+  };
+
+  let data: unknown[] = [];
+  let totalCount: number | null = null;
+
+  try {
+    const { data: rows, error, count } = await runQuery(true);
+    if (error) throwSupabaseError(error);
+    data = rows ?? [];
+    totalCount = typeof count === "number" ? count : null;
+  } catch {
+    const { data: rows, error, count } = await runQuery(false);
+    if (error) throwSupabaseError(error);
+    data = rows ?? [];
+    totalCount = typeof count === "number" ? count : null;
+  }
+
+  const reviews = (data as Row[]).map((row) => normalizeRowTimestamps(row));
+  const hasMore =
+    totalCount !== null
+      ? from + reviews.length < totalCount
+      : reviews.length >= pageSize;
+
+  const result: StoreProductReviewsPageResult = {
+    reviews,
+    page,
+    pageSize,
+    hasMore,
+    totalCount,
+  };
+  setCache(productReviewsPageCache, cacheKey, result);
+  return result;
+}
+
+export async function fetchStoreProductUserReviewCount(options: {
+  productId: string;
+  userId: string;
+  forceRefresh?: boolean;
+}): Promise<number> {
+  const supabase = getSupabaseClient();
+  const productId = options.productId.trim();
+  const userId = options.userId.trim();
+  if (!productId || !userId) return 0;
+
+  const forceRefresh = options.forceRefresh ?? false;
+  const cacheKey = `${productId}:${userId}`;
+  if (!forceRefresh) {
+    const cached = getCache(productUserReviewCountCache, cacheKey);
+    if (cached !== null) return cached;
+  }
+
+  try {
+    const { count, error } = await supabase
+      .from("reviews")
+      .select("id", { count: "exact", head: true })
+      .eq("productId", productId)
+      .eq("userId", userId);
+    if (error) throwSupabaseError(error);
+    const normalized = count ?? 0;
+    setCache(productUserReviewCountCache, cacheKey, normalized);
+    return normalized;
+  } catch {
+    const fallbackLimit = boundedLimit(MAX_REVIEWS, 2000);
+    const { data, error } = await supabase
+      .from("reviews")
+      .select("id")
+      .eq("productId", productId)
+      .eq("userId", userId)
+      .limit(fallbackLimit);
+    if (error) throwSupabaseError(error);
+    const normalized = (data ?? []).length;
+    setCache(productUserReviewCountCache, cacheKey, normalized);
+    return normalized;
+  }
 }
 
 export async function toggleStoreProductLike(payload: {
