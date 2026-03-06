@@ -210,6 +210,71 @@ const clearLigaEditorDraft = (ligaId: string): void => {
 
 const nowIso = (): string => new Date().toISOString();
 
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+    if (!error || typeof error !== "object") return null;
+    const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const message = [raw.message, raw.details, raw.hint]
+        .map((entry) => (typeof entry === "string" ? entry : ""))
+        .filter((entry) => entry.length > 0)
+        .join(" | ");
+    if (!message) return null;
+
+    const normalized = message.toLowerCase();
+    const isMissingColumn =
+        (normalized.includes("column") && normalized.includes("does not exist")) ||
+        normalized.includes("could not find the");
+    if (!isMissingColumn) return null;
+
+    const patterns = [
+        /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+        /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+        /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = message.match(pattern);
+        if (!match) continue;
+        const extracted = match[2] ?? match[1];
+        if (extracted) return extracted;
+    }
+
+    return null;
+};
+
+const extractErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) return error.message || "Erro inesperado.";
+    if (typeof error === "string" && error.trim()) return error.trim();
+    if (error && typeof error === "object") {
+        const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+        const message = [raw.message, raw.details, raw.hint]
+            .map((entry) => (typeof entry === "string" ? entry : ""))
+            .filter((entry) => entry.length > 0)
+            .join(" | ");
+        if (message) return message;
+        try {
+            const serialized = JSON.stringify(error);
+            if (serialized && serialized !== "{}") return serialized;
+        } catch {
+            // ignora serializacao
+        }
+    }
+    return "Erro inesperado.";
+};
+
+const removeMissingColumnFromPayload = (
+    payload: Record<string, unknown>,
+    missingColumn: string
+): Record<string, unknown> | null => {
+    const normalizedMissing = missingColumn.trim().toLowerCase();
+    if (!normalizedMissing) return null;
+
+    const nextEntries = Object.entries(payload).filter(
+        ([key]) => key.trim().toLowerCase() !== normalizedMissing
+    );
+    if (nextEntries.length === Object.keys(payload).length) return null;
+    return Object.fromEntries(nextEntries);
+};
+
 export default function LigasAdminPage() {
   const { addToast } = useToast();
   
@@ -731,9 +796,7 @@ export default function LigasAdminPage() {
                   if (eventUpsertError) throw eventUpsertError;
 
                   if (ev.pollQuestion) {
-                      const { error: pollInsertError } = await supabase
-                        .from("eventos_enquetes")
-                        .insert({
+                      let pollInsertPayload: Record<string, unknown> = {
                           eventoId: eventId,
                           question: ev.pollQuestion,
                           options: [],
@@ -743,10 +806,31 @@ export default function LigasAdminPage() {
                           createdAt: timestamp,
                           updatedAt: timestamp,
                           creatorId: ligaData.id,
-                          isOfficial: true
-                        });
-                      if (pollInsertError) throw pollInsertError;
-                      ev.pollQuestion = ""; 
+                          isOfficial: true,
+                      };
+
+                      while (Object.keys(pollInsertPayload).length > 0) {
+                          const { error: pollInsertError } = await supabase
+                            .from("eventos_enquetes")
+                            .insert(pollInsertPayload);
+                          if (!pollInsertError) {
+                              ev.pollQuestion = "";
+                              break;
+                          }
+
+                          const missingColumn = extractMissingSchemaColumn(pollInsertError);
+                          if (!missingColumn) throw pollInsertError;
+                          const nextPayload = removeMissingColumnFromPayload(
+                              pollInsertPayload,
+                              missingColumn
+                          );
+                          if (!nextPayload) throw pollInsertError;
+                          pollInsertPayload = nextPayload;
+                      }
+
+                      if (ev.pollQuestion) {
+                          throw new Error("Nao foi possivel salvar a enquete do evento.");
+                      }
                   }
               });
               
@@ -787,9 +871,9 @@ export default function LigasAdminPage() {
               "Atualizacao de dados da Liga"
           );
 
-      } catch (error) { 
-          console.error(error);
-          addToast("Erro ao salvar.", "error"); 
+      } catch (error: unknown) { 
+          console.error("Falha ao salvar dados da liga:", error);
+          addToast(`Erro ao salvar: ${extractErrorMessage(error)}`, "error"); 
       } finally {
           setLoading(false);
       }

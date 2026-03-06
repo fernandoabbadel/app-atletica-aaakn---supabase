@@ -268,15 +268,12 @@ async function selectRows(
 }
 
 async function selectEventById(eventId: string): Promise<Row | null> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("eventos")
-    .select(EVENTOS_SELECT_COLUMNS)
-    .eq("id", eventId)
-    .maybeSingle();
-
-  if (error) throwSupabaseError(error);
-  return data ? (normalizeRowTimestamps(data as Row) as Row) : null;
+  const rows = await selectRows("eventos", {
+    eq: { id: eventId },
+    limit: 1,
+  });
+  if (rows.length === 0) return null;
+  return normalizeRowTimestamps(rows[0] as Row) as Row;
 }
 
 async function updateEventRow(eventId: string, patch: Row): Promise<void> {

@@ -173,6 +173,20 @@ const removeMissingColumnFromSelection = (
   return next;
 };
 
+const removeMissingColumnFromPayload = (
+  payload: Record<string, unknown>,
+  missingColumn: string
+): Record<string, unknown> | null => {
+  const normalizedMissing = missingColumn.trim().toLowerCase();
+  if (!normalizedMissing) return null;
+
+  const nextEntries = Object.entries(payload).filter(
+    ([key]) => key.toLowerCase() !== normalizedMissing
+  );
+  if (nextEntries.length === Object.keys(payload).length) return null;
+  return Object.fromEntries(nextEntries);
+};
+
 const nowIso = (): string => new Date().toISOString();
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
@@ -934,24 +948,38 @@ export async function createEventPoll(payload: {
     requestPayload,
     async () => {
       const supabase = getSupabaseClient();
-      const { data, error } = await supabase
-        .from("eventos_enquetes")
-        .insert({
-          eventoId: eventId,
-          question: requestPayload.question,
-          allowUserOptions: requestPayload.allowUserOptions,
-          options: [],
-          voters: [],
-          userVotes: {},
-          creatorId: requestPayload.creatorId || null,
-          isOfficial: true,
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        })
-        .select("id")
-        .single();
-      if (error) throwSupabaseError(error);
-      return { id: asString((data as Record<string, unknown> | null)?.id) };
+      let insertPayload: Record<string, unknown> = {
+        eventoId: eventId,
+        question: requestPayload.question,
+        allowUserOptions: requestPayload.allowUserOptions,
+        options: [],
+        voters: [],
+        userVotes: {},
+        creatorId: requestPayload.creatorId || null,
+        isOfficial: true,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+
+      while (Object.keys(insertPayload).length > 0) {
+        const { data, error } = await supabase
+          .from("eventos_enquetes")
+          .insert(insertPayload)
+          .select("id")
+          .single();
+        if (!error) {
+          return { id: asString((data as Record<string, unknown> | null)?.id) };
+        }
+
+        const missingColumn = asString(extractMissingSchemaColumn(error));
+        if (!missingColumn) throwSupabaseError(error);
+
+        const nextPayload = removeMissingColumnFromPayload(insertPayload, missingColumn);
+        if (!nextPayload) throwSupabaseError(error);
+        insertPayload = nextPayload as Record<string, unknown>;
+      }
+
+      throw new Error("Nao foi possivel criar enquete para o evento.");
     }
   );
 

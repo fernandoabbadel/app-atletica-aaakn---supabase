@@ -7,7 +7,7 @@ import Image from "next/image"; // 🦈 Importando Image
 import {
   LogOut, LayoutDashboard, Settings, ShieldAlert, Trophy, Calendar,
   Star, Gamepad2, BookOpen, Dumbbell, History, ShoppingBag, Megaphone, MessageSquare,
-  Lock, Crown, BarChart3, Users, Camera, Dice5
+  Lock, Crown, BarChart3, Users, Camera, Dice5, Rocket
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { logActivity } from "../../lib/logger";
@@ -61,12 +61,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
     { name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
     { name: "Usuários", path: "/admin/usuarios", icon: <Users size={18} /> },
+    { name: "Cadastro", path: "/admin/cadastro", icon: <Users size={18} /> },
     { name: "Álbum da Galera", path: "/admin/album", icon: <Camera size={18} /> },
     { name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },
     { name: "Arena Games", path: "/admin/games", icon: <Gamepad2 size={18} /> },
     { name: "Fidelidade", path: "/admin/fidelidade", icon: <Star size={18} /> },
     { name: "Conquistas", path: "/admin/conquistas", icon: <Trophy size={18} /> },
     { name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
+    { name: "Lancamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
     { name: "Planos", path: "/admin/planos", icon: <Crown size={18} /> },
     { name: "Histórico", path: "/admin/historico", icon: <History size={18} /> },
     { name: "Guia do App", path: "/admin/guia", icon: <BookOpen size={18} /> },
@@ -156,3 +158,4 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     </div>
   );
 }
+

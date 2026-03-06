@@ -43,6 +43,7 @@ export const APP_PAGES = [
     // --- ADMINISTRAÃ‡ÃƒO ---
     { path: '/admin', label: 'ðŸ‘® Admin Dashboard' },
     { path: '/admin/album', label: 'ðŸ“· Adm Ãlbum' },
+    { path: '/admin/cadastro', label: 'ðŸ“ Adm Cadastro' },
     { path: '/admin/carteirinha', label: 'ðŸªª Adm Carteirinha' },
     { path: '/admin/comunidade', label: 'ðŸ’¬ Adm Comunidade' },
     { path: '/admin/configuracoes', label: 'âš™ï¸ ConfiguraÃ§Ãµes (Adm)' },
@@ -56,6 +57,7 @@ export const APP_PAGES = [
     { path: '/admin/gym', label: 'ðŸ‹ï¸ Adm Gym' },
     { path: '/admin/historico', label: 'ðŸ“œ Adm HistÃ³rico' },
     { path: '/admin/landing', label: 'ðŸ‘¥ Gerenciar LandingPage' },
+    { path: '/admin/lancamento', label: 'ðŸš€ Projeto Lancamento' },
     { path: '/admin/ligas', label: 'ðŸ† Adm Ligas' },
     { path: '/admin/logs', label: 'ðŸ“ Logs do Sistema' },
     { path: '/admin/loja', label: 'ðŸ‘• Adm Loja' },

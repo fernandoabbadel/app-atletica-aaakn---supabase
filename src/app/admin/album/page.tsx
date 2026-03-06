@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Medal, Palette, Save, ShieldCheck, Trophy } from "lucide-react";
+import { ArrowLeft, Medal, Palette, Plus, Save, ShieldCheck, Trophy } from "lucide-react";
 
 import { useToast } from "../../../context/ToastContext";
 import {
@@ -116,6 +116,13 @@ export default function AdminAlbumMenuPage() {
               <p className="text-[11px] text-zinc-500 font-bold">
                 Edita em tempo real titulo, subtitulo e imagem da home do album.
               </p>
+              <Link
+                href="/admin/cadastro"
+                className="mt-2 inline-flex items-center gap-1 text-[10px] font-black uppercase text-cyan-300 hover:text-cyan-200"
+              >
+                <Plus size={12} />
+                Adicionar turma
+              </Link>
             </div>
             <button
               onClick={handleSaveGlobal}

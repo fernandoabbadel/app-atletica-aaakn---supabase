@@ -12,17 +12,11 @@ import {
   type AlbumUiConfig,
 } from "../../lib/albumUiService";
 import { useAuth } from "../../context/AuthContext";
-
-const TURMAS = [
-  { id: "T1", slug: "t1", nome: "Turma I", mascote: "Jacare", frase: "Primeira linhagem" },
-  { id: "T2", slug: "t2", nome: "Turma II", mascote: "Cavalo Marinho", frase: "Cardume estrategico" },
-  { id: "T3", slug: "t3", nome: "Turma III", mascote: "Tartaruga", frase: "Resistencia e foco" },
-  { id: "T4", slug: "t4", nome: "Turma IV", mascote: "Baleia", frase: "Forca de oceano" },
-  { id: "T5", slug: "t5", nome: "Turma V", mascote: "Pinguim", frase: "Velocidade no gelo" },
-  { id: "T6", slug: "t6", nome: "Turma VI", mascote: "Lagosta", frase: "Blindagem natural" },
-  { id: "T7", slug: "t7", nome: "Turma VII", mascote: "Urso Polar", frase: "Predadores de elite" },
-  { id: "T8", slug: "t8", nome: "Turma VIII", mascote: "Calouros", frase: "Caca aos bixos" },
-] as const;
+import {
+  fetchTurmasConfig,
+  getDefaultTurmas,
+  type TurmaConfig,
+} from "../../lib/turmasService";
 
 const ADMIN_ROLES = new Set([
   "master",
@@ -33,17 +27,38 @@ const ADMIN_ROLES = new Set([
   "vendas",
 ]);
 
-const resolveTurmaSlug = (turmaRaw?: string): string => {
-  if (!turmaRaw) return "t8";
-  const normalized = turmaRaw.trim().toUpperCase();
-  if (normalized.startsWith("T")) return normalized.toLowerCase();
-  const digits = normalized.replace(/\D/g, "");
-  return digits ? `t${digits}` : "t8";
+const resolveTurmaSlug = (turmaRaw: string | undefined, turmas: TurmaConfig[]): string => {
+  const fallbackSlug =
+    turmas.find((entry) => entry.id === "T8")?.slug || turmas[0]?.slug || "t8";
+  if (!turmaRaw) return fallbackSlug;
+
+  const normalizedRaw = turmaRaw.trim();
+  if (!normalizedRaw) return fallbackSlug;
+
+  const bySlug = turmas.find(
+    (entry) => entry.slug.toLowerCase() === normalizedRaw.toLowerCase()
+  );
+  if (bySlug) return bySlug.slug;
+
+  const upper = normalizedRaw.toUpperCase();
+  const byId = turmas.find((entry) => entry.id === upper);
+  if (byId) return byId.slug;
+
+  const digits = upper.replace(/\D/g, "");
+  if (digits) {
+    const byDigits = turmas.find(
+      (entry) => entry.slug.toLowerCase() === `t${digits}`
+    );
+    if (byDigits) return byDigits.slug;
+  }
+
+  return fallbackSlug;
 };
 
 export default function AlbumTurmasPage() {
   const { user } = useAuth();
   const [uiConfig, setUiConfig] = useState<AlbumUiConfig | null>(null);
+  const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
   const [imageFallbackIndex, setImageFallbackIndex] = useState<Record<string, number>>(
     {}
   );
@@ -51,16 +66,22 @@ export default function AlbumTurmasPage() {
 
   useEffect(() => {
     let mounted = true;
-    const loadUi = async () => {
+    const loadData = async () => {
       try {
-        const config = await fetchAlbumUiConfig();
+        const [config, turmasConfig] = await Promise.all([
+          fetchAlbumUiConfig(),
+          fetchTurmasConfig(),
+        ]);
         if (!mounted) return;
         setUiConfig(config);
+        setTurmas(turmasConfig);
       } catch {
-        if (mounted) setUiConfig(null);
+        if (!mounted) return;
+        setUiConfig(null);
+        setTurmas(getDefaultTurmas());
       }
     };
-    void loadUi();
+    void loadData();
     return () => {
       mounted = false;
     };
@@ -74,15 +95,15 @@ export default function AlbumTurmasPage() {
   const shouldShowSubtitle =
     subtitle.trim().toLowerCase() !== heroHeadline.trim().toLowerCase();
   const hero = uiConfig?.capa?.trim() || "/capa_t8.jpg";
-  const currentTurmaSlug = resolveTurmaSlug(user?.turma);
+  const currentTurmaSlug = resolveTurmaSlug(user?.turma, turmas);
   const canEditAlbum = ADMIN_ROLES.has(String(user?.role || "").toLowerCase());
   const turmaImageCandidates = useMemo(
     () =>
-      TURMAS.reduce<Record<string, string[]>>((acc, turma) => {
-        acc[turma.id] = getTurmaImageCandidates(turma.id);
+      turmas.reduce<Record<string, string[]>>((acc, turma) => {
+        acc[turma.id] = getTurmaImageCandidates(turma.id, turma.logo || "/logo.png");
         return acc;
       }, {}),
-    []
+    [turmas]
   );
 
   return (
@@ -194,7 +215,7 @@ export default function AlbumTurmasPage() {
         )}
 
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {TURMAS.map((turma, index) => (
+          {turmas.map((turma, index) => (
             <Link
               key={turma.id}
               href={`/album/${turma.slug}`}

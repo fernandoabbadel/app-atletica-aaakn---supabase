@@ -45,6 +45,26 @@ const formatLogTime = (value: unknown): string => {
   return parsedDate.toLocaleTimeString();
 };
 
+const extractErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message || "Erro inesperado.";
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (error && typeof error === "object") {
+    const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const message = [raw.message, raw.details, raw.hint]
+      .map((entry) => (typeof entry === "string" ? entry : ""))
+      .filter((entry) => entry.length > 0)
+      .join(" | ");
+    if (message) return message;
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== "{}") return serialized;
+    } catch {
+      // ignora serializacao
+    }
+  }
+  return "Erro inesperado.";
+};
+
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({ totalUsers: 0, totalEvents: 0, totalSales: 0, activeChamps: 0 });
   const [recentUsers, setRecentUsers] = useState<RecentUser[]>([]);
@@ -62,7 +82,7 @@ export default function AdminDashboardPage() {
         setRecentUsers(data.recentUsers);
         setRecentActivity(data.recentActivity);
       } catch (error: unknown) {
-            console.error("Erro ao carregar dashboard:", error);
+            console.error(`Erro ao carregar dashboard: ${extractErrorMessage(error)}`, error);
         } finally {
             setLoading(false);
         }

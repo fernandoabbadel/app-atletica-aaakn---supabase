@@ -34,11 +34,14 @@ import {
 } from "../../../lib/albumService";
 import { getTurmaImage } from "../../../constants/turmaImages";
 import {
+  fetchTurmasConfig,
+  getDefaultTurmas,
+  type TurmaConfig,
+} from "../../../lib/turmasService";
+import {
   getBackendErrorCode,
   isPermissionError,
 } from "@/lib/backendErrors";
-
-type TurmaKey = "T1" | "T2" | "T3" | "T4" | "T5" | "T6" | "T7" | "T8";
 
 interface UserData {
   id: string;
@@ -60,22 +63,29 @@ interface UserData {
 const USERS_PAGE_SIZE = 20;
 const DEFAULT_AVATAR = "https://github.com/shadcn.png";
 
-const TURMAS_DATA: Record<TurmaKey, { nome: string; logo: string; capa: string }> = {
-  T1: { nome: "Turma I - Jacare", logo: getTurmaImage("T1"), capa: "/capa_t1.jpg" },
-  T2: { nome: "Turma II - Cavalo Marinho", logo: getTurmaImage("T2"), capa: "/capa_t2.jpg" },
-  T3: { nome: "Turma III - Tartaruga", logo: getTurmaImage("T3"), capa: "/capa_t3.jpg" },
-  T4: { nome: "Turma IV - Baleia", logo: getTurmaImage("T4"), capa: "/capa_t4.jpg" },
-  T5: { nome: "Turma V - Pinguim", logo: getTurmaImage("T5"), capa: "/capa_t5.jpg" },
-  T6: { nome: "Turma VI - Lagosta", logo: getTurmaImage("T6"), capa: "/capa_t6.jpg" },
-  T7: { nome: "Turma VII - Urso Polar", logo: getTurmaImage("T7"), capa: "/capa_t7.jpg" },
-  T8: { nome: "Turma VIII - Calouros", logo: getTurmaImage("T8"), capa: "/capa_t8.jpg" },
-};
+const parseTurmaSlug = (slug: string | undefined, turmas: TurmaConfig[]): string => {
+  const fallbackId = turmas.find((entry) => entry.id === "T8")?.id || turmas[0]?.id || "T8";
+  if (!slug) return fallbackId;
 
-const parseTurmaSlug = (slug: string | undefined): TurmaKey => {
-  const raw = (slug || "t8").trim().toUpperCase().replace("/", "");
-  const normalized = raw.startsWith("T") ? raw : `T${raw.replace(/\D/g, "")}`;
-  if (normalized in TURMAS_DATA) return normalized as TurmaKey;
-  return "T8";
+  const normalizedSlug = slug.trim().toLowerCase().replace(/\//g, "");
+  if (!normalizedSlug) return fallbackId;
+
+  const bySlug = turmas.find((entry) => entry.slug.toLowerCase() === normalizedSlug);
+  if (bySlug) return bySlug.id;
+
+  const upper = normalizedSlug.toUpperCase();
+  const byId = turmas.find((entry) => entry.id === upper);
+  if (byId) return byId.id;
+
+  const digits = upper.replace(/\D/g, "");
+  if (digits) {
+    const byDigits = turmas.find(
+      (entry) => entry.id === `T${digits}` || entry.slug.toLowerCase() === `t${digits}`
+    );
+    if (byDigits) return byDigits.id;
+  }
+
+  return fallbackId;
 };
 
 const extractTargetUidFromQr = (rawValue: string): string => {
@@ -126,7 +136,11 @@ const extractTargetUidFromQr = (rawValue: string): string => {
 export default function AlbumTurmaPage() {
   const params = useParams<{ turmaId: string }>();
   const searchParams = useSearchParams();
-  const turma = useMemo(() => parseTurmaSlug(params?.turmaId), [params]);
+  const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
+  const turma = useMemo(
+    () => parseTurmaSlug(params?.turmaId, turmas),
+    [params?.turmaId, turmas]
+  );
 
   const { user, loading: authLoading } = useAuth();
   const { addToast } = useToast();
@@ -237,10 +251,11 @@ export default function AlbumTurmaPage() {
 
     const loadTurma = async () => {
       try {
-        const [usersResult, cmsResult, uiResult] = await Promise.allSettled([
+        const [usersResult, cmsResult, uiResult, turmasResult] = await Promise.allSettled([
           fetchUsersByTurmaPage(turma, { pageSize: USERS_PAGE_SIZE }),
           fetchAlbumConfig(turma),
           fetchAlbumUiConfig(),
+          fetchTurmasConfig(),
         ]);
         if (!mounted) return;
 
@@ -267,6 +282,10 @@ export default function AlbumTurmaPage() {
           setAlbumUiConfig(uiResult.value);
         } else {
           setAlbumUiConfig(null);
+        }
+
+        if (turmasResult.status === "fulfilled") {
+          setTurmas(turmasResult.value);
         }
       } finally {
         if (mounted) setLoadingTurma(false);
@@ -460,9 +479,26 @@ export default function AlbumTurmaPage() {
     return { pegos: totalEuPeguei, total: totalCadastrados };
   }, [usuarios, meuAlbum]);
 
-  const turmaCover = turmaConfig?.capa?.trim() || TURMAS_DATA[turma].capa;
-  const turmaTitle = turmaConfig?.titulo?.trim() || TURMAS_DATA[turma].nome;
-  const turmaSubtitle = turmaConfig?.subtitulo?.trim() || "Album Oficial";
+  const turmaMeta = useMemo(() => {
+    const selected = turmas.find((entry) => entry.id === turma);
+    if (selected) return selected;
+
+    const digits = turma.replace(/\D/g, "");
+    const slug = digits ? `t${digits}` : turma.toLowerCase();
+    return {
+      id: turma || "T8",
+      slug: slug || "t8",
+      nome: `Turma ${digits || turma.replace(/[^A-Z0-9]/g, "")}`.trim(),
+      mascote: "Mascote",
+      frase: "Album Oficial",
+      capa: slug ? `/capa_${slug}.jpg` : "/capa_t8.jpg",
+      logo: getTurmaImage(turma || "T8"),
+    } as TurmaConfig;
+  }, [turma, turmas]);
+
+  const turmaCover = turmaConfig?.capa?.trim() || turmaMeta.capa || "/capa_t8.jpg";
+  const turmaTitle = turmaConfig?.titulo?.trim() || turmaMeta.nome;
+  const turmaSubtitle = turmaConfig?.subtitulo?.trim() || turmaMeta.frase || "Album Oficial";
   const pageTitle = albumUiConfig?.titulo?.trim() || "Caca aos Bixos";
 
   useEffect(() => {
@@ -517,11 +553,11 @@ export default function AlbumTurmaPage() {
           priority
           sizes="100vw"
           onError={() => {
-            if (coverSrc === TURMAS_DATA[turma].capa) {
+            if (coverSrc === turmaMeta.capa) {
               setCoverSrc("/logo.png");
               return;
             }
-            setCoverSrc(TURMAS_DATA[turma].capa);
+            setCoverSrc(turmaMeta.capa);
           }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-transparent" />

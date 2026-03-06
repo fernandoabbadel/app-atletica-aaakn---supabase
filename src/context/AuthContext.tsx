@@ -69,6 +69,11 @@ export interface User {
   email: string;
   foto: string;
   role: UserRole | string;
+
+  // Multi-tenant
+  tenant_id?: string | null;
+  tenant_role?: "visitante" | "user" | "admin_tenant" | "master_tenant" | string;
+  tenant_status?: "unlinked" | "pending" | "approved" | "rejected" | "disabled" | string;
   
   // Controle
   status?: UserStatus;
@@ -401,7 +406,7 @@ const buildUserPatchPayload = (
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const USER_SELECT_COLUMNS =
-  "uid,nome,email,foto,role,status,ultimoLoginDiario,data_adesao,level,xp,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,capa,estadoOrigem,extra,createdAt,updatedAt";
+  "uid,nome,email,foto,role,status,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,capa,estadoOrigem,extra,createdAt,updatedAt";
 const USER_SELECT_COLUMNS_LIST = USER_SELECT_COLUMNS.split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);

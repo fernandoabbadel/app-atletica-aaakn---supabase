@@ -24,6 +24,69 @@ const asObject = (value: unknown): Record<string, unknown> | null => {
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
 
+const splitSelectColumns = (selectColumns: string): string[] =>
+  selectColumns
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+  const message = [raw.message, raw.details, raw.hint]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!message) return null;
+
+  const normalized = message.toLowerCase();
+  const isMissingColumn =
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    normalized.includes("could not find the");
+  if (!isMissingColumn) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const extracted = match[2] ?? match[1];
+    if (extracted) return extracted;
+  }
+
+  return null;
+};
+
+const removeMissingColumn = (columns: string[], missingColumn: string): string[] | null => {
+  const normalizedMissing = missingColumn.trim().toLowerCase();
+  if (!normalizedMissing) return null;
+
+  const next = columns.filter((column) => {
+    const normalizedColumn = column.trim().toLowerCase();
+    if (!normalizedColumn) return false;
+    if (normalizedColumn === normalizedMissing) return false;
+    return !normalizedColumn.endsWith(`.${normalizedMissing}`);
+  });
+
+  if (next.length === columns.length) return null;
+  return next;
+};
+
+const throwSupabaseError = (error: {
+  message: string;
+  code?: string | null;
+  name?: string | null;
+}): never => {
+  throw Object.assign(new Error(error.message), {
+    code: error.code ?? `db/${error.name ?? "query-failed"}`,
+    cause: error,
+  });
+};
+
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
   if (requested < 1) return 1;
@@ -110,34 +173,58 @@ async function fetchRowsWithOrderFallback(options: {
   orderFields: string[];
 }): Promise<Row[]> {
   const supabase = getSupabaseClient();
+  let mutableColumns = splitSelectColumns(options.selectColumns);
   let lastError: unknown = null;
+
+  const runAttempt = async (orderField?: string): Promise<Row[] | undefined> => {
+    while (mutableColumns.length > 0) {
+      let query = supabase
+        .from(options.tableName)
+        .select(mutableColumns.join(","))
+        .limit(options.maxResults);
+
+      if (orderField) {
+        query = query.order(orderField, { ascending: false });
+      }
+
+      const { data, error } = await query;
+      if (!error) return Array.isArray(data) ? (data as unknown as Row[]) : [];
+
+      lastError = error;
+      const missingColumn = extractMissingSchemaColumn(error);
+      if (!missingColumn) return undefined;
+
+      if (orderField && orderField.trim().toLowerCase() === missingColumn.toLowerCase()) {
+        return undefined;
+      }
+
+      const nextColumns = removeMissingColumn(mutableColumns, missingColumn);
+      if (!nextColumns || nextColumns.length === 0) return undefined;
+      mutableColumns = nextColumns;
+    }
+
+    return [];
+  };
 
   // Tentamos diferentes campos de ordenacao para tolerar schema antigo/novo.
   for (const field of options.orderFields) {
-    const { data, error } = await supabase
-      .from(options.tableName)
-      .select(options.selectColumns)
-      .order(field, { ascending: false })
-      .limit(options.maxResults);
-
-    if (!error && Array.isArray(data)) {
-      return data as unknown as Row[];
-    }
-
-    lastError = error;
+    const rows = await runAttempt(field);
+    if (rows !== undefined) return rows;
   }
 
   // Fallback final sem order para nao quebrar se a coluna ainda nao existir.
-  const { data, error } = await supabase
-    .from(options.tableName)
-    .select(options.selectColumns)
-    .limit(options.maxResults);
+  const fallbackRows = await runAttempt();
+  if (fallbackRows !== undefined) return fallbackRows;
 
-  if (error) {
-    throw error ?? lastError;
+  if (
+    lastError &&
+    typeof lastError === "object" &&
+    typeof (lastError as { message?: unknown }).message === "string"
+  ) {
+    throwSupabaseError(lastError as { message: string; code?: string | null; name?: string | null });
   }
 
-  return Array.isArray(data) ? (data as unknown as Row[]) : [];
+  throw new Error("Falha ao carregar dados do dashboard admin.");
 }
 
 export interface AdminDashboardStats {

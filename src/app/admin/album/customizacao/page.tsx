@@ -13,10 +13,11 @@ import {
   type AlbumCmsData,
   type AlbumUiConfig,
 } from "../../../../lib/albumService";
-
-type TurmaKey = "T1" | "T2" | "T3" | "T4" | "T5" | "T6" | "T7" | "T8";
-
-const TURMAS: TurmaKey[] = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"];
+import {
+  fetchTurmasConfig,
+  getDefaultTurmas,
+  type TurmaConfig,
+} from "../../../../lib/turmasService";
 
 const DEFAULT_GLOBAL: AlbumUiConfig = {
   capa: "/capa_t8.jpg",
@@ -24,44 +25,64 @@ const DEFAULT_GLOBAL: AlbumUiConfig = {
   subtitulo: "Escolha a turma para abrir somente o que voce precisa",
 };
 
-const DEFAULT_TURMA = (turma: TurmaKey): AlbumCmsData => ({
-  capa: `/capa_${turma.toLowerCase()}.jpg`,
-  titulo: `Turma ${turma.replace("T", "")}`,
-  subtitulo: "Album Oficial",
+const DEFAULT_TURMA = (turma: TurmaConfig): AlbumCmsData => ({
+  capa: turma.capa || `/capa_${turma.slug || turma.id.toLowerCase()}.jpg`,
+  titulo: turma.nome || `Turma ${turma.id.replace("T", "")}`,
+  subtitulo: turma.frase || "Album Oficial",
 });
+
+const buildDefaultTurmaMap = (turmas: TurmaConfig[]): Record<string, AlbumCmsData> =>
+  turmas.reduce<Record<string, AlbumCmsData>>((acc, turma) => {
+    acc[turma.id] = DEFAULT_TURMA(turma);
+    return acc;
+  }, {});
 
 export default function AdminAlbumCustomizacaoPage() {
   const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [savingGlobal, setSavingGlobal] = useState(false);
   const [savingTurma, setSavingTurma] = useState(false);
-  const [selectedTurma, setSelectedTurma] = useState<TurmaKey>("T8");
+  const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
+  const [selectedTurma, setSelectedTurma] = useState<string>("T8");
   const [globalConfig, setGlobalConfig] = useState<AlbumUiConfig>(DEFAULT_GLOBAL);
-  const [turmaConfigMap, setTurmaConfigMap] = useState<Record<TurmaKey, AlbumCmsData>>(
-    () =>
-      TURMAS.reduce(
-        (acc, turma) => ({ ...acc, [turma]: DEFAULT_TURMA(turma) }),
-        {} as Record<TurmaKey, AlbumCmsData>
-      )
+  const [turmaConfigMap, setTurmaConfigMap] = useState<Record<string, AlbumCmsData>>(() =>
+    buildDefaultTurmaMap(getDefaultTurmas())
   );
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
       try {
-        const [globalDoc, ...turmaDocs] = await Promise.all([
+        const [globalDoc, turmasConfig] = await Promise.all([
           fetchAlbumUiConfig(),
-          ...TURMAS.map((turma) => fetchAlbumConfig(turma)),
+          fetchTurmasConfig(),
         ]);
         if (!mounted) return;
 
         setGlobalConfig(globalDoc || DEFAULT_GLOBAL);
+        setTurmas(turmasConfig);
 
-        const nextMap = TURMAS.reduce((acc, turma, index) => {
-          acc[turma] = turmaDocs[index] || DEFAULT_TURMA(turma);
-          return acc;
-        }, {} as Record<TurmaKey, AlbumCmsData>);
+        const turmaDocs = await Promise.all(
+          turmasConfig.map((turma) => fetchAlbumConfig(turma.id))
+        );
+        if (!mounted) return;
+
+        const nextMap = turmasConfig.reduce<Record<string, AlbumCmsData>>(
+          (acc, turma, index) => {
+            acc[turma.id] = turmaDocs[index] || DEFAULT_TURMA(turma);
+            return acc;
+          },
+          {}
+        );
         setTurmaConfigMap(nextMap);
+
+        const fallbackSelected =
+          turmasConfig.find((turma) => turma.id === "T8")?.id ||
+          turmasConfig[0]?.id ||
+          "T8";
+        setSelectedTurma((prev) =>
+          turmasConfig.some((turma) => turma.id === prev) ? prev : fallbackSelected
+        );
       } catch {
         if (mounted) addToast("Erro ao carregar customizacao do album.", "error");
       } finally {
@@ -75,9 +96,15 @@ export default function AdminAlbumCustomizacaoPage() {
     };
   }, [addToast]);
 
+  const selectedTurmaData = useMemo(() => {
+    const selected = turmas.find((turma) => turma.id === selectedTurma);
+    return selected || turmas[0] || getDefaultTurmas()[0];
+  }, [selectedTurma, turmas]);
+
   const turmaConfig = useMemo(
-    () => turmaConfigMap[selectedTurma] || DEFAULT_TURMA(selectedTurma),
-    [selectedTurma, turmaConfigMap]
+    () =>
+      turmaConfigMap[selectedTurmaData.id] || DEFAULT_TURMA(selectedTurmaData),
+    [selectedTurmaData, turmaConfigMap]
   );
 
   const handleSaveGlobal = async () => {
@@ -95,8 +122,8 @@ export default function AdminAlbumCustomizacaoPage() {
   const handleSaveTurma = async () => {
     try {
       setSavingTurma(true);
-      await saveAlbumConfig(selectedTurma, turmaConfig);
-      addToast(`Customizacao da turma ${selectedTurma} salva.`, "success");
+      await saveAlbumConfig(selectedTurmaData.id, turmaConfig);
+      addToast(`Customizacao da turma ${selectedTurmaData.id} salva.`, "success");
     } catch {
       addToast("Erro ao salvar customizacao da turma.", "error");
     } finally {
@@ -179,31 +206,34 @@ export default function AdminAlbumCustomizacaoPage() {
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <h2 className="text-sm font-black uppercase text-cyan-400">Pagina /album/[turma]</h2>
           <div className="flex flex-wrap gap-2">
-            {TURMAS.map((turma) => (
+            {turmas.map((turma) => (
               <button
-                key={turma}
-                onClick={() => setSelectedTurma(turma)}
+                key={turma.id}
+                onClick={() => setSelectedTurma(turma.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase border ${
-                  selectedTurma === turma
+                  selectedTurmaData.id === turma.id
                     ? "bg-cyan-500/20 border-cyan-400 text-cyan-300"
                     : "bg-black border-zinc-700 text-zinc-400"
                 }`}
               >
-                {turma}
+                {turma.id}
               </button>
             ))}
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="text-[11px] text-zinc-400 font-bold uppercase">
-                Titulo ({selectedTurma})
+                Titulo ({selectedTurmaData.id})
               </label>
               <input
                 value={turmaConfig.titulo}
                 onChange={(event) =>
                   setTurmaConfigMap((prev) => ({
                     ...prev,
-                    [selectedTurma]: { ...prev[selectedTurma], titulo: event.target.value },
+                    [selectedTurmaData.id]: {
+                      ...(prev[selectedTurmaData.id] || DEFAULT_TURMA(selectedTurmaData)),
+                      titulo: event.target.value,
+                    },
                   }))
                 }
                 className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
@@ -216,8 +246,8 @@ export default function AdminAlbumCustomizacaoPage() {
                 onChange={(event) =>
                   setTurmaConfigMap((prev) => ({
                     ...prev,
-                    [selectedTurma]: {
-                      ...prev[selectedTurma],
+                    [selectedTurmaData.id]: {
+                      ...(prev[selectedTurmaData.id] || DEFAULT_TURMA(selectedTurmaData)),
                       subtitulo: event.target.value,
                     },
                   }))
@@ -233,7 +263,10 @@ export default function AdminAlbumCustomizacaoPage() {
               onChange={(event) =>
                 setTurmaConfigMap((prev) => ({
                   ...prev,
-                  [selectedTurma]: { ...prev[selectedTurma], capa: event.target.value },
+                  [selectedTurmaData.id]: {
+                    ...(prev[selectedTurmaData.id] || DEFAULT_TURMA(selectedTurmaData)),
+                    capa: event.target.value,
+                  },
                 }))
               }
               className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
@@ -245,11 +278,10 @@ export default function AdminAlbumCustomizacaoPage() {
             className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-xs font-black uppercase inline-flex items-center gap-2"
           >
             <Save size={14} />
-            {savingTurma ? "Salvando..." : `Salvar ${selectedTurma}`}
+            {savingTurma ? "Salvando..." : `Salvar ${selectedTurmaData.id}`}
           </button>
         </section>
       </main>
     </div>
   );
 }
-
