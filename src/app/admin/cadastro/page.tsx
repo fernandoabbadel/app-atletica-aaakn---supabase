@@ -1,13 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Plus, RefreshCw, Users } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  ArrowLeft,
+  EyeOff,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
 import {
   addTurmaConfig,
+  deleteTurmaConfig,
   fetchTurmasConfig,
+  toggleTurmaVisibility,
+  updateTurmaConfig,
   type TurmaConfig,
 } from "@/lib/turmasService";
 
@@ -47,18 +61,43 @@ const getSuggestedTurmaId = (turmas: TurmaConfig[]): string => {
   return `T${maxNumber + 1}`;
 };
 
+type TurmaFormState = {
+  id: string;
+  nome: string;
+  mascote: string;
+  capa: string;
+  logo: string;
+};
+
+const EMPTY_FORM: TurmaFormState = {
+  id: "T9",
+  nome: "",
+  mascote: "",
+  capa: "",
+  logo: "",
+};
+
+const buildFormFromTurma = (turma: TurmaConfig): TurmaFormState => ({
+  id: turma.id,
+  nome: turma.nome,
+  mascote: turma.mascote,
+  capa: turma.capa,
+  logo: turma.logo,
+});
+
 export default function AdminCadastroPage() {
   const { addToast } = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [rowActionId, setRowActionId] = useState("");
   const [turmas, setTurmas] = useState<TurmaConfig[]>([]);
-  const [idInput, setIdInput] = useState("T9");
-  const [nomeInput, setNomeInput] = useState("");
-  const [mascoteInput, setMascoteInput] = useState("");
-  const [fraseInput, setFraseInput] = useState("");
-  const [capaInput, setCapaInput] = useState("");
-  const [logoInput, setLogoInput] = useState("");
+  const [form, setForm] = useState<TurmaFormState>(EMPTY_FORM);
+  const [editingTurmaId, setEditingTurmaId] = useState("");
+
+  const requestedEditId = normalizeTurmaIdInput(searchParams.get("edit") || "");
 
   const sortedTurmas = useMemo(
     () =>
@@ -73,14 +112,46 @@ export default function AdminCadastroPage() {
     [turmas]
   );
 
+  const resetToCreateMode = useCallback((rows: TurmaConfig[]) => {
+    setEditingTurmaId("");
+    setForm({
+      ...EMPTY_FORM,
+      id: getSuggestedTurmaId(rows),
+    });
+  }, []);
+
+  const syncEditMode = useCallback(
+    (rows: TurmaConfig[]) => {
+      if (!requestedEditId) {
+        if (editingTurmaId) {
+          resetToCreateMode(rows);
+        } else if (!form.id) {
+          setForm({
+            ...EMPTY_FORM,
+            id: getSuggestedTurmaId(rows),
+          });
+        }
+        return;
+      }
+
+      const target = rows.find((turma) => turma.id === requestedEditId);
+      if (!target) {
+        resetToCreateMode(rows);
+        return;
+      }
+
+      if (editingTurmaId !== target.id) {
+        setEditingTurmaId(target.id);
+        setForm(buildFormFromTurma(target));
+      }
+    },
+    [editingTurmaId, form.id, requestedEditId, resetToCreateMode]
+  );
+
   const refreshTurmas = async (): Promise<void> => {
     const rows = await fetchTurmasConfig({ forceRefresh: true });
     setTurmas(rows);
-    setIdInput((prev) => {
-      const normalized = normalizeTurmaIdInput(prev);
-      if (normalized) return normalized;
-      return getSuggestedTurmaId(rows);
-    });
+    syncEditMode(rows);
   };
 
   useEffect(() => {
@@ -90,7 +161,7 @@ export default function AdminCadastroPage() {
         const rows = await fetchTurmasConfig();
         if (!mounted) return;
         setTurmas(rows);
-        setIdInput(getSuggestedTurmaId(rows));
+        syncEditMode(rows);
       } catch (error: unknown) {
         if (!mounted) return;
         addToast(`Erro ao carregar turmas: ${extractErrorMessage(error)}`, "error");
@@ -103,10 +174,23 @@ export default function AdminCadastroPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [addToast, syncEditMode]);
 
-  const handleAddTurma = async () => {
-    const normalizedId = normalizeTurmaIdInput(idInput);
+  useEffect(() => {
+    if (loading) return;
+    syncEditMode(turmas);
+  }, [loading, syncEditMode, turmas]);
+
+  const handleStartEdit = (turmaId: string) => {
+    router.replace(`/admin/cadastro?edit=${turmaId}`);
+  };
+
+  const handleCancelEdit = () => {
+    router.replace("/admin/cadastro");
+  };
+
+  const handleSubmit = async () => {
+    const normalizedId = normalizeTurmaIdInput(form.id);
     if (!normalizedId) {
       addToast("Informe uma turma valida (ex: T9).", "error");
       return;
@@ -114,27 +198,79 @@ export default function AdminCadastroPage() {
 
     try {
       setSaving(true);
-      const next = await addTurmaConfig({
-        id: normalizedId,
-        nome: nomeInput.trim() || undefined,
-        mascote: mascoteInput.trim() || undefined,
-        frase: fraseInput.trim() || undefined,
-        capa: capaInput.trim() || undefined,
-        logo: logoInput.trim() || undefined,
-      });
+
+      const next = editingTurmaId
+        ? await updateTurmaConfig({
+            id: editingTurmaId,
+            nome: form.nome.trim() || undefined,
+            mascote: form.mascote.trim() || undefined,
+            capa: form.capa.trim() || undefined,
+            logo: form.logo.trim() || undefined,
+          })
+        : await addTurmaConfig({
+            id: normalizedId,
+            nome: form.nome.trim() || undefined,
+            mascote: form.mascote.trim() || undefined,
+            capa: form.capa.trim() || undefined,
+            logo: form.logo.trim() || undefined,
+          });
 
       setTurmas(next);
-      setIdInput(getSuggestedTurmaId(next));
-      setNomeInput("");
-      setMascoteInput("");
-      setFraseInput("");
-      setCapaInput("");
-      setLogoInput("");
-      addToast(`Turma ${normalizedId} criada com sucesso.`, "success");
+
+      if (editingTurmaId) {
+        const updated = next.find((turma) => turma.id === editingTurmaId);
+        if (updated) {
+          setForm(buildFormFromTurma(updated));
+        }
+        addToast(`Turma ${editingTurmaId} atualizada com sucesso.`, "success");
+      } else {
+        addToast(`Turma ${normalizedId} criada com sucesso.`, "success");
+        resetToCreateMode(next);
+      }
     } catch (error: unknown) {
-      addToast(`Erro ao adicionar turma: ${extractErrorMessage(error)}`, "error");
+      addToast(`Erro ao salvar turma: ${extractErrorMessage(error)}`, "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleHidden = async (turma: TurmaConfig) => {
+    try {
+      setRowActionId(turma.id);
+      const next = await toggleTurmaVisibility(turma.id, !turma.hidden);
+      setTurmas(next);
+      addToast(
+        turma.hidden
+          ? `Turma ${turma.id} voltou para a home do album.`
+          : `Turma ${turma.id} escondida da home do album.`,
+        "success"
+      );
+    } catch (error: unknown) {
+      addToast(`Erro ao alterar visibilidade: ${extractErrorMessage(error)}`, "error");
+    } finally {
+      setRowActionId("");
+    }
+  };
+
+  const handleDelete = async (turma: TurmaConfig) => {
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(`Excluir a turma ${turma.id} (${turma.nome})?`);
+      if (!confirmed) return;
+    }
+
+    try {
+      setRowActionId(turma.id);
+      const next = await deleteTurmaConfig(turma.id);
+      setTurmas(next);
+      if (editingTurmaId === turma.id) {
+        handleCancelEdit();
+        resetToCreateMode(next);
+      }
+      addToast(`Turma ${turma.id} excluida com sucesso.`, "success");
+    } catch (error: unknown) {
+      addToast(`Erro ao excluir turma: ${extractErrorMessage(error)}`, "error");
+    } finally {
+      setRowActionId("");
     }
   };
 
@@ -179,30 +315,47 @@ export default function AdminCadastroPage() {
 
       <main className="px-6 py-6 max-w-5xl mx-auto space-y-6">
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-          <div>
-            <h2 className="text-sm font-black uppercase text-emerald-400">
-              Adicionar Turma
-            </h2>
-            <p className="text-[11px] text-zinc-500 font-bold">
-              A turma criada aparece automaticamente em /album e em /admin/album/customizacao.
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-black uppercase text-emerald-400">
+                {editingTurmaId ? `Editar ${editingTurmaId}` : "Adicionar Turma"}
+              </h2>
+              <p className="text-[11px] text-zinc-500 font-bold">
+                A turma aparece automaticamente em /album e em /admin/album/customizacao.
+              </p>
+            </div>
+
+            {editingTurmaId && (
+              <button
+                onClick={handleCancelEdit}
+                className="px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-950 hover:bg-zinc-800 text-xs font-black uppercase inline-flex items-center gap-2"
+              >
+                <X size={14} />
+                Novo Cadastro
+              </button>
+            )}
           </div>
 
           <div className="grid md:grid-cols-2 gap-3">
             <div>
               <label className="text-[11px] text-zinc-400 font-bold uppercase">Codigo</label>
               <input
-                value={idInput}
-                onChange={(event) => setIdInput(event.target.value)}
+                value={form.id}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, id: event.target.value }))
+                }
                 placeholder="T9"
-                className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                disabled={Boolean(editingTurmaId)}
+                className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm disabled:opacity-60"
               />
             </div>
             <div>
               <label className="text-[11px] text-zinc-400 font-bold uppercase">Nome</label>
               <input
-                value={nomeInput}
-                onChange={(event) => setNomeInput(event.target.value)}
+                value={form.nome}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, nome: event.target.value }))
+                }
                 placeholder="Turma IX"
                 className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
               />
@@ -210,48 +363,49 @@ export default function AdminCadastroPage() {
             <div>
               <label className="text-[11px] text-zinc-400 font-bold uppercase">Mascote</label>
               <input
-                value={mascoteInput}
-                onChange={(event) => setMascoteInput(event.target.value)}
+                value={form.mascote}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, mascote: event.target.value }))
+                }
                 placeholder="Golfinho"
-                className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-zinc-400 font-bold uppercase">Frase</label>
-              <input
-                value={fraseInput}
-                onChange={(event) => setFraseInput(event.target.value)}
-                placeholder="Nova geracao"
-                className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-zinc-400 font-bold uppercase">Capa (opcional)</label>
-              <input
-                value={capaInput}
-                onChange={(event) => setCapaInput(event.target.value)}
-                placeholder="/capa_t9.jpg"
                 className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
               />
             </div>
             <div>
               <label className="text-[11px] text-zinc-400 font-bold uppercase">Logo (opcional)</label>
               <input
-                value={logoInput}
-                onChange={(event) => setLogoInput(event.target.value)}
+                value={form.logo}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, logo: event.target.value }))
+                }
                 placeholder="/turma9.jpg"
+                className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-[11px] text-zinc-400 font-bold uppercase">Capa (opcional)</label>
+              <input
+                value={form.capa}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, capa: event.target.value }))
+                }
+                placeholder="/capa_t9.jpg"
                 className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
               />
             </div>
           </div>
 
           <button
-            onClick={handleAddTurma}
+            onClick={handleSubmit}
             disabled={saving}
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-xs font-black uppercase inline-flex items-center gap-2"
           >
-            <Plus size={14} />
-            {saving ? "Salvando..." : "Adicionar Turma"}
+            {editingTurmaId ? <Save size={14} /> : <Plus size={14} />}
+            {saving
+              ? "Salvando..."
+              : editingTurmaId
+              ? "Salvar Alteracoes"
+              : "Adicionar Turma"}
           </button>
         </section>
 
@@ -262,26 +416,64 @@ export default function AdminCadastroPage() {
           </div>
 
           <div className="space-y-2">
-            {sortedTurmas.map((turma) => (
-              <div
-                key={turma.id}
-                className="rounded-xl border border-zinc-800 bg-black/50 px-4 py-3"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-black uppercase text-white">
-                      {turma.id} - {turma.nome}
-                    </p>
-                    <p className="text-[11px] text-zinc-400">
-                      {turma.mascote} | {turma.frase}
-                    </p>
-                  </div>
-                  <div className="text-[10px] text-zinc-500 font-bold uppercase">
-                    /album/{turma.slug}
+            {sortedTurmas.map((turma) => {
+              const isBusy = rowActionId === turma.id;
+              return (
+                <div
+                  key={turma.id}
+                  className={`rounded-xl border px-4 py-3 ${
+                    turma.hidden
+                      ? "border-amber-500/30 bg-amber-500/5"
+                      : "border-zinc-800 bg-black/50"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs font-black uppercase text-white">
+                          {turma.id} - {turma.nome}
+                        </p>
+                        {turma.hidden && (
+                          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase text-amber-300">
+                            Oculta
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-zinc-400">{turma.mascote}</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <span className="text-[10px] text-zinc-500 font-bold uppercase">
+                        /album/{turma.slug}
+                      </span>
+                      <button
+                        onClick={() => handleStartEdit(turma.id)}
+                        className="px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-[10px] font-black uppercase text-cyan-300 inline-flex items-center gap-1"
+                      >
+                        <Pencil size={12} />
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => void handleToggleHidden(turma)}
+                        disabled={isBusy}
+                        className="px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-[10px] font-black uppercase text-amber-300 inline-flex items-center gap-1 disabled:opacity-60"
+                      >
+                        <EyeOff size={12} />
+                        {turma.hidden ? "Mostrar" : "Esconder"}
+                      </button>
+                      <button
+                        onClick={() => void handleDelete(turma)}
+                        disabled={isBusy}
+                        className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-[10px] font-black uppercase text-red-300 inline-flex items-center gap-1 disabled:opacity-60"
+                      >
+                        <Trash2 size={12} />
+                        Excluir
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       </main>

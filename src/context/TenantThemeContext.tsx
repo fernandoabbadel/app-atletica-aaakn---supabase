@@ -11,7 +11,13 @@ import React, {
 
 import { useAuth } from "@/context/AuthContext";
 import { fetchTenantById, type TenantPaletteKey } from "@/lib/tenantService";
-import { isPlatformMaster } from "@/lib/roles";
+import {
+  dispatchMasterTenantOverrideChanged,
+  getMasterTenantOverrideId,
+  hasMasterTenantOverride,
+  MASTER_TENANT_OVERRIDE_STORAGE_KEY,
+  resolveEffectiveTenantId,
+} from "@/lib/tenantContext";
 import { TENANT_SLUG_COOKIE_NAME } from "@/lib/tenantRouting";
 
 interface TenantPalette {
@@ -27,6 +33,7 @@ interface TenantThemeContextValue {
   tenantSlug: string;
   tenantName: string;
   tenantSigla: string;
+  tenantCourse: string;
   tenantLogoUrl: string;
   isOverrideActive: boolean;
   loading: boolean;
@@ -45,7 +52,6 @@ const PALETTES: Record<TenantPaletteKey, TenantPalette> = {
 };
 
 const DEFAULT_PALETTE = PALETTES.green;
-const MASTER_TENANT_OVERRIDE_STORAGE_KEY = "usc_master_tenant_override";
 const TENANT_BRAND_SNAPSHOT_STORAGE_KEY = "usc_active_tenant_brand";
 
 const TenantThemeContext = createContext<TenantThemeContextValue>({
@@ -54,6 +60,7 @@ const TenantThemeContext = createContext<TenantThemeContextValue>({
   tenantSlug: "",
   tenantName: "USC",
   tenantSigla: "USC",
+  tenantCourse: "",
   tenantLogoUrl: "/logo.png",
   isOverrideActive: false,
   loading: true,
@@ -92,6 +99,7 @@ const persistTenantBrandSnapshot = (payload: {
   tenantSlug: string;
   tenantName: string;
   tenantSigla: string;
+  tenantCourse: string;
   tenantLogoUrl: string;
 }): void => {
   if (typeof window === "undefined") return;
@@ -126,6 +134,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
   const [tenantSlug, setTenantSlug] = useState("");
   const [tenantName, setTenantName] = useState("USC");
   const [tenantSigla, setTenantSigla] = useState("USC");
+  const [tenantCourse, setTenantCourse] = useState("");
   const [tenantLogoUrl, setTenantLogoUrl] = useState("/logo.png");
   const [isOverrideActive, setIsOverrideActive] = useState(false);
   const [masterOverrideTenantId, setMasterOverrideTenantId] = useState("");
@@ -133,7 +142,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
   const [refreshVersion, setRefreshVersion] = useState(0);
 
   const setMasterTenantOverride = useCallback((nextTenantId: string): void => {
-    const cleanTenantId = nextTenantId.trim();
+    const cleanTenantId = getMasterTenantOverrideId(nextTenantId);
     setMasterOverrideTenantId(cleanTenantId);
     if (typeof window === "undefined") return;
     if (cleanTenantId) {
@@ -141,6 +150,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
     } else {
       localStorage.removeItem(MASTER_TENANT_OVERRIDE_STORAGE_KEY);
     }
+    dispatchMasterTenantOverrideChanged(cleanTenantId);
   }, []);
 
   const refreshTenantTheme = useCallback((): void => {
@@ -154,13 +164,12 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = localStorage.getItem(MASTER_TENANT_OVERRIDE_STORAGE_KEY);
-    if (stored && stored.trim()) {
-      setMasterOverrideTenantId(stored.trim());
-    }
+    const cleanStored = getMasterTenantOverrideId(stored);
+    if (cleanStored) setMasterOverrideTenantId(cleanStored);
 
     const onStorage = (event: StorageEvent) => {
       if (event.key !== MASTER_TENANT_OVERRIDE_STORAGE_KEY) return;
-      setMasterOverrideTenantId((event.newValue || "").trim());
+      setMasterOverrideTenantId(getMasterTenantOverrideId(event.newValue));
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -172,15 +181,17 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
     let mounted = true;
     const syncPalette = async () => {
       try {
-        const platformMaster = isPlatformMaster({ role: user?.role });
-        const userTenantId = typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
         const userTenantStatus =
           typeof user?.tenant_status === "string" ? user.tenant_status.trim().toLowerCase() : "";
-        const selectedTenantId =
-          platformMaster && masterOverrideTenantId ? masterOverrideTenantId : userTenantId;
+        const selectedTenantId = resolveEffectiveTenantId(
+          user,
+          masterOverrideTenantId
+        );
         const hasTenantContext =
           selectedTenantId.length > 0 &&
-          (platformMaster || !userTenantStatus || userTenantStatus === "approved");
+          (hasMasterTenantOverride(user, masterOverrideTenantId) ||
+            !userTenantStatus ||
+            userTenantStatus === "approved");
 
         if (!hasTenantContext) {
           if (!mounted) return;
@@ -189,6 +200,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
           setPalette(DEFAULT_PALETTE);
           setTenantName("USC");
           setTenantSigla("USC");
+          setTenantCourse("");
           setTenantLogoUrl("/logo.png");
           setIsOverrideActive(false);
           syncTenantSlugCookie("");
@@ -197,6 +209,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
             tenantSlug: "",
             tenantName: "USC",
             tenantSigla: "USC",
+            tenantCourse: "",
             tenantLogoUrl: "/logo.png",
           });
           applyPaletteToRoot(DEFAULT_PALETTE);
@@ -210,25 +223,23 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
         const resolvedSlug = tenant?.slug || "";
         const resolvedName = tenant?.nome || "USC";
         const resolvedSigla = tenant?.sigla || "USC";
+        const resolvedCourse = tenant?.curso || "";
         const resolvedLogo = tenant?.logoUrl || "/logo.png";
         setTenantId(selectedTenantId);
         setTenantSlug(resolvedSlug);
         setPalette(resolvedPalette);
         setTenantName(resolvedName);
         setTenantSigla(resolvedSigla);
+        setTenantCourse(resolvedCourse);
         setTenantLogoUrl(resolvedLogo);
         syncTenantSlugCookie(resolvedSlug);
-        setIsOverrideActive(
-          platformMaster &&
-            selectedTenantId.length > 0 &&
-            userTenantId.length > 0 &&
-            selectedTenantId !== userTenantId
-        );
+        setIsOverrideActive(hasMasterTenantOverride(user, masterOverrideTenantId));
         persistTenantBrandSnapshot({
           tenantId: selectedTenantId,
           tenantSlug: resolvedSlug,
           tenantName: resolvedName,
           tenantSigla: resolvedSigla,
+          tenantCourse: resolvedCourse,
           tenantLogoUrl: resolvedLogo,
         });
         applyPaletteToRoot(resolvedPalette);
@@ -239,6 +250,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
         setPalette(DEFAULT_PALETTE);
         setTenantName("USC");
         setTenantSigla("USC");
+        setTenantCourse("");
         setTenantLogoUrl("/logo.png");
         setIsOverrideActive(false);
         syncTenantSlugCookie("");
@@ -247,6 +259,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
           tenantSlug: "",
           tenantName: "USC",
           tenantSigla: "USC",
+          tenantCourse: "",
           tenantLogoUrl: "/logo.png",
         });
         applyPaletteToRoot(DEFAULT_PALETTE);
@@ -263,9 +276,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
     authLoading,
     masterOverrideTenantId,
     refreshVersion,
-    user?.role,
-    user?.tenant_id,
-    user?.tenant_status,
+    user,
   ]);
 
   const value = useMemo(
@@ -275,6 +286,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
       tenantSlug,
       tenantName,
       tenantSigla,
+      tenantCourse,
       tenantLogoUrl,
       isOverrideActive,
       loading: authLoading || loading,
@@ -293,6 +305,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
       tenantLogoUrl,
       tenantName,
       tenantSigla,
+      tenantCourse,
     ]
   );
 

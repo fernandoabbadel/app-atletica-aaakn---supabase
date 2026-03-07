@@ -94,7 +94,7 @@ const StatCard = ({ icon: Icon, value, label, color, suffix = "" }: StatCardProp
 
 export default function LandingPage() {
   const router = useRouter();
-  const { user, loginGoogle, loading: authLoading } = useAuth();
+  const { user, loginAsGuest, loginGoogle, loading: authLoading } = useAuth();
   const { addToast } = useToast();
 
   const [config, setConfig] = useState<LandingConfig>(DEFAULT_CONFIG);
@@ -108,7 +108,8 @@ export default function LandingPage() {
 
   // Ã°Å¸â€â€™ Redirecionamento de SeguranÒ§a
   useEffect(() => {
-    if (!authLoading && user) router.push("/dashboard");
+    if (authLoading || !user) return;
+    router.push(user.isAnonymous ? "/visitante" : "/dashboard");
   }, [user, authLoading, router]);
 
   // Ã°Å¸â€œÂ¡ Busca ConfiguraÒ§Òµes Visuais
@@ -141,7 +142,15 @@ export default function LandingPage() {
   }, []);
 
   const handleGoogleLogin = async () => { try { await loginGoogle(); } catch { addToast("Erro no login Google", "error"); } };
-  const handleGuest = () => { addToast("Modo Visitante Ativado!", "info"); router.push("/dashboard"); };
+  const handleGuest = async () => {
+    try {
+      addToast("Modo visitante ativado.", "info");
+      await loginAsGuest();
+      router.push("/visitante");
+    } catch {
+      addToast("Erro ao entrar como visitante.", "error");
+    }
+  };
 
   if (loading) return <div className="h-screen bg-[#02050d] flex items-center justify-center text-blue-400 font-bold animate-pulse">CARREGANDO CARDUME...</div>;
 

@@ -21,12 +21,13 @@ import {
   type AdminUserListItem,
 } from "@/lib/adminUsersService";
 import { updatePermissionUserRole } from "@/lib/adminSecurityService";
-import { isPlatformMaster } from "@/lib/roles";
+import { canManageTenant } from "@/lib/roles";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const PAGE_SIZE = 20;
 
 const ROLES = [
-  { id: "master", label: "Master" },
+  { id: "master", label: "Master Tenant" },
   { id: "admin_geral", label: "Admin Geral" },
   { id: "admin_gestor", label: "Gestor" },
   { id: "admin_treino", label: "Adm Treino" },
@@ -71,6 +72,7 @@ const mergeUniqueUsers = (
 
 export default function AdminPermissoesUsuariosPage() {
   const { user, loading: authLoading } = useAuth();
+  const { tenantId: activeTenantId, tenantName, tenantSigla } = useTenantTheme();
   const { addToast } = useToast();
   const router = useRouter();
 
@@ -81,7 +83,7 @@ export default function AdminPermissoesUsuariosPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
-  const isMaster = isPlatformMaster(user);
+  const canManageRoles = canManageTenant(user);
 
   const loadUsers = useCallback(
     async (options?: { reset?: boolean; cursorId?: string | null }) => {
@@ -96,6 +98,7 @@ export default function AdminPermissoesUsuariosPage() {
           pageSize: PAGE_SIZE,
           cursorId: reset ? null : cursorId,
           forceRefresh: false,
+          tenantId: activeTenantId || undefined,
         });
 
         if (reset) setRows(page.users);
@@ -116,20 +119,27 @@ export default function AdminPermissoesUsuariosPage() {
         else setLoadingMore(false);
       }
     },
-    [addToast, router]
+    [activeTenantId, addToast, router]
   );
 
   useEffect(() => {
     if (authLoading) return;
 
-    if (!isMaster) {
+    if (!canManageRoles) {
       setLoading(false);
       router.push("/dashboard");
       return;
     }
 
+    if (!activeTenantId) {
+      setLoading(false);
+      addToast("Selecione um tenant antes de editar cargos.", "error");
+      router.push("/admin/master");
+      return;
+    }
+
     void loadUsers({ reset: true });
-  }, [authLoading, isMaster, router, loadUsers]);
+  }, [activeTenantId, authLoading, canManageRoles, router, loadUsers, addToast]);
 
   const filteredRows = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -148,7 +158,11 @@ export default function AdminPermissoesUsuariosPage() {
 
   const handleUpdateRole = async (targetUserId: string, role: string) => {
     try {
-      await updatePermissionUserRole({ targetUserId, role });
+      await updatePermissionUserRole({
+        targetUserId,
+        role,
+        tenantId: activeTenantId || undefined,
+      });
 
       setRows((prev) =>
         prev.map((entry) =>
@@ -186,7 +200,7 @@ export default function AdminPermissoesUsuariosPage() {
     );
   }
 
-  if (!isMaster) return null;
+  if (!canManageRoles) return null;
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
@@ -204,7 +218,7 @@ export default function AdminPermissoesUsuariosPage() {
                 <Shield className="text-cyan-400" size={18} /> Cargos de Acesso
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">
-                Paginacao 20 em 20 para reduzir leituras
+                {tenantSigla || tenantName || "Tenant atual"} • paginacao 20 em 20
               </p>
             </div>
           </div>
@@ -263,7 +277,7 @@ export default function AdminPermissoesUsuariosPage() {
                     value={(entry.role || "visitante").toLowerCase() === "guest" ? "visitante" : entry.role || "visitante"}
                     onChange={(event) => void handleUpdateRole(entry.id, event.target.value)}
                     className="bg-zinc-900 text-white text-xs rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase font-bold border border-zinc-700"
-                    disabled={entry.id === user?.uid}
+                    disabled={entry.id === user?.uid || !activeTenantId}
                   >
                     {ROLES.map((role) => (
                       <option key={role.id} value={role.id}>

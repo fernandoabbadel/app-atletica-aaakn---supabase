@@ -22,6 +22,7 @@ import {
   canManageTenant,
   getAccessRoleCandidates,
   hasAdminPanelAccess,
+  isMasterOnlyAdminPath,
   isPlatformMaster,
   resolveEffectiveAccessRole,
 } from "@/lib/roles";
@@ -298,6 +299,13 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       return;
     }
 
+    if (isMasterOnlyAdminPath(currentPath) && !isPlatformMasterUser) {
+      setAuthorizedSafe(false);
+      addToast("Area exclusiva do master da plataforma.", "error");
+      safeReplace("/sem-permissao");
+      return;
+    }
+
     if (shouldAutoScopePath(currentPath) && !routeTenantSlug && activeTenantSlug) {
       setAuthorizedSafe(false);
       safeReplace(withTenantSlug(activeTenantSlug, currentPath));
@@ -344,6 +352,12 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     }
 
     if (currentUserRole === "guest_anon") {
+      if (currentPath === "/dashboard" && !routeTenantSlug && !activeTenantSlug) {
+        setAuthorizedSafe(false);
+        safeReplace("/visitante");
+        return;
+      }
+
       const isAllowed = GUEST_ALLOWED_PATHS.some(
         (path) => currentPath === path || currentPath.startsWith(`${path}/`)
       );

@@ -32,7 +32,11 @@ import {
   savePermissionMatrix,
   type PermissionMatrix,
 } from "@/lib/adminSecurityService";
-import { canManageTenant, isPlatformMaster } from "@/lib/roles";
+import {
+  canManageTenant,
+  isMasterOnlyAdminPath,
+  isPlatformMaster,
+} from "@/lib/roles";
 
 const ROLES = [
   { id: "master", label: "Master", icon: Crown, color: "text-red-500" },
@@ -101,7 +105,9 @@ export default function AdminPermissoesPage() {
         } else {
           const defaultMatrix: PermissionMatrix = {};
           APP_PAGES.forEach((page) => {
-            defaultMatrix[page.path] = ["master"];
+            defaultMatrix[page.path] = isMasterOnlyAdminPath(page.path)
+              ? ["master"]
+              : ["master"];
           });
           setPermissionMatrix(defaultMatrix);
         }
@@ -137,7 +143,9 @@ export default function AdminPermissoesPage() {
   }, [authLoading, canViewPermissions, router, addToast, isPlatformMasterUser]);
 
   const togglePermission = (path: string, roleId: string) => {
-    if (!isPlatformMasterUser) return;
+    if (!isPlatformMasterUser || roleId === "master" || isMasterOnlyAdminPath(path)) {
+      return;
+    }
 
     setPermissionMatrix((prev) => {
       const currentRoles = prev[path] || [];
@@ -215,12 +223,12 @@ export default function AdminPermissoesPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {isPlatformMasterUser && (
+          {canManageTenant(user) && (
             <Link
               href="/admin/permissoes/usuarios"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-cyan-700/40 bg-zinc-900 text-cyan-300 text-[11px] font-black uppercase hover:bg-zinc-800 transition"
             >
-              <Users size={14} /> Cargos
+              <Users size={14} /> Cargos do Tenant
             </Link>
           )}
           <Link
@@ -241,11 +249,12 @@ export default function AdminPermissoesPage() {
           <div className="bg-yellow-900/20 border border-yellow-600/30 p-4 rounded-xl flex items-start gap-3">
             <AlertTriangle className="text-yellow-500 shrink-0" size={20} />
             <div>
-              <h3 className="text-sm font-bold text-yellow-500 uppercase">Atencao, Master</h3>
+              <h3 className="text-sm font-bold text-yellow-500 uppercase">
+                {isPlatformMasterUser ? "Atencao, Master" : "Matriz Global"}
+              </h3>
               <p className="text-xs text-zinc-400 mt-1">
-                Esta matriz controla o acesso por rota. Mantenha{" "}
-                <b>&apos;/configuracoes&apos;</b> liberado para o cargo{" "}
-                <b>&apos;Visitante&apos;</b>.
+                Esta matriz controla o acesso por rota. A edicao da matriz global fica apenas para o
+                master da plataforma.
               </p>
             </div>
           </div>
@@ -277,6 +286,7 @@ export default function AdminPermissoesPage() {
               <tbody className="bg-black">
                 {APP_PAGES.map((page, idx) => {
                   const isAdmin = page.path.startsWith("/admin");
+                  const isMasterOnlyRoute = isMasterOnlyAdminPath(page.path);
                   const prevPage = idx > 0 ? APP_PAGES[idx - 1] : null;
                   const prevIsAdmin = prevPage ? prevPage.path.startsWith("/admin") : isAdmin;
                   const showSeparator = prevPage && isAdmin !== prevIsAdmin;
@@ -309,19 +319,25 @@ export default function AdminPermissoesPage() {
 
                         {ROLES.map((role) => {
                           const isAllowed =
-                            (permissionMatrix[page.path] || []).includes(role.id) || role.id === "master";
+                            isMasterOnlyRoute
+                              ? role.id === "master"
+                              : (permissionMatrix[page.path] || []).includes(role.id) || role.id === "master";
+                          const isLocked =
+                            !isPlatformMasterUser ||
+                            role.id === "master" ||
+                            isMasterOnlyRoute;
 
                           return (
                             <td key={`${page.path}-${role.id}`} className="p-4 text-center border-l border-zinc-800/30">
                               <button
                                 onClick={() => togglePermission(page.path, role.id)}
-                                disabled={!isPlatformMasterUser || role.id === "master"}
+                                disabled={isLocked}
                                 className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all mx-auto ${
                                   isAllowed
                                     ? "bg-emerald-500 text-black shadow-lg scale-100"
                                     : "bg-zinc-900 text-zinc-700 border border-zinc-800 scale-90 grayscale"
                                 } ${
-                                  !isPlatformMasterUser || role.id === "master"
+                                  isLocked
                                     ? "opacity-50 cursor-not-allowed"
                                     : "hover:scale-110 active:scale-95"
                                 }`}

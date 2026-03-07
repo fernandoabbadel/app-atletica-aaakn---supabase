@@ -10,6 +10,7 @@ import { COMING_SOON_PATHS } from "@/lib/appRoutes";
 import {
   ADMIN_PANEL_FALLBACK_ROLES,
   getAccessRoleCandidates,
+  isMasterOnlyAdminPath,
   isPlatformMaster,
   resolveEffectiveAccessRole,
 } from "@/lib/roles";
@@ -67,6 +68,10 @@ export default function SmartLink({
       (comingPath) => path === comingPath || path.startsWith(`${comingPath}/`)
     );
     if (isComingSoon) return false;
+
+    if (isMasterOnlyAdminPath(path)) {
+      return isPlatformMaster(user);
+    }
 
     if (isPlatformMaster(user)) return true;
 

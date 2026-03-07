@@ -250,7 +250,7 @@ const ProductCard = ({
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
-  const { tenantLogoUrl } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantLogoUrl } = useTenantTheme();
 
   const [events, setEvents] = useState<Evento[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -278,7 +278,9 @@ export default function DashboardPage() {
 
     const loadDashboard = async () => {
       try {
-        const data = await fetchDashboardBundle();
+        const data = await fetchDashboardBundle({
+          tenantId: activeTenantId || undefined,
+        });
         if (!active) return;
 
         setEvents(data.events);
@@ -303,7 +305,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [activeTenantId]);
 
   const scroll = (ref: React.RefObject<HTMLDivElement | null>, dir: 'left' | 'right') => { 
       if (ref.current) {

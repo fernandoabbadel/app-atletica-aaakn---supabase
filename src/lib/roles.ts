@@ -47,8 +47,20 @@ export const TENANT_MANAGER_ROLES = new Set<TenantScopedRole>([
   "admin_gestor",
 ]);
 
+const MASTER_ONLY_ADMIN_PREFIXES = ["/admin/master"];
+
 const toRoleString = (value: unknown): string =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
+
+export const isMasterOnlyAdminPath = (path: string): boolean => {
+  const normalizedPath = path.trim().toLowerCase();
+  if (!normalizedPath.startsWith("/")) return false;
+
+  return MASTER_ONLY_ADMIN_PREFIXES.some(
+    (prefix) =>
+      normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
+  );
+};
 
 export const isPlatformMaster = (user: RoleUserLike | null | undefined): boolean =>
   toRoleString(user?.role) === "master";
@@ -141,4 +153,3 @@ export const canManageTenant = (
   const tenantRole = normalizeTenantRole(user?.tenant_role);
   return tenantRole ? TENANT_MANAGER_ROLES.has(tenantRole) : false;
 };
-

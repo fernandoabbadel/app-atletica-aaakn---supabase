@@ -61,6 +61,9 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
   return null;
 };
 
+const isMissingTenantIdColumn = (error: unknown): boolean =>
+  extractMissingSchemaColumn(error)?.trim().toLowerCase() === "tenant_id";
+
 const removeMissingColumn = (columns: string[], missingColumn: string): string[] | null => {
   const normalizedMissing = missingColumn.trim().toLowerCase();
   if (!normalizedMissing) return null;
@@ -173,18 +176,36 @@ const sortRowsByDateCandidatesDesc = (rows: Row[], fields: string[]): Row[] =>
 
 async function safeCount(
   tableName: string,
-  countColumn: string
+  countColumn: string,
+  tenantId?: string
 ): Promise<{ count: number; fallbackUsed: boolean }> {
   const supabase = getSupabaseClient();
+  const cleanTenantId = asString(tenantId).trim();
+  let allowTenantFilter = cleanTenantId.length > 0;
 
   // Preferimos counts por metadata para reduzir custo de leitura no plano free.
   for (const mode of ["planned", "estimated", "exact"] as const) {
-    const { count, error } = await supabase
+    let query = supabase
       .from(tableName)
       .select(countColumn, { count: mode, head: true });
+    if (allowTenantFilter) {
+      query = query.eq("tenant_id", cleanTenantId);
+    }
+
+    const { count, error } = await query;
 
     if (!error && typeof count === "number") {
       return { count, fallbackUsed: false };
+    }
+
+    if (allowTenantFilter && isMissingTenantIdColumn(error)) {
+      allowTenantFilter = false;
+      const retry = await supabase
+        .from(tableName)
+        .select(countColumn, { count: mode, head: true });
+      if (!retry.error && typeof retry.count === "number") {
+        return { count: retry.count, fallbackUsed: false };
+      }
     }
   }
 
@@ -192,7 +213,8 @@ async function safeCount(
 }
 
 async function safeCountFromCandidates(
-  candidates: Array<{ tableName: string; countColumn: string }>
+  candidates: Array<{ tableName: string; countColumn: string }>,
+  tenantId?: string
 ): Promise<{ count: number; fallbackUsed: boolean }> {
   let bestResult: { count: number; fallbackUsed: boolean } = {
     count: 0,
@@ -200,7 +222,7 @@ async function safeCountFromCandidates(
   };
 
   for (const candidate of candidates) {
-    const current = await safeCount(candidate.tableName, candidate.countColumn);
+    const current = await safeCount(candidate.tableName, candidate.countColumn, tenantId);
     if (!current.fallbackUsed) return current;
     if (current.count > 0) bestResult = current;
   }
@@ -213,10 +235,13 @@ async function fetchRowsWithOrderFallback(options: {
   selectColumns: string;
   maxResults: number;
   orderFields: string[];
+  tenantId?: string;
 }): Promise<Row[]> {
   const supabase = getSupabaseClient();
   let mutableColumns = splitSelectColumns(options.selectColumns);
   let lastError: unknown = null;
+  const cleanTenantId = asString(options.tenantId).trim();
+  let allowTenantFilter = cleanTenantId.length > 0;
 
   const runAttempt = async (orderField?: string): Promise<Row[] | undefined> => {
     while (mutableColumns.length > 0) {
@@ -224,6 +249,9 @@ async function fetchRowsWithOrderFallback(options: {
         .from(options.tableName)
         .select(mutableColumns.join(","))
         .limit(options.maxResults);
+      if (allowTenantFilter) {
+        query = query.eq("tenant_id", cleanTenantId);
+      }
 
       if (orderField) {
         query = query.order(orderField, { ascending: false });
@@ -237,6 +265,11 @@ async function fetchRowsWithOrderFallback(options: {
       if (!missingColumn) {
         if (isRecoverableReadError(error)) return [];
         return undefined;
+      }
+
+      if (allowTenantFilter && missingColumn.toLowerCase() === "tenant_id") {
+        allowTenantFilter = false;
+        continue;
       }
 
       if (orderField && orderField.trim().toLowerCase() === missingColumn.toLowerCase()) {
@@ -346,6 +379,7 @@ export async function fetchAdminDashboardBundle(options?: {
   usersLimit?: number;
   logsLimit?: number;
   forceRefresh?: boolean;
+  tenantId?: string;
 }): Promise<AdminDashboardBundle> {
   const usersLimit = boundedLimit(
     options?.usersLimit ?? 5,
@@ -353,7 +387,8 @@ export async function fetchAdminDashboardBundle(options?: {
   );
   const logsLimit = boundedLimit(options?.logsLimit ?? 5, MAX_RECENT_LOGS_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${usersLimit}:${logsLimit}`;
+  const tenantId = asString(options?.tenantId).trim();
+  const cacheKey = `${usersLimit}:${logsLimit}:${tenantId || "platform"}`;
 
   if (!forceRefresh) {
     const cached = getCachedValue(dashboardCache, cacheKey);
@@ -362,24 +397,26 @@ export async function fetchAdminDashboardBundle(options?: {
 
   const [usersCountResult, eventsCountResult, salesCountResult, usersRows, logsRows] =
     await Promise.all([
-      safeCount("users", "uid"),
-      safeCount("eventos", "id"),
+      safeCount("users", "uid", tenantId),
+      safeCount("eventos", "id", tenantId),
       safeCountFromCandidates([
         { tableName: "orders", countColumn: "id" },
         { tableName: "store_orders", countColumn: "id" },
-      ]),
+      ], tenantId),
       fetchRowsWithOrderFallback({
         tableName: "users",
         selectColumns:
           "id,uid,nome,email,foto,turma,role,data_adesao,createdAt,created_at",
         maxResults: usersLimit,
         orderFields: ["data_adesao", "createdAt", "created_at"],
+        tenantId,
       }),
       fetchRowsWithOrderFallback({
         tableName: "activity_logs",
         selectColumns: "id,userName,action,resource,timestamp,createdAt,created_at",
         maxResults: logsLimit,
         orderFields: ["timestamp", "createdAt", "created_at"],
+        tenantId,
       }),
     ]);
 

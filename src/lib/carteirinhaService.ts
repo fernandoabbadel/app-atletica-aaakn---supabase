@@ -4,6 +4,7 @@ import { compressImageFile } from "./imageCompression";
 export interface CarteirinhaConfig {
   validade: string;
   backgrounds: Record<string, string>;
+  backgroundOpacity: number;
 }
 
 const CONFIG_COLLECTION = "app_config";
@@ -17,6 +18,7 @@ const VALID_TURMAS = new Set(["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"]);
 const DEFAULT_CONFIG: CarteirinhaConfig = {
   validade: "DEZ/2026",
   backgrounds: {},
+  backgroundOpacity: 60,
 };
 
 const DEFAULT_BUCKET =
@@ -27,6 +29,7 @@ const DEFAULT_BUCKET =
 const createDefaultConfig = (): CarteirinhaConfig => ({
   validade: DEFAULT_CONFIG.validade,
   backgrounds: {},
+  backgroundOpacity: DEFAULT_CONFIG.backgroundOpacity,
 });
 
 type CachedConfig = {
@@ -57,6 +60,7 @@ const normalizeConfig = (raw: Record<string, unknown> | null): CarteirinhaConfig
 
   const normalizedBackgrounds: Record<string, string> = {};
   const rawBackgrounds = asObject(raw.backgrounds);
+  const rawData = asObject(raw.data);
 
   if (rawBackgrounds) {
     for (const [turma, value] of Object.entries(rawBackgrounds)) {
@@ -67,7 +71,16 @@ const normalizeConfig = (raw: Record<string, unknown> | null): CarteirinhaConfig
     }
   }
 
-  return { validade, backgrounds: normalizedBackgrounds };
+  const opacitySource =
+    raw.backgroundOpacity ??
+    rawData?.backgroundOpacity ??
+    DEFAULT_CONFIG.backgroundOpacity;
+  const parsedOpacity = Number(opacitySource);
+  const backgroundOpacity = Number.isFinite(parsedOpacity)
+    ? Math.max(0, Math.min(100, Math.round(parsedOpacity)))
+    : DEFAULT_CONFIG.backgroundOpacity;
+
+  return { validade, backgrounds: normalizedBackgrounds, backgroundOpacity };
 };
 
 const setConfigCache = (config: CarteirinhaConfig): void => {
@@ -153,7 +166,9 @@ export async function fetchCarteirinhaConfig(options?: {
     ? normalizeConfig({
         validade: raw.validade,
         backgrounds:
-          raw.backgrounds ?? (asObject(raw.data)?.backgrounds as Record<string, unknown> | undefined),
+          raw.backgrounds ??
+          (asObject(raw.data)?.backgrounds as Record<string, unknown> | undefined),
+        data: raw.data,
       })
     : createDefaultConfig();
 
@@ -170,6 +185,9 @@ export async function saveCarteirinhaConfig(config: CarteirinhaConfig): Promise<
       id: CONFIG_DOC_ID,
       validade: normalized.validade,
       backgrounds: normalized.backgrounds,
+      data: {
+        backgroundOpacity: normalized.backgroundOpacity,
+      },
       updatedAt: new Date().toISOString(),
     },
     { onConflict: "id" }

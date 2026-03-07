@@ -1,5 +1,7 @@
 import { httpsCallable } from "@/lib/supa/functions";
+import { isMasterOnlyAdminPath } from "@/lib/roles";
 
+import { clearAdminUsersCache } from "./adminUsersService";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { getSupabaseClient } from "./supabase";
@@ -139,6 +141,10 @@ const sanitizePermissionMatrix = (
   Object.entries(matrix).forEach(([path, roles]) => {
     const cleanPath = path.trim();
     if (!cleanPath.startsWith("/")) return;
+    if (isMasterOnlyAdminPath(cleanPath)) {
+      sanitized[cleanPath] = ["master"];
+      return;
+    }
     const cleanRoles = asStringArray(roles).map((role) => role.trim()).filter(Boolean);
     sanitized[cleanPath] = Array.from(new Set(cleanRoles));
   });
@@ -478,8 +484,9 @@ export async function fetchPermissionMatrix(options?: {
   );
 
   const normalized = extractPermissionMatrix(response.matrix);
-  permissionMatrixCache = { cachedAt: Date.now(), value: normalized };
-  return normalized;
+  const sanitized = normalized ? sanitizePermissionMatrix(normalized) : null;
+  permissionMatrixCache = { cachedAt: Date.now(), value: sanitized };
+  return sanitized;
 }
 
 export async function savePermissionMatrix(
@@ -502,12 +509,15 @@ export async function savePermissionMatrix(
 export async function updatePermissionUserRole(payload: {
   targetUserId: string;
   role: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const targetUserId = payload.targetUserId.trim();
-  const role = payload.role.trim();
+  const tenantId = payload.tenantId?.trim() || "";
+  const requestedRole = payload.role.trim().toLowerCase();
+  const role = requestedRole === "master_tenant" ? "master" : requestedRole;
   if (!targetUserId || !role) return;
 
-  const requestPayload = { targetUserId, role };
+  const requestPayload = { targetUserId, role, tenantId: tenantId || undefined };
   await callWithFallback<typeof requestPayload, { ok: boolean }>(
     UPDATE_USER_ROLE_CALLABLE,
     requestPayload,
@@ -525,14 +535,21 @@ export async function updatePermissionUserRole(payload: {
 
       const nowIso = new Date().toISOString();
       let finalTenantRole = role;
-      let updateResult = await supabase
-        .from("users")
-        .update({
-          role,
-          tenant_role: role,
+      const buildUserPatch = (nextRole: string): Record<string, unknown> => {
+        const patch: Record<string, unknown> = {
+          tenant_role: nextRole,
           tenant_status: "approved",
           updatedAt: nowIso,
-        })
+        };
+        if (tenantId) {
+          patch.tenant_id = tenantId;
+        }
+        return patch;
+      };
+
+      let updateResult = await supabase
+        .from("users")
+        .update(buildUserPatch(role))
         .eq("uid", targetUserId);
 
       if (updateResult.error) {
@@ -546,27 +563,25 @@ export async function updatePermissionUserRole(payload: {
           finalTenantRole = legacyTenantRole;
           updateResult = await supabase
             .from("users")
-            .update({
-              role,
-              tenant_role: legacyTenantRole,
-              tenant_status: "approved",
-              updatedAt: nowIso,
-            })
+            .update(buildUserPatch(legacyTenantRole))
             .eq("uid", targetUserId);
         }
       }
 
       if (updateResult.error) throwSupabaseError(updateResult.error);
 
-      const { data: userRow, error: userFetchError } = await supabase
-        .from("users")
-        .select("tenant_id")
-        .eq("uid", targetUserId)
-        .maybeSingle();
-      if (userFetchError) throwSupabaseError(userFetchError);
+      let resolvedTenantId = tenantId;
+      if (!resolvedTenantId) {
+        const { data: userRow, error: userFetchError } = await supabase
+          .from("users")
+          .select("tenant_id")
+          .eq("uid", targetUserId)
+          .maybeSingle();
+        if (userFetchError) throwSupabaseError(userFetchError);
+        resolvedTenantId = asString(asObject(userRow)?.tenant_id).trim();
+      }
 
-      const tenantId = asString(asObject(userRow)?.tenant_id).trim();
-      if (tenantId) {
+      if (resolvedTenantId) {
         let membershipUpdate = await supabase
           .from("tenant_memberships")
           .update({
@@ -574,7 +589,7 @@ export async function updatePermissionUserRole(payload: {
             status: "approved",
             updated_at: nowIso,
           })
-          .eq("tenant_id", tenantId)
+          .eq("tenant_id", resolvedTenantId)
           .eq("user_id", targetUserId);
 
         if (membershipUpdate.error) {
@@ -587,7 +602,7 @@ export async function updatePermissionUserRole(payload: {
                 status: "approved",
                 updated_at: nowIso,
               })
-              .eq("tenant_id", tenantId)
+              .eq("tenant_id", resolvedTenantId)
               .eq("user_id", targetUserId);
           }
         }
@@ -600,6 +615,7 @@ export async function updatePermissionUserRole(payload: {
   );
 
   permissionUsersCache.clear();
+  clearAdminUsersCache();
 }
 
 export function clearAdminSecurityCaches(): void {

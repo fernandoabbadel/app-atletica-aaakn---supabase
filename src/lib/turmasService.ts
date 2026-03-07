@@ -17,6 +17,9 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
 
+const asBoolean = (value: unknown, fallback = false): boolean =>
+  typeof value === "boolean" ? value : fallback;
+
 const nowIso = (): string => new Date().toISOString();
 
 const throwSupabaseError = (error: {
@@ -89,9 +92,9 @@ export interface TurmaConfig {
   slug: string;
   nome: string;
   mascote: string;
-  frase: string;
   capa: string;
   logo: string;
+  hidden: boolean;
 }
 
 const DEFAULT_TURMAS: TurmaConfig[] = [
@@ -100,76 +103,79 @@ const DEFAULT_TURMAS: TurmaConfig[] = [
     slug: "t1",
     nome: "Turma I",
     mascote: "Jacare",
-    frase: "Primeira linhagem",
     capa: "/capa_t1.jpg",
     logo: "/turma1.jpeg",
+    hidden: false,
   },
   {
     id: "T2",
     slug: "t2",
     nome: "Turma II",
     mascote: "Cavalo Marinho",
-    frase: "Cardume estrategico",
     capa: "/capa_t2.jpg",
     logo: "/turma2.jpeg",
+    hidden: false,
   },
   {
     id: "T3",
     slug: "t3",
     nome: "Turma III",
     mascote: "Tartaruga",
-    frase: "Resistencia e foco",
     capa: "/capa_t3.jpg",
     logo: "/turma3.jpeg",
+    hidden: false,
   },
   {
     id: "T4",
     slug: "t4",
     nome: "Turma IV",
     mascote: "Baleia",
-    frase: "Forca de oceano",
     capa: "/capa_t4.jpg",
     logo: "/turma4.jpeg",
+    hidden: false,
   },
   {
     id: "T5",
     slug: "t5",
     nome: "Turma V",
     mascote: "Pinguim",
-    frase: "Velocidade no gelo",
     capa: "/capa_t5.jpg",
     logo: "/turma5.jpeg",
+    hidden: false,
   },
   {
     id: "T6",
     slug: "t6",
     nome: "Turma VI",
     mascote: "Lagosta",
-    frase: "Blindagem natural",
     capa: "/capa_t6.jpg",
     logo: "/turma6.jpeg",
+    hidden: false,
   },
   {
     id: "T7",
     slug: "t7",
     nome: "Turma VII",
     mascote: "Urso Polar",
-    frase: "Predadores de elite",
     capa: "/capa_t7.jpg",
     logo: "/turma7.jpeg",
+    hidden: false,
   },
   {
     id: "T8",
     slug: "t8",
     nome: "Turma VIII",
     mascote: "Calouros",
-    frase: "Caca aos bixos",
     capa: "/capa_t8.jpg",
     logo: "/turma8.jpg",
+    hidden: false,
   },
 ];
 
 const DEFAULT_TURMAS_MAP = new Map(DEFAULT_TURMAS.map((turma) => [turma.id, turma]));
+
+const getFallbackTurmas = (): TurmaConfig[] =>
+  sortTurmas(DEFAULT_TURMAS.map((row) => ({ ...row })));
 
 const toTurmaConfig = (raw: unknown): TurmaConfig | null => {
   const data = asObject(raw);
@@ -188,11 +194,11 @@ const toTurmaConfig = (raw: unknown): TurmaConfig | null => {
     defaultTurma?.nome ||
     `Turma ${id.replace("T", "")}`;
   const mascote = asString(data.mascote).trim() || defaultTurma?.mascote || "Mascote";
-  const frase = asString(data.frase).trim() || defaultTurma?.frase || "Album Oficial";
   const capa = asString(data.capa).trim() || defaultTurma?.capa || "/capa_t8.jpg";
   const logo = asString(data.logo).trim() || defaultTurma?.logo || "/logo.png";
+  const hidden = asBoolean(data.hidden, false);
 
-  return { id, slug, nome, mascote, frase, capa, logo };
+  return { id, slug, nome, mascote, capa, logo, hidden };
 };
 
 const sanitizeTurmas = (rows: TurmaConfig[]): TurmaConfig[] => {
@@ -203,13 +209,7 @@ const sanitizeTurmas = (rows: TurmaConfig[]): TurmaConfig[] => {
   return dedupeTurmasById(normalized);
 };
 
-const mergeWithDefaults = (rows: TurmaConfig[]): TurmaConfig[] => {
-  const map = new Map<string, TurmaConfig>(DEFAULT_TURMAS.map((turma) => [turma.id, turma]));
-  rows.forEach((row) => map.set(row.id, row));
-  return dedupeTurmasById(Array.from(map.values()));
-};
-
-export const getDefaultTurmas = (): TurmaConfig[] => [...DEFAULT_TURMAS];
+export const getDefaultTurmas = (): TurmaConfig[] => getFallbackTurmas();
 
 export async function fetchTurmasConfig(options?: { forceRefresh?: boolean }): Promise<TurmaConfig[]> {
   const forceRefresh = options?.forceRefresh ?? false;
@@ -234,14 +234,14 @@ export async function fetchTurmasConfig(options?: { forceRefresh?: boolean }): P
     .map((entry) => toTurmaConfig(entry))
     .filter((entry): entry is TurmaConfig => entry !== null);
 
-  const resolved = mergeWithDefaults(parsed);
+  const hasStoredRow = Boolean(row);
+  const resolved = parsed.length > 0 || hasStoredRow ? sortTurmas(parsed) : getFallbackTurmas();
   setCachedValue(turmasCache, cacheKey, resolved);
   return resolved;
 }
 
 export async function saveTurmasConfig(turmas: TurmaConfig[]): Promise<TurmaConfig[]> {
-  const sanitized = sanitizeTurmas(turmas);
-  const next = mergeWithDefaults(sanitized);
+  const next = sanitizeTurmas(turmas);
 
   const supabase = getSupabaseClient();
   const { error } = await supabase.from("app_config").upsert(
@@ -262,7 +262,6 @@ export async function addTurmaConfig(payload: {
   id: string;
   nome?: string;
   mascote?: string;
-  frase?: string;
   capa?: string;
   logo?: string;
 }): Promise<TurmaConfig[]> {
@@ -280,12 +279,75 @@ export async function addTurmaConfig(payload: {
     slug: buildSlugFromTurmaId(turmaId),
     nome: payload.nome?.trim() || `Turma ${defaultNumero}`,
     mascote: payload.mascote?.trim() || "Novo mascote",
-    frase: payload.frase?.trim() || "Nova turma no album",
     capa: payload.capa?.trim() || `/capa_${buildSlugFromTurmaId(turmaId)}.jpg`,
     logo: payload.logo?.trim() || "/logo.png",
+    hidden: false,
   };
 
   return saveTurmasConfig([...current, nextTurma]);
+}
+
+export async function updateTurmaConfig(payload: {
+  id: string;
+  nome?: string;
+  mascote?: string;
+  capa?: string;
+  logo?: string;
+  hidden?: boolean;
+}): Promise<TurmaConfig[]> {
+  const turmaId = normalizeTurmaId(payload.id);
+  if (!turmaId) throw new Error("Codigo de turma invalido.");
+
+  const current = await fetchTurmasConfig({ forceRefresh: true });
+  const currentTurma = current.find((turma) => turma.id === turmaId);
+  if (!currentTurma) {
+    throw new Error(`Turma ${turmaId} nao encontrada.`);
+  }
+
+  const next = current.map((turma) =>
+    turma.id === turmaId
+      ? {
+          ...turma,
+          nome: payload.nome?.trim() || turma.nome,
+          mascote: payload.mascote?.trim() || turma.mascote,
+          capa: payload.capa?.trim() || turma.capa,
+          logo: payload.logo?.trim() || turma.logo,
+          hidden: typeof payload.hidden === "boolean" ? payload.hidden : turma.hidden,
+        }
+      : turma
+  );
+
+  return saveTurmasConfig(next);
+}
+
+export async function toggleTurmaVisibility(
+  turmaIdRaw: string,
+  hidden?: boolean
+): Promise<TurmaConfig[]> {
+  const turmaId = normalizeTurmaId(turmaIdRaw);
+  if (!turmaId) throw new Error("Codigo de turma invalido.");
+
+  const current = await fetchTurmasConfig({ forceRefresh: true });
+  const currentTurma = current.find((turma) => turma.id === turmaId);
+  if (!currentTurma) {
+    throw new Error(`Turma ${turmaId} nao encontrada.`);
+  }
+
+  const nextHidden = typeof hidden === "boolean" ? hidden : !currentTurma.hidden;
+  return updateTurmaConfig({ id: turmaId, hidden: nextHidden });
+}
+
+export async function deleteTurmaConfig(turmaIdRaw: string): Promise<TurmaConfig[]> {
+  const turmaId = normalizeTurmaId(turmaIdRaw);
+  if (!turmaId) throw new Error("Codigo de turma invalido.");
+
+  const current = await fetchTurmasConfig({ forceRefresh: true });
+  if (!current.some((turma) => turma.id === turmaId)) {
+    throw new Error(`Turma ${turmaId} nao encontrada.`);
+  }
+
+  const next = current.filter((turma) => turma.id !== turmaId);
+  return saveTurmasConfig(next);
 }
 
 export function clearTurmasCache(): void {

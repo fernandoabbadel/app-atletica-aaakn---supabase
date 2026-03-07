@@ -8,8 +8,12 @@ import {
   fetchPublicLandingData,
   type PublicLandingData,
 } from "@/lib/publicLandingService";
+import { fetchTenantBySlug } from "@/lib/tenantService";
+import { TENANT_SLUG_COOKIE_NAME } from "@/lib/tenantRouting";
+import { cookies } from "next/headers";
 
 export const revalidate = 43200; // 12h
+export const dynamic = "force-dynamic";
 
 const fallbackPayload = (
   config: LandingConfig = DEFAULT_LANDING_CONFIG
@@ -22,9 +26,16 @@ const fallbackPayload = (
 
 export async function GET() {
   try {
+    const cookieStore = await cookies();
+    const tenantSlug = (cookieStore.get(TENANT_SLUG_COOKIE_NAME)?.value || "")
+      .trim()
+      .toLowerCase();
+    const tenant = tenantSlug ? await fetchTenantBySlug(tenantSlug) : null;
+
     const data = await fetchPublicLandingData({
       forceRefresh: true,
       fallbackConfig: DEFAULT_LANDING_CONFIG,
+      tenantId: tenant?.id || "",
     });
 
     return NextResponse.json(data, {

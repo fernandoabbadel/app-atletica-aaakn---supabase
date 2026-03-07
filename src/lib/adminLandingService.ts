@@ -16,11 +16,9 @@ const MAX_STAT_VALUE = 9_999_999;
 // Tabela/linha padrao para guardar JSON de configuracao no Supabase.
 const SITE_CONFIG_TABLE = "site_config";
 const LANDING_CONFIG_ROW_ID = "landing_page";
-const LANDING_ROW_SELECT_WRAPPER = "id,key,config,data,payload,updated_at";
-const LANDING_ROW_SELECT_FLAT =
-  "id,key,tagline,taglineColor,heroTitle,heroSubtitle,heroHighlight,titleColor,gradientStart,gradientEnd,statUsers,statPosts,statPartners,address,phone,whatsapp,email,socialLinks,reviews,updated_at";
+const LANDING_ROW_SELECT_COLUMNS = "id,data,updated_at";
 
-let landingConfigCache: CacheEntry<LandingConfig> | null = null;
+const landingConfigCache = new Map<string, CacheEntry<LandingConfig>>();
 
 export type SocialPlatform =
   | "instagram"
@@ -213,105 +211,94 @@ export function sanitizeLandingConfig(
   };
 }
 
-async function fetchLandingConfigRow(): Promise<unknown> {
+const getLandingCacheKey = (tenantId?: string | null): string => {
+  const cleanTenantId = tenantId?.trim() || "";
+  return cleanTenantId || "global";
+};
+
+const buildLandingRowId = (tenantId?: string | null): string => {
+  const cleanTenantId = tenantId?.trim() || "";
+  return cleanTenantId ? `${LANDING_CONFIG_ROW_ID}__${cleanTenantId}` : LANDING_CONFIG_ROW_ID;
+};
+
+async function fetchLandingConfigRow(tenantId?: string | null): Promise<unknown> {
   const supabase = getSupabaseClient();
-  let lastError: unknown = null;
+  const rowIds = Array.from(
+    new Set([buildLandingRowId(tenantId), LANDING_CONFIG_ROW_ID])
+  );
 
-  // Suporta schemas com chave primaria chamada id ou key.
-  for (const keyColumn of ["id", "key"] as const) {
-    for (const selectColumns of [LANDING_ROW_SELECT_WRAPPER, LANDING_ROW_SELECT_FLAT]) {
-      const { data, error } = await supabase
-        .from(SITE_CONFIG_TABLE)
-        .select(selectColumns)
-        .eq(keyColumn, LANDING_CONFIG_ROW_ID)
-        .maybeSingle();
+  for (const rowId of rowIds) {
+    const { data, error } = await supabase
+      .from(SITE_CONFIG_TABLE)
+      .select(LANDING_ROW_SELECT_COLUMNS)
+      .eq("id", rowId)
+      .maybeSingle();
 
-      if (!error) {
-        return data;
-      }
-
-      lastError = error;
-    }
+    if (error) throw error;
+    if (data) return data;
   }
 
-  if (lastError) throw lastError;
   return null;
 }
 
-async function saveLandingConfigRow(normalized: LandingConfig): Promise<void> {
+async function saveLandingConfigRow(
+  normalized: LandingConfig,
+  tenantId?: string | null
+): Promise<void> {
   const supabase = getSupabaseClient();
   const nowIso = new Date().toISOString();
-
-  const attempts: Array<{ row: Record<string, unknown>; onConflict: string }> = [
+  const { error } = await supabase.from(SITE_CONFIG_TABLE).upsert(
     {
-      row: { id: LANDING_CONFIG_ROW_ID, data: normalized, updated_at: nowIso },
-      onConflict: "id",
+      id: buildLandingRowId(tenantId),
+      data: normalized,
+      updated_at: nowIso,
     },
-    {
-      row: { key: LANDING_CONFIG_ROW_ID, data: normalized, updated_at: nowIso },
-      onConflict: "key",
-    },
-    {
-      row: { id: LANDING_CONFIG_ROW_ID, ...normalized, updated_at: nowIso },
-      onConflict: "id",
-    },
-    {
-      row: { key: LANDING_CONFIG_ROW_ID, ...normalized, updated_at: nowIso },
-      onConflict: "key",
-    },
-  ];
+    { onConflict: "id" }
+  );
 
-  let lastError: unknown = null;
-  for (const attempt of attempts) {
-    const { error } = await supabase
-      .from(SITE_CONFIG_TABLE)
-      .upsert(attempt.row, { onConflict: attempt.onConflict });
-
-    if (!error) {
-      return;
-    }
-
-    lastError = error;
-  }
-
-  if (lastError) throw lastError;
+  if (error) throw error;
 }
 
 export async function fetchLandingConfig(options?: {
   forceRefresh?: boolean;
   fallbackConfig?: LandingConfig;
+  tenantId?: string | null;
 }): Promise<LandingConfig> {
   const forceRefresh = options?.forceRefresh ?? false;
   const fallbackConfig = options?.fallbackConfig ?? DEFAULT_LANDING_CONFIG;
+  const cacheKey = getLandingCacheKey(options?.tenantId);
 
-  if (!forceRefresh && landingConfigCache) {
-    if (Date.now() - landingConfigCache.cachedAt <= READ_CACHE_TTL_MS) {
-      return landingConfigCache.value;
-    }
+  const cached = landingConfigCache.get(cacheKey);
+  if (!forceRefresh && cached && Date.now() - cached.cachedAt <= READ_CACHE_TTL_MS) {
+    return cached.value;
   }
 
-  const rawConfig = await fetchLandingConfigRow();
+  const rawConfig = await fetchLandingConfigRow(options?.tenantId);
   const normalized = sanitizeLandingConfig(extractPayloadData(rawConfig), fallbackConfig);
 
-  landingConfigCache = {
+  landingConfigCache.set(cacheKey, {
     cachedAt: Date.now(),
     value: normalized,
-  };
+  });
 
   return normalized;
 }
 
-export async function saveLandingConfig(config: LandingConfig): Promise<void> {
+export async function saveLandingConfig(
+  config: LandingConfig,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const normalized = sanitizeLandingConfig(config, config);
+  const cacheKey = getLandingCacheKey(options?.tenantId);
 
-  await saveLandingConfigRow(normalized);
+  await saveLandingConfigRow(normalized, options?.tenantId);
 
-  landingConfigCache = {
+  landingConfigCache.set(cacheKey, {
     cachedAt: Date.now(),
     value: normalized,
-  };
+  });
 }
 
 export function clearAdminLandingCache(): void {
-  landingConfigCache = null;
+  landingConfigCache.clear();
 }

@@ -8,6 +8,12 @@ import LoadingScreen from "../app/loading";
 import { DEFAULT_STATS, DEFAULT_USER_PROPS } from "../constants/userDefaults";
 import { getBackendErrorCode, isPermissionError } from "@/lib/backendErrors";
 import { ensureAlbumSelfCollected } from "@/lib/albumService";
+import {
+  applyPlatformMasterTenantOverride,
+  MASTER_TENANT_OVERRIDE_EVENT_NAME,
+  getMasterTenantOverrideId,
+  MASTER_TENANT_OVERRIDE_STORAGE_KEY,
+} from "@/lib/tenantContext";
 import { parseTenantScopedPath } from "@/lib/tenantRouting";
 import {
   getAccessRoleCandidates,
@@ -479,6 +485,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [masterOverrideTenantId, setMasterOverrideTenantId] = useState("");
   
   // Ã°Å¸Â¦Ë† ESTADO LOCAL DE GUEST
   const [isLocalGuest, setIsLocalGuest] = useState(false);
@@ -495,6 +502,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = useMemo(
     () => parseTenantScopedPath(pathnameRaw ? pathnameRaw.split("?")[0] : "/").scopedPath,
     [pathnameRaw]
+  );
+  const effectiveUser = useMemo(
+    () => applyPlatformMasterTenantOverride(user, masterOverrideTenantId) ?? null,
+    [masterOverrideTenantId, user]
   );
 
   // 1. CARREGAMENTO INICIAL UNIFICADO
@@ -576,8 +587,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setTimeout(() => setLoading(false), 500);
         } catch {
             localStorage.removeItem("shark_guest_session");
-        }
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    setMasterOverrideTenantId(
+      getMasterTenantOverrideId(
+        localStorage.getItem(MASTER_TENANT_OVERRIDE_STORAGE_KEY)
+      )
+    );
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== MASTER_TENANT_OVERRIDE_STORAGE_KEY) return;
+      setMasterOverrideTenantId(getMasterTenantOverrideId(event.newValue));
+    };
+    const onOverrideChanged = (event: Event) => {
+      const rawEvent = event as CustomEvent<{ tenantId?: unknown }>;
+      setMasterOverrideTenantId(
+        getMasterTenantOverrideId(rawEvent.detail?.tenantId)
+      );
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(
+      MASTER_TENANT_OVERRIDE_EVENT_NAME,
+      onOverrideChanged as EventListener
+    );
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(
+        MASTER_TENANT_OVERRIDE_EVENT_NAME,
+        onOverrideChanged as EventListener
+      );
+    };
   }, []);
 
   // 3. MONITORAR AUTH (SUPABASE NATIVO)
@@ -1136,7 +1181,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Pequeno delay para a UI reagir
     setTimeout(() => {
         setLoading(false);
-        router.push("/dashboard");
     }, 500);
   };
 
@@ -1163,15 +1207,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const checkPermission = (allowedRoles: string[]) => {
-    if (!user) return false;
-    if (isPlatformMaster(user)) return true;
+    if (!effectiveUser) return false;
+    if (isPlatformMaster(effectiveUser)) return true;
 
     const normalizedAllowed = new Set(
       allowedRoles.map((role) => role.trim().toLowerCase()).filter(Boolean)
     );
     if (!normalizedAllowed.size) return false;
 
-    const candidates = getAccessRoleCandidates(user);
+    const candidates = getAccessRoleCandidates(effectiveUser);
     return candidates.some((role) => normalizedAllowed.has(role));
   };
 
@@ -1271,7 +1315,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, isAdmin, loginGoogle, loginAsGuest, logout, checkPermission, updateUser }}>
+    <AuthContext.Provider value={{ user: effectiveUser, loading, isAdmin, loginGoogle, loginAsGuest, logout, checkPermission, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

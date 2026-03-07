@@ -3,7 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, ChevronRight, QrCode, ScanLine, Shield } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  EyeOff,
+  Pencil,
+  QrCode,
+  ScanLine,
+  Shield,
+  Trash2,
+} from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { getTurmaImageCandidates } from "../../constants/turmaImages";
@@ -12,9 +21,13 @@ import {
   type AlbumUiConfig,
 } from "../../lib/albumUiService";
 import { useAuth } from "../../context/AuthContext";
+import { useToast } from "../../context/ToastContext";
+import { resolveEffectiveAccessRole } from "../../lib/roles";
 import {
+  deleteTurmaConfig,
   fetchTurmasConfig,
   getDefaultTurmas,
+  toggleTurmaVisibility,
   type TurmaConfig,
 } from "../../lib/turmasService";
 
@@ -57,12 +70,14 @@ const resolveTurmaSlug = (turmaRaw: string | undefined, turmas: TurmaConfig[]): 
 
 export default function AlbumTurmasPage() {
   const { user } = useAuth();
+  const { addToast } = useToast();
   const [uiConfig, setUiConfig] = useState<AlbumUiConfig | null>(null);
   const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
   const [imageFallbackIndex, setImageFallbackIndex] = useState<Record<string, number>>(
     {}
   );
   const [showMyQr, setShowMyQr] = useState(false);
+  const [processingTurmaId, setProcessingTurmaId] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -96,7 +111,10 @@ export default function AlbumTurmasPage() {
     subtitle.trim().toLowerCase() !== heroHeadline.trim().toLowerCase();
   const hero = uiConfig?.capa?.trim() || "/capa_t8.jpg";
   const currentTurmaSlug = resolveTurmaSlug(user?.turma, turmas);
-  const canEditAlbum = ADMIN_ROLES.has(String(user?.role || "").toLowerCase());
+  const currentRole = resolveEffectiveAccessRole(user);
+  const canEditAlbum =
+    ADMIN_ROLES.has(String(user?.role || "").toLowerCase()) || ADMIN_ROLES.has(currentRole);
+  const visibleTurmas = canEditAlbum ? turmas : turmas.filter((turma) => !turma.hidden);
   const turmaImageCandidates = useMemo(
     () =>
       turmas.reduce<Record<string, string[]>>((acc, turma) => {
@@ -105,6 +123,50 @@ export default function AlbumTurmasPage() {
       }, {}),
     [turmas]
   );
+
+  const handleToggleHidden = async (turma: TurmaConfig) => {
+    try {
+      setProcessingTurmaId(turma.id);
+      const next = await toggleTurmaVisibility(turma.id, !turma.hidden);
+      setTurmas(next);
+      addToast(
+        turma.hidden
+          ? `Turma ${turma.id} visivel novamente na home do album.`
+          : `Turma ${turma.id} escondida da home do album.`,
+        "success"
+      );
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Erro ao atualizar visibilidade da turma.";
+      addToast(message, "error");
+    } finally {
+      setProcessingTurmaId("");
+    }
+  };
+
+  const handleDelete = async (turma: TurmaConfig) => {
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(`Excluir a turma ${turma.id} (${turma.nome})?`);
+      if (!confirmed) return;
+    }
+
+    try {
+      setProcessingTurmaId(turma.id);
+      const next = await deleteTurmaConfig(turma.id);
+      setTurmas(next);
+      addToast(`Turma ${turma.id} excluida com sucesso.`, "success");
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Erro ao excluir turma.";
+      addToast(message, "error");
+    } finally {
+      setProcessingTurmaId("");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-28">
@@ -215,53 +277,89 @@ export default function AlbumTurmasPage() {
         )}
 
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {turmas.map((turma, index) => (
-            <Link
+          {visibleTurmas.map((turma, index) => (
+            <div
               key={turma.id}
-              href={`/album/${turma.slug}`}
-              className="group relative overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900 hover:border-emerald-500/40 transition"
+              className={`group relative overflow-hidden rounded-3xl border bg-zinc-900 transition ${
+                turma.hidden
+                  ? "border-amber-500/30 opacity-75"
+                  : "border-zinc-800 hover:border-emerald-500/40"
+              }`}
             >
-              <div className="relative h-56 w-full">
-                <Image
-                  src={
-                    turmaImageCandidates[turma.id][
-                      imageFallbackIndex[turma.id] ?? 0
-                    ] || "/capa_t8.jpg"
-                  }
-                  alt={turma.nome}
-                  fill
-                  priority={index < 2}
-                  className="object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition duration-500"
-                  sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 25vw"
-                  
-                  onError={() =>
-                    setImageFallbackIndex((prev) => {
-                      const current = prev[turma.id] ?? 0;
-                      const maxIndex = turmaImageCandidates[turma.id].length - 1;
-                      if (current >= maxIndex) return prev;
-                      return { ...prev, [turma.id]: current + 1 };
-                    })
-                  }
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
-              </div>
+              {canEditAlbum && (
+                <div className="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-2">
+                  {turma.hidden && (
+                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[9px] font-black uppercase text-amber-300">
+                      Oculta
+                    </span>
+                  )}
+                  <Link
+                    href={`/admin/cadastro?edit=${turma.id}`}
+                    className="rounded-full border border-cyan-500/30 bg-black/70 p-2 text-cyan-300 backdrop-blur"
+                    title={`Editar ${turma.id}`}
+                  >
+                    <Pencil size={14} />
+                  </Link>
+                  <button
+                    onClick={() => void handleToggleHidden(turma)}
+                    disabled={processingTurmaId === turma.id}
+                    className="rounded-full border border-amber-500/30 bg-black/70 p-2 text-amber-300 backdrop-blur disabled:opacity-60"
+                    title={turma.hidden ? `Mostrar ${turma.id}` : `Esconder ${turma.id}`}
+                  >
+                    <EyeOff size={14} />
+                  </button>
+                  <button
+                    onClick={() => void handleDelete(turma)}
+                    disabled={processingTurmaId === turma.id}
+                    className="rounded-full border border-red-500/30 bg-black/70 p-2 text-red-300 backdrop-blur disabled:opacity-60"
+                    title={`Excluir ${turma.id}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )}
 
-              <div className="p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] text-zinc-400 font-black uppercase tracking-wider">
-                      {turma.id}
-                    </p>
-                    <h2 className="text-sm font-black uppercase">{turma.nome}</h2>
-                    <p className="text-[11px] text-zinc-400 mt-1">{turma.mascote}</p>
-                    <p className="text-[10px] text-zinc-500 mt-1">{turma.frase}</p>
-                  </div>
-                  <div className="w-9 h-9 rounded-full border border-zinc-700 bg-zinc-950 flex items-center justify-center text-zinc-300 group-hover:text-emerald-400 group-hover:border-emerald-500/40 transition">
-                    <ChevronRight size={16} />
+              <Link href={`/album/${turma.slug}`} className="block">
+                <div className="relative h-56 w-full">
+                  <Image
+                    src={
+                      turmaImageCandidates[turma.id][
+                        imageFallbackIndex[turma.id] ?? 0
+                      ] || "/capa_t8.jpg"
+                    }
+                    alt={turma.nome}
+                    fill
+                    priority={index < 2}
+                    className="object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition duration-500"
+                    sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 25vw"
+                    onError={() =>
+                      setImageFallbackIndex((prev) => {
+                        const current = prev[turma.id] ?? 0;
+                        const maxIndex = turmaImageCandidates[turma.id].length - 1;
+                        if (current >= maxIndex) return prev;
+                        return { ...prev, [turma.id]: current + 1 };
+                      })
+                    }
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+                </div>
+
+                <div className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] text-zinc-400 font-black uppercase tracking-wider">
+                        {turma.id}
+                      </p>
+                      <h2 className="text-sm font-black uppercase">{turma.nome}</h2>
+                      <p className="text-[11px] text-zinc-400 mt-1">{turma.mascote}</p>
+                    </div>
+                    <div className="w-9 h-9 rounded-full border border-zinc-700 bg-zinc-950 flex items-center justify-center text-zinc-300 group-hover:text-emerald-400 group-hover:border-emerald-500/40 transition">
+                      <ChevronRight size={16} />
+                    </div>
                   </div>
                 </div>
-              </div>
-            </Link>
+              </Link>
+            </div>
           ))}
         </section>
       </main>

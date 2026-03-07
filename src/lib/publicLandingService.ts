@@ -96,9 +96,11 @@ export interface PublicLandingData {
 export async function fetchPublicLandingData(options?: {
   forceRefresh?: boolean;
   fallbackConfig?: LandingConfig;
+  tenantId?: string | null;
 }): Promise<PublicLandingData> {
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = "default";
+  const tenantId = options?.tenantId?.trim() || "";
+  const cacheKey = tenantId || "default";
   const fallbackConfig = options?.fallbackConfig ?? DEFAULT_LANDING_CONFIG;
 
   if (!forceRefresh) {
@@ -111,6 +113,7 @@ export async function fetchPublicLandingData(options?: {
     fetchLandingConfig({
       forceRefresh,
       fallbackConfig,
+      tenantId,
     }),
     fetchCountFromCandidates([{ tableName: "users", countColumn: "uid" }]),
     fetchCountFromCandidates([{ tableName: "tenants", countColumn: "id" }]),

@@ -28,7 +28,7 @@ const DEFAULT_GLOBAL: AlbumUiConfig = {
 const DEFAULT_TURMA = (turma: TurmaConfig): AlbumCmsData => ({
   capa: turma.capa || `/capa_${turma.slug || turma.id.toLowerCase()}.jpg`,
   titulo: turma.nome || `Turma ${turma.id.replace("T", "")}`,
-  subtitulo: turma.frase || "Album Oficial",
+  subtitulo: turma.mascote || "Album Oficial",
 });
 
 const buildDefaultTurmaMap = (turmas: TurmaConfig[]): Record<string, AlbumCmsData> =>

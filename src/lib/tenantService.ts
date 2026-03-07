@@ -140,6 +140,18 @@ export interface TenantInviteActivationRankingEntry {
   lastActivationAt: string;
 }
 
+export interface TenantInviteGenerationRankingEntry {
+  inviterUserId: string;
+  inviterName: string;
+  inviterEmail: string;
+  inviterPhoto: string;
+  totalInvites: number;
+  activeInvites: number;
+  inactiveInvites: number;
+  totalUses: number;
+  lastInviteAt: string;
+}
+
 const TENANT_SELECT_COLUMNS_V1 =
   "id,nome,sigla,slug,faculdade,cidade,curso,area,logo_url,palette_key,allow_public_signup,status,created_at,updated_at";
 const TENANT_SELECT_COLUMNS_V2 =
@@ -432,7 +444,25 @@ export async function fetchTenantPlatformConfig(): Promise<TenantPlatformConfig>
     .select("id,tokenization_active,updated_by,updated_at")
     .eq("id", "global")
     .maybeSingle();
-  if (error) throwSupabaseError(error);
+  if (error) {
+    const message = [
+      asString(error.message).toLowerCase(),
+      asString(error.details).toLowerCase(),
+      asString(error.hint).toLowerCase(),
+    ].join(" ");
+    const isRecoverable =
+      error.code === "42P01" ||
+      error.code === "PGRST204" ||
+      message.includes("does not exist") ||
+      message.includes("schema cache") ||
+      message.includes("permission denied");
+    if (!isRecoverable) throwSupabaseError(error);
+    return {
+      tokenizationActive: true,
+      updatedBy: "",
+      updatedAt: "",
+    };
+  }
 
   const row = asObject(data);
   return {
@@ -510,6 +540,35 @@ export async function fetchManageableTenants(options?: {
       .select(TENANT_SELECT_COLUMNS_V1)
       .in("id", tenantIds)
       .order("nome", { ascending: true });
+    data = fallbackResult.data as unknown as typeof data;
+    error = fallbackResult.error;
+  }
+  if (error) throwSupabaseError(error);
+
+  return (Array.isArray(data) ? data : [])
+    .map((row) => parseTenant(row))
+    .filter((row): row is TenantSummary => row !== null);
+}
+
+export async function fetchPublicTenants(options?: {
+  limit?: number;
+}): Promise<TenantSummary[]> {
+  const limit = Math.max(1, Math.min(200, Math.floor(options?.limit ?? 80)));
+  const supabase = getSupabaseClient();
+
+  let { data, error } = await supabase
+    .from("tenants")
+    .select(TENANT_SELECT_COLUMNS_V2)
+    .eq("status", "active")
+    .order("nome", { ascending: true })
+    .limit(limit);
+  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+    const fallbackResult = await supabase
+      .from("tenants")
+      .select(TENANT_SELECT_COLUMNS_V1)
+      .eq("status", "active")
+      .order("nome", { ascending: true })
+      .limit(limit);
     data = fallbackResult.data as unknown as typeof data;
     error = fallbackResult.error;
   }
@@ -847,7 +906,7 @@ export async function createTenantInvite(payload: {
   const cleanTenantId = payload.tenantId.trim();
   if (!cleanTenantId) throw new Error("Tenant invalido para criar convite.");
 
-  const roleToAssign = payload.roleToAssign ?? "user";
+  const roleToAssign: TenantInviteRole = "user";
   const roleToAssignForRpc = toLegacyTenantRole(roleToAssign);
   const maxUses = Math.max(1, Math.min(500, Math.floor(payload.maxUses ?? 25)));
   const expiresInHours = Math.max(
@@ -1239,6 +1298,103 @@ export async function fetchTenantInviteActivationRanking(
       lastActivationAt: row.lastActivationAt,
     };
   });
+}
+
+export async function fetchTenantInviteGenerationRanking(
+  tenantId: string,
+  options?: { limit?: number }
+): Promise<TenantInviteGenerationRankingEntry[]> {
+  const cleanTenantId = tenantId.trim();
+  if (!cleanTenantId) return [];
+
+  const limit = Math.max(1, Math.min(50, Math.floor(options?.limit ?? 10)));
+  const invites = await fetchTenantInvites(cleanTenantId, { limit: 200 });
+  const grouped = new Map<
+    string,
+    {
+      totalInvites: number;
+      activeInvites: number;
+      inactiveInvites: number;
+      totalUses: number;
+      lastInviteAt: string;
+    }
+  >();
+
+  invites.forEach((invite) => {
+    const inviterUserId = invite.createdBy.trim();
+    if (!inviterUserId) return;
+
+    const current = grouped.get(inviterUserId) ?? {
+      totalInvites: 0,
+      activeInvites: 0,
+      inactiveInvites: 0,
+      totalUses: 0,
+      lastInviteAt: "",
+    };
+
+    current.totalInvites += 1;
+    current.totalUses += Math.max(0, invite.usesCount);
+    if (invite.isActive) current.activeInvites += 1;
+    else current.inactiveInvites += 1;
+
+    if (!current.lastInviteAt || invite.createdAt > current.lastInviteAt) {
+      current.lastInviteAt = invite.createdAt;
+    }
+
+    grouped.set(inviterUserId, current);
+  });
+
+  const inviterIds = Array.from(grouped.keys());
+  if (inviterIds.length === 0) return [];
+
+  const supabase = getSupabaseClient();
+  const { data: usersData, error: usersError } = await supabase
+    .from("users")
+    .select("uid,nome,email,foto")
+    .in("uid", inviterIds);
+  if (usersError) throwSupabaseError(usersError);
+
+  const usersMap = new Map<string, { nome: string; email: string; foto: string }>();
+  (Array.isArray(usersData) ? usersData : []).forEach((entry) => {
+    const raw = asObject(entry);
+    if (!raw) return;
+    const uid = asString(raw.uid).trim();
+    if (!uid) return;
+    usersMap.set(uid, {
+      nome: asString(raw.nome).trim(),
+      email: asString(raw.email).trim(),
+      foto: asString(raw.foto).trim(),
+    });
+  });
+
+  return inviterIds
+    .map((inviterUserId) => {
+      const stats = grouped.get(inviterUserId);
+      if (!stats) return null;
+      const profile = usersMap.get(inviterUserId);
+      return {
+        inviterUserId,
+        inviterName: profile?.nome || "",
+        inviterEmail: profile?.email || "",
+        inviterPhoto: profile?.foto || "",
+        totalInvites: stats.totalInvites,
+        activeInvites: stats.activeInvites,
+        inactiveInvites: stats.inactiveInvites,
+        totalUses: stats.totalUses,
+        lastInviteAt: stats.lastInviteAt,
+      };
+    })
+    .filter((row): row is TenantInviteGenerationRankingEntry => row !== null)
+    .sort((left, right) => {
+      if (right.totalInvites !== left.totalInvites) {
+        return right.totalInvites - left.totalInvites;
+      }
+      if (right.totalUses !== left.totalUses) {
+        return right.totalUses - left.totalUses;
+      }
+      return right.lastInviteAt.localeCompare(left.lastInviteAt);
+    })
+    .slice(0, limit);
 }
 
 export async function uploadTenantLogo(payload: {

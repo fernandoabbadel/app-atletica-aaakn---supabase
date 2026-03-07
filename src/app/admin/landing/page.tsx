@@ -9,6 +9,7 @@ import {
 
 // IMPORTS DO SISTEMA
 import { useAuth } from "@/context/AuthContext"; 
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
   fetchLandingConfig,
@@ -20,6 +21,20 @@ import { logActivity } from "@/lib/logger";
 import { isPermissionError } from "@/lib/backendErrors";
 
 // --- TYPES & INTERFACES (Clean Code) ---
+
+const extractErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const message = [raw.message, raw.details, raw.hint]
+      .map((entry) => (typeof entry === "string" ? entry : ""))
+      .filter((entry) => entry.length > 0)
+      .join(" | ");
+    if (message) return message;
+  }
+  return "Erro inesperado.";
+};
 
 // --- ESTADO INICIAL ---
 const INITIAL_CONFIG: LandingConfig = {
@@ -46,6 +61,7 @@ const INITIAL_CONFIG: LandingConfig = {
 
 export default function AdminLandingPage() {
   const { user } = useAuth();
+  const { tenantId: activeTenantId, tenantSigla, tenantName, palette } = useTenantTheme();
   const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,7 +71,10 @@ export default function AdminLandingPage() {
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const data = await fetchLandingConfig({ fallbackConfig: INITIAL_CONFIG });
+        const data = await fetchLandingConfig({
+          fallbackConfig: INITIAL_CONFIG,
+          tenantId: activeTenantId || undefined,
+        });
         setConfig({
           ...INITIAL_CONFIG,
           ...data,
@@ -66,39 +85,41 @@ export default function AdminLandingPage() {
         if (isPermissionError(error)) {
           addToast("Sem permissão para carregar a configuração da landing.", "error");
         } else {
-          console.error("Erro ao carregar config:", error);
-          addToast("Erro ao carregar configurações.", "error");
+          const message = extractErrorMessage(error);
+          console.error(`Erro ao carregar config: ${message}`);
+          addToast(`Erro ao carregar configurações: ${message}`, "error");
         }
       } finally {
         setLoading(false);
       }
     };
     void fetchConfig();
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   // SALVAR DADOS
   const handleSave = async () => {
     setSaving(true);
     try {
-      await saveLandingConfig(config);
+      await saveLandingConfig(config, { tenantId: activeTenantId || undefined });
 
       if (user) {
         await logActivity(
           user.uid,
           String(user.displayName || user.email || "Admin"), 
           "UPDATE",
-          "Landing Page",
-          `Atualizou Landing Page. Destaque: ${config.heroHighlight}`
+          "Landing",
+          `Atualizou landing. Destaque: ${config.heroHighlight}`
         );
       }
 
-      addToast("Aí sim! O Tubarão atualizou a vitrine! 🦈✅", "success");
+      addToast("Landing atualizada com sucesso.", "success");
     } catch (error: unknown) {
       if (isPermissionError(error)) {
         addToast("Sem permissão para salvar a landing.", "error");
       } else {
-        console.error(error);
-        addToast("Deu ruim no plantão! Falha ao salvar.", "error");
+        const message = extractErrorMessage(error);
+        console.error(`Erro ao salvar landing: ${message}`);
+        addToast(`Falha ao salvar landing: ${message}`, "error");
       }
     } finally {
       setSaving(false);
@@ -158,7 +179,7 @@ export default function AdminLandingPage() {
       }
   };
 
-  if (loading) return <div className="p-8 text-white">Carregando painel do Tubarão... 🦈</div>;
+  if (loading) return <div className="p-8 text-white">Carregando landing...</div>;
 
   return (
     <div className="min-h-screen bg-zinc-950 p-6 md:p-12 pb-32">
@@ -166,9 +187,11 @@ export default function AdminLandingPage() {
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
         <div>
           <h1 className="text-3xl font-black text-white flex items-center gap-3">
-            <LayoutTemplate className="text-emerald-500" /> Editor da Landing Page
+            <LayoutTemplate className="text-emerald-500" /> Editor da Landing
           </h1>
-          <p className="text-zinc-400 text-sm">Personalize a vitrine da Atlética em tempo real.</p>
+          <p className="text-sm font-bold uppercase tracking-[0.22em]" style={{ color: palette.primary }}>
+            {tenantSigla || tenantName || "Modo Global"} • Landing ativa
+          </p>
         </div>
         <button 
           onClick={handleSave}

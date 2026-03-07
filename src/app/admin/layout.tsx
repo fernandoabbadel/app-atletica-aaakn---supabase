@@ -27,6 +27,7 @@ import {
   Dice5,
   Rocket,
   Building2,
+  CreditCard,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -36,6 +37,7 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { logActivity } from "../../lib/logger";
 import { isPlatformMaster } from "@/lib/roles";
 import { parseTenantScopedPath } from "@/lib/tenantRouting";
+import MasterTenantSwitcher from "./_components/MasterTenantSwitcher";
 
 interface SidebarItem {
   name: string;
@@ -112,6 +114,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
     { name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
     { name: "Usuarios", path: "/admin/usuarios", icon: <Users size={18} /> },
+    { name: "Carteirinha", path: "/admin/carteirinha", icon: <CreditCard size={18} /> },
     { name: "Cadastro", path: "/admin/cadastro", icon: <Users size={18} /> },
     { name: "Album da Galera", path: "/admin/album", icon: <Camera size={18} /> },
     { name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },
@@ -121,10 +124,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
     { name: "Lancamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
     {
-      name: "Landing USC",
+      name: "Landing",
       path: "/admin/landing",
       icon: <Rocket size={18} />,
-      platformOnly: true,
     },
     { name: "Planos", path: "/admin/planos", icon: <Crown size={18} /> },
     { name: "Historico", path: "/admin/historico", icon: <History size={18} /> },
@@ -137,13 +139,27 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const masterSidebarItems: SidebarItem[] = [
     { name: "Dashboard Master", path: "/admin/master", icon: <Building2 size={18} /> },
     { name: "Permissoes Globais", path: "/admin/permissoes", icon: <Lock size={18} /> },
-    { name: "Landing USC", path: "/admin/landing", icon: <Rocket size={18} /> },
-    { name: "Lançamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
-    { name: "Solicitacoes", path: "/admin/lancamento#solicitacoes", icon: <Users size={18} /> },
-    { name: "Visao Tenant", path: "/admin", icon: <LayoutDashboard size={18} /> },
+    { name: "Landing", path: "/admin/landing", icon: <Rocket size={18} /> },
+    { name: "Lancamento", path: "/admin/master/lancamento", icon: <Rocket size={18} /> },
+    {
+      name: "Solicitacoes",
+      path: "/admin/master/lancamento/pendentes",
+      icon: <Users size={18} />,
+    },
+    { name: "Voltar ao Admin", path: "/admin", icon: <LayoutDashboard size={18} /> },
   ];
-  const isMasterRoute = currentPath.startsWith("/admin/master");
-  const activeSidebarItems = isMasterRoute && isPlatformMasterUser
+  const isMasterContextRoute =
+    isPlatformMasterUser &&
+    [
+      "/admin/master",
+      "/admin/permissoes",
+      "/admin/landing",
+      "/admin/master/lancamento",
+    ].some(
+      (pathPrefix) =>
+        currentPath === pathPrefix || currentPath.startsWith(`${pathPrefix}/`)
+    );
+  const activeSidebarItems = isMasterContextRoute
     ? masterSidebarItems
     : sidebarItems.filter((item) => !item.platformOnly || isPlatformMasterUser);
 
@@ -201,17 +217,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             )}
           </div>
 
-          {isPlatformMasterUser && (
-            <Link
-              href="/admin/master"
-              className={`mb-4 inline-flex w-full items-center justify-center rounded-xl border border-cyan-700/40 bg-cyan-900/20 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-cyan-200 transition hover:bg-cyan-900/35 ${
-                isSidebarCollapsed ? "" : "gap-2"
-              }`}
-              title="Admin Master"
-            >
-              <Building2 size={14} /> {!isSidebarCollapsed && "Admin Master"}
-            </Link>
-          )}
+          {isPlatformMasterUser && !isSidebarCollapsed && <MasterTenantSwitcher />}
 
           {isOverrideActive && !isSidebarCollapsed && (
             <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-amber-300">

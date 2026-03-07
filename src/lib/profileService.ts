@@ -26,7 +26,7 @@ const PROFILE_ADMIN_RECOUNT_FOLLOWS_CALLABLE = "profileAdminRecountFollowStats";
 const PROFILE_USER_SELECT_COLUMNS =
   "uid,nome,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,status,pets,statusRelacionamento,esportes,whatsappPublico,idadePublica,relacionamentoPublico,stats";
 const PROFILE_POST_SELECT_COLUMNS = "id,texto,imagem,createdAt,likes,comentarios,userId";
-const PROFILE_EVENT_SELECT_COLUMNS = "id,titulo,data,local,imagem,imagePositionY,interessados,participantes";
+const PROFILE_EVENT_SELECT_COLUMNS = "id,titulo,data,local,imagem,imagePositionY";
 const PROFILE_TREINO_SELECT_COLUMNS = "id,modalidade,dia,horario,imagem,local,confirmados";
 const PROFILE_LIGA_SELECT_COLUMNS = "id,nome,sigla,foto,logo,logoBase64,membrosIds";
 const PROFILE_FOLLOW_SELECT_COLUMNS = "id,uid,nome,foto,turma,followedAt";

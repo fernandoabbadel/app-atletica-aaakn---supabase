@@ -1,4 +1,5 @@
 import { httpsCallable } from "@/lib/supa/functions";
+import { resolveEffectiveAccessRole } from "@/lib/roles";
 
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -198,7 +199,7 @@ async function callCallableWithFallback<TReq, TRes>(
   }
 }
 
-const clearAdminUsersCache = (): void => {
+export const clearAdminUsersCache = (): void => {
   usersListCache.clear();
   userProfileCache.clear();
   userDossierCache.clear();
@@ -314,6 +315,7 @@ export interface AdminUserListItem {
   foto: string;
   xp: number;
   role: string;
+  tenantId: string;
 }
 
 export interface AdminUsersPageResult {
@@ -417,7 +419,8 @@ const normalizeAdminUserListItem = (
     plano,
     foto: asString(data.foto, "https://github.com/shadcn.png"),
     xp: asNumber(data.xp, 0),
-    role: asString(data.role, "user"),
+    role: resolveEffectiveAccessRole(data),
+    tenantId: asString(data.tenant_id),
   };
 };
 
@@ -522,10 +525,12 @@ const normalizeGymLog = (id: string, raw: unknown): AdminUserGymRecord | null =>
 export async function fetchAdminUsersList(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AdminUserListItem[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 320, MAX_USERS_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const tenantId = options?.tenantId?.trim() || "";
+  const cacheKey = `${maxResults}:${tenantId || "all"}`;
 
   if (!forceRefresh) {
     const cached = getCachedValue(usersListCache, cacheKey);
@@ -545,15 +550,24 @@ export async function fetchAdminUsersList(options?: {
     "foto",
     "xp",
     "role",
+    "tenant_id",
+    "tenant_role",
+    "tenant_status",
   ];
   let rows: AdminUserListItem[] = [];
 
   while (selectColumns.length > 0) {
-    const { data, error } = await supabase
+    let request = supabase
       .from("users")
       .select(selectColumns.join(","))
       .order("nome", { ascending: true })
       .limit(maxResults);
+
+    if (tenantId) {
+      request = request.eq("tenant_id", tenantId);
+    }
+
+    const { data, error } = await request;
     if (!error) {
       rows = (data ?? [])
         .map((row) =>
@@ -581,11 +595,13 @@ export async function fetchAdminUsersPage(options?: {
   pageSize?: number;
   cursorId?: string | null;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AdminUsersPageResult> {
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_USERS_RESULTS);
   const cursorId = options?.cursorId?.trim() || "";
   const forceRefresh = options?.forceRefresh ?? false;
-  const inflightKey = `${pageSize}:${cursorId || "first"}`;
+  const tenantId = options?.tenantId?.trim() || "";
+  const inflightKey = `${pageSize}:${cursorId || "first"}:${tenantId || "all"}`;
 
   if (forceRefresh) {
     clearAdminUsersCache();
@@ -598,6 +614,7 @@ export async function fetchAdminUsersPage(options?: {
     const allUsers = await fetchAdminUsersList({
       maxResults: MAX_USERS_RESULTS,
       forceRefresh,
+      tenantId,
     });
 
     let startIndex = 0;

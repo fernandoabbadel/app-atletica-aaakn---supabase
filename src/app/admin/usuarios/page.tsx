@@ -24,6 +24,7 @@ import {
   type AdminUserListItem,
 } from "@/lib/adminUsersService";
 import { adminRecountFollowStatsBatch } from "@/lib/profileService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const PAGE_SIZE = 20;
 
@@ -61,6 +62,7 @@ const statusClass: Record<AdminUserListItem["status"], string> = {
 
 export default function AdminUsuariosPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
 
   const [rows, setRows] = useState<AdminUserListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +87,7 @@ export default function AdminUsuariosPage() {
           pageSize: PAGE_SIZE,
           cursorId: reset ? null : cursorId,
           forceRefresh: false,
+          tenantId: activeTenantId || undefined,
         });
 
         if (reset) setRows(page.users);
@@ -100,7 +103,7 @@ export default function AdminUsuariosPage() {
         else setLoadingMore(false);
       }
     },
-    [addToast]
+    [activeTenantId, addToast]
   );
 
   useEffect(() => {

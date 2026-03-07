@@ -21,13 +21,15 @@ const DASHBOARD_TOTAL_CACA_RPC = "dashboard_total_caca_calouros";
 const DASHBOARD_EVENT_GRACE_MS = 24 * 60 * 60 * 1000;
 
 const DASHBOARD_EVENTS_SELECT =
-  "id,titulo,data,hora,local,imagem,tipo,status,likesList,interessados,participantes,imagePositionY";
-const DASHBOARD_PRODUCTS_SELECT = "id,nome,preco,img,likes";
+  "id,titulo,data,hora,local,imagem,tipo,status,likesList,interessados,imagePositionY,tenant_id";
+const DASHBOARD_PRODUCTS_SELECT =
+  "id,nome,preco,img,likes,active,aprovado,tenant_id";
 const DASHBOARD_PARTNERS_SELECT =
-  "id,nome,imgLogo,imgCapa,categoria,plano,tier,status";
+  "id,nome,imgLogo,imgCapa,categoria,tier,status";
 const DASHBOARD_LIGAS_SELECT =
   "id,nome,sigla,foto,logoUrl,logoBase64,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
-const DASHBOARD_POSTS_SELECT = "id,userId,userName,avatar,createdAt,texto,text,likes";
+const DASHBOARD_POSTS_SELECT =
+  "id,userId,userName,avatar,createdAt,texto,likes,tenant_id";
 const DASHBOARD_TREINOS_SELECT = "id,imagem";
 const DASHBOARD_ALBUM_FALLBACK_SELECT = "totalColetado";
 
@@ -150,7 +152,11 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
 async function fetchRowsWithFallback(
   table: string,
   selectColumns: string,
-  attempts: Array<{ orderBy?: { column: string; ascending: boolean }; limit: number; eq?: Record<string, string> }>
+  attempts: Array<{
+    orderBy?: { column: string; ascending: boolean };
+    limit: number;
+    eq?: Record<string, string | boolean>;
+  }>
 ): Promise<Row[]> {
   const supabase = getSupabaseClient();
   let lastError: unknown = null;
@@ -475,30 +481,57 @@ export interface DashboardBundle {
   productTurmaStats: Record<string, DashboardTurmaStat[]>;
 }
 
-export async function fetchDashboardBundle(options?: { forceRefresh?: boolean }): Promise<DashboardBundle> {
+export async function fetchDashboardBundle(options?: {
+  forceRefresh?: boolean;
+  tenantId?: string;
+}): Promise<DashboardBundle> {
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = "default";
+  const tenantId = asString(options?.tenantId).trim();
+  const cacheKey = tenantId || "default";
   if (!forceRefresh) {
     const cached = getCachedValue(dashboardCache, cacheKey);
     if (cached) return cached;
   }
 
+  const tenantFilter = tenantId ? { tenant_id: tenantId } : null;
+
   const [eventRows, productRows, partnerRows, ligaRows, postRows, treinoRows, totalAlunos, totalCaca] =
     await Promise.all([
       fetchRowsWithFallback("eventos", DASHBOARD_EVENTS_SELECT, [
-        { orderBy: { column: "data", ascending: true }, limit: DASHBOARD_EVENTS_FETCH_LIMIT },
-        { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_EVENTS_FETCH_LIMIT },
-        { limit: DASHBOARD_EVENTS_FETCH_LIMIT },
+        {
+          orderBy: { column: "data", ascending: true },
+          limit: DASHBOARD_EVENTS_FETCH_LIMIT,
+          ...(tenantFilter ? { eq: tenantFilter } : {}),
+        },
+        {
+          orderBy: { column: "createdAt", ascending: false },
+          limit: DASHBOARD_EVENTS_FETCH_LIMIT,
+          ...(tenantFilter ? { eq: tenantFilter } : {}),
+        },
+        { limit: DASHBOARD_EVENTS_FETCH_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
       ]),
-      fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [{ limit: DASHBOARD_PRODUCTS_LIMIT }]),
+      fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [
+        {
+          limit: DASHBOARD_PRODUCTS_LIMIT,
+          eq: {
+            active: true,
+            aprovado: true,
+            ...(tenantFilter ?? {}),
+          },
+        },
+      ]),
       fetchRowsWithFallback("parceiros", DASHBOARD_PARTNERS_SELECT, [
         { eq: { status: "active" }, limit: DASHBOARD_PARTNERS_LIMIT },
         { limit: DASHBOARD_PARTNERS_LIMIT },
       ]),
       fetchRowsWithFallback("ligas_config", DASHBOARD_LIGAS_SELECT, [{ limit: DASHBOARD_LIGAS_LIMIT }]),
       fetchRowsWithFallback("posts", DASHBOARD_POSTS_SELECT, [
-        { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_POSTS_LIMIT },
-        { limit: DASHBOARD_POSTS_LIMIT },
+        {
+          orderBy: { column: "createdAt", ascending: false },
+          limit: DASHBOARD_POSTS_LIMIT,
+          ...(tenantFilter ? { eq: tenantFilter } : {}),
+        },
+        { limit: DASHBOARD_POSTS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
       ]),
       fetchRowsWithFallback("treinos", DASHBOARD_TREINOS_SELECT, [
         { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_TREINOS_LIMIT },

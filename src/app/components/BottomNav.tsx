@@ -48,7 +48,7 @@ type Notification = BottomNavNotification;
 interface NavItemProps {
     id: string; label: string; path?: string; icon: React.ReactNode; 
     action?: () => void; isMain?: boolean; badge?: string;
-    isComingSoon?: boolean;
+    isComingSoon?: boolean; isLocked?: boolean;
 }
 interface BannerProps {
     tier: string; closeMenu: () => void; router: ReturnType<typeof useRouter>;
@@ -127,6 +127,7 @@ export default function BottomNavbar() {
   const userUid = user?.uid || "";
   const currentTurmaSlug = resolveTurmaSlug(currentUser?.turma);
   const isGuestVirtual = userUid.startsWith("guest_virtual_");
+  const isGuestRestricted = Boolean(user?.isAnonymous) || isGuestVirtual;
   const canLoadNotifications = Boolean(userUid) && !user?.isAnonymous && !isGuestVirtual;
   const sidebarNameColor = resolvePlanTextClass(currentUser?.plano_cor || "zinc", "text-white");
 
@@ -277,17 +278,19 @@ export default function BottomNavbar() {
       const hours = Math.floor(diff / 60); if (hours < 24) return `${hours}h`;
       return `${Math.floor(hours / 24)}d`;
   };
-  const handleNavigation = (path: string, isComingSoon?: boolean) => { 
-      if (isComingSoon) return; 
+  const isItemBlocked = (item: NavItemProps): boolean =>
+      Boolean(item.isComingSoon || item.isLocked);
+  const handleNavigation = (path: string, isBlocked?: boolean) => { 
+      if (isBlocked) return; 
       setIsSidebarOpen(false); router.push(path); 
   };
   const handleLogout = () => { if (logout) logout(); setIsSidebarOpen(false); router.push("/"); };
 
-  const isHiddenRoute = ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao"].includes(normalizedPathname) || normalizedPathname.startsWith("/empresa") || normalizedPathname.startsWith("/admin");
+  const isHiddenRoute = ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao", "/visitante"].includes(normalizedPathname) || normalizedPathname.startsWith("/empresa") || normalizedPathname.startsWith("/admin");
   if (isHiddenRoute) return null;
 
   // --- DEFINIÃ‡ÃƒO DOS MENUS (CSS e Badges Atualizados) ---
-  const bottomItems: NavItemProps[] = [
+  const bottomItemsBase: NavItemProps[] = [
       { id: 'home', label: 'Inicio', icon: <Home size={22}/>, path: '/dashboard' },
       { id: 'eventos', label: 'Eventos', icon: <Calendar size={22}/>, path: '/eventos' },
       { id: 'scan', label: 'Scanner', icon: <ScanLine size={28}/>, path: `/album/${currentTurmaSlug}?scan=1`, isMain: true },
@@ -295,7 +298,7 @@ export default function BottomNavbar() {
       { id: 'menu', label: 'Menu', icon: <Menu size={22}/>, action: () => setIsSidebarOpen(true) },
   ];
   
-  const sidebarItemsGeneral: NavItemProps[] = [
+  const sidebarItemsGeneralBase: NavItemProps[] = [
       { id: 'loja', label: 'Lojinha', icon: <ShoppingBag size={18} />, path: '/loja' },
       { id: 'eventos_menu', label: 'Eventos', icon: <Calendar size={18} />, path: '/eventos' },
       { id: 'carteira_side', label: 'Carteirinha', icon: <CreditCard size={18} />, path: '/carteirinha' },
@@ -304,7 +307,7 @@ export default function BottomNavbar() {
       { id: 'album', label: 'Album da Galera', icon: <Camera size={18} />, path: '/album' },
   ];
 
-  const sidebarItemsAtleta: NavItemProps[] = [
+  const sidebarItemsAtletaBase: NavItemProps[] = [
       { id: 'treinos', label: 'Treinos', icon: <CalendarRange size={18} />, path: '/treinos' },
       { id: 'arena', label: 'Arena Games', icon: <Gamepad2 size={18} />, path: '/arena-games', badge: "Vem ai", isComingSoon: true },
       { id: 'shark_round', label: 'Shark Round', icon: <Target size={18} />, path: '/sharkround', isComingSoon: true },
@@ -312,7 +315,7 @@ export default function BottomNavbar() {
       { id: 'gym_side', label: 'Treinando com Tubarao', icon: <Dumbbell size={18} />, path: '/gym-rats', badge: "Vem ai", isComingSoon: true },
   ];
 
-  const sidebarItemsInfo: NavItemProps[] = [
+  const sidebarItemsInfoBase: NavItemProps[] = [
       { id: 'ligas', label: 'Area das Ligas', icon: <Users size={18} />, path: '/ligas_unitau' },
       { id: 'avaliacao', label: 'Avaliacao Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true },
       { id: 'conquistas', label: 'Conquistas', icon: <Medal size={18} />, path: '/conquistas', isComingSoon: true },
@@ -320,6 +323,17 @@ export default function BottomNavbar() {
       { id: 'guia', label: 'Guia', icon: <HelpCircle size={18} />, path: '/guia' },
       { id: 'historico', label: 'Nossa Historia', icon: <Clock size={18} />, path: '/historico' },
   ];
+
+  const lockGuestItem = (item: NavItemProps): NavItemProps =>
+      isGuestRestricted ? { ...item, isLocked: true, badge: undefined } : item;
+  const bottomItems = bottomItemsBase.map((item) =>
+      isGuestRestricted && item.id !== "home" && item.id !== "menu"
+          ? { ...item, isLocked: true, badge: undefined }
+          : item
+  );
+  const sidebarItemsGeneral = sidebarItemsGeneralBase.map(lockGuestItem);
+  const sidebarItemsAtleta = sidebarItemsAtletaBase.map(lockGuestItem);
+  const sidebarItemsInfo = sidebarItemsInfoBase.map(lockGuestItem);
 
   const userTurmaImg = currentUser?.turma ? getTurmaImage(currentUser.turma) : null;
 
@@ -342,9 +356,9 @@ export default function BottomNavbar() {
                 </div>
             </div>
             <div className="flex items-center gap-2">
-                <button onClick={() => setShowNotifications(!showNotifications)} className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white transition relative">
+                <button onClick={() => { if (!isGuestRestricted) setShowNotifications(!showNotifications); }} className={cn("p-2 bg-zinc-900 rounded-full transition relative", isGuestRestricted ? "text-zinc-600 cursor-not-allowed" : "text-zinc-400 hover:text-white")}>
                     <Bell size={18}/>
-                    {unreadCount > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-zinc-900 animate-pulse"></span>}
+                    {isGuestRestricted ? <Lock size={10} className="absolute -bottom-0.5 -right-0.5 text-zinc-500" /> : unreadCount > 0 ? <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-zinc-900 animate-pulse"></span> : null}
                 </button>
                 <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white transition"><X size={18}/></button>
             </div>
@@ -377,7 +391,7 @@ export default function BottomNavbar() {
             <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-1">
                 
                 {currentUser && (
-                    <div onClick={() => handleNavigation('/perfil')} className="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-2xl border border-zinc-800 mb-4 cursor-pointer hover:bg-zinc-900 hover:border-emerald-500/30 transition group">
+                    <div onClick={() => handleNavigation('/perfil', isGuestRestricted)} className={cn("flex items-center gap-3 p-3 bg-zinc-900/50 rounded-2xl border border-zinc-800 mb-4 transition group", isGuestRestricted ? "cursor-not-allowed opacity-80" : "cursor-pointer hover:bg-zinc-900 hover:border-emerald-500/30")}>
                         <div className="relative">
                             <div className="w-12 h-12 rounded-full bg-black overflow-hidden border-2 border-zinc-700 group-hover:border-emerald-500 transition relative">
                                 <OptimizedImage src={currentUser.foto || "https://github.com/shadcn.png"} alt="User" fill sizes="48px" className="object-cover"/>
@@ -400,20 +414,20 @@ export default function BottomNavbar() {
                                 </div>
                             </div>
                         </div>
-                        <ChevronRight size={16} className="text-zinc-600 group-hover:text-emerald-500 transition"/>
+                        {isGuestRestricted ? <Lock size={16} className="text-zinc-600" /> : <ChevronRight size={16} className="text-zinc-600 group-hover:text-emerald-500 transition"/>}
                     </div>
                 )}
 
-                <SocioGrowthBanner tier={currentUser?.tier || 'bicho'} closeMenu={() => setIsSidebarOpen(false)} router={router} />
+                {!isGuestRestricted && <SocioGrowthBanner tier={currentUser?.tier || 'bicho'} closeMenu={() => setIsSidebarOpen(false)} router={router} />}
 
                 {/* MENU PRINCIPAL */}
                 <div className="px-2 pt-2 pb-2"><h3 className="text-[10px] font-black text-zinc-500 uppercase flex items-center gap-2"><Layout size={10}/> Menu Principal</h3></div>
                 <div className="space-y-1">
                     {sidebarItemsGeneral.map((item) => (
-                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-50 cursor-not-allowed")}>
+                        <button key={item.id} onClick={() => handleNavigation(item.path!, isItemBlocked(item))} disabled={isItemBlocked(item)} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", isItemBlocked(item) && "opacity-50 cursor-not-allowed")}>
                             <div className={cn("p-1.5 rounded-lg", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
                             <span className="text-xs font-bold uppercase tracking-wide">{item.label}</span>
-                            {item.isComingSoon && <Lock size={12} className="ml-auto text-zinc-600"/>}
+                            {isItemBlocked(item) && <Lock size={12} className="ml-auto text-zinc-600"/>}
                         </button>
                     ))}
                 </div>
@@ -422,7 +436,7 @@ export default function BottomNavbar() {
                 <div className="px-2 pt-6 pb-2 border-t border-zinc-800/50 mt-2"><h3 className="text-[10px] font-black text-emerald-600 uppercase flex items-center gap-2 tracking-widest"><Dumbbell size={10}/> Area do Atleta</h3></div>
                 <div className="space-y-1">
                     {sidebarItemsAtleta.map((item) => (
-                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center justify-between p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-60 cursor-not-allowed grayscale")}>
+                        <button key={item.id} onClick={() => handleNavigation(item.path!, isItemBlocked(item))} disabled={isItemBlocked(item)} className={cn("w-full flex items-center justify-between p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", isItemBlocked(item) && "opacity-60 cursor-not-allowed grayscale")}>
                             <div className="flex items-center gap-3">
                                 <div className={cn("p-1.5 rounded-lg", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
                                 <span className="text-xs font-bold uppercase tracking-wide">{item.label}</span>
@@ -432,7 +446,7 @@ export default function BottomNavbar() {
                                     <Sparkles size={8} /> {item.badge}
                                 </span>
                             )}
-                            {!item.badge && item.isComingSoon && <Lock size={12} className="text-zinc-600"/>}
+                            {((!item.badge && item.isComingSoon) || item.isLocked) && <Lock size={12} className="text-zinc-600"/>}
                         </button>
                     ))}
                 </div>
@@ -441,10 +455,10 @@ export default function BottomNavbar() {
                 <div className="px-2 pt-6 pb-2 border-t border-zinc-800/50 mt-2"><h3 className="text-[10px] font-black text-zinc-500 uppercase flex items-center gap-2 tracking-widest"><MapPin size={10}/> Central de Info</h3></div>
                 <div className="space-y-1 pb-6">
                     {sidebarItemsInfo.map((item) => (
-                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-50 cursor-not-allowed")}>
+                        <button key={item.id} onClick={() => handleNavigation(item.path!, isItemBlocked(item))} disabled={isItemBlocked(item)} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", isItemBlocked(item) && "opacity-50 cursor-not-allowed")}>
                             <div className={cn("p-1.5 rounded-lg", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
                             <span className="text-xs font-bold uppercase tracking-wide">{item.label}</span>
-                            {item.isComingSoon && <Lock size={12} className="ml-auto text-zinc-600"/>}
+                            {isItemBlocked(item) && <Lock size={12} className="ml-auto text-zinc-600"/>}
                         </button>
                     ))}
                 </div>
@@ -461,7 +475,7 @@ export default function BottomNavbar() {
                 </button>
             )}
             <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => handleNavigation('/configuracoes')} className="flex flex-col items-center justify-center p-2 rounded-xl bg-zinc-900 text-zinc-500 hover:text-white hover:bg-zinc-800 transition"><Settings size={18}/><span className="text-[8px] font-bold uppercase mt-1">Ajustes</span></button>
+                <button onClick={() => handleNavigation('/configuracoes', isGuestRestricted)} disabled={isGuestRestricted} className={cn("flex flex-col items-center justify-center p-2 rounded-xl bg-zinc-900 transition", isGuestRestricted ? "cursor-not-allowed text-zinc-600" : "text-zinc-500 hover:text-white hover:bg-zinc-800")}><Settings size={18}/><span className="text-[8px] font-bold uppercase mt-1">{isGuestRestricted ? "Bloqueado" : "Ajustes"}</span></button>
                 {currentUser ? (
                     <button onClick={handleLogout} className="flex flex-col items-center justify-center p-2 rounded-xl bg-zinc-900 text-zinc-500 hover:text-red-500 hover:bg-red-900/10 transition"><LogOut size={18}/><span className="text-[8px] font-bold uppercase mt-1">Sair</span></button>
                 ) : (
@@ -477,15 +491,15 @@ export default function BottomNavbar() {
             {bottomItems.map((item) => (
                 item.isMain ? (
                     <div key={item.id} className="relative -top-8 mx-1 group z-20">
-                        <div className={cn("absolute inset-0 bg-emerald-500 rounded-full blur-xl opacity-40 animate-pulse", item.isComingSoon && "bg-zinc-600 opacity-20 animate-none")}></div>
-                        <button onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("relative w-16 h-16 rounded-full flex items-center justify-center bg-emerald-500 text-black shadow-2xl border-[4px] border-zinc-950 transition-transform active:scale-95 group-hover:scale-105", item.isComingSoon && "bg-zinc-800 text-zinc-500 border-zinc-700 cursor-not-allowed")}>
-                            {item.isComingSoon ? <Lock size={22}/> : item.icon}
+                        <div className={cn("absolute inset-0 bg-emerald-500 rounded-full blur-xl opacity-40 animate-pulse", isItemBlocked(item) && "bg-zinc-600 opacity-20 animate-none")}></div>
+                        <button onClick={() => handleNavigation(item.path!, isItemBlocked(item))} disabled={isItemBlocked(item)} className={cn("relative w-16 h-16 rounded-full flex items-center justify-center bg-emerald-500 text-black shadow-2xl border-[4px] border-zinc-950 transition-transform active:scale-95 group-hover:scale-105", isItemBlocked(item) && "bg-zinc-800 text-zinc-500 border-zinc-700 cursor-not-allowed")}>
+                            {isItemBlocked(item) ? <Lock size={22}/> : item.icon}
                         </button>
                     </div>
                 ) : (
                     <div key={item.id} className="flex-1 h-full flex justify-center">
-                        <button onClick={() => item.action ? item.action() : handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full h-[60px] flex flex-col items-center justify-center gap-1 rounded-2xl active:scale-90 transition-colors", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300", item.isComingSoon && "opacity-40 cursor-not-allowed")}>
-                            {item.icon}
+                        <button onClick={() => item.action ? item.action() : handleNavigation(item.path!, isItemBlocked(item))} disabled={isItemBlocked(item)} className={cn("w-full h-[60px] flex flex-col items-center justify-center gap-1 rounded-2xl active:scale-90 transition-colors", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300", isItemBlocked(item) && "opacity-40 cursor-not-allowed")}>
+                            {isItemBlocked(item) ? <Lock size={22}/> : item.icon}
                             <span className="text-[8px] font-bold uppercase tracking-wide">{item.label}</span>
                         </button>
                     </div>

@@ -490,15 +490,15 @@ export default function AlbumTurmaPage() {
       slug: slug || "t8",
       nome: `Turma ${digits || turma.replace(/[^A-Z0-9]/g, "")}`.trim(),
       mascote: "Mascote",
-      frase: "Album Oficial",
       capa: slug ? `/capa_${slug}.jpg` : "/capa_t8.jpg",
       logo: getTurmaImage(turma || "T8"),
+      hidden: false,
     } as TurmaConfig;
   }, [turma, turmas]);
 
   const turmaCover = turmaConfig?.capa?.trim() || turmaMeta.capa || "/capa_t8.jpg";
   const turmaTitle = turmaConfig?.titulo?.trim() || turmaMeta.nome;
-  const turmaSubtitle = turmaConfig?.subtitulo?.trim() || turmaMeta.frase || "Album Oficial";
+  const turmaSubtitle = turmaConfig?.subtitulo?.trim() || turmaMeta.mascote || "Album Oficial";
   const pageTitle = albumUiConfig?.titulo?.trim() || "Caca aos Bixos";
 
   useEffect(() => {

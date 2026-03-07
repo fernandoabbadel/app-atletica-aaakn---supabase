@@ -3,6 +3,18 @@ import { processLock, type LockFunc } from "@supabase/auth-js";
 
 // Reutiliza um singleton no browser para evitar multiplas instancias do cliente.
 let browserClient: SupabaseClient | null = null;
+const SUPABASE_AUTH_PARAM_KEYS = [
+  "access_token",
+  "refresh_token",
+  "expires_at",
+  "expires_in",
+  "issued_at",
+  "provider_token",
+  "provider_refresh_token",
+  "token_type",
+  "type",
+  "code",
+] as const;
 
 const getSupabaseEnv = (): { url: string; anonKey: string } => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -21,6 +33,80 @@ const sharedAuthLock: LockFunc = async (name, acquireTimeout, fn) => {
   return processLock(name, Math.max(acquireTimeout, 30_000), fn);
 };
 
+const getBrowserAuthParams = (): {
+  params: URLSearchParams;
+  source: "hash" | "search";
+} | null => {
+  if (typeof window === "undefined") return null;
+
+  const url = new URL(window.location.href);
+  const hashParams = new URLSearchParams(
+    url.hash.startsWith("#") ? url.hash.slice(1) : url.hash
+  );
+  const searchParams = new URLSearchParams(url.search);
+
+  const hasKnownAuthParam = (params: URLSearchParams): boolean =>
+    SUPABASE_AUTH_PARAM_KEYS.some((key) => params.has(key));
+
+  if (hasKnownAuthParam(hashParams)) {
+    return { params: hashParams, source: "hash" };
+  }
+
+  if (hasKnownAuthParam(searchParams)) {
+    return { params: searchParams, source: "search" };
+  }
+
+  return null;
+};
+
+const stripSupabaseAuthParamsFromUrl = (source: "hash" | "search"): void => {
+  if (typeof window === "undefined") return;
+
+  const url = new URL(window.location.href);
+  const params =
+    source === "hash"
+      ? new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash)
+      : new URLSearchParams(url.search);
+
+  SUPABASE_AUTH_PARAM_KEYS.forEach((key) => params.delete(key));
+
+  if (source === "hash") {
+    const nextHash = params.toString();
+    url.hash = nextHash ? `#${nextHash}` : "";
+  } else {
+    url.search = params.toString();
+  }
+
+  window.history.replaceState({}, document.title, url.toString());
+};
+
+const shouldDetectSessionInUrl = (): boolean => {
+  const authParams = getBrowserAuthParams();
+  if (!authParams) return false;
+
+  if (authParams.params.has("code")) {
+    return true;
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const expiresAt = Number(authParams.params.get("expires_at") || 0);
+  const issuedAt = Number(authParams.params.get("issued_at") || 0);
+  const expiresIn = Number(authParams.params.get("expires_in") || 0);
+  const inferredIssuedAt =
+    expiresAt > 0 && expiresIn > 0 ? Math.max(0, expiresAt - expiresIn) : 0;
+  const effectiveIssuedAt = issuedAt > 0 ? issuedAt : inferredIssuedAt;
+
+  const isExpired = expiresAt > 0 && expiresAt <= nowSeconds;
+  const isStale = effectiveIssuedAt > 0 && nowSeconds - effectiveIssuedAt > 120;
+
+  if (isExpired || isStale) {
+    stripSupabaseAuthParamsFromUrl(authParams.source);
+    return false;
+  }
+
+  return true;
+};
+
 const createSupabaseBrowserClient = (): SupabaseClient => {
   const { url, anonKey } = getSupabaseEnv();
 
@@ -29,7 +115,7 @@ const createSupabaseBrowserClient = (): SupabaseClient => {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true,
+      detectSessionInUrl: shouldDetectSessionInUrl(),
       lock: sharedAuthLock,
     },
   });

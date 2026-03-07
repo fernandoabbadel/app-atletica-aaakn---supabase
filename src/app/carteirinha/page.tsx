@@ -8,6 +8,7 @@ import {
 import Link from "next/link";
 import Image from "next/image"; // ðŸ¦ˆ Importado para otimização
 import { useAuth } from "@/context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
   fetchCarteirinhaConfig,
@@ -20,6 +21,7 @@ import { resolvePlanTheme, resolveUserPlanIcon } from "@/constants/planVisuals";
 
 export default function CarteirinhaPage() {
   const { user, loading } = useAuth();
+  const { palette, tenantLogoUrl, tenantSigla, tenantCourse } = useTenantTheme();
   const { addToast } = useToast();
   const [config, setConfig] = useState<CarteirinhaConfig | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -54,6 +56,10 @@ export default function CarteirinhaPage() {
   const bgPadrao = getTurmaImage(user.turma);
   const bgFinal = config?.backgrounds?.[user.turma || ""] || bgPadrao;
   const validadeTexto = config?.validade || "DEZ/2026";
+  const backgroundOpacity = Math.max(
+    0,
+    Math.min(100, config?.backgroundOpacity ?? 60)
+  ) / 100;
 
   // --- ðŸ¦ˆ LÃ“GICA VISUAL DINÃ‚MICA ---
   const userCor = user.plano_cor || "zinc"; 
@@ -96,7 +102,8 @@ export default function CarteirinhaPage() {
                  src={bgFinal}
                  alt="Background Turma"
                  fill
-                 className="object-cover opacity-60 mix-blend-overlay brightness-75 scale-105"
+                 className="object-cover mix-blend-overlay brightness-75 scale-105"
+                 style={{ opacity: backgroundOpacity }}
                   // Permite URLs externas/base64 sem config no next.config.js
                  priority
               />
@@ -112,7 +119,7 @@ export default function CarteirinhaPage() {
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-black/80 backdrop-blur rounded-lg flex items-center justify-center border border-white/10 shadow-lg relative overflow-hidden">
                   <Image
-                    src="/logo.png"
+                    src={tenantLogoUrl || "/logo.png"}
                     alt="Logo"
                     width={32}
                     height={32}
@@ -122,8 +129,15 @@ export default function CarteirinhaPage() {
                   />
                 </div>
                 <div>
-                  <h2 className="font-black text-white text-lg leading-none tracking-tight">AAAKN</h2>
-                  <p className="text-emerald-500 text-[9px] uppercase tracking-widest font-bold">Medicina</p>
+                  <h2 className="font-black text-white text-lg leading-none tracking-tight">
+                    {(tenantSigla || "USC").toUpperCase()}
+                  </h2>
+                  <p
+                    className="text-[9px] uppercase tracking-widest font-bold"
+                    style={{ color: palette.primary }}
+                  >
+                    {(tenantCourse || "Atletica").toUpperCase()}
+                  </p>
                 </div>
               </div>
 
@@ -224,7 +238,7 @@ export default function CarteirinhaPage() {
           </button>
 
           <p className="text-zinc-600 text-[10px] text-center uppercase font-medium tracking-widest mt-4">
-             Documento Digital Oficial ⬢ AAAKN
+             Documento Digital Oficial ⬢ {(tenantSigla || "USC").toUpperCase()}
           </p>
         </div>
       </main>
@@ -241,7 +255,7 @@ export default function CarteirinhaPage() {
                   <div className="mb-6 mt-2">
                       <div className="w-12 h-12 bg-black rounded-xl mx-auto flex items-center justify-center mb-3 relative overflow-hidden">
                         <Image
-                          src="/logo.png"
+                          src={tenantLogoUrl || "/logo.png"}
                           alt="Logo"
                           width={28}
                           height={28}

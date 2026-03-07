@@ -25,7 +25,11 @@ export default function LoginPage() {
 
     setIsLoading(false);
     const blocked = user.status === "banned" || user.status === "bloqueado";
-    router.replace(blocked ? "/banned" : "/dashboard");
+    if (blocked) {
+      router.replace("/banned");
+      return;
+    }
+    router.replace(user.isAnonymous ? "/visitante" : "/dashboard");
   }, [loading, user, router]);
 
   const handleLogin = async (event: React.FormEvent) => {
@@ -50,7 +54,7 @@ export default function LoginPage() {
       setIsLoading(true);
       addToast("Gerando cracha de visitante...", "info");
       await loginAsGuest();
-      router.push("/dashboard");
+      router.push("/visitante");
     } catch (error: unknown) {
       console.error(error);
       addToast("Erro ao entrar como visitante.", "error");

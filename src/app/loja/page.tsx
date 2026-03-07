@@ -35,7 +35,8 @@ export default async function LojaPage() {
           : ""
       )
       .filter((entry): entry is string => entry.length > 0);
-    initialHydrated = true;
+    // No server a leitura usa anon key e pode vir vazia por RLS mesmo com sessao no browser.
+    initialHydrated = initialProducts.length > 0 || initialCategories.length > 0;
   } catch {
     initialProducts = [];
     initialCategories = [];

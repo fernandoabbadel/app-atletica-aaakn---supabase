@@ -26,6 +26,7 @@ const TURMAS_LIST = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"];
 const DEFAULT_CONFIG: CarteirinhaConfig = {
   validade: "DEZ/2026",
   backgrounds: {},
+  backgroundOpacity: 60,
 };
 
 export default function AdminCarteirinhaPage() {
@@ -135,21 +136,48 @@ export default function AdminCarteirinhaPage() {
           <h3 className="text-sm font-bold text-white uppercase mb-4 flex items-center gap-2">
             <Calendar size={16} className="text-emerald-500" /> Validade do Documento
           </h3>
-          <div>
-            <label className="text-[10px] font-bold text-zinc-500 uppercase mb-2 block">
-              Texto de Validade (Verso do Cartao)
-            </label>
-            <input
-              type="text"
-              className="w-full bg-black border border-zinc-700 rounded-xl p-4 text-white font-mono text-lg outline-none focus:border-emerald-500 transition"
-              value={config.validade}
-              onChange={(event) =>
-                setConfig({
-                  ...config,
-                  validade: event.target.value.slice(0, 24),
-                })
-              }
-            />
+          <div className="space-y-5">
+            <div>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase mb-2 block">
+                Texto de Validade (Verso do Cartao)
+              </label>
+              <input
+                type="text"
+                className="w-full bg-black border border-zinc-700 rounded-xl p-4 text-white font-mono text-lg outline-none focus:border-emerald-500 transition"
+                value={config.validade}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    validade: event.target.value.slice(0, 24),
+                  })
+                }
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase mb-2 block">
+                Transparencia do Fundo
+              </label>
+              <div className="rounded-2xl border border-zinc-800 bg-black/50 p-4">
+                <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase text-zinc-400">
+                  <span>Imagem da turma na carteirinha</span>
+                  <span>{config.backgroundOpacity}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={config.backgroundOpacity}
+                  onChange={(event) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      backgroundOpacity: Number(event.target.value),
+                    }))
+                  }
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+            </div>
           </div>
         </div>
 

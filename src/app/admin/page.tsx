@@ -14,6 +14,7 @@ import {
   type AdminDashboardStats,
 } from "@/lib/adminDashboardService";
 import { useAuth } from "@/context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { isPlatformMaster } from "@/lib/roles";
 
 // --- INTERFACES (FIM DO ANY) ---
@@ -69,6 +70,7 @@ const extractErrorMessage = (error: unknown): string => {
 
 export default function AdminDashboardPage() {
   const { user } = useAuth();
+  const { tenantId: activeTenantId, tenantName, tenantSigla, palette } = useTenantTheme();
   const [stats, setStats] = useState<DashboardStats>({ totalUsers: 0, totalEvents: 0, totalSales: 0, activeChamps: 0 });
   const [recentUsers, setRecentUsers] = useState<RecentUser[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
@@ -76,10 +78,12 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     async function fetchDashboardData() {
+        setLoading(true);
         try {
         const data = await fetchAdminDashboardBundle({
           usersLimit: 5,
           logsLimit: 5,
+          tenantId: activeTenantId || undefined,
         });
         setStats(data.stats);
         setRecentUsers(data.recentUsers);
@@ -92,7 +96,7 @@ export default function AdminDashboardPage() {
     }
 
     void fetchDashboardData();
-  }, []);
+  }, [activeTenantId]);
 
   if (loading) {
       return (
@@ -109,7 +113,12 @@ export default function AdminDashboardPage() {
             <header className="mb-8 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-black uppercase italic tracking-tighter text-white">Visao Geral</h1>
-          <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Metricas e atividade em tempo real</p>
+          <p
+            className="text-xs font-bold uppercase tracking-widest"
+            style={{ color: palette.primary }}
+          >
+            Metricas e atividade em tempo real • {tenantSigla || tenantName || "USC"}
+          </p>
         </div>
         {isPlatformMaster(user) && (
           <Link

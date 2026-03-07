@@ -296,7 +296,7 @@ export default function AdminMasterPage() {
                 <Shield className="text-cyan-400" size={18} /> Admin Master
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold uppercase">
-                Controle global de tenants e contexto da plataforma USC
+                Controle global de tenants e contexto da plataforma
               </p>
             </div>
           </div>
@@ -318,16 +318,16 @@ export default function AdminMasterPage() {
             Atalhos da Plataforma
           </h2>
           <Link
-            href="/admin/lancamento"
+            href="/admin/master/lancamento"
             className="w-full inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-black px-3 py-2 text-xs font-bold uppercase text-zinc-200 hover:bg-zinc-800"
           >
-            <Rocket size={14} /> Projeto de Lancamento
+            <Rocket size={14} /> Lancamento
           </Link>
           <Link
             href="/admin/landing"
             className="w-full inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-black px-3 py-2 text-xs font-bold uppercase text-zinc-200 hover:bg-zinc-800"
           >
-            <Palette size={14} /> CSS da Landing USC
+            <Palette size={14} /> Landing
           </Link>
           <Link
             href="/admin/permissoes"
