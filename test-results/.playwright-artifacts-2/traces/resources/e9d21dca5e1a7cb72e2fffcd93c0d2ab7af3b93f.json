@@ -1,4 +1,0 @@
-[{"nome":"Bicho Solto","cor":"zinc","icon":"ghost","descontoLoja":0.00,"xpMultiplier":1.00,"nivelPrioridade":1}, 
- {"nome":"Cardume Livre","cor":"blue","icon":"fish","descontoLoja":5.00,"xpMultiplier":1.10,"nivelPrioridade":2}, 
- {"nome":"Lenda","cor":"yellow","icon":"crown","descontoLoja":20.00,"xpMultiplier":1.50,"nivelPrioridade":4}, 
- {"nome":"Atleta","cor":"emerald","icon":"zap","descontoLoja":10.00,"xpMultiplier":1.25,"nivelPrioridade":3}]
