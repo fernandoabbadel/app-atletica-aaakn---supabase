@@ -37,6 +37,9 @@ if (supabaseStorageHostname) {
 
 const nextConfig = {
   reactStrictMode: false,
+  turbopack: {
+    root: process.cwd(),
+  },
   images: {
     formats: ["image/avif", "image/webp"],
     remotePatterns,

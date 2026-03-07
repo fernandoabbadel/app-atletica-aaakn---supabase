@@ -61,6 +61,7 @@ export const APP_PAGES = [
     { path: '/admin/ligas', label: 'ðŸ† Adm Ligas' },
     { path: '/admin/logs', label: 'ðŸ“ Logs do Sistema' },
     { path: '/admin/loja', label: 'ðŸ‘• Adm Loja' },
+    { path: '/admin/master', label: '🧭 Admin Master Tenant' },
     { path: '/admin/parceiros', label: 'ðŸ¤ Adm Parceiros' },
     { path: '/admin/permissoes', label: 'ðŸ”‘ PermissÃµes (CrÃ­tico)' },
     { path: '/admin/planos', label: 'ðŸ“ Adm Planos' },
@@ -71,6 +72,7 @@ export const APP_PAGES = [
     { path: '/admin/usuarios', label: 'ðŸ‘¥ Gerenciar UsuÃ¡rios' },
 
     // --- PÃšBLICO / MEMBROS ---
+    { path: '/aguardando-aprovacao', label: '⏳ Aguardando Aprovação' },
     { path: '/album', label: 'ðŸ“¸ Ãlbum' },
     { path: '/carteirinha', label: 'ðŸªª Carteirinha' },
     { path: '/comunidade', label: 'ðŸ’¬ Comunidade' },
@@ -87,6 +89,7 @@ export const APP_PAGES = [
     { path: '/ligas', label: 'ðŸ† Ligas (Geral)' },
     { path: '/ligas_unitau', label: 'ðŸŸï¸ Ligas Unitau' },
     { path: '/loja', label: 'ðŸ›ï¸ Loja' },
+    { path: '/nova-atletica', label: '🏫 Onboarding Atletica' },
     { path: '/parceiros', label: 'ðŸ¤ Parceiros' },
     { path: '/perfil', label: 'ðŸ‘¤ Perfil' },
     { path: '/planos', label: 'ðŸ“ Planos' },

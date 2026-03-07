@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import SharkLoader from "./SharkLoader";
 import { useAuth } from "@/context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
   PUBLIC_PATHS,
@@ -16,14 +17,20 @@ import {
   type PermissionMatrix,
 } from "@/lib/adminSecurityService";
 import { isPermissionError } from "@/lib/backendErrors";
-
-const ADMIN_FALLBACK_ROLES = new Set([
-  "master",
-  "admin",
-  "admin_geral",
-  "admin_gestor",
-  "staff",
-]);
+import {
+  ADMIN_PANEL_FALLBACK_ROLES,
+  canManageTenant,
+  getAccessRoleCandidates,
+  hasAdminPanelAccess,
+  isPlatformMaster,
+  resolveEffectiveAccessRole,
+} from "@/lib/roles";
+import {
+  parseTenantScopedPath,
+  shouldAutoScopePath,
+  withTenantSlug,
+} from "@/lib/tenantRouting";
+import { fetchTenantBySlug } from "@/lib/tenantService";
 
 const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
   if (typeof raw !== "object" || raw === null) return null;
@@ -45,24 +52,105 @@ const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
 
 export default function RouteGuard({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
+  const { tenantSlug: activeTenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
+
+  const rawCurrentPath = pathname ? pathname.split("?")[0] : "/";
+  const routePathInfo = useMemo(
+    () => parseTenantScopedPath(rawCurrentPath),
+    [rawCurrentPath]
+  );
+  const currentPath = routePathInfo.scopedPath;
+  const routeTenantSlug = routePathInfo.tenantSlug;
 
   const [authorized, setAuthorized] = useState(false);
   const [permissionMatrix, setPermissionMatrix] =
     useState<PermissionMatrix | null>(null);
   const [rulesLoading, setRulesLoading] = useState(true);
+  const [routeTenantId, setRouteTenantId] = useState("");
+  const [routeTenantLoading, setRouteTenantLoading] = useState(false);
+  const [routeTenantResolved, setRouteTenantResolved] = useState(true);
+  const loginToastPathRef = useRef("");
+  const lastPathRef = useRef("");
+  const pendingRedirectRef = useRef("");
   const hasUser = !!user;
-  const userUid = user?.uid || "";
-  const userRole = (user?.role || "visitante").toLowerCase();
   const userIsAnonymous = Boolean(user?.isAnonymous);
+  const effectiveAccessRole = useMemo(
+    () => resolveEffectiveAccessRole(user),
+    [user]
+  );
+  const roleCandidates = useMemo(
+    () => getAccessRoleCandidates(user),
+    [user]
+  );
+  const isPlatformMasterUser = isPlatformMaster(user);
+  const setAuthorizedSafe = useCallback((next: boolean) => {
+    setAuthorized((previous) => (previous === next ? previous : next));
+  }, []);
+
+  useEffect(() => {
+    if (!hasUser || !routeTenantSlug) {
+      setRouteTenantId("");
+      setRouteTenantLoading(false);
+      setRouteTenantResolved(true);
+      return;
+    }
+
+    const userTenantId =
+      typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
+    const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
+    if (
+      userTenantId &&
+      normalizedActiveTenantSlug &&
+      routeTenantSlug === normalizedActiveTenantSlug
+    ) {
+      setRouteTenantId(userTenantId);
+      setRouteTenantLoading(false);
+      setRouteTenantResolved(true);
+      return;
+    }
+
+    let mounted = true;
+    setRouteTenantId("");
+    setRouteTenantResolved(false);
+    setRouteTenantLoading(true);
+
+    const resolveRouteTenant = async () => {
+      try {
+        const tenant = await fetchTenantBySlug(routeTenantSlug);
+        if (!mounted) return;
+        setRouteTenantId(tenant?.id || "");
+      } catch {
+        if (!mounted) return;
+        if (
+          userTenantId &&
+          normalizedActiveTenantSlug &&
+          routeTenantSlug === normalizedActiveTenantSlug
+        ) {
+          setRouteTenantId(userTenantId);
+        } else {
+          setRouteTenantId("");
+        }
+      } finally {
+        if (mounted) {
+          setRouteTenantLoading(false);
+          setRouteTenantResolved(true);
+        }
+      }
+    };
+
+    void resolveRouteTenant();
+    return () => {
+      mounted = false;
+    };
+  }, [hasUser, routeTenantSlug, user?.tenant_id, activeTenantSlug]);
 
   useEffect(() => {
     if (authLoading) return;
 
     let isMounted = true;
-    const currentPath = pathname ? pathname.split("?")[0] : "/";
     const shouldLoadRemoteRules =
       hasUser &&
       !userIsAnonymous &&
@@ -126,14 +214,32 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     return () => {
       isMounted = false;
     };
-  }, [authLoading, hasUser, pathname, userIsAnonymous, userRole]);
+  }, [authLoading, currentPath, hasUser, userIsAnonymous]);
 
   useEffect(() => {
-    const currentPath = pathname ? pathname.split("?")[0] : "/";
+    if (lastPathRef.current !== rawCurrentPath) {
+      lastPathRef.current = rawCurrentPath;
+      pendingRedirectRef.current = "";
+    }
+
+    const safeReplace = (targetPath: string) => {
+      if (rawCurrentPath === targetPath) {
+        pendingRedirectRef.current = "";
+        return;
+      }
+      if (pendingRedirectRef.current === targetPath) return;
+      pendingRedirectRef.current = targetPath;
+      router.replace(targetPath);
+    };
+
+    const dashboardPath =
+      activeTenantSlug && activeTenantSlug.trim()
+        ? withTenantSlug(activeTenantSlug, "/dashboard")
+        : "/dashboard";
 
     if (currentPath === "/login" && !authLoading && user) {
-      setAuthorized(false);
-      router.replace("/dashboard");
+      setAuthorizedSafe(false);
+      safeReplace(dashboardPath);
       return;
     }
 
@@ -141,16 +247,30 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       (path) => currentPath === path || currentPath.startsWith("/public")
     );
     if (isPublic) {
-      setAuthorized(true);
+      loginToastPathRef.current = "";
+      pendingRedirectRef.current = "";
+      setAuthorizedSafe(true);
       return;
     }
 
-    if (authLoading || rulesLoading) return;
+    if (
+      authLoading ||
+      rulesLoading ||
+      routeTenantLoading ||
+      (hasUser && !!routeTenantSlug && !routeTenantResolved)
+    ) {
+      return;
+    }
 
     let currentUserRole = "visitante";
+    let currentRoleCandidates = [...roleCandidates];
     if (user) {
-      if (userIsAnonymous) currentUserRole = "guest_anon";
-      else currentUserRole = userRole || "user";
+      if (userIsAnonymous) {
+        currentUserRole = "guest_anon";
+        currentRoleCandidates = ["guest_anon", "visitante", "guest"];
+      } else {
+        currentUserRole = effectiveAccessRole || "visitante";
+      }
     }
 
     if (
@@ -159,24 +279,66 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
         (path) => currentPath === path || currentPath.startsWith(`${path}/`)
       )
     ) {
-      setAuthorized(false);
-      router.replace("/em-breve");
+      setAuthorizedSafe(false);
+      safeReplace("/em-breve");
       return;
     }
 
     if (!user) {
-      setAuthorized(false);
+      setAuthorizedSafe(false);
       if (currentPath !== "/login") {
-        addToast("Opa! Faz login pra nadar com o cardume!", "info");
-        router.replace("/login");
+        if (loginToastPathRef.current !== rawCurrentPath) {
+          addToast("Opa! Faz login pra nadar com o cardume!", "info");
+          loginToastPathRef.current = rawCurrentPath;
+        }
+        safeReplace("/login");
+      } else {
+        loginToastPathRef.current = "";
       }
       return;
     }
 
+    if (shouldAutoScopePath(currentPath) && !routeTenantSlug && activeTenantSlug) {
+      setAuthorizedSafe(false);
+      safeReplace(withTenantSlug(activeTenantSlug, currentPath));
+      return;
+    }
+
+    if (routeTenantSlug) {
+      if (!routeTenantId) {
+        setAuthorizedSafe(false);
+        safeReplace("/nao-encontrado");
+        return;
+      }
+
+      if (!isPlatformMasterUser) {
+        const userTenantId = typeof user.tenant_id === "string" ? user.tenant_id.trim() : "";
+        const userTenantStatus =
+          typeof user.tenant_status === "string"
+            ? user.tenant_status.trim().toLowerCase()
+            : "";
+        const hasScopedTenantContext =
+          userTenantId.length > 0 &&
+          (!userTenantStatus ||
+            userTenantStatus === "approved" ||
+            userTenantStatus === "pending");
+
+        if (hasScopedTenantContext && userTenantId !== routeTenantId) {
+          setAuthorizedSafe(false);
+          addToast("Esse tenant nao pertence ao seu acesso atual.", "error");
+          safeReplace(dashboardPath);
+          return;
+        }
+      }
+    }
+
+    loginToastPathRef.current = "";
+    pendingRedirectRef.current = "";
+
     if (user.status === "banned" || user.status === "bloqueado") {
-      setAuthorized(false);
+      setAuthorizedSafe(false);
       if (currentPath !== "/banned") {
-        router.replace("/banned");
+        safeReplace("/banned");
       }
       return;
     }
@@ -187,16 +349,26 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       );
 
       if (!isAllowed) {
-        setAuthorized(false);
+        setAuthorizedSafe(false);
         addToast("Essa area eh exclusiva para membros oficiais!", "error");
-        const fallbackPath = currentPath === "/dashboard" ? "/login" : "/dashboard";
-        router.replace(fallbackPath);
+        const fallbackPath = currentPath === "/dashboard" ? "/login" : dashboardPath;
+        safeReplace(fallbackPath);
         return;
       }
     }
 
-    if (userRole === "master") {
-      setAuthorized(true);
+    if (isPlatformMasterUser) {
+      setAuthorizedSafe(true);
+      return;
+    }
+
+    const tenantCanManageInvites = canManageTenant(user);
+    const isTenantLaunchPath =
+      currentPath === "/admin/lancamento" ||
+      currentPath.startsWith("/admin/lancamento/");
+
+    if (isTenantLaunchPath && tenantCanManageInvites) {
+      setAuthorizedSafe(true);
       return;
     }
 
@@ -204,14 +376,18 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       permissionMatrix !== null && Object.keys(permissionMatrix).length > 0;
 
     if (!hasPermissionRules && currentPath.startsWith("/admin")) {
-      if (!ADMIN_FALLBACK_ROLES.has(currentUserRole)) {
-        setAuthorized(false);
+      const hasAdminFallback = currentRoleCandidates.some((role) =>
+        ADMIN_PANEL_FALLBACK_ROLES.has(role)
+      );
+
+      if (!hasAdminFallback && !hasAdminPanelAccess(user)) {
+        setAuthorizedSafe(false);
         addToast("Opa! Area restrita da diretoria!", "error");
-        router.replace("/sem-permissao");
+        safeReplace("/sem-permissao");
         return;
       }
 
-      setAuthorized(true);
+      setAuthorizedSafe(true);
       return;
     }
 
@@ -227,43 +403,55 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
         const allowedRoles = permissionMatrix[matchedRulePath].map((role) =>
           role.toLowerCase()
         );
-        const isRoleAllowed = allowedRoles.includes(currentUserRole);
+        const isRoleAllowed =
+          allowedRoles.includes(currentUserRole) ||
+          currentRoleCandidates.some((role) => allowedRoles.includes(role));
 
         if (!isRoleAllowed) {
-          setAuthorized(false);
+          setAuthorizedSafe(false);
           addToast("Eita! Voce nao tem permissao para essa area!", "error");
-          router.replace(user.isAnonymous ? "/dashboard" : "/sem-permissao");
+          safeReplace(user.isAnonymous ? dashboardPath : "/sem-permissao");
           return;
         }
+      } else if (currentPath.startsWith("/admin/master") && isPlatformMasterUser) {
+        setAuthorizedSafe(true);
+        return;
       } else if (currentPath.startsWith("/admin")) {
-        setAuthorized(false);
+        setAuthorizedSafe(false);
         addToast("Opa! Area restrita da diretoria!", "error");
-        router.replace("/sem-permissao");
+        safeReplace("/sem-permissao");
         return;
       }
     }
 
-    setAuthorized(true);
+    setAuthorizedSafe(true);
   }, [
     user,
-    userUid,
-    userRole,
+    hasUser,
     userIsAnonymous,
+    roleCandidates,
+    effectiveAccessRole,
+    isPlatformMasterUser,
     authLoading,
     rulesLoading,
-    pathname,
+    routeTenantId,
+    routeTenantLoading,
+    routeTenantResolved,
+    routeTenantSlug,
+    rawCurrentPath,
+    currentPath,
+    activeTenantSlug,
     router,
     permissionMatrix,
     addToast,
+    setAuthorizedSafe,
   ]);
 
-  const currentPath = pathname ? pathname.split("?")[0] : "/";
   const isPublicRenderCheck = PUBLIC_PATHS.includes(currentPath);
 
   if (isPublicRenderCheck) return <>{children}</>;
-  if (authLoading || rulesLoading) return <SharkLoader />;
+  if (authLoading || rulesLoading || routeTenantLoading) return <SharkLoader />;
   if (!authorized) return <SharkLoader />;
 
   return <>{children}</>;
 }
-

@@ -21,6 +21,7 @@ import {
   type AdminUserListItem,
 } from "@/lib/adminUsersService";
 import { updatePermissionUserRole } from "@/lib/adminSecurityService";
+import { isPlatformMaster } from "@/lib/roles";
 
 const PAGE_SIZE = 20;
 
@@ -33,8 +34,7 @@ const ROLES = [
   { id: "treinador", label: "Coach" },
   { id: "empresa", label: "Empresa" },
   { id: "user", label: "Membro" },
-  { id: "guest", label: "Visitante" },
-  { id: "inactive", label: "Inativo" },
+  { id: "visitante", label: "Visitante" },
 ];
 
 const statusLabel: Record<AdminUserListItem["status"], string> = {
@@ -70,7 +70,7 @@ const mergeUniqueUsers = (
 };
 
 export default function AdminPermissoesUsuariosPage() {
-  const { user, checkPermission, loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
 
@@ -81,7 +81,7 @@ export default function AdminPermissoesUsuariosPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
-  const isMaster = checkPermission(["master"]);
+  const isMaster = isPlatformMaster(user);
 
   const loadUsers = useCallback(
     async (options?: { reset?: boolean; cursorId?: string | null }) => {
@@ -260,7 +260,7 @@ export default function AdminPermissoesUsuariosPage() {
                   </span>
 
                   <select
-                    value={entry.role || "guest"}
+                    value={(entry.role || "visitante").toLowerCase() === "guest" ? "visitante" : entry.role || "visitante"}
                     onChange={(event) => void handleUpdateRole(entry.id, event.target.value)}
                     className="bg-zinc-900 text-white text-xs rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase font-bold border border-zinc-700"
                     disabled={entry.id === user?.uid}

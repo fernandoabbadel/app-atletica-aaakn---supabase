@@ -1,4 +1,10 @@
 import { useAuth } from "../context/AuthContext";
+import {
+  getAccessRoleCandidates,
+  isPlatformMaster,
+  resolveEffectiveAccessRole,
+} from "@/lib/roles";
+import { parseTenantScopedPath } from "@/lib/tenantRouting";
 
 export function usePermission() {
   const { user } = useAuth();
@@ -9,7 +15,7 @@ export function usePermission() {
     if (!user) return false;
     
     // 2. Master é Deus (acessa tudo)
-    if (user.role === 'master') return true;
+    if (isPlatformMaster(user)) return true;
 
     // 3. Pega permissões do cache (mesma lógica do RouteGuard)
     const cachedRules = localStorage.getItem("shark_permissions");
@@ -18,8 +24,9 @@ export function usePermission() {
     if (!cachedRules) return true; 
 
     const matrix = JSON.parse(cachedRules);
-    const cleanPath = path.split("?")[0];
-    const userRole = (user.role || 'user').toLowerCase();
+    const cleanPath = parseTenantScopedPath(path.split("?")[0]).scopedPath;
+    const userRole = resolveEffectiveAccessRole(user);
+    const roleCandidates = getAccessRoleCandidates(user);
 
     // 4. Busca a regra mais específica para aquele caminho
     // Ex: Se tem regra para "/admin", ela vale para "/admin/financeiro"
@@ -30,7 +37,10 @@ export function usePermission() {
     // 5. Verifica se a role do usuário está na lista permitida
     if (matchedRule) {
         const allowedRoles = matrix[matchedRule].map((r: string) => r.toLowerCase());
-        return allowedRoles.includes(userRole);
+        return (
+          allowedRoles.includes(userRole) ||
+          roleCandidates.some((role) => allowedRoles.includes(role))
+        );
     }
 
     // Se não tem regra específica, assume liberado (padrão do sistema)

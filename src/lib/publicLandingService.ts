@@ -10,8 +10,8 @@ type CacheEntry<T> = {
   value: T;
 };
 
-const READ_CACHE_TTL_MS = 30_000;
-const USERS_COUNT_FALLBACK_LIMIT = 2_000;
+const READ_CACHE_TTL_MS = 12 * 60 * 60_000;
+const COUNT_FALLBACK_LIMIT = 2_000;
 
 const publicLandingCache = new Map<string, CacheEntry<PublicLandingData>>();
 
@@ -36,15 +36,18 @@ const setCachedValue = <T>(
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
-async function fetchUsersCount(): Promise<number> {
+async function fetchCountFromTable(
+  tableName: string,
+  countColumn: string
+): Promise<number> {
   const supabase = getSupabaseClient();
   let lastError: unknown = null;
 
   // No plano free, tentamos contagem de metadata antes de usar exact count.
   for (const mode of ["planned", "estimated", "exact"] as const) {
     const { count, error } = await supabase
-      .from("users")
-      .select("uid", { count: mode, head: true });
+      .from(tableName)
+      .select(countColumn, { count: mode, head: true });
 
     if (!error && typeof count === "number") {
       return count;
@@ -55,9 +58,9 @@ async function fetchUsersCount(): Promise<number> {
 
   // Fallback final com leitura limitada caso count esteja indisponivel.
   const { data, error } = await supabase
-    .from("users")
-    .select("uid")
-    .limit(USERS_COUNT_FALLBACK_LIMIT);
+    .from(tableName)
+    .select(countColumn)
+    .limit(COUNT_FALLBACK_LIMIT);
 
   if (error) {
     throw error ?? lastError;
@@ -66,9 +69,28 @@ async function fetchUsersCount(): Promise<number> {
   return Array.isArray(data) ? data.length : 0;
 }
 
+async function fetchCountFromCandidates(
+  candidates: Array<{ tableName: string; countColumn: string }>
+): Promise<number> {
+  let lastError: unknown = null;
+
+  for (const candidate of candidates) {
+    try {
+      return await fetchCountFromTable(candidate.tableName, candidate.countColumn);
+    } catch (error: unknown) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) throw lastError;
+  return 0;
+}
+
 export interface PublicLandingData {
   config: LandingConfig;
   usersCount: number;
+  tenantsCount: number;
+  partnersCount: number;
 }
 
 export async function fetchPublicLandingData(options?: {
@@ -84,12 +106,18 @@ export async function fetchPublicLandingData(options?: {
     if (cached) return cached;
   }
 
-  const [configResult, usersCountResult] = await Promise.allSettled([
+  const [configResult, usersCountResult, tenantsCountResult, partnersCountResult] =
+    await Promise.allSettled([
     fetchLandingConfig({
       forceRefresh,
       fallbackConfig,
     }),
-    fetchUsersCount(),
+    fetchCountFromCandidates([{ tableName: "users", countColumn: "uid" }]),
+    fetchCountFromCandidates([{ tableName: "tenants", countColumn: "id" }]),
+    fetchCountFromCandidates([
+      { tableName: "parceiros", countColumn: "id" },
+      { tableName: "partners", countColumn: "id" },
+    ]),
   ]);
 
   const config = configResult.status === "fulfilled"
@@ -98,11 +126,19 @@ export async function fetchPublicLandingData(options?: {
 
   const usersCount = usersCountResult.status === "fulfilled"
     ? usersCountResult.value
-    : fallbackConfig.statUsers;
+    : 0;
+  const tenantsCount = tenantsCountResult.status === "fulfilled"
+    ? tenantsCountResult.value
+    : 0;
+  const partnersCount = partnersCountResult.status === "fulfilled"
+    ? partnersCountResult.value
+    : 0;
 
   const data: PublicLandingData = {
     config,
     usersCount,
+    tenantsCount,
+    partnersCount,
   };
 
   setCachedValue(publicLandingCache, cacheKey, data);

@@ -1,10 +1,13 @@
-"use client";
+﻿"use client";
 
 import React, { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
 
+import { useTenantTheme } from "@/context/TenantThemeContext";
+
 export default function Template({ children }: { children: React.ReactNode }) {
+  const { tenantLogoUrl, tenantName } = useTenantTheme();
   const [loading, setLoading] = useState(true);
   const [frase, setFrase] = useState("");
   const pathname = usePathname();
@@ -14,13 +17,8 @@ export default function Template({ children }: { children: React.ReactNode }) {
       "Afiando o bisturi e os dentes.",
       "Os tubaroes estao revisando Anatomia.",
       "Procurando a veia certa. Aguarde.",
-      "Tubarão nao dorme, estuda Fisiologia.",
-      "Calibrando a mordida para o Intermed.",
-      "Mergulhando em um mar de apostilas.",
-      "Oxigenando as branquias para o plantao.",
-      "Esperando o R1 passar a visita.",
-      "Consultando o Harrison. Um momento.",
       "Nadando contra a corrente e o sono.",
+      "Consultando o Harrison. Um momento.",
     ];
 
     setFrase(frases[Math.floor(Math.random() * frases.length)]);
@@ -28,7 +26,7 @@ export default function Template({ children }: { children: React.ReactNode }) {
 
     const timer = setTimeout(() => {
       setLoading(false);
-    }, 5000);
+    }, 1500);
 
     return () => clearTimeout(timer);
   }, [pathname]);
@@ -39,8 +37,8 @@ export default function Template({ children }: { children: React.ReactNode }) {
         <div className="relative w-40 h-40 rounded-full border-4 border-zinc-800 overflow-hidden bg-black shadow-[0_0_50px_rgba(16,185,129,0.3)] mb-8 flex items-center justify-center">
           <div className="relative z-20 w-28 h-28 flex items-center justify-center">
             <Image
-              src="/logo.png"
-              alt="Logo Atletica"
+              src={tenantLogoUrl || "/logo.png"}
+              alt={`Logo ${tenantName || "Tenant"}`}
               fill
               sizes="112px"
               className="object-contain drop-shadow-2xl"
@@ -53,7 +51,7 @@ export default function Template({ children }: { children: React.ReactNode }) {
 
         <div className="text-center px-6">
           <h2 className="text-emerald-500 font-black text-xl tracking-widest mb-3 animate-pulse">
-            CARREGANDO....
+            CARREGANDO
           </h2>
           <p className="text-zinc-400 text-sm font-medium italic max-w-xs mx-auto leading-relaxed">
             &quot;{frase}&quot;
@@ -72,7 +70,7 @@ export default function Template({ children }: { children: React.ReactNode }) {
             }
           }
           .animate-wave {
-            animation: wave 5s ease-in-out forwards;
+            animation: wave 3s ease-in-out forwards;
           }
         `}</style>
       </div>

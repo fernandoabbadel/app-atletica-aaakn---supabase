@@ -2,36 +2,50 @@
 
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { 
   Sparkles, Users, MapPin, Mail, Phone, Instagram, 
-  Dumbbell, Star, Rocket, Crown, Eye 
+  Star, Crown, Eye, Building2, Handshake
 } from "lucide-react";
 
 // Ã°Å¸Â¦Ë† IMPORTS DO SISTEMA
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { fetchPublicLandingData } from "../lib/publicLandingService";
+import { type PublicLandingData } from "../lib/publicLandingService";
 import { type LandingConfig } from "../lib/adminLandingService";
 
 const DEFAULT_CONFIG: LandingConfig = {
-  heroTitle: "SEJA UM",
-  heroSubtitle: "Centralize sua vida universitaria. Carteirinha, Loja e Eventos.",
-  heroHighlight: "TUBARAO REI",
-  tagline: "GESTAO ESPORTIVA 2.0",
-  taglineColor: "#10b981",
+  heroTitle: "BEM-VINDO AO",
+  heroSubtitle: "Plataforma multi-atleticas para eventos, comunidade, loja e gestao esportiva.",
+  heroHighlight: "SPOT CONNECT",
+  tagline: "USC - UNIVERSIDADE SPOT CONNECT",
+  taglineColor: "#60a5fa",
   titleColor: "#ffffff",
-  gradientStart: "#34d399",
-  gradientEnd: "#10b981",
+  gradientStart: "#93c5fd",
+  gradientEnd: "#2563eb",
   statUsers: 120,
-  statPosts: 340,
+  statPosts: 12,
   statPartners: 12,
   address: "Campus Medicina - Bloco C",
   phone: "(12) 99999-9999",
   whatsapp: "5512999999999",
-  email: "suporte@aaakn.com.br",
+  email: "suporte@spotconnect.app",
   socialLinks: [],
   reviews: []
+};
+
+const normalizeUscPalette = (config: LandingConfig): LandingConfig => {
+  const normalized = { ...config };
+  const colorTagline = config.taglineColor.trim().toLowerCase();
+  const colorStart = config.gradientStart.trim().toLowerCase();
+  const colorEnd = config.gradientEnd.trim().toLowerCase();
+
+  if (colorTagline === "#10b981") normalized.taglineColor = DEFAULT_CONFIG.taglineColor;
+  if (colorStart === "#34d399") normalized.gradientStart = DEFAULT_CONFIG.gradientStart;
+  if (colorEnd === "#10b981") normalized.gradientEnd = DEFAULT_CONFIG.gradientEnd;
+
+  return normalized;
 };
 
 // --- HOOK: Contadores Animados ---
@@ -52,7 +66,7 @@ const useCounter = (end: number, duration: number = 2000) => {
 };
 
 // --- COMPONENTE: Card de EstatÒ­stica ---
-type StatColor = "emerald" | "blue" | "amber";
+type StatColor = "blue" | "indigo" | "cyan";
 
 interface StatCardProps {
   icon: React.ComponentType<{ className?: string }>;
@@ -65,9 +79,9 @@ interface StatCardProps {
 const StatCard = ({ icon: Icon, value, label, color, suffix = "" }: StatCardProps) => {
   const count = useCounter(value);
   const colors: Record<StatColor, string> = {
-    emerald: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
     blue: "text-blue-400 bg-blue-500/10 border-blue-500/20",
-    amber: "text-amber-400 bg-amber-500/10 border-amber-500/20"
+    indigo: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
+    cyan: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20"
   };
   return (
     <div className={`flex flex-col items-center p-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 backdrop-blur-md transition-all hover:scale-105 ${colors[color] ? "" : "border-zinc-800"}`}>
@@ -84,7 +98,11 @@ export default function LandingPage() {
   const { addToast } = useToast();
 
   const [config, setConfig] = useState<LandingConfig>(DEFAULT_CONFIG);
-  const [realStats, setRealStats] = useState({ users: 0 });
+  const [realStats, setRealStats] = useState({
+    users: 0,
+    tenants: 0,
+    partners: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"aluno" | "empresa">("aluno");
 
@@ -97,11 +115,22 @@ export default function LandingPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const data = await fetchPublicLandingData({
-          fallbackConfig: DEFAULT_CONFIG,
+        const response = await fetch("/api/public/landing", {
+          cache: "force-cache",
         });
-        setConfig(data.config);
-        setRealStats({ users: data.usersCount || DEFAULT_CONFIG.statUsers });
+        if (!response.ok) {
+          throw new Error(`Falha ao carregar landing: ${response.status}`);
+        }
+        const data = (await response.json()) as Partial<PublicLandingData>;
+        const configData = data.config && typeof data.config === "object"
+          ? (data.config as LandingConfig)
+          : DEFAULT_CONFIG;
+        setConfig(normalizeUscPalette(configData));
+        setRealStats({
+          users: typeof data.usersCount === "number" ? data.usersCount : 0,
+          tenants: typeof data.tenantsCount === "number" ? data.tenantsCount : 0,
+          partners: typeof data.partnersCount === "number" ? data.partnersCount : 0,
+        });
       } catch (error: unknown) {
         console.error("Erro ao carregar landing:", error);
       } finally {
@@ -114,29 +143,45 @@ export default function LandingPage() {
   const handleGoogleLogin = async () => { try { await loginGoogle(); } catch { addToast("Erro no login Google", "error"); } };
   const handleGuest = () => { addToast("Modo Visitante Ativado!", "info"); router.push("/dashboard"); };
 
-  if (loading) return <div className="h-screen bg-[#030a08] flex items-center justify-center text-emerald-500 font-bold animate-pulse">CARREGANDO CARDUME...</div>;
+  if (loading) return <div className="h-screen bg-[#02050d] flex items-center justify-center text-blue-400 font-bold animate-pulse">CARREGANDO CARDUME...</div>;
 
   return (
-    <div className="min-h-screen bg-[#030a08] text-white selection:bg-emerald-500/30 overflow-x-hidden font-sans">
+    <div className="min-h-screen bg-[#02050d] text-white selection:bg-blue-500/30 overflow-x-hidden font-sans">
       
       {/* Ã°Å¸Å’Å  Background Layers */}
       <div className="fixed inset-0 pointer-events-none z-0">
-         <div className="absolute top-[-10%] left-[-20%] w-[80%] h-[80%] bg-emerald-500/5 rounded-full blur-[120px] animate-pulse-slow" />
-         <div className="absolute bottom-[-10%] right-[-20%] w-[80%] h-[80%] bg-teal-600/5 rounded-full blur-[120px] animate-pulse-slow delay-700" />
+         <div className="absolute top-[-10%] left-[-20%] w-[80%] h-[80%] bg-blue-500/10 rounded-full blur-[120px] animate-pulse-slow" />
+         <div className="absolute bottom-[-10%] right-[-20%] w-[80%] h-[80%] bg-cyan-500/10 rounded-full blur-[120px] animate-pulse-slow delay-700" />
       </div>
 
+      <header className="relative z-20 container mx-auto px-4 pt-5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Image src="/logo.png" alt="Logo USC" width={36} height={36} className="rounded-lg object-cover" />
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-300">USC</p>
+            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Universidade Spot Connect</p>
+          </div>
+        </div>
+        <Link
+          href="/nova-atletica"
+          className="px-3 py-2 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-[10px] font-black uppercase tracking-wider"
+        >
+          Cadastrar Atletica
+        </Link>
+      </header>
+
       {/* ================= HERO SECTION ================= */}
-      <main className="relative z-10 container mx-auto px-4 pt-10 pb-20 lg:pt-20 lg:flex lg:items-center lg:gap-16">
+      <main className="relative z-10 container mx-auto px-4 pt-8 pb-20 lg:pt-14 lg:flex lg:items-center lg:gap-16">
         
         {/* ESQUERDA: Texto DinÒ¢mico */}
         <div className="flex-1 text-center lg:text-left space-y-8">
             <div className="relative w-48 h-48 lg:w-64 lg:h-64 mx-auto lg:mx-0 animate-float-slow group">
-                <div className="absolute inset-0 bg-emerald-500/20 blur-[50px] rounded-full scale-75" />
+                <div className="absolute inset-0 bg-blue-500/30 blur-[50px] rounded-full scale-75" />
                 <Image 
                     src="/logo.png" 
-                    alt="Logo AAAKN" 
+                    alt="Logo USC" 
                     width={256} height={256} 
-                    className="relative z-10 object-contain drop-shadow-[0_0_35px_rgba(16,185,129,0.4)]"
+                    className="relative z-10 object-contain mix-blend-screen drop-shadow-[0_0_35px_rgba(59,130,246,0.45)]"
                     priority
                 />
             </div>
@@ -163,9 +208,9 @@ export default function LandingPage() {
 
             {/* Stats Bar - Ã°Å¸Â¦Ë† RANKING REMOVIDO DAQUI */}
             <div className="grid grid-cols-3 gap-4 w-full max-w-lg mx-auto lg:mx-0">
-                <StatCard icon={Users} value={realStats.users || config.statUsers} label="Socios" color="emerald" />
-                <StatCard icon={Dumbbell} value={config.statPosts} label="Treinos" color="blue" />
-                <StatCard icon={Rocket} value={config.statPartners} label="Parceiros" color="amber" />
+                <StatCard icon={Users} value={realStats.users} label="Socios totais" color="blue" />
+                <StatCard icon={Building2} value={realStats.tenants} label="Atleticas criadas" color="indigo" />
+                <StatCard icon={Handshake} value={realStats.partners} label="Parceiros totais" color="cyan" />
             </div>
         </div>
 
@@ -200,15 +245,15 @@ export default function LandingPage() {
       {/* ================= DEPOIMENTOS ================= */}
       <section className="py-20 container mx-auto px-4 border-t border-white/5 bg-zinc-950/30">
         <div className="flex items-center gap-2 mb-8 justify-center lg:justify-start">
-            <Star className="text-emerald-500 fill-emerald-500" />
+            <Star className="text-blue-400 fill-blue-400" />
             <h3 className="text-xl font-black text-white uppercase tracking-tight">O Cardume Aprova</h3>
         </div>
         
         <div className="flex gap-6 overflow-x-auto pb-8 px-4 scrollbar-hide snap-x md:grid md:grid-cols-3 md:overflow-visible">
             {(config.reviews || []).length > 0 ? config.reviews.map((review) => (
-                <div key={review.id} className="flex flex-col gap-4 p-6 bg-zinc-900/80 border border-zinc-800 rounded-2xl min-w-[300px] hover:border-emerald-500/30 transition-all shadow-lg snap-center">
+                <div key={review.id} className="flex flex-col gap-4 p-6 bg-zinc-900/80 border border-zinc-800 rounded-2xl min-w-[300px] hover:border-blue-500/30 transition-all shadow-lg snap-center">
                     <div className="flex items-center gap-3">
-                        <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-emerald-500/30 bg-zinc-800">
+                        <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-blue-500/30 bg-zinc-800">
                             <Image 
                                 src={review.profileUrl || "/logo.png"} 
                                 alt={review.name} 
@@ -237,20 +282,20 @@ export default function LandingPage() {
         <div className="container mx-auto px-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
                 <div className="space-y-4">
-                    <div className="flex items-center gap-2"><Crown className="text-emerald-500 w-5 h-5" /><span className="font-black text-xl text-white">AAAKN</span></div>
-                    <p className="text-zinc-500 text-xs leading-relaxed">Plataforma oficial da Atletica.</p>
+                    <div className="flex items-center gap-2"><Crown className="text-blue-400 w-5 h-5" /><span className="font-black text-xl text-white">USC</span></div>
+                    <p className="text-zinc-500 text-xs leading-relaxed">Plataforma oficial multi-atleticas.</p>
                 </div>
 
                 <div>
                     <h4 className="text-white font-bold mb-4 uppercase text-xs tracking-wider">Suporte</h4>
                     <ul className="space-y-3 text-xs text-zinc-500">
-                        <li className="flex items-center gap-2"><MapPin size={14} className="text-emerald-600"/> {config.address}</li>
-                        <li className="flex items-center gap-2"><Mail size={14} className="text-emerald-600"/> {config.email}</li>
-                        <li className="flex items-center gap-2"><Phone size={14} className="text-emerald-600"/> {config.phone}</li>
+                        <li className="flex items-center gap-2"><MapPin size={14} className="text-blue-500"/> {config.address}</li>
+                        <li className="flex items-center gap-2"><Mail size={14} className="text-blue-500"/> {config.email}</li>
+                        <li className="flex items-center gap-2"><Phone size={14} className="text-blue-500"/> {config.phone}</li>
                         
                         {(config.socialLinks || []).map(social => (
                             <li key={social.id} className="pt-2">
-                                <a href={social.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-emerald-400 hover:text-emerald-300 font-bold capitalize">
+                                <a href={social.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-400 hover:text-blue-300 font-bold capitalize">
                                     <Instagram size={14}/> {social.platform}
                                 </a>
                             </li>
@@ -259,8 +304,8 @@ export default function LandingPage() {
                 </div>
             </div>
             <div className="pt-8 border-t border-zinc-900 text-center text-[10px] text-zinc-600">
-                <p>&copy; {new Date().getFullYear()} AAAKN. Todos os direitos reservados.</p>
-                <p className="mt-1">O Tubarao ja subiu para a base.</p>
+                <p>&copy; {new Date().getFullYear()} USC - Universidade Spot Connect.</p>
+                <p className="mt-1">Infraestrutura oficial para gestao de atleticas.</p>
             </div>
         </div>
       </footer>

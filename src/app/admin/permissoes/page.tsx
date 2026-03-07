@@ -9,7 +9,6 @@ import {
   Crown,
   DollarSign,
   Dumbbell,
-  Ghost,
   LayoutList,
   Loader2,
   Lock,
@@ -17,7 +16,6 @@ import {
   Settings,
   Shield,
   Users,
-  UserX,
   User,
   Zap,
 } from "lucide-react";
@@ -34,6 +32,7 @@ import {
   savePermissionMatrix,
   type PermissionMatrix,
 } from "@/lib/adminSecurityService";
+import { canManageTenant, isPlatformMaster } from "@/lib/roles";
 
 const ROLES = [
   { id: "master", label: "Master", icon: Crown, color: "text-red-500" },
@@ -44,12 +43,11 @@ const ROLES = [
   { id: "treinador", label: "Coach", icon: Dumbbell, color: "text-orange-500" },
   { id: "empresa", label: "Empresa", icon: Briefcase, color: "text-cyan-400" },
   { id: "user", label: "Membro", icon: User, color: "text-zinc-400" },
-  { id: "guest", label: "Visitante", icon: Ghost, color: "text-zinc-600" },
-  { id: "inactive", label: "Inativo", icon: UserX, color: "text-zinc-700" },
+  { id: "visitante", label: "Visitante", icon: User, color: "text-zinc-600" },
 ];
 
 export default function AdminPermissoesPage() {
-  const { user, checkPermission, loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
 
@@ -57,14 +55,37 @@ export default function AdminPermissoesPage() {
   const [permissionMatrix, setPermissionMatrix] = useState<PermissionMatrix>({});
   const [savingMatrix, setSavingMatrix] = useState(false);
 
-  const isMaster = checkPermission(["master"]);
+  const isPlatformMasterUser = isPlatformMaster(user);
+  const canViewPermissions = isPlatformMasterUser || canManageTenant(user);
+
+  const getLocalCachedMatrix = (): PermissionMatrix | null => {
+    if (typeof window === "undefined") return null;
+    const raw = localStorage.getItem("shark_permissions");
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (typeof parsed !== "object" || parsed === null) return null;
+      const matrix: PermissionMatrix = {};
+      Object.entries(parsed).forEach(([path, roles]) => {
+        if (!Array.isArray(roles)) return;
+        const cleanRoles = roles
+          .filter((entry): entry is string => typeof entry === "string")
+          .map((entry) => entry.trim())
+          .filter(Boolean);
+        matrix[path] = Array.from(new Set(cleanRoles));
+      });
+      return matrix;
+    } catch {
+      return null;
+    }
+  };
 
   useEffect(() => {
     if (authLoading) return;
 
-    if (!isMaster) {
+    if (!canViewPermissions) {
       setLoading(false);
-      router.push("/dashboard");
+      router.push("/sem-permissao");
       return;
     }
 
@@ -86,12 +107,21 @@ export default function AdminPermissoesPage() {
         }
       } catch (error: unknown) {
         if (isPermissionError(error)) {
-          addToast("Sem permissao para abrir o painel de permissoes.", "error");
-          router.push("/sem-permissao");
-          return;
+          const cached = getLocalCachedMatrix();
+          if (cached) {
+            setPermissionMatrix(cached);
+            addToast("Modo leitura: usando matriz local em cache.", "info");
+          } else if (isPlatformMasterUser) {
+            addToast("Sem permissao para abrir o painel de permissoes.", "error");
+            router.push("/sem-permissao");
+            return;
+          } else {
+            setPermissionMatrix({});
+          }
+        } else {
+          console.error(error);
+          addToast("Erro ao carregar a matriz de acessos.", "error");
         }
-        console.error(error);
-        addToast("Erro ao carregar a matriz de acessos.", "error");
       } finally {
         if (mounted) {
           setLoading(false);
@@ -104,9 +134,11 @@ export default function AdminPermissoesPage() {
     return () => {
       mounted = false;
     };
-  }, [authLoading, isMaster, router, addToast]);
+  }, [authLoading, canViewPermissions, router, addToast, isPlatformMasterUser]);
 
   const togglePermission = (path: string, roleId: string) => {
+    if (!isPlatformMasterUser) return;
+
     setPermissionMatrix((prev) => {
       const currentRoles = prev[path] || [];
       const hasAccess = currentRoles.includes(roleId);
@@ -119,6 +151,11 @@ export default function AdminPermissoesPage() {
   };
 
   const saveMatrix = async () => {
+    if (!isPlatformMasterUser) {
+      addToast("Somente o master da plataforma pode editar a matriz.", "error");
+      return;
+    }
+
     setSavingMatrix(true);
     try {
       const adminName =
@@ -156,7 +193,7 @@ export default function AdminPermissoesPage() {
     );
   }
 
-  if (!isMaster) return null;
+  if (!canViewPermissions) return null;
 
   return (
     <div className="min-h-screen bg-[#050505] text-white pb-32 font-sans">
@@ -170,18 +207,22 @@ export default function AdminPermissoesPage() {
               <Shield className="text-red-600" /> Controle de Acesso
             </h1>
             <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">
-              Area Restrita do Master
+              {isPlatformMasterUser
+                ? "Area Restrita do Master da Plataforma"
+                : "Modo Leitura para Admin do Tenant"}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <Link
-            href="/admin/permissoes/usuarios"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-cyan-700/40 bg-zinc-900 text-cyan-300 text-[11px] font-black uppercase hover:bg-zinc-800 transition"
-          >
-            <Users size={14} /> Cargos
-          </Link>
+          {isPlatformMasterUser && (
+            <Link
+              href="/admin/permissoes/usuarios"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-cyan-700/40 bg-zinc-900 text-cyan-300 text-[11px] font-black uppercase hover:bg-zinc-800 transition"
+            >
+              <Users size={14} /> Cargos
+            </Link>
+          )}
           <Link
             href="/admin/usuarios"
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300 text-[11px] font-black uppercase hover:bg-zinc-800 transition"
@@ -204,7 +245,7 @@ export default function AdminPermissoesPage() {
               <p className="text-xs text-zinc-400 mt-1">
                 Esta matriz controla o acesso por rota. Mantenha{" "}
                 <b>&apos;/configuracoes&apos;</b> liberado para o cargo{" "}
-                <b>&apos;Inativo&apos;</b>.
+                <b>&apos;Visitante&apos;</b>.
               </p>
             </div>
           </div>
@@ -274,12 +315,16 @@ export default function AdminPermissoesPage() {
                             <td key={`${page.path}-${role.id}`} className="p-4 text-center border-l border-zinc-800/30">
                               <button
                                 onClick={() => togglePermission(page.path, role.id)}
-                                disabled={role.id === "master"}
+                                disabled={!isPlatformMasterUser || role.id === "master"}
                                 className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all mx-auto ${
                                   isAllowed
                                     ? "bg-emerald-500 text-black shadow-lg scale-100"
                                     : "bg-zinc-900 text-zinc-700 border border-zinc-800 scale-90 grayscale"
-                                } ${role.id === "master" ? "opacity-50 cursor-not-allowed" : "hover:scale-110 active:scale-95"}`}
+                                } ${
+                                  !isPlatformMasterUser || role.id === "master"
+                                    ? "opacity-50 cursor-not-allowed"
+                                    : "hover:scale-110 active:scale-95"
+                                }`}
                               >
                                 {isAllowed ? <CheckSquare size={16} strokeWidth={3} /> : <Lock size={14} />}
                               </button>
@@ -294,19 +339,20 @@ export default function AdminPermissoesPage() {
             </table>
           </div>
 
-          <div className="fixed bottom-6 right-6 z-50">
-            <button
-              onClick={saveMatrix}
-              disabled={savingMatrix}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 px-8 rounded-full flex items-center gap-3 transition-all shadow-[0_0_30px_rgba(16,185,129,0.3)] hover:scale-105 active:scale-95 border-4 border-[#050505]"
-            >
-              {savingMatrix ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-              SALVAR ALTERACOES
-            </button>
-          </div>
+          {isPlatformMasterUser && (
+            <div className="fixed bottom-6 right-6 z-50">
+              <button
+                onClick={saveMatrix}
+                disabled={savingMatrix}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 px-8 rounded-full flex items-center gap-3 transition-all shadow-[0_0_30px_rgba(16,185,129,0.3)] hover:scale-105 active:scale-95 border-4 border-[#050505]"
+              >
+                {savingMatrix ? <Loader2 className="animate-spin" /> : <Save size={20} />}
+                SALVAR ALTERACOES
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
-

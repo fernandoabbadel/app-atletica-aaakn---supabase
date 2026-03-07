@@ -6,6 +6,7 @@ import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { ToastProvider } from "@/context/ToastContext";
 import { CartProvider } from "@/context/CartContext";
+import { TenantThemeProvider } from "@/context/TenantThemeContext";
 
 // 🦈 COMPONENTES GLOBAIS
 import BottomNav from "@/app/components/BottomNav";
@@ -24,11 +25,12 @@ const geistMono = Geist_Mono({
 
 // 1. METADATA (SEO & PWA)
 export const metadata: Metadata = {
-  title: "Tubarão App - AAAKN",
-  description: "Portal oficial da Atlética Medicina Caraguá",
+  title: "USC - Universidade Spot Connect",
+  description: "Plataforma oficial multi-atleticas",
   manifest: "/manifest.json", // Link para o arquivo PWA
   icons: {
-    icon: "/favicon.ico",
+    icon: ["/favicon.ico", "/favicon-32x32.png", "/favicon-16x16.png"],
+    apple: "/apple-touch-icon.png",
   },
 };
 
@@ -50,10 +52,11 @@ export default function RootLayout({
   return (
     <html lang="pt-br" className="dark" data-scroll-behavior="smooth">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#050505] text-white min-h-screen selection:bg-emerald-500/30`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#050505] text-white min-h-screen`}
       >
         {/* 1. Autenticação */}
         <AuthProvider>
+          <TenantThemeProvider>
           
           {/* 2. Feedback Visual */}
           <ToastProvider>
@@ -75,6 +78,7 @@ export default function RootLayout({
               </RouteGuard>
             </CartProvider>
           </ToastProvider>
+          </TenantThemeProvider>
         </AuthProvider>
       </body>
     </html>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Home, Calendar, Dumbbell, CreditCard, Menu, X, Wallet,
@@ -10,10 +10,13 @@ import {
   Target, GraduationCap, Users, Lock, Bell, Fish, Swords, Sparkles, ScanLine // ðŸ¦ˆ Adicionado Sparkles
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { isPermissionError } from "@/lib/backendErrors";
 import { OptimizedImage } from "@/app/components/shared/OptimizedImage";
 import { getTurmaImage } from "../../constants/turmaImages";
 import { resolvePlanTextClass, resolveUserPlanIcon } from "@/constants/planVisuals";
+import { hasAdminPanelAccess } from "@/lib/roles";
+import { parseTenantScopedPath } from "@/lib/tenantRouting";
 import {
   fetchBottomNavBannedAppealsCount,
   fetchBottomNavNotifications,
@@ -100,8 +103,13 @@ const SocioGrowthBanner = ({ tier, closeMenu, router }: BannerProps) => {
 
 export default function BottomNavbar() {
   const pathname = usePathname();
+  const normalizedPathname = useMemo(
+    () => parseTenantScopedPath(pathname || "/").scopedPath,
+    [pathname]
+  );
   const router = useRouter();
   const { user, logout } = useAuth();
+  const { tenantLogoUrl, tenantSigla } = useTenantTheme();
   const lastNotificationsFocusRefreshAtRef = useRef(0);
   const lastBannedAppealsFocusRefreshAtRef = useRef(0);
   const currentUser = user as unknown as UserData;
@@ -115,7 +123,7 @@ export default function BottomNavbar() {
   const [bannedMessagesCount, setBannedMessagesCount] = useState(0); 
   const lastScrollY = useRef(0);
 
-  const isAdmin = currentUser?.role === 'master' || currentUser?.role === 'admin_geral' || currentUser?.role === 'admin_gestor';
+  const isAdmin = hasAdminPanelAccess(user);
   const userUid = user?.uid || "";
   const currentTurmaSlug = resolveTurmaSlug(currentUser?.turma);
   const isGuestVirtual = userUid.startsWith("guest_virtual_");
@@ -275,7 +283,7 @@ export default function BottomNavbar() {
   };
   const handleLogout = () => { if (logout) logout(); setIsSidebarOpen(false); router.push("/"); };
 
-  const isHiddenRoute = ["/", "/login", "/cadastro", "/banned"].includes(pathname || "") || pathname?.startsWith("/empresa") || pathname?.startsWith("/admin");
+  const isHiddenRoute = ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao"].includes(normalizedPathname) || normalizedPathname.startsWith("/empresa") || normalizedPathname.startsWith("/admin");
   if (isHiddenRoute) return null;
 
   // --- DEFINIÃ‡ÃƒO DOS MENUS (CSS e Badges Atualizados) ---
@@ -326,10 +334,10 @@ export default function BottomNavbar() {
         <div className="p-6 pb-4 border-b border-zinc-800 bg-black/40 backdrop-blur-sm flex justify-between items-center">
             <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-900/20 relative">
-                    <OptimizedImage src="/logo.png" alt="Logo" fill sizes="32px" className="object-contain p-1" />
+                    <OptimizedImage src={tenantLogoUrl || "/logo.png"} alt="Logo" fill sizes="32px" className="object-contain p-1" />
                 </div>
                 <div>
-                    <h2 className="text-lg font-black italic uppercase text-white leading-none">AAAKN</h2>
+                    <h2 className="text-lg font-black italic uppercase text-white leading-none">{(tenantSigla || "USC").toUpperCase()}</h2>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">App Oficial</p>
                 </div>
             </div>
@@ -402,8 +410,8 @@ export default function BottomNavbar() {
                 <div className="px-2 pt-2 pb-2"><h3 className="text-[10px] font-black text-zinc-500 uppercase flex items-center gap-2"><Layout size={10}/> Menu Principal</h3></div>
                 <div className="space-y-1">
                     {sidebarItemsGeneral.map((item) => (
-                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-all group", pathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-50 cursor-not-allowed")}>
-                            <div className={cn("p-1.5 rounded-lg", pathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
+                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-50 cursor-not-allowed")}>
+                            <div className={cn("p-1.5 rounded-lg", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
                             <span className="text-xs font-bold uppercase tracking-wide">{item.label}</span>
                             {item.isComingSoon && <Lock size={12} className="ml-auto text-zinc-600"/>}
                         </button>
@@ -414,9 +422,9 @@ export default function BottomNavbar() {
                 <div className="px-2 pt-6 pb-2 border-t border-zinc-800/50 mt-2"><h3 className="text-[10px] font-black text-emerald-600 uppercase flex items-center gap-2 tracking-widest"><Dumbbell size={10}/> Area do Atleta</h3></div>
                 <div className="space-y-1">
                     {sidebarItemsAtleta.map((item) => (
-                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center justify-between p-3 rounded-xl transition-all group", pathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-60 cursor-not-allowed grayscale")}>
+                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center justify-between p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-60 cursor-not-allowed grayscale")}>
                             <div className="flex items-center gap-3">
-                                <div className={cn("p-1.5 rounded-lg", pathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
+                                <div className={cn("p-1.5 rounded-lg", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
                                 <span className="text-xs font-bold uppercase tracking-wide">{item.label}</span>
                             </div>
                             {item.badge && (
@@ -433,8 +441,8 @@ export default function BottomNavbar() {
                 <div className="px-2 pt-6 pb-2 border-t border-zinc-800/50 mt-2"><h3 className="text-[10px] font-black text-zinc-500 uppercase flex items-center gap-2 tracking-widest"><MapPin size={10}/> Central de Info</h3></div>
                 <div className="space-y-1 pb-6">
                     {sidebarItemsInfo.map((item) => (
-                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-all group", pathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-50 cursor-not-allowed")}>
-                            <div className={cn("p-1.5 rounded-lg", pathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
+                        <button key={item.id} onClick={() => handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", item.isComingSoon && "opacity-50 cursor-not-allowed")}>
+                            <div className={cn("p-1.5 rounded-lg", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-500/70")}>{item.icon}</div>
                             <span className="text-xs font-bold uppercase tracking-wide">{item.label}</span>
                             {item.isComingSoon && <Lock size={12} className="ml-auto text-zinc-600"/>}
                         </button>
@@ -476,7 +484,7 @@ export default function BottomNavbar() {
                     </div>
                 ) : (
                     <div key={item.id} className="flex-1 h-full flex justify-center">
-                        <button onClick={() => item.action ? item.action() : handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full h-[60px] flex flex-col items-center justify-center gap-1 rounded-2xl active:scale-90 transition-colors", pathname === item.path ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300", item.isComingSoon && "opacity-40 cursor-not-allowed")}>
+                        <button onClick={() => item.action ? item.action() : handleNavigation(item.path!, item.isComingSoon)} disabled={item.isComingSoon} className={cn("w-full h-[60px] flex flex-col items-center justify-center gap-1 rounded-2xl active:scale-90 transition-colors", normalizedPathname === item.path ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300", item.isComingSoon && "opacity-40 cursor-not-allowed")}>
                             {item.icon}
                             <span className="text-[8px] font-bold uppercase tracking-wide">{item.label}</span>
                         </button>

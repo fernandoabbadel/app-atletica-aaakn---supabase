@@ -7,6 +7,12 @@ import { Lock } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { COMING_SOON_PATHS } from "@/lib/appRoutes";
+import {
+  ADMIN_PANEL_FALLBACK_ROLES,
+  getAccessRoleCandidates,
+  isPlatformMaster,
+  resolveEffectiveAccessRole,
+} from "@/lib/roles";
 
 interface SmartLinkProps {
   href: string;
@@ -14,14 +20,6 @@ interface SmartLinkProps {
   className?: string;
   showLockIcon?: boolean;
 }
-
-const ADMIN_FALLBACK_ROLES = new Set([
-  "master",
-  "admin",
-  "admin_geral",
-  "admin_gestor",
-  "staff",
-]);
 
 const parsePermissionMatrix = (
   raw: string
@@ -62,19 +60,22 @@ export default function SmartLink({
     if (!user) return false;
 
     const path = href.toString().split("?")[0];
-    const userRole = (user.role || "user").toLowerCase();
+    const userRole = resolveEffectiveAccessRole(user);
+    const roleCandidates = getAccessRoleCandidates(user);
 
     const isComingSoon = COMING_SOON_PATHS.some(
       (comingPath) => path === comingPath || path.startsWith(`${comingPath}/`)
     );
     if (isComingSoon) return false;
 
-    if (userRole === "master") return true;
+    if (isPlatformMaster(user)) return true;
 
     const cachedRules = localStorage.getItem("shark_permissions");
     if (!cachedRules) {
       if (path.startsWith("/admin")) {
-        return ADMIN_FALLBACK_ROLES.has(userRole);
+        return roleCandidates.some((role) =>
+          ADMIN_PANEL_FALLBACK_ROLES.has(role)
+        );
       }
       return true;
     }
@@ -83,7 +84,9 @@ export default function SmartLink({
       const permissionMatrix = parsePermissionMatrix(cachedRules);
       if (!permissionMatrix) {
         if (path.startsWith("/admin")) {
-          return ADMIN_FALLBACK_ROLES.has(userRole);
+          return roleCandidates.some((role) =>
+            ADMIN_PANEL_FALLBACK_ROLES.has(role)
+          );
         }
         return true;
       }
@@ -98,16 +101,23 @@ export default function SmartLink({
         const allowedRoles = permissionMatrix[matchedPath].map((role) =>
           role.toLowerCase()
         );
-        return allowedRoles.includes(userRole);
+        return (
+          allowedRoles.includes(userRole) ||
+          roleCandidates.some((role) => allowedRoles.includes(role))
+        );
       }
 
       if (path.startsWith("/admin")) {
-        return ADMIN_FALLBACK_ROLES.has(userRole);
+        return roleCandidates.some((role) =>
+          ADMIN_PANEL_FALLBACK_ROLES.has(role)
+        );
       }
     } catch (error: unknown) {
       console.error("Erro ao verificar permissao no SmartLink", error);
       if (path.startsWith("/admin")) {
-        return ADMIN_FALLBACK_ROLES.has(userRole);
+        return roleCandidates.some((role) =>
+          ADMIN_PANEL_FALLBACK_ROLES.has(role)
+        );
       }
       return true;
     }

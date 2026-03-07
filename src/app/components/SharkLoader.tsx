@@ -1,27 +1,29 @@
-"use client";
+﻿"use client";
 
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 
-const FRASES_TUBARAO = [
+import { useTenantTheme } from "@/context/TenantThemeContext";
+
+const FRASES = [
   "Afiando o bisturi e os dentes.",
   "Os tubaroes estao revisando Anatomia.",
   "Procurando a veia certa. Aguarde.",
-  "Tubarao nao dorme, estuda Fisiologia.",
   "Calibrando a mordida para o Intermed.",
   "Mergulhando em um mar de apostilas.",
-  "Oxigenando as branquias para o plantao.",
+  "Oxigenando as branqueas para o plantao.",
 ];
 
 export default function SharkLoader() {
+  const { tenantLogoUrl, tenantName } = useTenantTheme();
   const [frase, setFrase] = useState("Carregando...");
   const [imgError, setImgError] = useState(false);
 
   useEffect(() => {
-    setFrase(FRASES_TUBARAO[Math.floor(Math.random() * FRASES_TUBARAO.length)]);
+    setFrase(FRASES[Math.floor(Math.random() * FRASES.length)]);
 
     const interval = setInterval(() => {
-      setFrase(FRASES_TUBARAO[Math.floor(Math.random() * FRASES_TUBARAO.length)]);
+      setFrase(FRASES[Math.floor(Math.random() * FRASES.length)]);
     }, 2500);
 
     return () => clearInterval(interval);
@@ -34,18 +36,17 @@ export default function SharkLoader() {
           {!imgError ? (
             <div className="relative w-full h-full">
               <Image
-                src="/logo.png"
-                alt="Loading"
+                src={tenantLogoUrl || "/logo.png"}
+                alt={`Loading ${tenantName || "Tenant"}`}
                 fill
                 sizes="80px"
                 priority
                 className="object-contain drop-shadow-2xl animate-pulse"
                 onError={() => setImgError(true)}
-                
               />
             </div>
           ) : (
-            <span style={{ fontSize: "3rem" }}>T</span>
+            <span style={{ fontSize: "3rem" }}>U</span>
           )}
         </div>
 

@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { AlertTriangle, RefreshCcw } from "lucide-react";
 
@@ -9,10 +9,35 @@ type GlobalErrorPageProps = {
   reset: () => void;
 };
 
+const BRAND_SNAPSHOT_KEY = "usc_active_tenant_brand";
+
 export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) {
+  const [logoUrl, setLogoUrl] = useState("/logo.png");
+  const [tenantName, setTenantName] = useState("USC");
+
   useEffect(() => {
     console.error("Global app error:", error);
   }, [error]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(BRAND_SNAPSHOT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        tenantLogoUrl?: unknown;
+        tenantName?: unknown;
+      };
+      if (typeof parsed.tenantLogoUrl === "string" && parsed.tenantLogoUrl.trim()) {
+        setLogoUrl(parsed.tenantLogoUrl.trim());
+      }
+      if (typeof parsed.tenantName === "string" && parsed.tenantName.trim()) {
+        setTenantName(parsed.tenantName.trim());
+      }
+    } catch {
+      // ignora falha de storage
+    }
+  }, []);
 
   return (
     <html lang="pt-BR">
@@ -23,8 +48,8 @@ export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) 
           <div className="relative w-40 h-40 rounded-full border-4 border-orange-500/40 overflow-hidden bg-black shadow-[0_0_70px_rgba(251,146,60,0.25)] mb-8 flex items-center justify-center">
             <div className="relative z-20 w-24 h-24 flex items-center justify-center">
               <Image
-                src="/logo.png"
-                alt="Logo AAAKN"
+                src={logoUrl}
+                alt={`Logo ${tenantName}`}
                 fill
                 sizes="96px"
                 className="object-contain drop-shadow-2xl"
@@ -84,4 +109,3 @@ export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) 
     </html>
   );
 }
-

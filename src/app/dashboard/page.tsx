@@ -8,6 +8,7 @@ import {
   ScanBarcode, Crosshair
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext'; 
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import Link from 'next/link';
 import Image from 'next/image'; 
 import { 
@@ -56,11 +57,11 @@ const parsePartnerTier = (partner: Parceiro): PartnerTier => {
     return 'standard';
 };
 
-const getPartnerLogoSrc = (partner: Parceiro): string =>
-    partner.imgLogo || partner.imgCapa || '/logo.png';
+const getPartnerLogoSrc = (partner: Parceiro, fallbackLogo: string): string =>
+    partner.imgLogo || partner.imgCapa || fallbackLogo;
 
-const getPartnerCoverSrc = (partner: Parceiro): string =>
-    partner.imgCapa || partner.imgLogo || '/placeholder_liga.png';
+const getPartnerCoverSrc = (partner: Parceiro, fallbackLogo: string): string =>
+    partner.imgCapa || partner.imgLogo || fallbackLogo;
 
 // --- SUB-COMPONENTES PADRONIZADOS ---
 
@@ -249,6 +250,7 @@ const ProductCard = ({
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
+  const { tenantLogoUrl } = useTenantTheme();
 
   const [events, setEvents] = useState<Evento[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -429,6 +431,7 @@ export default function DashboardPage() {
   const userData = user as unknown as UserData; 
   const userRoleNormalized =
     typeof userData?.role === "string" ? userData.role.toLowerCase().trim() : "guest";
+  const tenantLogoFallback = tenantLogoUrl || "/logo.png";
   const sharkroundHref =
     userRoleNormalized === "master" ||
     userRoleNormalized === "admin_geral" ||
@@ -474,7 +477,7 @@ export default function DashboardPage() {
                 >
                   <div className="absolute inset-0">
                     <Image
-                      src={getPartnerCoverSrc(p)}
+                      src={getPartnerCoverSrc(p, tenantLogoFallback)}
                       alt={p.nome}
                       fill
                       sizes="(max-width: 768px) 100vw, 420px"
@@ -491,7 +494,7 @@ export default function DashboardPage() {
                   <div className="relative z-10 h-full flex flex-col justify-end p-6">
                     <div className="w-24 h-24 rounded-2xl bg-black/70 border border-yellow-500/30 overflow-hidden mb-4 relative shadow-[0_0_20px_rgba(234,179,8,0.15)]">
                       <Image
-                        src={getPartnerLogoSrc(p)}
+                        src={getPartnerLogoSrc(p, tenantLogoFallback)}
                         alt={p.nome}
                         fill
                         sizes="96px"
@@ -524,7 +527,7 @@ export default function DashboardPage() {
                   >
                     <div className="absolute inset-0">
                       <Image
-                        src={getPartnerCoverSrc(p)}
+                        src={getPartnerCoverSrc(p, tenantLogoFallback)}
                         alt="Capa"
                         fill
                         sizes="150px"
@@ -534,7 +537,7 @@ export default function DashboardPage() {
                       <div className="absolute inset-0 bg-black/50" />
                     </div>
                     <div className="w-20 h-20 bg-black rounded-full border-2 border-zinc-500/80 flex items-center justify-center overflow-hidden shadow-2xl relative z-10 group-hover:scale-110 transition">
-                      <Image src={getPartnerLogoSrc(p)} alt={p.nome} fill sizes="80px" className="object-cover"  />
+                      <Image src={getPartnerLogoSrc(p, tenantLogoFallback)} alt={p.nome} fill sizes="80px" className="object-cover"  />
                     </div>
                     <div className="text-center relative z-10 px-2 w-full">
                       <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>
@@ -785,11 +788,11 @@ export default function DashboardPage() {
                    {parceirosStandard.map((p) => (
                        <Link href={`/parceiros/${p.id}`} key={p.id} className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-800 hover:border-zinc-600">
                            <div className="absolute inset-0">
-                               <Image src={getPartnerCoverSrc(p)} alt="Capa" fill sizes="150px" className="object-cover opacity-30 group-hover:opacity-50 transition" />
+                               <Image src={getPartnerCoverSrc(p, tenantLogoFallback)} alt="Capa" fill sizes="150px" className="object-cover opacity-30 group-hover:opacity-50 transition" />
                                <div className="absolute inset-0 bg-black/40"/>
                            </div>
                            <div className="w-20 h-20 bg-black rounded-full border-2 border-zinc-600 flex items-center justify-center overflow-hidden shadow-2xl relative z-10 group-hover:scale-110 transition">
-                               <Image src={getPartnerLogoSrc(p)} alt="Logo" fill sizes="80px" className="object-cover" />
+                               <Image src={getPartnerLogoSrc(p, tenantLogoFallback)} alt="Logo" fill sizes="80px" className="object-cover" />
                            </div>
                            <div className="text-center relative z-10 px-2 w-full">
                                <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>

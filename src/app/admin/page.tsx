@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect } from "react";
 import { 
@@ -6,13 +6,15 @@ import {
   ArrowUpRight, Clock, ShieldAlert, Activity
 } from "lucide-react";
 import Link from "next/link";
-import Image from "next/image"; // 🦈 Correção: Next Image
+import Image from "next/image"; // ðŸ¦ˆ CorreÃ§Ã£o: Next Image
 import {
   fetchAdminDashboardBundle,
   type AdminDashboardActivityLog,
   type AdminDashboardRecentUser,
   type AdminDashboardStats,
 } from "@/lib/adminDashboardService";
+import { useAuth } from "@/context/AuthContext";
+import { isPlatformMaster } from "@/lib/roles";
 
 // --- INTERFACES (FIM DO ANY) ---
 type DashboardStats = AdminDashboardStats;
@@ -66,6 +68,7 @@ const extractErrorMessage = (error: unknown): string => {
 };
 
 export default function AdminDashboardPage() {
+  const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({ totalUsers: 0, totalEvents: 0, totalSales: 0, activeChamps: 0 });
   const [recentUsers, setRecentUsers] = useState<RecentUser[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
@@ -103,9 +106,19 @@ export default function AdminDashboardPage() {
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       
       {/* HEADER */}
-      <header className="mb-8">
-        <h1 className="text-3xl font-black uppercase italic tracking-tighter text-white">Visão Geral</h1>
-        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Métricas e Atividade em Tempo Real</p>
+            <header className="mb-8 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-black uppercase italic tracking-tighter text-white">Visao Geral</h1>
+          <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Metricas e atividade em tempo real</p>
+        </div>
+        {isPlatformMaster(user) && (
+          <Link
+            href="/admin/master"
+            className="inline-flex items-center gap-2 rounded-lg border border-cyan-700/40 bg-cyan-900/20 px-4 py-2 text-[11px] font-black uppercase text-cyan-200 hover:bg-cyan-900/35 transition"
+          >
+            <ShieldAlert size={14} /> Admin Master
+          </Link>
+        )}
       </header>
 
       {/* STAT CARDS */}
@@ -132,13 +145,13 @@ export default function AdminDashboardPage() {
             title="Engajamento" 
             value="98.5%" 
             icon={<TrendingUp size={20} className="text-yellow-500"/>} 
-            trend="Recorde histórico"
+            trend="Recorde historico"
           />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* COLUNA 1: NOVOS USUÁRIOS (2/3 da tela) */}
+          {/* COLUNA 1: NOVOS USUÃRIOS (2/3 da tela) */}
           <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
               <div className="flex justify-between items-center mb-6">
                   <h3 className="font-bold text-white uppercase flex items-center gap-2">
@@ -154,7 +167,7 @@ export default function AdminDashboardPage() {
                       <div key={user.id} className="flex items-center justify-between p-4 bg-black/40 rounded-2xl border border-zinc-800/50 hover:border-zinc-700 transition group">
                           <div className="flex items-center gap-4">
                               <div className="relative w-10 h-10">
-                                  {/* 🦈 Correção da Imagem Aqui (Linha 345 original) */}
+                                  {/* ðŸ¦ˆ CorreÃ§Ã£o da Imagem Aqui (Linha 345 original) */}
                                   <Image 
                                     src={user.foto || "https://github.com/shadcn.png"} 
                                     alt={user.nome} 
@@ -165,7 +178,7 @@ export default function AdminDashboardPage() {
                               </div>
                               <div>
                                   <p className="font-bold text-white text-sm group-hover:text-emerald-400 transition">{user.nome}</p>
-                                  <p className="text-[10px] text-zinc-500 uppercase font-bold">{user.turma} • {user.role}</p>
+                                  <p className="text-[10px] text-zinc-500 uppercase font-bold">{user.turma} - {user.role}</p>
                               </div>
                           </div>
                           <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-1 rounded font-mono">
@@ -220,3 +233,5 @@ function StatCard({ title, value, icon, trend }: { title: string, value: string 
         </div>
     );
 }
+
+

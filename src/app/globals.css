@@ -9,7 +9,10 @@
   --foreground-rgb: 255, 255, 255;
   --background-start-rgb: 5, 5, 5;
   --background-end-rgb: 5, 5, 5;
-  --neon-green: #4ade80;
+  --tenant-primary: #10b981;
+  --tenant-accent: #34d399;
+  --tenant-primary-rgb: 16 185 129;
+  --neon-green: var(--tenant-primary);
   --neon-red: #e53935;
 }
 
@@ -57,9 +60,9 @@ samp {
 
 /* --- 3. SELEÇÃO DE TEXTO --- */
 ::selection {
-  background-color: rgba(74, 222, 128, 0.3);
+  background-color: rgb(var(--tenant-primary-rgb) / 0.3);
   color: #fff;
-  text-shadow: 0 0 10px var(--neon-green);
+  text-shadow: 0 0 10px var(--tenant-primary);
 }
 
 /* --- 4. NOVAS ANIMAÇÕES (Para a Landing Page funcionar) --- */

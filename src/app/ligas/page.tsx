@@ -11,6 +11,7 @@ import {
 import Image from "next/image";
 import { useToast } from "../../context/ToastContext";
 import { getSupabaseClient } from "@/lib/supabase";
+import { useAuth } from "@/context/AuthContext";
 import { logActivity } from "../../lib/logger"; 
 import {
   createEventPoll,
@@ -276,6 +277,7 @@ const removeMissingColumnFromPayload = (
 };
 
 export default function LigasAdminPage() {
+  const { user } = useAuth();
   const { addToast } = useToast();
   
   // --- ESTADOS DE CONTROLE ---
@@ -733,6 +735,8 @@ export default function LigasAdminPage() {
       try {
           const supabase = getSupabaseClient();
           const timestamp = nowIso();
+          const actorTenantId =
+              typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
 
           // 1. Cria array auxiliar de IDs para busca
           const membrosIds = ligaData.membros?.map(m => m.id) || [];
@@ -760,7 +764,7 @@ export default function LigasAdminPage() {
             .from("ligas_config")
             .update(ligaUpdatePayload)
             .eq("id", ligaData.id);
-          if (ligaUpdateError) throw ligaUpdateError;
+          if (ligaUpdateError) throw new Error(extractErrorMessage(ligaUpdateError));
 
           // 3. Sincroniza Eventos (Cria/Atualiza no Global)
           if (ligaData.eventos && ligaData.eventos.length > 0) {
@@ -770,7 +774,7 @@ export default function LigasAdminPage() {
                   ev.globalEventId = eventId;
                   ev.linkEvento = `/eventos/${eventId}`;
                   
-                  const eventPayload: Record<string, unknown> = {
+                  let eventPayload: Record<string, unknown> = {
                       id: eventId,
                       titulo: `[${ligaData.sigla}] ${ev.titulo}` ,
                       data: ev.data,
@@ -785,15 +789,27 @@ export default function LigasAdminPage() {
                       categoria: "Liga",
                       status: "ativo",
                       updatedAt: timestamp,
+                      ...(actorTenantId ? { tenant_id: actorTenantId } : {}),
                   };
                   if (!alreadyLinkedToGlobal) {
                       eventPayload.createdAt = timestamp;
                   }
 
-                  const { error: eventUpsertError } = await supabase
-                    .from("eventos")
-                    .upsert(eventPayload, { onConflict: "id" });
-                  if (eventUpsertError) throw eventUpsertError;
+                  while (Object.keys(eventPayload).length > 0) {
+                      const { error: eventUpsertError } = await supabase
+                        .from("eventos")
+                        .upsert(eventPayload, { onConflict: "id" });
+                      if (!eventUpsertError) break;
+
+                      const missingColumn = extractMissingSchemaColumn(eventUpsertError);
+                      if (!missingColumn) throw new Error(extractErrorMessage(eventUpsertError));
+                      const nextPayload = removeMissingColumnFromPayload(
+                          eventPayload,
+                          missingColumn
+                      );
+                      if (!nextPayload) throw new Error(extractErrorMessage(eventUpsertError));
+                      eventPayload = nextPayload;
+                  }
 
                   if (ev.pollQuestion) {
                       let pollInsertPayload: Record<string, unknown> = {
@@ -807,6 +823,7 @@ export default function LigasAdminPage() {
                           updatedAt: timestamp,
                           creatorId: ligaData.id,
                           isOfficial: true,
+                          ...(actorTenantId ? { tenant_id: actorTenantId } : {}),
                       };
 
                       while (Object.keys(pollInsertPayload).length > 0) {
@@ -819,12 +836,12 @@ export default function LigasAdminPage() {
                           }
 
                           const missingColumn = extractMissingSchemaColumn(pollInsertError);
-                          if (!missingColumn) throw pollInsertError;
+                          if (!missingColumn) throw new Error(extractErrorMessage(pollInsertError));
                           const nextPayload = removeMissingColumnFromPayload(
                               pollInsertPayload,
                               missingColumn
                           );
-                          if (!nextPayload) throw pollInsertError;
+                          if (!nextPayload) throw new Error(extractErrorMessage(pollInsertError));
                           pollInsertPayload = nextPayload;
                       }
 
@@ -840,7 +857,7 @@ export default function LigasAdminPage() {
                 .from("ligas_config")
                 .update({ eventos: ligaData.eventos, updatedAt: timestamp })
                 .eq("id", ligaData.id);
-              if (ligaEventsUpdateError) throw ligaEventsUpdateError;
+              if (ligaEventsUpdateError) throw new Error(extractErrorMessage(ligaEventsUpdateError));
           }
 
           // 4. Notificacao Bizu
@@ -855,7 +872,7 @@ export default function LigasAdminPage() {
                   createdAt: timestamp,
                   userId: "GLOBAL"
               });
-              if (notificationInsertError) throw notificationInsertError;
+              if (notificationInsertError) throw new Error(extractErrorMessage(notificationInsertError));
               setSendNotification(false);
           }
 

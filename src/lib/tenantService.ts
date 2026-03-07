@@ -1,5 +1,10 @@
 import { getSupabaseClient } from "./supabase";
 import { asNumber, asObject, asString, throwSupabaseError } from "./supabaseData";
+import {
+  normalizeTenantRole,
+  toLegacyTenantRole,
+  type TenantScopedRole,
+} from "./roles";
 
 export type TenantPaletteKey =
   | "green"
@@ -10,9 +15,15 @@ export type TenantPaletteKey =
   | "purple"
   | "pink";
 
-export type TenantRole = "visitante" | "user" | "admin_tenant" | "master_tenant";
+export type TenantRole = TenantScopedRole | "admin_tenant" | "master_tenant";
+export type TenantInviteRole = Exclude<TenantScopedRole, "master">;
 export type TenantMembershipStatus = "pending" | "approved" | "rejected" | "disabled";
 export type TenantJoinRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "cancelled";
+export type TenantOnboardingStatus =
   | "pending"
   | "approved"
   | "rejected"
@@ -27,6 +38,9 @@ export interface TenantSummary {
   cidade: string;
   curso: string;
   area: string;
+  cnpj: string;
+  contatoEmail: string;
+  contatoTelefone: string;
   logoUrl: string;
   paletteKey: TenantPaletteKey;
   allowPublicSignup: boolean;
@@ -45,7 +59,7 @@ export interface TenantInvite {
   id: string;
   tenantId: string;
   token: string;
-  roleToAssign: Exclude<TenantRole, "master_tenant">;
+  roleToAssign: TenantInviteRole;
   requiresApproval: boolean;
   maxUses: number;
   usesCount: number;
@@ -61,8 +75,8 @@ export interface TenantJoinRequest {
   requesterUserId: string;
   inviteId: string;
   status: TenantJoinRequestStatus;
-  requestedRole: TenantRole;
-  approvedRole: Exclude<TenantRole, "master_tenant"> | "";
+  requestedRole: TenantScopedRole;
+  approvedRole: TenantInviteRole | "";
   requestedAt: string;
   reviewedAt: string;
   rejectionReason: string;
@@ -81,32 +95,71 @@ export interface TenantCreatePayload {
   curso?: string;
   area?: string;
   cnpj?: string;
+  contatoEmail?: string;
+  contatoTelefone?: string;
   paletteKey?: TenantPaletteKey;
   allowPublicSignup?: boolean;
 }
 
-const TENANT_SELECT_COLUMNS =
+export interface TenantOnboardingRequest {
+  id: string;
+  requesterUserId: string;
+  nome: string;
+  sigla: string;
+  logoUrl: string;
+  cidade: string;
+  faculdade: string;
+  curso: string;
+  area: string;
+  cnpj: string;
+  contatoEmail: string;
+  contatoTelefone: string;
+  paletteKey: TenantPaletteKey;
+  allowPublicSignup: boolean;
+  status: TenantOnboardingStatus;
+  reviewedBy: string;
+  reviewedAt: string;
+  rejectionReason: string;
+  approvedTenantId: string;
+  createdAt: string;
+  updatedAt: string;
+  requesterName: string;
+  requesterEmail: string;
+  requesterTurma: string;
+  requesterPhoto: string;
+}
+
+export interface TenantInviteActivationRankingEntry {
+  inviterUserId: string;
+  inviterName: string;
+  inviterEmail: string;
+  inviterPhoto: string;
+  approvedCount: number;
+  pendingCount: number;
+  totalCount: number;
+  lastActivationAt: string;
+}
+
+const TENANT_SELECT_COLUMNS_V1 =
   "id,nome,sigla,slug,faculdade,cidade,curso,area,logo_url,palette_key,allow_public_signup,status,created_at,updated_at";
+const TENANT_SELECT_COLUMNS_V2 =
+  "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,contato_email,contato_telefone,logo_url,palette_key,allow_public_signup,status,created_at,updated_at";
 const TENANT_INVITE_SELECT_COLUMNS =
   "id,tenant_id,token,role_to_assign,requires_approval,max_uses,uses_count,expires_at,is_active,created_by,created_at";
 const TENANT_JOIN_REQUEST_SELECT_COLUMNS =
   "id,tenant_id,requester_user_id,invite_id,status,requested_role,approved_role,requested_at,reviewed_at,rejection_reason";
+const TENANT_ONBOARDING_SELECT_COLUMNS_V1 =
+  "id,requester_user_id,nome,sigla,logo_url,cidade,faculdade,curso,area,cnpj,palette_key,allow_public_signup,status,reviewed_by,reviewed_at,rejection_reason,approved_tenant_id,created_at,updated_at";
+const TENANT_ONBOARDING_SELECT_COLUMNS_V2 =
+  "id,requester_user_id,nome,sigla,logo_url,cidade,faculdade,curso,area,cnpj,contato_email,contato_telefone,palette_key,allow_public_signup,status,reviewed_by,reviewed_at,rejection_reason,approved_tenant_id,created_at,updated_at";
 
 const asBoolean = (value: unknown, fallback = false): boolean =>
   typeof value === "boolean" ? value : fallback;
 
-const parseTenantRole = (value: unknown, fallback: TenantRole = "visitante"): TenantRole => {
-  const role = asString(value).trim().toLowerCase();
-  if (
-    role === "visitante" ||
-    role === "user" ||
-    role === "admin_tenant" ||
-    role === "master_tenant"
-  ) {
-    return role;
-  }
-  return fallback;
-};
+const parseTenantRole = (
+  value: unknown,
+  fallback: TenantScopedRole = "visitante"
+): TenantScopedRole => normalizeTenantRole(value) || fallback;
 
 const parseMembershipStatus = (
   value: unknown,
@@ -128,6 +181,22 @@ const parseJoinRequestStatus = (
   value: unknown,
   fallback: TenantJoinRequestStatus = "pending"
 ): TenantJoinRequestStatus => {
+  const status = asString(value).trim().toLowerCase();
+  if (
+    status === "pending" ||
+    status === "approved" ||
+    status === "rejected" ||
+    status === "cancelled"
+  ) {
+    return status;
+  }
+  return fallback;
+};
+
+const parseOnboardingStatus = (
+  value: unknown,
+  fallback: TenantOnboardingStatus = "pending"
+): TenantOnboardingStatus => {
   const status = asString(value).trim().toLowerCase();
   if (
     status === "pending" ||
@@ -178,6 +247,9 @@ const parseTenant = (row: unknown): TenantSummary | null => {
     cidade: asString(raw.cidade).trim(),
     curso: asString(raw.curso).trim(),
     area: asString(raw.area).trim(),
+    cnpj: asString(raw.cnpj).trim(),
+    contatoEmail: asString(raw.contato_email).trim(),
+    contatoTelefone: asString(raw.contato_telefone).trim(),
     logoUrl: asString(raw.logo_url).trim(),
     paletteKey: parsePalette(raw.palette_key),
     allowPublicSignup: asBoolean(raw.allow_public_signup, true),
@@ -187,11 +259,20 @@ const parseTenant = (row: unknown): TenantSummary | null => {
   };
 };
 
-const parseInviteRole = (
-  value: unknown
-): Exclude<TenantRole, "master_tenant"> => {
-  const role = asString(value).trim().toLowerCase();
-  if (role === "visitante" || role === "admin_tenant") return role;
+const parseInviteRole = (value: unknown): TenantInviteRole => {
+  const role = parseTenantRole(value, "user");
+  if (
+    role === "visitante" ||
+    role === "user" ||
+    role === "treinador" ||
+    role === "empresa" ||
+    role === "admin_treino" ||
+    role === "admin_geral" ||
+    role === "admin_gestor" ||
+    role === "vendas"
+  ) {
+    return role;
+  }
   return "user";
 };
 
@@ -250,6 +331,43 @@ const parseJoinRequest = (row: unknown): TenantJoinRequest | null => {
   };
 };
 
+const parseOnboardingRequest = (row: unknown): TenantOnboardingRequest | null => {
+  const raw = asObject(row);
+  if (!raw) return null;
+
+  const id = asString(raw.id).trim();
+  const requesterUserId = asString(raw.requester_user_id).trim();
+  if (!id || !requesterUserId) return null;
+
+  return {
+    id,
+    requesterUserId,
+    nome: asString(raw.nome).trim(),
+    sigla: asString(raw.sigla).trim(),
+    logoUrl: asString(raw.logo_url).trim(),
+    cidade: asString(raw.cidade).trim(),
+    faculdade: asString(raw.faculdade).trim(),
+    curso: asString(raw.curso).trim(),
+    area: asString(raw.area).trim(),
+    cnpj: asString(raw.cnpj).trim(),
+    contatoEmail: asString(raw.contato_email).trim(),
+    contatoTelefone: asString(raw.contato_telefone).trim(),
+    paletteKey: parsePalette(raw.palette_key),
+    allowPublicSignup: asBoolean(raw.allow_public_signup, true),
+    status: parseOnboardingStatus(raw.status),
+    reviewedBy: asString(raw.reviewed_by).trim(),
+    reviewedAt: asString(raw.reviewed_at).trim(),
+    rejectionReason: asString(raw.rejection_reason).trim(),
+    approvedTenantId: asString(raw.approved_tenant_id).trim(),
+    createdAt: asString(raw.created_at),
+    updatedAt: asString(raw.updated_at),
+    requesterName: "",
+    requesterEmail: "",
+    requesterTurma: "",
+    requesterPhoto: "",
+  };
+};
+
 const parseUserPreview = (
   row: unknown
 ): { uid: string; nome: string; email: string; turma: string; foto: string } | null => {
@@ -269,6 +387,43 @@ const parseUserPreview = (
 
 const uniqueIds = (values: string[]): string[] =>
   Array.from(new Set(values.filter((value) => value.trim().length > 0)));
+
+const isRpcFunctionSignatureError = (
+  error: unknown,
+  functionName: string
+): boolean => {
+  const raw = asObject(error);
+  const text = [
+    error instanceof Error ? error.message : "",
+    asString(raw?.message),
+    asString(raw?.details),
+    asString(raw?.hint),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" ")
+    .toLowerCase();
+
+  return text.includes(functionName.toLowerCase()) && text.includes("does not exist");
+};
+
+const shouldFallbackMissingColumns = (
+  error: unknown,
+  columns: string[]
+): boolean => {
+  const raw = asObject(error);
+  const message = [
+    error instanceof Error ? error.message : "",
+    asString(raw?.message),
+    asString(raw?.details),
+    asString(raw?.hint),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" ")
+    .toLowerCase();
+
+  if (!message.includes("column") || !message.includes("does not exist")) return false;
+  return columns.some((column) => message.includes(column.toLowerCase()));
+};
 
 export async function fetchTenantPlatformConfig(): Promise<TenantPlatformConfig> {
   const supabase = getSupabaseClient();
@@ -302,10 +457,18 @@ export async function fetchManageableTenants(options?: {
   const includeAll = options?.includeAll ?? false;
 
   if (includeAll) {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("tenants")
-      .select(TENANT_SELECT_COLUMNS)
+      .select(TENANT_SELECT_COLUMNS_V2)
       .order("nome", { ascending: true });
+    if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+      const fallbackResult = await supabase
+        .from("tenants")
+        .select(TENANT_SELECT_COLUMNS_V1)
+        .order("nome", { ascending: true });
+      data = fallbackResult.data as unknown as typeof data;
+      error = fallbackResult.error;
+    }
     if (error) throwSupabaseError(error);
 
     return (Array.isArray(data) ? data : [])
@@ -326,7 +489,7 @@ export async function fetchManageableTenants(options?: {
     .select("tenant_id,role,status")
     .eq("user_id", userId)
     .eq("status", "approved")
-    .in("role", ["master_tenant", "admin_tenant"]);
+    .in("role", ["master", "admin_geral", "admin_gestor", "master_tenant", "admin_tenant"]);
   if (membershipError) throwSupabaseError(membershipError);
 
   const tenantIds = uniqueIds(
@@ -336,11 +499,20 @@ export async function fetchManageableTenants(options?: {
   );
   if (tenantIds.length === 0) return [];
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("tenants")
-    .select(TENANT_SELECT_COLUMNS)
+    .select(TENANT_SELECT_COLUMNS_V2)
     .in("id", tenantIds)
     .order("nome", { ascending: true });
+  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+    const fallbackResult = await supabase
+      .from("tenants")
+      .select(TENANT_SELECT_COLUMNS_V1)
+      .in("id", tenantIds)
+      .order("nome", { ascending: true });
+    data = fallbackResult.data as unknown as typeof data;
+    error = fallbackResult.error;
+  }
   if (error) throwSupabaseError(error);
 
   return (Array.isArray(data) ? data : [])
@@ -348,11 +520,73 @@ export async function fetchManageableTenants(options?: {
     .filter((row): row is TenantSummary => row !== null);
 }
 
+export async function fetchTenantById(tenantId: string): Promise<TenantSummary | null> {
+  const cleanTenantId = tenantId.trim();
+  if (!cleanTenantId) return null;
+
+  const supabase = getSupabaseClient();
+  let { data, error } = await supabase
+    .from("tenants")
+    .select(TENANT_SELECT_COLUMNS_V2)
+    .eq("id", cleanTenantId)
+    .maybeSingle();
+  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+    const fallbackResult = await supabase
+      .from("tenants")
+      .select(TENANT_SELECT_COLUMNS_V1)
+      .eq("id", cleanTenantId)
+      .maybeSingle();
+    data = fallbackResult.data as unknown as typeof data;
+    error = fallbackResult.error;
+  }
+  if (error) throwSupabaseError(error);
+
+  return parseTenant(data);
+}
+
+export async function fetchTenantBySlug(tenantSlug: string): Promise<TenantSummary | null> {
+  const cleanTenantSlug = tenantSlug.trim().toLowerCase();
+  if (!cleanTenantSlug) return null;
+
+  const supabase = getSupabaseClient();
+  let { data, error } = await supabase
+    .from("tenants")
+    .select(TENANT_SELECT_COLUMNS_V2)
+    .ilike("slug", cleanTenantSlug)
+    .maybeSingle();
+  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+    const fallbackResult = await supabase
+      .from("tenants")
+      .select(TENANT_SELECT_COLUMNS_V1)
+      .ilike("slug", cleanTenantSlug)
+      .maybeSingle();
+    data = fallbackResult.data as unknown as typeof data;
+    error = fallbackResult.error;
+  }
+  if (error) throwSupabaseError(error);
+
+  return parseTenant(data);
+}
+
 export async function createTenantWithMaster(
   payload: TenantCreatePayload
 ): Promise<string> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase.rpc("tenant_create_with_master", {
+  const payloadV2 = {
+    p_nome: payload.nome,
+    p_sigla: payload.sigla,
+    p_logo_url: payload.logoUrl ?? null,
+    p_cidade: payload.cidade ?? null,
+    p_faculdade: payload.faculdade,
+    p_curso: payload.curso ?? null,
+    p_area: payload.area ?? null,
+    p_cnpj: payload.cnpj ?? null,
+    p_contato_email: payload.contatoEmail ?? null,
+    p_contato_telefone: payload.contatoTelefone ?? null,
+    p_palette_key: payload.paletteKey ?? "green",
+    p_allow_public_signup: payload.allowPublicSignup ?? true,
+  };
+  const payloadLegacy = {
     p_nome: payload.nome,
     p_sigla: payload.sigla,
     p_logo_url: payload.logoUrl ?? null,
@@ -363,7 +597,14 @@ export async function createTenantWithMaster(
     p_cnpj: payload.cnpj ?? null,
     p_palette_key: payload.paletteKey ?? "green",
     p_allow_public_signup: payload.allowPublicSignup ?? true,
-  });
+  };
+
+  let { data, error } = await supabase.rpc("tenant_create_with_master", payloadV2);
+  if (error && isRpcFunctionSignatureError(error, "tenant_create_with_master")) {
+    const legacyResult = await supabase.rpc("tenant_create_with_master", payloadLegacy);
+    data = legacyResult.data;
+    error = legacyResult.error;
+  }
   if (error) throwSupabaseError(error);
 
   if (typeof data === "string" && data.trim()) return data.trim();
@@ -372,6 +613,206 @@ export async function createTenantWithMaster(
   }
 
   throw new Error("Tenant criado, mas o banco nao retornou o identificador.");
+}
+
+export async function submitTenantOnboardingRequest(
+  payload: TenantCreatePayload
+): Promise<string> {
+  const supabase = getSupabaseClient();
+  const payloadV2 = {
+    p_nome: payload.nome,
+    p_sigla: payload.sigla,
+    p_logo_url: payload.logoUrl ?? null,
+    p_cidade: payload.cidade ?? null,
+    p_faculdade: payload.faculdade,
+    p_curso: payload.curso ?? null,
+    p_area: payload.area ?? null,
+    p_cnpj: payload.cnpj ?? null,
+    p_contato_email: payload.contatoEmail ?? null,
+    p_contato_telefone: payload.contatoTelefone ?? null,
+    p_palette_key: payload.paletteKey ?? "green",
+    p_allow_public_signup: payload.allowPublicSignup ?? true,
+  };
+  const payloadLegacy = {
+    p_nome: payload.nome,
+    p_sigla: payload.sigla,
+    p_logo_url: payload.logoUrl ?? null,
+    p_cidade: payload.cidade ?? null,
+    p_faculdade: payload.faculdade,
+    p_curso: payload.curso ?? null,
+    p_area: payload.area ?? null,
+    p_cnpj: payload.cnpj ?? null,
+    p_palette_key: payload.paletteKey ?? "green",
+    p_allow_public_signup: payload.allowPublicSignup ?? true,
+  };
+
+  let { data, error } = await supabase.rpc("tenant_submit_onboarding_request", payloadV2);
+  if (error && isRpcFunctionSignatureError(error, "tenant_submit_onboarding_request")) {
+    const legacyResult = await supabase.rpc("tenant_submit_onboarding_request", payloadLegacy);
+    data = legacyResult.data;
+    error = legacyResult.error;
+  }
+  if (error) throwSupabaseError(error);
+
+  if (typeof data === "string" && data.trim()) return data.trim();
+  if (Array.isArray(data) && typeof data[0] === "string" && data[0].trim()) {
+    return data[0].trim();
+  }
+  throw new Error("Solicitacao criada, mas o banco nao retornou o id.");
+}
+
+export async function fetchMyTenantOnboardingRequests(options?: {
+  status?: TenantOnboardingStatus;
+  limit?: number;
+}): Promise<TenantOnboardingRequest[]> {
+  const supabase = getSupabaseClient();
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError) {
+    throw new Error(authError.message || "Falha ao identificar usuario autenticado.");
+  }
+
+  const userId = asString(authData.user?.id).trim();
+  if (!userId) return [];
+
+  const limit = Math.max(1, Math.min(50, Math.floor(options?.limit ?? 10)));
+  let query = supabase
+    .from("tenant_onboarding_requests")
+    .select(TENANT_ONBOARDING_SELECT_COLUMNS_V2)
+    .eq("requester_user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (options?.status) {
+    query = query.eq("status", options.status);
+  }
+
+  let { data, error } = await query;
+  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+    let fallbackQuery = supabase
+      .from("tenant_onboarding_requests")
+      .select(TENANT_ONBOARDING_SELECT_COLUMNS_V1)
+      .eq("requester_user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (options?.status) {
+      fallbackQuery = fallbackQuery.eq("status", options.status);
+    }
+
+    const fallbackResult = await fallbackQuery;
+    data = fallbackResult.data as unknown as typeof data;
+    error = fallbackResult.error;
+  }
+  if (error) throwSupabaseError(error);
+
+  return (Array.isArray(data) ? data : [])
+    .map((row) => parseOnboardingRequest(row))
+    .filter((row): row is TenantOnboardingRequest => row !== null);
+}
+
+export async function fetchTenantOnboardingRequests(options?: {
+  status?: TenantOnboardingStatus;
+  limit?: number;
+}): Promise<TenantOnboardingRequest[]> {
+  const limit = Math.max(1, Math.min(200, Math.floor(options?.limit ?? 50)));
+  const supabase = getSupabaseClient();
+
+  let query = supabase
+    .from("tenant_onboarding_requests")
+    .select(TENANT_ONBOARDING_SELECT_COLUMNS_V2)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (options?.status) {
+    query = query.eq("status", options.status);
+  }
+
+  let { data, error } = await query;
+  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+    let fallbackQuery = supabase
+      .from("tenant_onboarding_requests")
+      .select(TENANT_ONBOARDING_SELECT_COLUMNS_V1)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (options?.status) {
+      fallbackQuery = fallbackQuery.eq("status", options.status);
+    }
+
+    const fallbackResult = await fallbackQuery;
+    data = fallbackResult.data as unknown as typeof data;
+    error = fallbackResult.error;
+  }
+  if (error) throwSupabaseError(error);
+
+  const requests = (Array.isArray(data) ? data : [])
+    .map((row) => parseOnboardingRequest(row))
+    .filter((row): row is TenantOnboardingRequest => row !== null);
+  if (requests.length === 0) return [];
+
+  const requesterIds = uniqueIds(requests.map((entry) => entry.requesterUserId));
+  if (requesterIds.length === 0) return requests;
+
+  const { data: usersData, error: usersError } = await supabase
+    .from("users")
+    .select("uid,nome,email,turma,foto")
+    .in("uid", requesterIds);
+  if (usersError || !Array.isArray(usersData)) return requests;
+
+  const usersMap = new Map(
+    usersData
+      .map((row) => parseUserPreview(row))
+      .filter(
+        (row): row is { uid: string; nome: string; email: string; turma: string; foto: string } =>
+          row !== null
+      )
+      .map((row) => [row.uid, row])
+  );
+
+  return requests.map((request) => {
+    const requester = usersMap.get(request.requesterUserId);
+    if (!requester) return request;
+
+    return {
+      ...request,
+      requesterName: requester.nome,
+      requesterEmail: requester.email,
+      requesterTurma: requester.turma,
+      requesterPhoto: requester.foto,
+    };
+  });
+}
+
+export async function approveTenantOnboardingRequest(requestId: string): Promise<string> {
+  const cleanRequestId = requestId.trim();
+  if (!cleanRequestId) throw new Error("Solicitacao invalida.");
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc("tenant_approve_onboarding_request", {
+    p_request_id: cleanRequestId,
+  });
+  if (error) throwSupabaseError(error);
+
+  if (typeof data === "string" && data.trim()) return data.trim();
+  if (Array.isArray(data) && typeof data[0] === "string" && data[0].trim()) {
+    return data[0].trim();
+  }
+  throw new Error("Solicitacao aprovada, mas o banco nao retornou o tenant.");
+}
+
+export async function rejectTenantOnboardingRequest(payload: {
+  requestId: string;
+  reason?: string;
+}): Promise<void> {
+  const cleanRequestId = payload.requestId.trim();
+  if (!cleanRequestId) throw new Error("Solicitacao invalida.");
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.rpc("tenant_reject_onboarding_request", {
+    p_request_id: cleanRequestId,
+    p_reason: payload.reason?.trim() || null,
+  });
+  if (error) throwSupabaseError(error);
 }
 
 export async function fetchTenantInvites(
@@ -398,7 +839,7 @@ export async function fetchTenantInvites(
 
 export async function createTenantInvite(payload: {
   tenantId: string;
-  roleToAssign?: Exclude<TenantRole, "master_tenant">;
+  roleToAssign?: TenantInviteRole;
   maxUses?: number;
   expiresInHours?: number;
   requiresApproval?: boolean;
@@ -407,6 +848,7 @@ export async function createTenantInvite(payload: {
   if (!cleanTenantId) throw new Error("Tenant invalido para criar convite.");
 
   const roleToAssign = payload.roleToAssign ?? "user";
+  const roleToAssignForRpc = toLegacyTenantRole(roleToAssign);
   const maxUses = Math.max(1, Math.min(500, Math.floor(payload.maxUses ?? 25)));
   const expiresInHours = Math.max(
     1,
@@ -417,7 +859,7 @@ export async function createTenantInvite(payload: {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.rpc("tenant_create_invite", {
     p_tenant_id: cleanTenantId,
-    p_role_to_assign: roleToAssign,
+    p_role_to_assign: roleToAssignForRpc,
     p_max_uses: maxUses,
     p_expires_in_hours: expiresInHours,
     p_requires_approval: requiresApproval,
@@ -528,7 +970,7 @@ export async function fetchTenantJoinRequests(
 
 export async function approveTenantJoinRequest(payload: {
   requestId: string;
-  approvedRole?: Exclude<TenantRole, "master_tenant">;
+  approvedRole?: TenantInviteRole;
 }): Promise<void> {
   const requestId = payload.requestId.trim();
   if (!requestId) throw new Error("Solicitacao invalida.");
@@ -537,7 +979,7 @@ export async function approveTenantJoinRequest(payload: {
   const supabase = getSupabaseClient();
   const { error } = await supabase.rpc("tenant_approve_join_request", {
     p_request_id: requestId,
-    p_approved_role: approvedRole,
+    p_approved_role: toLegacyTenantRole(approvedRole),
   });
   if (error) throwSupabaseError(error);
 }
@@ -593,7 +1035,7 @@ export async function requestJoinManual(tenantId: string): Promise<string> {
 
 export async function fetchPendingMembershipStatusForCurrentUser(): Promise<{
   tenantId: string;
-  role: TenantRole;
+  role: TenantScopedRole;
   status: TenantMembershipStatus;
 } | null> {
   const supabase = getSupabaseClient();
@@ -623,4 +1065,213 @@ export async function fetchPendingMembershipStatusForCurrentUser(): Promise<{
     role: parseTenantRole(row.role, "visitante"),
     status: parseMembershipStatus(row.status, "pending"),
   };
+}
+
+export async function updateTenantStatus(payload: {
+  tenantId: string;
+  status: "active" | "inactive" | "blocked";
+}): Promise<void> {
+  const tenantId = payload.tenantId.trim();
+  if (!tenantId) throw new Error("Tenant invalido.");
+
+  const status = payload.status;
+  if (status !== "active" && status !== "inactive" && status !== "blocked") {
+    throw new Error("Status de tenant invalido.");
+  }
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("tenants")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", tenantId);
+
+  if (error) throwSupabaseError(error);
+}
+
+export async function updateTenantProfile(payload: {
+  tenantId: string;
+  nome?: string;
+  sigla?: string;
+  logoUrl?: string;
+  cidade?: string;
+  faculdade?: string;
+  curso?: string;
+  area?: string;
+  cnpj?: string;
+  contatoEmail?: string;
+  contatoTelefone?: string;
+  paletteKey?: TenantPaletteKey;
+  allowPublicSignup?: boolean;
+  status?: "active" | "inactive" | "blocked";
+}): Promise<void> {
+  const tenantId = payload.tenantId.trim();
+  if (!tenantId) throw new Error("Tenant invalido.");
+
+  const patch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  const setTrimmed = (key: string, value: unknown) => {
+    if (typeof value !== "string") return;
+    patch[key] = value.trim();
+  };
+
+  setTrimmed("nome", payload.nome);
+  setTrimmed("sigla", payload.sigla);
+  setTrimmed("logo_url", payload.logoUrl);
+  setTrimmed("cidade", payload.cidade);
+  setTrimmed("faculdade", payload.faculdade);
+  setTrimmed("curso", payload.curso);
+  setTrimmed("area", payload.area);
+  setTrimmed("cnpj", payload.cnpj);
+  setTrimmed("contato_email", payload.contatoEmail);
+  setTrimmed("contato_telefone", payload.contatoTelefone);
+
+  if (payload.paletteKey) patch.palette_key = payload.paletteKey;
+  if (typeof payload.allowPublicSignup === "boolean") {
+    patch.allow_public_signup = payload.allowPublicSignup;
+  }
+  if (payload.status) patch.status = payload.status;
+
+  const supabase = getSupabaseClient();
+  let { error } = await supabase.from("tenants").update(patch).eq("id", tenantId);
+  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+    const fallbackPatch = { ...patch };
+    delete fallbackPatch.contato_email;
+    delete fallbackPatch.contato_telefone;
+    const fallbackResult = await supabase
+      .from("tenants")
+      .update(fallbackPatch)
+      .eq("id", tenantId);
+    error = fallbackResult.error;
+  }
+  if (error) throwSupabaseError(error);
+}
+
+export async function fetchTenantInviteActivationRanking(
+  tenantId: string,
+  options?: { limit?: number }
+): Promise<TenantInviteActivationRankingEntry[]> {
+  const cleanTenantId = tenantId.trim();
+  if (!cleanTenantId) return [];
+
+  const limit = Math.max(1, Math.min(50, Math.floor(options?.limit ?? 10)));
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase.rpc("tenant_invite_activation_ranking", {
+    p_tenant_id: cleanTenantId,
+    p_limit: limit,
+  });
+  if (error) throwSupabaseError(error);
+
+  const rows = Array.isArray(data) ? data : [];
+  if (rows.length === 0) return [];
+
+  const parseCount = (value: unknown): number => {
+    if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+    if (typeof value === "string") {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) return Math.max(0, parsed);
+    }
+    return 0;
+  };
+
+  const parsedRows = rows
+    .map((row) => {
+      const raw = asObject(row);
+      if (!raw) return null;
+
+      const inviterUserId = asString(raw.inviter_user_id).trim();
+      if (!inviterUserId) return null;
+
+      return {
+        inviterUserId,
+        approvedCount: parseCount(raw.approved_count),
+        pendingCount: parseCount(raw.pending_count),
+        totalCount: parseCount(raw.total_count),
+        lastActivationAt: asString(raw.last_activation_at),
+      };
+    })
+    .filter(
+      (
+        row
+      ): row is {
+        inviterUserId: string;
+        approvedCount: number;
+        pendingCount: number;
+        totalCount: number;
+        lastActivationAt: string;
+      } => row !== null
+    );
+
+  if (parsedRows.length === 0) return [];
+
+  const inviterIds = uniqueIds(parsedRows.map((row) => row.inviterUserId));
+  const { data: usersData, error: usersError } = await supabase
+    .from("users")
+    .select("uid,nome,email,foto")
+    .in("uid", inviterIds);
+  if (usersError) throwSupabaseError(usersError);
+
+  const usersMap = new Map<string, { nome: string; email: string; foto: string }>();
+  (Array.isArray(usersData) ? usersData : []).forEach((entry) => {
+    const raw = asObject(entry);
+    if (!raw) return;
+    const uid = asString(raw.uid).trim();
+    if (!uid) return;
+    usersMap.set(uid, {
+      nome: asString(raw.nome).trim(),
+      email: asString(raw.email).trim(),
+      foto: asString(raw.foto).trim(),
+    });
+  });
+
+  return parsedRows.map((row) => {
+    const profile = usersMap.get(row.inviterUserId);
+    return {
+      inviterUserId: row.inviterUserId,
+      inviterName: profile?.nome || "",
+      inviterEmail: profile?.email || "",
+      inviterPhoto: profile?.foto || "",
+      approvedCount: row.approvedCount,
+      pendingCount: row.pendingCount,
+      totalCount: row.totalCount,
+      lastActivationAt: row.lastActivationAt,
+    };
+  });
+}
+
+export async function uploadTenantLogo(payload: {
+  tenantId: string;
+  file: File;
+}): Promise<string> {
+  const tenantId = payload.tenantId.trim();
+  if (!tenantId) throw new Error("Tenant invalido para upload da logo.");
+  if (!(payload.file instanceof File)) {
+    throw new Error("Arquivo de logo invalido.");
+  }
+
+  const fileName = payload.file.name || "logo.png";
+  const extension = fileName.includes(".")
+    ? fileName.split(".").pop()?.toLowerCase() || "png"
+    : "png";
+  const safeExt = /^[a-z0-9]+$/i.test(extension) ? extension : "png";
+  const objectPath = `tenants/${tenantId}/logo-${Date.now()}.${safeExt}`;
+  const bucket = (process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET || "uploads").trim() || "uploads";
+
+  const supabase = getSupabaseClient();
+  const upload = await supabase.storage.from(bucket).upload(objectPath, payload.file, {
+    cacheControl: "3600",
+    upsert: true,
+    contentType: payload.file.type || undefined,
+  });
+  if (upload.error) throwSupabaseError(upload.error);
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+  const publicUrl = asString(data?.publicUrl).trim();
+  if (!publicUrl) {
+    throw new Error("Upload da logo concluido, mas sem URL publica retornada.");
+  }
+
+  return publicUrl;
 }

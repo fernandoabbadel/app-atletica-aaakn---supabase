@@ -26,7 +26,7 @@ const DEFAULT_EVENT_DETAILS_COMMENTS_LIMIT = 100;
 const DEFAULT_EVENT_DETAILS_POLLS_LIMIT = 20;
 const DEFAULT_EVENT_DETAILS_PEDIDOS_LIMIT = 20;
 const EVENTOS_SELECT_COLUMNS =
-  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,isLowStock,stats,lotes,interessados,participantes,likesList,createdAt,updatedAt";
+  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,isLowStock,stats,lotes,interessados,likesList,tenant_id,createdAt,updatedAt";
 const EVENTOS_RSVPS_SELECT_COLUMNS =
   "id,eventoId,userId,status,userName,userAvatar,userTurma,timestamp";
 const EVENTOS_COMENTARIOS_SELECT_COLUMNS =

@@ -513,11 +513,88 @@ export async function updatePermissionUserRole(payload: {
     requestPayload,
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
+
+      const toLegacyTenantRole = (value: string): string => {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === "admin_geral") return "admin_tenant";
+        if (normalized === "master") return "master_tenant";
+        if (normalized === "visitante") return "visitante";
+        if (normalized === "user") return "user";
+        return "user";
+      };
+
+      const nowIso = new Date().toISOString();
+      let finalTenantRole = role;
+      let updateResult = await supabase
         .from("users")
-        .update({ role, updatedAt: new Date().toISOString() })
+        .update({
+          role,
+          tenant_role: role,
+          tenant_status: "approved",
+          updatedAt: nowIso,
+        })
         .eq("uid", targetUserId);
-      if (error) throwSupabaseError(error);
+
+      if (updateResult.error) {
+        const legacyTenantRole = toLegacyTenantRole(role);
+        const isTenantRoleConstraintError =
+          asString(updateResult.error.message).toLowerCase().includes("tenant_role") ||
+          asString(updateResult.error.details).toLowerCase().includes("tenant_role") ||
+          asString(updateResult.error.hint).toLowerCase().includes("tenant_role");
+
+        if (isTenantRoleConstraintError && legacyTenantRole !== role) {
+          finalTenantRole = legacyTenantRole;
+          updateResult = await supabase
+            .from("users")
+            .update({
+              role,
+              tenant_role: legacyTenantRole,
+              tenant_status: "approved",
+              updatedAt: nowIso,
+            })
+            .eq("uid", targetUserId);
+        }
+      }
+
+      if (updateResult.error) throwSupabaseError(updateResult.error);
+
+      const { data: userRow, error: userFetchError } = await supabase
+        .from("users")
+        .select("tenant_id")
+        .eq("uid", targetUserId)
+        .maybeSingle();
+      if (userFetchError) throwSupabaseError(userFetchError);
+
+      const tenantId = asString(asObject(userRow)?.tenant_id).trim();
+      if (tenantId) {
+        let membershipUpdate = await supabase
+          .from("tenant_memberships")
+          .update({
+            role: finalTenantRole,
+            status: "approved",
+            updated_at: nowIso,
+          })
+          .eq("tenant_id", tenantId)
+          .eq("user_id", targetUserId);
+
+        if (membershipUpdate.error) {
+          const fallbackRole = toLegacyTenantRole(finalTenantRole);
+          if (fallbackRole !== finalTenantRole) {
+            membershipUpdate = await supabase
+              .from("tenant_memberships")
+              .update({
+                role: fallbackRole,
+                status: "approved",
+                updated_at: nowIso,
+              })
+              .eq("tenant_id", tenantId)
+              .eq("user_id", targetUserId);
+          }
+        }
+
+        if (membershipUpdate.error) throwSupabaseError(membershipUpdate.error);
+      }
+
       return { ok: true };
     }
   );

@@ -87,6 +87,31 @@ const throwSupabaseError = (error: {
   });
 };
 
+const isRecoverableReadError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+
+  const raw = error as {
+    code?: unknown;
+    message?: unknown;
+    details?: unknown;
+    hint?: unknown;
+  };
+
+  const code = asString(raw.code).toLowerCase();
+  const message = asString(raw.message).toLowerCase();
+  const details = asString(raw.details).toLowerCase();
+  const hint = asString(raw.hint).toLowerCase();
+  const combined = `${message} ${details} ${hint}`;
+
+  if (code === "42p01" || code === "42501" || code === "pgrst204") return true;
+  if (combined.includes("permission denied")) return true;
+  if (combined.includes("relation") && combined.includes("does not exist")) return true;
+  if (combined.includes("could not find the table")) return true;
+  if (combined.includes("schema cache")) return true;
+
+  return false;
+};
+
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
   if (requested < 1) return 1;
@@ -166,6 +191,23 @@ async function safeCount(
   return { count: 0, fallbackUsed: true };
 }
 
+async function safeCountFromCandidates(
+  candidates: Array<{ tableName: string; countColumn: string }>
+): Promise<{ count: number; fallbackUsed: boolean }> {
+  let bestResult: { count: number; fallbackUsed: boolean } = {
+    count: 0,
+    fallbackUsed: true,
+  };
+
+  for (const candidate of candidates) {
+    const current = await safeCount(candidate.tableName, candidate.countColumn);
+    if (!current.fallbackUsed) return current;
+    if (current.count > 0) bestResult = current;
+  }
+
+  return bestResult;
+}
+
 async function fetchRowsWithOrderFallback(options: {
   tableName: string;
   selectColumns: string;
@@ -192,14 +234,20 @@ async function fetchRowsWithOrderFallback(options: {
 
       lastError = error;
       const missingColumn = extractMissingSchemaColumn(error);
-      if (!missingColumn) return undefined;
+      if (!missingColumn) {
+        if (isRecoverableReadError(error)) return [];
+        return undefined;
+      }
 
       if (orderField && orderField.trim().toLowerCase() === missingColumn.toLowerCase()) {
         return undefined;
       }
 
       const nextColumns = removeMissingColumn(mutableColumns, missingColumn);
-      if (!nextColumns || nextColumns.length === 0) return undefined;
+      if (!nextColumns || nextColumns.length === 0) {
+        if (isRecoverableReadError(error)) return [];
+        return undefined;
+      }
       mutableColumns = nextColumns;
     }
 
@@ -215,6 +263,8 @@ async function fetchRowsWithOrderFallback(options: {
   // Fallback final sem order para nao quebrar se a coluna ainda nao existir.
   const fallbackRows = await runAttempt();
   if (fallbackRows !== undefined) return fallbackRows;
+
+  if (isRecoverableReadError(lastError)) return [];
 
   if (
     lastError &&
@@ -314,7 +364,10 @@ export async function fetchAdminDashboardBundle(options?: {
     await Promise.all([
       safeCount("users", "uid"),
       safeCount("eventos", "id"),
-      safeCount("store_orders", "id"),
+      safeCountFromCandidates([
+        { tableName: "orders", countColumn: "id" },
+        { tableName: "store_orders", countColumn: "id" },
+      ]),
       fetchRowsWithOrderFallback({
         tableName: "users",
         selectColumns:

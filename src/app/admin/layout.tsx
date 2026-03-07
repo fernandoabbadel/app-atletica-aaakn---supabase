@@ -1,30 +1,75 @@
-"use client";
+﻿"use client";
 
 import React, { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import Image from "next/image"; // 🦈 Importando Image
+import Image from "next/image";
 import {
-  LogOut, LayoutDashboard, Settings, ShieldAlert, Trophy, Calendar,
-  Star, Gamepad2, BookOpen, Dumbbell, History, ShoppingBag, Megaphone, MessageSquare,
-  Lock, Crown, BarChart3, Users, Camera, Dice5, Rocket
+  LogOut,
+  LayoutDashboard,
+  Settings,
+  ShieldAlert,
+  Trophy,
+  Calendar,
+  Star,
+  Gamepad2,
+  BookOpen,
+  Dumbbell,
+  History,
+  ShoppingBag,
+  Megaphone,
+  MessageSquare,
+  Lock,
+  Crown,
+  BarChart3,
+  Users,
+  Camera,
+  Dice5,
+  Rocket,
+  Building2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
-import { useAuth } from "../../context/AuthContext";
-import { logActivity } from "../../lib/logger";
 
-// 🦈 Interface para os itens do menu (Fim do any)
+import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { logActivity } from "../../lib/logger";
+import { isPlatformMaster } from "@/lib/roles";
+import { parseTenantScopedPath } from "@/lib/tenantRouting";
+
 interface SidebarItem {
-    name: string;
-    path: string;
-    icon: React.ReactNode;
-    badge?: string;
-    isDanger?: boolean;
+  name: string;
+  path: string;
+  icon: React.ReactNode;
+  badge?: string;
+  isDanger?: boolean;
+  platformOnly?: boolean;
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user, logout } = useAuth(); 
+  const currentPath = parseTenantScopedPath(pathname || "/").scopedPath;
+  const { user, logout } = useAuth();
+  const { tenantName, tenantSigla, isOverrideActive } = useTenantTheme();
   const loginAuditRef = useRef(false);
+  const isPlatformMasterUser = isPlatformMaster(user);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("admin_sidebar_collapsed");
+    setIsSidebarCollapsed(stored === "1");
+  }, []);
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("admin_sidebar_collapsed", next ? "1" : "0");
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     const userId = typeof user?.uid === "string" ? user.uid : "";
@@ -51,111 +96,180 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       "Admin/Painel",
       `Acessou a base gate em ${pathname || "/admin"}`
     );
-  }, [pathname, user?.nome, user?.role, user?.uid]);
+  }, [currentPath, pathname, user?.nome, user?.role, user?.uid]);
 
   const sidebarItems: SidebarItem[] = [
     { name: "Dashboard", path: "/admin", icon: <LayoutDashboard size={18} /> },
+    {
+      name: "Admin Master",
+      path: "/admin/master",
+      icon: <Building2 size={18} />,
+      platformOnly: true,
+    },
     { name: "SharkRound", path: "/admin/sharkround", icon: <Dice5 size={18} /> },
     { name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
     { name: "Comunidade", path: "/admin/comunidade", icon: <MessageSquare size={18} /> },
     { name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
     { name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
-    { name: "Usuários", path: "/admin/usuarios", icon: <Users size={18} /> },
+    { name: "Usuarios", path: "/admin/usuarios", icon: <Users size={18} /> },
     { name: "Cadastro", path: "/admin/cadastro", icon: <Users size={18} /> },
-    { name: "Álbum da Galera", path: "/admin/album", icon: <Camera size={18} /> },
+    { name: "Album da Galera", path: "/admin/album", icon: <Camera size={18} /> },
     { name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },
     { name: "Arena Games", path: "/admin/games", icon: <Gamepad2 size={18} /> },
     { name: "Fidelidade", path: "/admin/fidelidade", icon: <Star size={18} /> },
     { name: "Conquistas", path: "/admin/conquistas", icon: <Trophy size={18} /> },
     { name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
     { name: "Lancamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
+    {
+      name: "Landing USC",
+      path: "/admin/landing",
+      icon: <Rocket size={18} />,
+      platformOnly: true,
+    },
     { name: "Planos", path: "/admin/planos", icon: <Crown size={18} /> },
-    { name: "Histórico", path: "/admin/historico", icon: <History size={18} /> },
+    { name: "Historico", path: "/admin/historico", icon: <History size={18} /> },
     { name: "Guia do App", path: "/admin/guia", icon: <BookOpen size={18} /> },
-    { name: "Denúncias", path: "/admin/denuncias", icon: <ShieldAlert size={18} /> },
-    { name: "Configurações", path: "/admin/configuracoes", icon: <Settings size={18} /> },
-    { name: "Permissões", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
+    { name: "Denuncias", path: "/admin/denuncias", icon: <ShieldAlert size={18} /> },
+    { name: "Configuracoes", path: "/admin/configuracoes", icon: <Settings size={18} /> },
+    { name: "Permissoes", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
   ];
+
+  const masterSidebarItems: SidebarItem[] = [
+    { name: "Dashboard Master", path: "/admin/master", icon: <Building2 size={18} /> },
+    { name: "Permissoes Globais", path: "/admin/permissoes", icon: <Lock size={18} /> },
+    { name: "Landing USC", path: "/admin/landing", icon: <Rocket size={18} /> },
+    { name: "Lançamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
+    { name: "Solicitacoes", path: "/admin/lancamento#solicitacoes", icon: <Users size={18} /> },
+    { name: "Visao Tenant", path: "/admin", icon: <LayoutDashboard size={18} /> },
+  ];
+  const isMasterRoute = currentPath.startsWith("/admin/master");
+  const activeSidebarItems = isMasterRoute && isPlatformMasterUser
+    ? masterSidebarItems
+    : sidebarItems.filter((item) => !item.platformOnly || isPlatformMasterUser);
 
   return (
     <div className="flex min-h-screen bg-[#050505]">
-      {/* BARRA LATERAL FIXA - Z-INDEX 40 */}
-      <aside className="w-64 bg-zinc-900/90 backdrop-blur-xl border-r border-white/5 flex flex-col justify-between fixed h-full z-40 overflow-y-auto custom-scrollbar">
+      <aside
+        className={`fixed z-40 flex h-full flex-col justify-between overflow-y-auto border-r border-white/5 bg-zinc-900/90 backdrop-blur-xl custom-scrollbar transition-all ${
+          isSidebarCollapsed ? "w-20" : "w-64"
+        }`}
+      >
         <div className="p-6">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.4)] shrink-0">
+          <div className="mb-8 flex items-center gap-3">
+            <div className="h-10 w-10 shrink-0 rounded-xl bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)] flex items-center justify-center">
               <ShieldAlert size={24} className="text-black" />
             </div>
-            <div>
-              <h1 className="font-black text-white text-lg uppercase tracking-tighter leading-none">Painel Admin</h1>
-              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">AAAKN • v2.0</p>
-            </div>
+            {!isSidebarCollapsed && (
+              <div className="min-w-0">
+                <h1 className="leading-none text-lg font-black uppercase tracking-tighter text-white">Painel Admin</h1>
+                <p className="truncate text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                  {(tenantSigla || "USC").toUpperCase()} • v2.0
+                </p>
+              </div>
+            )}
+            <button
+              onClick={toggleSidebar}
+              className="ml-auto inline-flex items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 p-1.5 text-zinc-300 hover:bg-zinc-800"
+              title={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+            </button>
           </div>
 
-          <div className="mb-6 p-3 bg-black/40 rounded-xl border border-zinc-800 flex items-center gap-3 shadow-inner">
-            <div className="relative w-9 h-9 shrink-0">
-                <Image 
-                    src={user?.foto || "https://github.com/shadcn.png"} 
-                    alt="Admin Avatar" 
-                    fill
-                    
-                    className="rounded-full border border-emerald-500 object-cover shadow-[0_0_10px_rgba(16,185,129,0.2)]"
-                />
+          <div
+            className={`mb-6 flex items-center rounded-xl border border-zinc-800 bg-black/40 p-3 shadow-inner ${
+              isSidebarCollapsed ? "justify-center" : "gap-3"
+            }`}
+          >
+            <div className="relative h-9 w-9 shrink-0">
+              <Image
+                src={user?.foto || "https://github.com/shadcn.png"}
+                alt="Admin Avatar"
+                fill
+                className="rounded-full border border-emerald-500 object-cover shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+              />
             </div>
-            <div className="overflow-hidden">
-              <p className="text-xs font-bold text-white truncate">
-                {user?.nome ? user.nome.split(" ")[0] : "Admin"}
-              </p>
-              <span className="text-[8px] font-black text-red-500 uppercase tracking-widest block truncate">
-                {typeof user?.role === 'string' 
-                    ? user.role.replace("admin_", "").replace("_", " ") 
-                    : "MASTER"}
-              </span>
-            </div>
+            {!isSidebarCollapsed && (
+              <div className="overflow-hidden">
+                <p className="truncate text-xs font-bold text-white">
+                  {user?.nome ? user.nome.split(" ")[0] : "Admin"}
+                </p>
+                <span className="block truncate text-[8px] font-black uppercase tracking-widest text-red-500">
+                  {typeof user?.role === "string" ? user.role.replace("admin_", "").replace("_", " ") : "MASTER"}
+                </span>
+              </div>
+            )}
           </div>
+
+          {isPlatformMasterUser && (
+            <Link
+              href="/admin/master"
+              className={`mb-4 inline-flex w-full items-center justify-center rounded-xl border border-cyan-700/40 bg-cyan-900/20 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-cyan-200 transition hover:bg-cyan-900/35 ${
+                isSidebarCollapsed ? "" : "gap-2"
+              }`}
+              title="Admin Master"
+            >
+              <Building2 size={14} /> {!isSidebarCollapsed && "Admin Master"}
+            </Link>
+          )}
+
+          {isOverrideActive && !isSidebarCollapsed && (
+            <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-amber-300">
+              Contexto: {tenantName || "Tenant selecionado"}
+            </div>
+          )}
 
           <nav className="space-y-1">
-            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest px-2 mb-2">Menu Principal</p>
-            {sidebarItems.map((item) => (
-              <Link 
-                key={item.path} 
-                href={item.path} 
-                className={`flex items-center justify-between px-3 py-2.5 rounded-lg transition-all group ${
-                  pathname === item.path 
-                  ? "bg-emerald-500 text-black shadow-lg shadow-emerald-500/20 font-bold" 
-                  : item.isDanger 
-                    ? "text-red-500 hover:bg-red-500/10" 
-                    : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  {item.icon}
-                  <span className="text-xs font-medium uppercase tracking-wide">{item.name}</span>
-                </div>
-                {item.badge && (
-                  <span className="bg-zinc-800 text-emerald-500 text-[7px] font-black px-1.5 py-0.5 rounded border border-emerald-500/30 animate-pulse">
-                    {item.badge}
-                  </span>
-                )}
-              </Link>
-            ))}
+            {!isSidebarCollapsed && (
+              <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Menu Principal</p>
+            )}
+            {activeSidebarItems.map((item) => {
+              const itemPath = item.path.split("#")[0];
+              const isActive = currentPath === itemPath;
+              return (
+                <Link
+                  key={item.path}
+                  href={item.path}
+                  title={item.name}
+                  className={`group flex items-center justify-between rounded-lg px-3 py-2.5 transition-all ${
+                    isActive
+                      ? "bg-emerald-500 font-bold text-black shadow-lg shadow-emerald-500/20"
+                      : item.isDanger
+                      ? "text-red-500 hover:bg-red-500/10"
+                      : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                  }`}
+                >
+                  <div
+                    className={`flex items-center ${isSidebarCollapsed ? "w-full justify-center" : "gap-3"}`}
+                  >
+                    {item.icon}
+                    {!isSidebarCollapsed && (
+                      <span className="text-xs font-medium uppercase tracking-wide">{item.name}</span>
+                    )}
+                  </div>
+                  {item.badge && !isSidebarCollapsed && (
+                    <span className="animate-pulse rounded border border-emerald-500/30 bg-zinc-800 px-1.5 py-0.5 text-[7px] font-black text-emerald-500">
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
           </nav>
         </div>
 
-        <div className="p-6 border-t border-white/5 bg-black/20">
-          <button 
-            onClick={() => logout()} 
-            className="w-full flex items-center justify-center gap-3 p-3 rounded-xl bg-red-600/10 text-red-500 border border-red-600/20 hover:bg-red-600 hover:text-white transition-all font-bold uppercase text-[10px] tracking-wider group"
+        <div className="border-t border-white/5 bg-black/20 p-6">
+          <button
+            onClick={() => logout()}
+            className="group w-full flex items-center justify-center gap-3 rounded-xl border border-red-600/20 bg-red-600/10 p-3 text-[10px] font-bold uppercase tracking-wider text-red-500 transition-all hover:bg-red-600 hover:text-white"
           >
-            <LogOut size={16} className="group-hover:-translate-x-1 transition-transform" /> 
+            <LogOut size={16} className="transition-transform group-hover:-translate-x-1" />
             Sair do Painel
           </button>
         </div>
       </aside>
 
-      {/* CONTEÚDO PRINCIPAL - 🦈 CORREÇÃO: SEM Z-INDEX AQUI PARA NÃO PRENDER O MODAL */}
-      <main className="flex-1 ml-64 p-8">{children}</main>
+      <main className={`flex-1 p-8 transition-all ${isSidebarCollapsed ? "ml-20" : "ml-64"}`}>{children}</main>
     </div>
   );
 }
-

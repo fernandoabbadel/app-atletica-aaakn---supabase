@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { User as SupabaseAuthUser } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useRouter, usePathname } from "next/navigation"; 
@@ -8,6 +8,12 @@ import LoadingScreen from "../app/loading";
 import { DEFAULT_STATS, DEFAULT_USER_PROPS } from "../constants/userDefaults";
 import { getBackendErrorCode, isPermissionError } from "@/lib/backendErrors";
 import { ensureAlbumSelfCollected } from "@/lib/albumService";
+import { parseTenantScopedPath } from "@/lib/tenantRouting";
+import {
+  getAccessRoleCandidates,
+  hasAdminPanelAccess,
+  isPlatformMaster,
+} from "@/lib/roles";
 
 // --- TIPAGEM ---
 export type UserRole = "guest" | "user" | "treinador" | "empresa" | "admin_treino" | "admin_geral" | "admin_gestor" | "master" | "vendas";
@@ -72,7 +78,19 @@ export interface User {
 
   // Multi-tenant
   tenant_id?: string | null;
-  tenant_role?: "visitante" | "user" | "admin_tenant" | "master_tenant" | string;
+  tenant_role?:
+    | "visitante"
+    | "user"
+    | "treinador"
+    | "empresa"
+    | "admin_treino"
+    | "admin_geral"
+    | "admin_gestor"
+    | "master"
+    | "vendas"
+    | "admin_tenant"
+    | "master_tenant"
+    | string;
   tenant_status?: "unlinked" | "pending" | "approved" | "rejected" | "disabled" | string;
   
   // Controle
@@ -353,6 +371,18 @@ const hasCadastroPendente = (user: User): boolean => {
 
 const isCadastroBypassPath = (pathname: string): boolean => {
   return (
+    pathname === "/aguardando-aprovacao" ||
+    pathname === "/cadastro" ||
+    pathname === "/banned" ||
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname.startsWith("/auth")
+  );
+};
+
+const isTenantPendingBypassPath = (pathname: string): boolean => {
+  return (
+    pathname === "/aguardando-aprovacao" ||
     pathname === "/cadastro" ||
     pathname === "/banned" ||
     pathname === "/" ||
@@ -461,7 +491,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const authSyncFallbackUidRef = useRef<string | null>(null);
 
   const router = useRouter();
-  const pathname = usePathname(); 
+  const pathnameRaw = usePathname();
+  const pathname = useMemo(
+    () => parseTenantScopedPath(pathnameRaw ? pathnameRaw.split("?")[0] : "/").scopedPath,
+    [pathnameRaw]
+  );
 
   // 1. CARREGAMENTO INICIAL UNIFICADO
   useEffect(() => {
@@ -575,7 +609,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           authSyncFallbackUidRef.current = null;
           const normalized = normalizeUserRow(existingRow, authUser);
           setUser(normalized);
-          setIsAdmin(["master", "admin_geral", "admin_gestor"].includes(String(normalized.role)));
+          setIsAdmin(hasAdminPanelAccess(normalized));
           setLoading(false);
           void ensureAlbumSelfCollected(normalized.uid).catch(() => {});
           return;
@@ -770,13 +804,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const recoveredNormalized = normalizeUserRow(recoveredRow);
         setUser(recoveredNormalized);
-        setIsAdmin(["master", "admin_geral", "admin_gestor"].includes(String(recoveredNormalized.role)));
+        setIsAdmin(hasAdminPanelAccess(recoveredNormalized));
         return recoveredNormalized;
       }
 
       const normalized = normalizeUserRow(data);
       setUser(normalized);
-      setIsAdmin(["master", "admin_geral", "admin_gestor"].includes(String(normalized.role)));
+      setIsAdmin(hasAdminPanelAccess(normalized));
       return normalized;
     },
     []
@@ -1015,6 +1049,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
       if (loading || !user || isLocalGuest) return;
       if (user.status === "banned" || user.status === "bloqueado") return;
+
+      const tenantStatus = asString(user.tenant_status).trim().toLowerCase();
+      const tenantId = asString(user.tenant_id).trim();
+      const isPendingTenant = tenantStatus === "pending" && tenantId.length > 0;
+
+      if (isPendingTenant) {
+          if (isTenantPendingBypassPath(pathname)) return;
+          router.replace("/aguardando-aprovacao");
+          return;
+      }
+
+      if (pathname === "/aguardando-aprovacao") {
+          router.replace("/dashboard");
+      }
+  }, [isLocalGuest, loading, pathname, router, user]);
+
+  useEffect(() => {
+      if (loading || !user || isLocalGuest) return;
+      if (user.status === "banned" || user.status === "bloqueado") return;
+      if (
+        asString(user.tenant_status).trim().toLowerCase() === "pending" &&
+        asString(user.tenant_id).trim().length > 0
+      ) return;
       if (isCadastroBypassPath(pathname)) return;
       if (authSyncFallbackUidRef.current === user.uid) return;
 
@@ -1107,8 +1164,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const checkPermission = (allowedRoles: string[]) => {
     if (!user) return false;
-    if (user.role === "master") return true;
-    return allowedRoles.includes(user.role as string);
+    if (isPlatformMaster(user)) return true;
+
+    const normalizedAllowed = new Set(
+      allowedRoles.map((role) => role.trim().toLowerCase()).filter(Boolean)
+    );
+    if (!normalizedAllowed.size) return false;
+
+    const candidates = getAccessRoleCandidates(user);
+    return candidates.some((role) => normalizedAllowed.has(role));
   };
 
   const updateUser = async (data: Partial<User>) => {
@@ -1189,7 +1253,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return previousSignature === nextSignature ? previous : normalized;
         });
 
-        setIsAdmin(["master", "admin_geral", "admin_gestor"].includes(String(normalized.role)));
+        setIsAdmin(hasAdminPanelAccess(normalized));
       } catch (error: unknown) {
         if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
           console.warn("Falha ao atualizar snapshot do usuario:", formatBackendErrorForConsole(error));

@@ -8,7 +8,7 @@ import {
   ArrowLeft, BadgeCheck, Lock, Camera, UploadCloud 
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext"; 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { markProfileComplete, uploadProfileImage } from "../../lib/profileService";
@@ -16,6 +16,10 @@ import { validateImageFile } from "../../lib/upload";
 import { isPermissionError } from "../../lib/backendErrors";
 import { useToast } from "../../context/ToastContext"; 
 import { getTurmaImage } from "../../constants/turmaImages";
+import {
+  fetchPendingMembershipStatusForCurrentUser,
+  requestJoinWithInvite,
+} from "../../lib/tenantService";
 
 // --- DADOS ---
 const TURMAS = [
@@ -95,10 +99,27 @@ interface UserFormData {
     foto: string;
 }
 
+const extractErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const message = [raw.message, raw.details, raw.hint]
+      .map((entry) => (typeof entry === "string" ? entry : ""))
+      .filter((entry) => entry.length > 0)
+      .join(" | ");
+    if (message) return message;
+  }
+  return "Erro inesperado.";
+};
+
 export default function CadastroPage() {
   const { user, updateUser, logout, loading: authLoading } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteToken = (searchParams.get("invite") || "").trim();
+  const hasInviteToken = inviteToken.length > 0;
   
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false); 
@@ -282,6 +303,48 @@ export default function CadastroPage() {
         await markProfileComplete(user.uid);
       }
 
+      // 2. Vinculo tenant por convite (quando vier com ?invite=)
+      const currentTenantStatus = String(user?.tenant_status || "").trim().toLowerCase();
+      const shouldTryInviteJoin =
+        hasInviteToken &&
+        currentTenantStatus !== "pending" &&
+        currentTenantStatus !== "approved";
+
+      if (shouldTryInviteJoin) {
+        try {
+          await requestJoinWithInvite(inviteToken);
+        } catch (joinError: unknown) {
+          const joinMessage = extractErrorMessage(joinError);
+          setError(`Cadastro salvo, mas o convite falhou: ${joinMessage}`);
+          addToast("Cadastro salvo, mas o convite nao foi aplicado.", "error");
+          return;
+        }
+      }
+
+      // 3. Se estiver pendente, manda para tela de espera
+      try {
+        const membership = await fetchPendingMembershipStatusForCurrentUser();
+        if (membership?.status === "pending") {
+          await updateUser({
+            tenant_id: membership.tenantId,
+            tenant_role: membership.role,
+            tenant_status: membership.status,
+          });
+          addToast("Cadastro concluido. Aguarde aprovacao da atletica.", "info");
+          router.push("/aguardando-aprovacao");
+          return;
+        }
+        if (membership?.status === "approved") {
+          await updateUser({
+            tenant_id: membership.tenantId,
+            tenant_role: membership.role,
+            tenant_status: membership.status,
+          });
+        }
+      } catch {
+        // Nao bloqueia fluxo principal se esta consulta falhar.
+      }
+
       addToast("Perfil atualizado! Bem-vindo ao cardume. \uD83E\uDD88", "success");
       router.push("/perfil"); 
     } catch (err: unknown) {
@@ -371,6 +434,13 @@ export default function CadastroPage() {
                 </div>
 
                 <h1 className="text-3xl font-black uppercase italic tracking-tighter">Ficha do <span className="text-emerald-500">Tubarao</span></h1>
+                {hasInviteToken && (
+                    <div className="mt-3 bg-cyan-500/10 border border-cyan-500/20 p-3 rounded-xl max-w-xl mx-auto">
+                        <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wide">
+                            Convite detectado: ao concluir, seu acesso fica aguardando aprovacao.
+                        </p>
+                    </div>
+                )}
                 
                 {/* AVISO DE FOTO */}
                 <div className="mt-4 bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl max-w-sm mx-auto">

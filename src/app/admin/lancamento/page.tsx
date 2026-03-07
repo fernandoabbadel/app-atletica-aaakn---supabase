@@ -16,20 +16,25 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
+  approveTenantOnboardingRequest,
   approveTenantJoinRequest,
   createTenantInvite,
   fetchManageableTenants,
+  fetchTenantOnboardingRequests,
   fetchTenantInvites,
+  fetchTenantInviteActivationRanking,
   fetchTenantJoinRequests,
   fetchTenantPlatformConfig,
+  rejectTenantOnboardingRequest,
   rejectTenantJoinRequest,
   setTenantLaunchTokenizationActive,
   type TenantInvite,
+  type TenantInviteRole,
+  type TenantInviteActivationRankingEntry,
   type TenantJoinRequest,
+  type TenantOnboardingRequest,
   type TenantSummary,
 } from "@/lib/tenantService";
-
-type InviteRole = "visitante" | "user" | "admin_tenant";
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message;
@@ -59,18 +64,22 @@ export default function AdminLancamentoPage() {
   const [savingTokenization, setSavingTokenization] = useState(false);
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [processingRequestId, setProcessingRequestId] = useState("");
+  const [processingOnboardingId, setProcessingOnboardingId] = useState("");
 
   const [tokenizationActive, setTokenizationActive] = useState(true);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [invites, setInvites] = useState<TenantInvite[]>([]);
   const [pendingRequests, setPendingRequests] = useState<TenantJoinRequest[]>([]);
+  const [inviteRanking, setInviteRanking] = useState<TenantInviteActivationRankingEntry[]>([]);
+  const [onboardingRequests, setOnboardingRequests] = useState<TenantOnboardingRequest[]>([]);
 
-  const [inviteRole, setInviteRole] = useState<InviteRole>("user");
+  const [inviteRole, setInviteRole] = useState<TenantInviteRole>("user");
   const [inviteUses, setInviteUses] = useState(25);
   const [inviteHours, setInviteHours] = useState(72);
   const [inviteRequiresApproval, setInviteRequiresApproval] = useState(true);
   const [rejectReason, setRejectReason] = useState("");
+  const [onboardingRejectReason, setOnboardingRejectReason] = useState("");
   const [origin, setOrigin] = useState("");
   const initialLoadRef = useRef(false);
 
@@ -99,15 +108,18 @@ export default function AdminLancamentoPage() {
     if (!cleanTenantId) {
       setInvites([]);
       setPendingRequests([]);
+      setInviteRanking([]);
       return;
     }
 
-    const [invitesRows, requestsRows] = await Promise.all([
+    const [invitesRows, requestsRows, rankingRows] = await Promise.all([
       fetchTenantInvites(cleanTenantId, { limit: 25 }),
       fetchTenantJoinRequests(cleanTenantId, { status: "pending", limit: 80 }),
+      fetchTenantInviteActivationRanking(cleanTenantId, { limit: 10 }),
     ]);
     setInvites(invitesRows);
     setPendingRequests(requestsRows);
+    setInviteRanking(rankingRows);
   }, []);
 
   const loadPageData = useCallback(
@@ -131,6 +143,16 @@ export default function AdminLancamentoPage() {
 
         setSelectedTenantId(nextTenantId);
         await loadTenantScopedData(nextTenantId);
+
+        if (isPlatformMaster) {
+          const onboardingRows = await fetchTenantOnboardingRequests({
+            status: "pending",
+            limit: 80,
+          });
+          setOnboardingRequests(onboardingRows);
+        } else {
+          setOnboardingRequests([]);
+        }
       } catch (error: unknown) {
         addToast(`Erro ao carregar lancamento: ${extractErrorMessage(error)}`, "error");
       } finally {
@@ -153,13 +175,15 @@ export default function AdminLancamentoPage() {
     let mounted = true;
     const syncTenantData = async () => {
       try {
-        const [invitesRows, requestsRows] = await Promise.all([
+        const [invitesRows, requestsRows, rankingRows] = await Promise.all([
           fetchTenantInvites(selectedTenantId, { limit: 25 }),
           fetchTenantJoinRequests(selectedTenantId, { status: "pending", limit: 80 }),
+          fetchTenantInviteActivationRanking(selectedTenantId, { limit: 10 }),
         ]);
         if (!mounted) return;
         setInvites(invitesRows);
         setPendingRequests(requestsRows);
+        setInviteRanking(rankingRows);
       } catch (error: unknown) {
         if (!mounted) return;
         addToast(`Erro ao atualizar dados do tenant: ${extractErrorMessage(error)}`, "error");
@@ -244,6 +268,10 @@ export default function AdminLancamentoPage() {
       setProcessingRequestId(requestId);
       await approveTenantJoinRequest({ requestId, approvedRole: "user" });
       setPendingRequests((prev) => prev.filter((request) => request.id !== requestId));
+      if (selectedTenantId) {
+        const rankingRows = await fetchTenantInviteActivationRanking(selectedTenantId, { limit: 10 });
+        setInviteRanking(rankingRows);
+      }
       addToast("Solicitacao aprovada.", "success");
     } catch (error: unknown) {
       addToast(`Erro ao aprovar solicitacao: ${extractErrorMessage(error)}`, "error");
@@ -261,12 +289,49 @@ export default function AdminLancamentoPage() {
         reason: rejectReason.trim() || undefined,
       });
       setPendingRequests((prev) => prev.filter((request) => request.id !== requestId));
+      if (selectedTenantId) {
+        const rankingRows = await fetchTenantInviteActivationRanking(selectedTenantId, { limit: 10 });
+        setInviteRanking(rankingRows);
+      }
       setRejectReason("");
       addToast("Solicitacao rejeitada.", "success");
     } catch (error: unknown) {
       addToast(`Erro ao rejeitar solicitacao: ${extractErrorMessage(error)}`, "error");
     } finally {
       setProcessingRequestId("");
+    }
+  };
+
+  const handleApproveOnboarding = async (requestId: string) => {
+    if (!requestId.trim()) return;
+    try {
+      setProcessingOnboardingId(requestId);
+      await approveTenantOnboardingRequest(requestId);
+      setOnboardingRequests((prev) => prev.filter((request) => request.id !== requestId));
+      await loadPageData("refresh");
+      addToast("Onboarding aprovado e tenant criado.", "success");
+    } catch (error: unknown) {
+      addToast(`Erro ao aprovar onboarding: ${extractErrorMessage(error)}`, "error");
+    } finally {
+      setProcessingOnboardingId("");
+    }
+  };
+
+  const handleRejectOnboarding = async (requestId: string) => {
+    if (!requestId.trim()) return;
+    try {
+      setProcessingOnboardingId(requestId);
+      await rejectTenantOnboardingRequest({
+        requestId,
+        reason: onboardingRejectReason.trim() || undefined,
+      });
+      setOnboardingRequests((prev) => prev.filter((request) => request.id !== requestId));
+      setOnboardingRejectReason("");
+      addToast("Onboarding rejeitado.", "success");
+    } catch (error: unknown) {
+      addToast(`Erro ao rejeitar onboarding: ${extractErrorMessage(error)}`, "error");
+    } finally {
+      setProcessingOnboardingId("");
     }
   };
 
@@ -342,6 +407,87 @@ export default function AdminLancamentoPage() {
           )}
         </section>
 
+        {isPlatformMaster && (
+          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black uppercase text-emerald-300">
+                  Onboarding Inicial de Atleticas
+                </h2>
+                <p className="text-[11px] text-zinc-500 font-bold">
+                  Solicitações de criacao de tenant aguardando aprovacao da plataforma.
+                </p>
+              </div>
+              <div className="text-xs font-black uppercase text-zinc-300">
+                {onboardingRequests.length} pendente(s)
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] text-zinc-400 font-bold uppercase">
+                Motivo para rejeicao (opcional)
+              </label>
+              <input
+                value={onboardingRejectReason}
+                onChange={(event) => setOnboardingRejectReason(event.target.value)}
+                placeholder="Ex: dados insuficientes"
+                className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="space-y-2">
+              {onboardingRequests.map((request) => {
+                const isBusy = processingOnboardingId === request.id;
+                const requesterName =
+                  request.requesterName || request.requesterEmail || request.requesterUserId;
+
+                return (
+                  <div
+                    key={request.id}
+                    className="rounded-xl border border-zinc-800 bg-black/50 px-4 py-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase text-white">
+                          {request.sigla} - {request.nome}
+                        </p>
+                        <p className="text-[11px] text-zinc-400">
+                          {request.faculdade} | solicitante: {requesterName}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => void handleApproveOnboarding(request.id)}
+                          disabled={isBusy}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-xs font-black uppercase text-emerald-300 disabled:opacity-60 inline-flex items-center gap-1"
+                        >
+                          <CheckCircle2 size={14} />
+                          Aprovar
+                        </button>
+                        <button
+                          onClick={() => void handleRejectOnboarding(request.id)}
+                          disabled={isBusy}
+                          className="px-3 py-1.5 rounded-lg bg-red-600/20 border border-red-500/40 text-xs font-black uppercase text-red-300 disabled:opacity-60 inline-flex items-center gap-1"
+                        >
+                          <XCircle size={14} />
+                          Reprovar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {onboardingRequests.length === 0 && (
+              <p className="text-sm text-zinc-400">
+                Nenhuma solicitacao de onboarding pendente.
+              </p>
+            )}
+          </section>
+        )}
+
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div className="grid md:grid-cols-3 gap-3">
             <div className="md:col-span-2">
@@ -389,12 +535,17 @@ export default function AdminLancamentoPage() {
               <label className="text-[11px] text-zinc-400 font-bold uppercase">Role final</label>
               <select
                 value={inviteRole}
-                onChange={(event) => setInviteRole(event.target.value as InviteRole)}
+                onChange={(event) => setInviteRole(event.target.value as TenantInviteRole)}
                 className="mt-1 w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
               >
                 <option value="visitante">visitante</option>
                 <option value="user">user</option>
-                <option value="admin_tenant">admin_tenant</option>
+                <option value="treinador">treinador</option>
+                <option value="empresa">empresa</option>
+                <option value="admin_treino">admin_treino</option>
+                <option value="admin_geral">admin_geral</option>
+                <option value="admin_gestor">admin_gestor</option>
+                <option value="vendas">vendas</option>
               </select>
             </div>
 
@@ -539,6 +690,51 @@ export default function AdminLancamentoPage() {
           {pendingRequests.length === 0 && (
             <p className="text-sm text-zinc-400">
               Nenhuma solicitacao pendente para este tenant.
+            </p>
+          )}
+        </section>
+
+        <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-black uppercase text-cyan-300">
+                Ranking de Convites Ativados
+              </h2>
+              <p className="text-[11px] text-zinc-500 font-bold">
+                Usuarios com mais convites que viraram cadastro no tenant.
+              </p>
+            </div>
+            <div className="text-xs font-black uppercase text-zinc-300">
+              top {inviteRanking.length}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {inviteRanking.map((entry, index) => {
+              const displayName =
+                entry.inviterName || entry.inviterEmail || entry.inviterUserId;
+
+              return (
+                <div
+                  key={`${entry.inviterUserId}-${index}`}
+                  className="rounded-xl border border-zinc-800 bg-black/50 px-4 py-3 flex flex-wrap items-center justify-between gap-3"
+                >
+                  <div>
+                    <p className="text-xs font-black uppercase text-white">
+                      #{index + 1} {displayName}
+                    </p>
+                    <p className="text-[11px] text-zinc-500">
+                      aprovados: {entry.approvedCount} | pendentes: {entry.pendingCount} | total: {entry.totalCount}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {inviteRanking.length === 0 && (
+            <p className="text-sm text-zinc-400">
+              Ainda nao existem convites ativados para montar o ranking.
             </p>
           )}
         </section>
