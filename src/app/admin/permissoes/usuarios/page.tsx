@@ -23,11 +23,12 @@ import {
 import { updatePermissionUserRole } from "@/lib/adminSecurityService";
 import { canManageTenant } from "@/lib/roles";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
 
 const ROLES = [
-  { id: "master", label: "Master Tenant" },
+  { id: "master_tenant", label: "Master Tenant" },
   { id: "admin_geral", label: "Admin Geral" },
   { id: "admin_gestor", label: "Gestor" },
   { id: "admin_treino", label: "Adm Treino" },
@@ -72,7 +73,7 @@ const mergeUniqueUsers = (
 
 export default function AdminPermissoesUsuariosPage() {
   const { user, loading: authLoading } = useAuth();
-  const { tenantId: activeTenantId, tenantName, tenantSigla } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantName, tenantSigla, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const router = useRouter();
 
@@ -134,12 +135,12 @@ export default function AdminPermissoesUsuariosPage() {
     if (!activeTenantId) {
       setLoading(false);
       addToast("Selecione um tenant antes de editar cargos.", "error");
-      router.push("/admin/master");
+      router.push(tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin");
       return;
     }
 
     void loadUsers({ reset: true });
-  }, [activeTenantId, authLoading, canManageRoles, router, loadUsers, addToast]);
+  }, [activeTenantId, authLoading, canManageRoles, router, loadUsers, addToast, tenantSlug]);
 
   const filteredRows = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -202,13 +203,18 @@ export default function AdminPermissoesUsuariosPage() {
 
   if (!canManageRoles) return null;
 
+  const permissionsHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/permissoes")
+    : "/admin/permissoes";
+  const usersHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/usuarios") : "/admin/usuarios";
+
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Link
-              href="/admin/permissoes"
+              href={permissionsHref}
               className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
             >
               <ArrowLeft size={18} className="text-zinc-300" />
@@ -224,7 +230,7 @@ export default function AdminPermissoesUsuariosPage() {
           </div>
 
           <Link
-            href="/admin/usuarios"
+            href={usersHref}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black uppercase border border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 transition"
           >
             <Users size={14} /> Status Completo

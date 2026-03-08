@@ -15,7 +15,7 @@ import {
 } from "@/lib/adminDashboardService";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
-import { isPlatformMaster } from "@/lib/roles";
+import { isPlatformMaster, resolveEffectiveAccessRole } from "@/lib/roles";
 
 // --- INTERFACES (FIM DO ANY) ---
 type DashboardStats = AdminDashboardStats;
@@ -70,7 +70,15 @@ const extractErrorMessage = (error: unknown): string => {
 
 export default function AdminDashboardPage() {
   const { user } = useAuth();
-  const { tenantId: activeTenantId, tenantName, tenantSigla, palette } = useTenantTheme();
+  const {
+    tenantId: activeTenantId,
+    tenantName,
+    tenantSigla,
+    tenantLogoUrl,
+    palette,
+  } = useTenantTheme();
+  const canOpenMasterPanel =
+    isPlatformMaster(user) && resolveEffectiveAccessRole(user) === "master";
   const [stats, setStats] = useState<DashboardStats>({ totalUsers: 0, totalEvents: 0, totalSales: 0, activeChamps: 0 });
   const [recentUsers, setRecentUsers] = useState<RecentUser[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
@@ -111,7 +119,18 @@ export default function AdminDashboardPage() {
       
       {/* HEADER */}
             <header className="mb-8 flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="flex items-center gap-4">
+          <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-lg">
+            <Image
+              src={tenantLogoUrl || "/logo.png"}
+              alt={`Logo ${tenantSigla || tenantName || "Tenant"}`}
+              fill
+              className="object-contain p-2"
+              unoptimized={(tenantLogoUrl || "").startsWith("http")}
+              sizes="64px"
+            />
+          </div>
+          <div>
           <h1 className="text-3xl font-black uppercase italic tracking-tighter text-white">Visao Geral</h1>
           <p
             className="text-xs font-bold uppercase tracking-widest"
@@ -120,9 +139,10 @@ export default function AdminDashboardPage() {
             Metricas e atividade em tempo real • {tenantSigla || tenantName || "USC"}
           </p>
         </div>
-        {isPlatformMaster(user) && (
+        </div>
+        {canOpenMasterPanel && (
           <Link
-            href="/admin/master"
+            href="/master"
             className="inline-flex items-center gap-2 rounded-lg border border-cyan-700/40 bg-cyan-900/20 px-4 py-2 text-[11px] font-black uppercase text-cyan-200 hover:bg-cyan-900/35 transition"
           >
             <ShieldAlert size={14} /> Admin Master

@@ -36,9 +36,7 @@ export function proxy(request: NextRequest): NextResponse {
   const parsed = parseTenantScopedPath(pathname);
   if (parsed.isTenantScoped) {
     if (parsed.scopedPath === "/") {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = withTenantSlug(parsed.tenantSlug, "/dashboard");
-      const response = NextResponse.redirect(redirectUrl);
+      const response = NextResponse.next();
       setTenantSlugCookie(response, parsed.tenantSlug);
       return response;
     }

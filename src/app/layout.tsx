@@ -2,14 +2,13 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-// 🦈 CONTEXTOS
 import { AuthProvider } from "@/context/AuthContext";
 import { ToastProvider } from "@/context/ToastContext";
 import { CartProvider } from "@/context/CartContext";
 import { TenantThemeProvider } from "@/context/TenantThemeContext";
 
-// 🦈 COMPONENTES GLOBAIS
 import BottomNav from "@/app/components/BottomNav";
+import MasterTopBar from "@/app/components/MasterTopBar";
 import RouteGuard from "@/app/components/RouteGuard";
 
 const geistSans = Geist({
@@ -23,25 +22,22 @@ const geistMono = Geist_Mono({
   preload: false,
 });
 
-// 1. METADATA (SEO & PWA)
 export const metadata: Metadata = {
   title: "USC - Universidade Spot Connect",
   description: "Plataforma oficial multi-atleticas",
-  manifest: "/manifest.json", // Link para o arquivo PWA
+  manifest: "/manifest.json",
   icons: {
     icon: ["/favicon.ico", "/favicon-32x32.png", "/favicon-16x16.png"],
     apple: "/apple-touch-icon.png",
   },
 };
 
-// 2. VIEWPORT (Visual Mobile & Tema)
-// Isso substitui o antigo 'theme-color' dentro do metadata
 export const viewport: Viewport = {
   themeColor: "#050505",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  userScalable: false, // Impede zoom indesejado no app mobile
+  userScalable: false,
 };
 
 export default function RootLayout({
@@ -52,32 +48,21 @@ export default function RootLayout({
   return (
     <html lang="pt-br" className="dark" data-scroll-behavior="smooth">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#050505] text-white min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-[#050505] text-white antialiased`}
       >
-        {/* 1. Autenticação */}
         <AuthProvider>
           <TenantThemeProvider>
-          
-          {/* 2. Feedback Visual */}
-          <ToastProvider>
-            
-            {/* 3. Carrinho */}
-            <CartProvider>
-              
-              {/* 4. Proteção de Rotas */}
-              <RouteGuard>
-                
-                {/* Conteúdo Principal */}
-                <main className="pb-24 min-h-screen relative z-10">
-                  {children}
-                </main>
-
-                {/* Navegação Fixa */}
-                <BottomNav />
-
-              </RouteGuard>
-            </CartProvider>
-          </ToastProvider>
+            <ToastProvider>
+              <CartProvider>
+                <RouteGuard>
+                  <MasterTopBar />
+                  <main className="relative z-10 min-h-screen pb-24">
+                    {children}
+                  </main>
+                  <BottomNav />
+                </RouteGuard>
+              </CartProvider>
+            </ToastProvider>
           </TenantThemeProvider>
         </AuthProvider>
       </body>

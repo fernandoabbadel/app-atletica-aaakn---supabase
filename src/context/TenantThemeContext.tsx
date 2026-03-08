@@ -10,6 +10,7 @@ import React, {
 } from "react";
 
 import { useAuth } from "@/context/AuthContext";
+import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import { fetchTenantById, type TenantPaletteKey } from "@/lib/tenantService";
 import {
   dispatchMasterTenantOverrideChanged,
@@ -61,7 +62,7 @@ const TenantThemeContext = createContext<TenantThemeContextValue>({
   tenantName: "USC",
   tenantSigla: "USC",
   tenantCourse: "",
-  tenantLogoUrl: "/logo.png",
+  tenantLogoUrl: PLATFORM_LOGO_URL,
   isOverrideActive: false,
   loading: true,
   setMasterTenantOverride: () => {},
@@ -135,7 +136,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
   const [tenantName, setTenantName] = useState("USC");
   const [tenantSigla, setTenantSigla] = useState("USC");
   const [tenantCourse, setTenantCourse] = useState("");
-  const [tenantLogoUrl, setTenantLogoUrl] = useState("/logo.png");
+  const [tenantLogoUrl, setTenantLogoUrl] = useState(PLATFORM_LOGO_URL);
   const [isOverrideActive, setIsOverrideActive] = useState(false);
   const [masterOverrideTenantId, setMasterOverrideTenantId] = useState("");
   const [palette, setPalette] = useState<TenantPalette>(DEFAULT_PALETTE);
@@ -201,7 +202,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
           setTenantName("USC");
           setTenantSigla("USC");
           setTenantCourse("");
-          setTenantLogoUrl("/logo.png");
+          setTenantLogoUrl(PLATFORM_LOGO_URL);
           setIsOverrideActive(false);
           syncTenantSlugCookie("");
           persistTenantBrandSnapshot({
@@ -210,7 +211,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
             tenantName: "USC",
             tenantSigla: "USC",
             tenantCourse: "",
-            tenantLogoUrl: "/logo.png",
+            tenantLogoUrl: PLATFORM_LOGO_URL,
           });
           applyPaletteToRoot(DEFAULT_PALETTE);
           return;
@@ -224,7 +225,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
         const resolvedName = tenant?.nome || "USC";
         const resolvedSigla = tenant?.sigla || "USC";
         const resolvedCourse = tenant?.curso || "";
-        const resolvedLogo = tenant?.logoUrl || "/logo.png";
+        const resolvedLogo = tenant?.logoUrl || PLATFORM_LOGO_URL;
         setTenantId(selectedTenantId);
         setTenantSlug(resolvedSlug);
         setPalette(resolvedPalette);
@@ -251,7 +252,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
         setTenantName("USC");
         setTenantSigla("USC");
         setTenantCourse("");
-        setTenantLogoUrl("/logo.png");
+        setTenantLogoUrl(PLATFORM_LOGO_URL);
         setIsOverrideActive(false);
         syncTenantSlugCookie("");
         persistTenantBrandSnapshot({
@@ -260,7 +261,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
           tenantName: "USC",
           tenantSigla: "USC",
           tenantCourse: "",
-          tenantLogoUrl: "/logo.png",
+          tenantLogoUrl: PLATFORM_LOGO_URL,
         });
         applyPaletteToRoot(DEFAULT_PALETTE);
       } finally {

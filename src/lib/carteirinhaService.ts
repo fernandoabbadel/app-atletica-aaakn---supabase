@@ -9,7 +9,9 @@ export interface CarteirinhaConfig {
 
 const CONFIG_COLLECTION = "app_config";
 const CONFIG_DOC_ID = "carteirinha";
-const CACHE_KEY = "aaakn:carteirinha-config:v1";
+const CACHE_KEY = "aaakn:carteirinha-config:v2";
+export const CARTEIRINHA_CONFIG_SYNC_KEY = "aaakn:carteirinha-config:updated-at";
+export const CARTEIRINHA_CONFIG_UPDATED_EVENT_NAME = "usc:carteirinha-config-updated";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_SOURCE_FILE_BYTES = 12 * 1024 * 1024;
 const MAX_UPLOAD_FILE_BYTES = 2.5 * 1024 * 1024;
@@ -83,17 +85,31 @@ const normalizeConfig = (raw: Record<string, unknown> | null): CarteirinhaConfig
   return { validade, backgrounds: normalizedBackgrounds, backgroundOpacity };
 };
 
-const setConfigCache = (config: CarteirinhaConfig): void => {
+const broadcastConfigUpdate = (): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CARTEIRINHA_CONFIG_SYNC_KEY, String(Date.now()));
+  } catch {
+    // ignora erro de storage
+  }
+  window.dispatchEvent(new CustomEvent(CARTEIRINHA_CONFIG_UPDATED_EVENT_NAME));
+};
+
+const setConfigCache = (
+  config: CarteirinhaConfig,
+  options?: { broadcast?: boolean }
+): void => {
   const normalized = normalizeConfig(config as unknown as Record<string, unknown>);
   const cache: CachedConfig = { value: normalized, cachedAt: Date.now() };
   memoryCache = cache;
 
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
   } catch {
     // Sem cache persistente: segue apenas com cache em memoria.
   }
+  if (options?.broadcast) broadcastConfigUpdate();
 };
 
 const getMemoryCache = (): CarteirinhaConfig | null => {
@@ -105,11 +121,11 @@ const getMemoryCache = (): CarteirinhaConfig | null => {
   return memoryCache.value;
 };
 
-const getSessionCache = (): CarteirinhaConfig | null => {
+const getPersistentCache = (): CarteirinhaConfig | null => {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.sessionStorage.getItem(CACHE_KEY);
+    const raw = window.localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as {
@@ -120,7 +136,7 @@ const getSessionCache = (): CarteirinhaConfig | null => {
     const cachedAt =
       typeof parsed.cachedAt === "number" && Number.isFinite(parsed.cachedAt) ? parsed.cachedAt : 0;
     if (Date.now() - cachedAt > CACHE_TTL_MS) {
-      window.sessionStorage.removeItem(CACHE_KEY);
+      window.localStorage.removeItem(CACHE_KEY);
       return null;
     }
 
@@ -149,8 +165,8 @@ export async function fetchCarteirinhaConfig(options?: {
     const memory = getMemoryCache();
     if (memory) return memory;
 
-    const session = getSessionCache();
-    if (session) return session;
+    const persistent = getPersistentCache();
+    if (persistent) return persistent;
   }
 
   const { data, error } = await supabase
@@ -194,7 +210,7 @@ export async function saveCarteirinhaConfig(config: CarteirinhaConfig): Promise<
   );
 
   if (error) throwSupabaseError(error);
-  setConfigCache(normalized);
+  setConfigCache(normalized, { broadcast: true });
 }
 
 export async function uploadCarteirinhaBackground(turma: string, file: File): Promise<string> {

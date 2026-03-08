@@ -958,6 +958,50 @@ export async function createTenantInvite(payload: {
   };
 }
 
+export async function createMemberInvite(payload: {
+  tenantId: string;
+  maxUses?: number;
+  expiresInHours?: number;
+}): Promise<TenantInvite> {
+  const cleanTenantId = payload.tenantId.trim();
+  if (!cleanTenantId) throw new Error("Tenant invalido para criar convite.");
+
+  const maxUses = Math.max(1, Math.min(5, Math.floor(payload.maxUses ?? 1)));
+  const expiresInHours = Math.max(
+    1,
+    Math.min(24 * 7, Math.floor(payload.expiresInHours ?? 72))
+  );
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc("tenant_create_member_invite", {
+    p_tenant_id: cleanTenantId,
+    p_max_uses: maxUses,
+    p_expires_in_hours: expiresInHours,
+  });
+  if (error) throwSupabaseError(error);
+
+  const rawResult = Array.isArray(data) ? asObject(data[0]) : asObject(data);
+  const inviteId = asString(rawResult?.invite_id || rawResult?.id).trim();
+  const token = asString(rawResult?.token).trim();
+  const expiresAt = asString(rawResult?.expires_at).trim();
+
+  if (!token) throw new Error("Convite criado, mas token nao retornado.");
+
+  return {
+    id: inviteId || `tmp-${Date.now()}`,
+    tenantId: cleanTenantId,
+    token,
+    roleToAssign: "user",
+    requiresApproval: true,
+    maxUses,
+    usesCount: 0,
+    expiresAt,
+    isActive: true,
+    createdBy: "",
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export async function fetchTenantJoinRequests(
   tenantId: string,
   options?: {

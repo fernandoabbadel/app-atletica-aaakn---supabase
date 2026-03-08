@@ -1,0 +1,582 @@
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  Sparkles,
+  Users,
+  MapPin,
+  Mail,
+  Phone,
+  Instagram,
+  Star,
+  Crown,
+  Eye,
+  Building2,
+  Handshake,
+  LayoutDashboard,
+  Shield,
+} from "lucide-react";
+
+import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
+import {
+  PLATFORM_BRAND_NAME,
+  PLATFORM_BRAND_SIGLA,
+  PLATFORM_BRAND_SUBTITLE,
+  PLATFORM_LOGO_URL,
+} from "@/constants/platformBrand";
+import { type LandingConfig } from "@/lib/adminLandingService";
+import { type PublicLandingPayload } from "@/lib/publicLandingService";
+import { hasAdminPanelAccess } from "@/lib/roles";
+import { withTenantSlug } from "@/lib/tenantRouting";
+
+const DEFAULT_CONFIG: LandingConfig = {
+  heroTitle: "BEM-VINDO AO",
+  heroSubtitle:
+    "Plataforma multi-atleticas para eventos, comunidade, loja e gestao esportiva.",
+  heroHighlight: "SPOT CONNECT",
+  tagline: "USC - UNIVERSIDADE SPOT CONNECT",
+  taglineColor: "#60a5fa",
+  titleColor: "#ffffff",
+  gradientStart: "#93c5fd",
+  gradientEnd: "#2563eb",
+  statUsers: 120,
+  statPosts: 12,
+  statPartners: 12,
+  address: "Campus Medicina - Bloco C",
+  phone: "(12) 99999-9999",
+  whatsapp: "5512999999999",
+  email: "suporte@spotconnect.app",
+  socialLinks: [],
+  reviews: [],
+};
+
+type BrandState = {
+  sigla: string;
+  nome: string;
+  subtitle: string;
+  logoUrl: string;
+};
+
+const DEFAULT_BRAND: BrandState = {
+  sigla: PLATFORM_BRAND_SIGLA,
+  nome: PLATFORM_BRAND_NAME,
+  subtitle: PLATFORM_BRAND_SUBTITLE,
+  logoUrl: PLATFORM_LOGO_URL,
+};
+
+const normalizeUscPalette = (config: LandingConfig): LandingConfig => {
+  const normalized = { ...config };
+  const colorTagline = config.taglineColor.trim().toLowerCase();
+  const colorStart = config.gradientStart.trim().toLowerCase();
+  const colorEnd = config.gradientEnd.trim().toLowerCase();
+
+  if (colorTagline === "#10b981") normalized.taglineColor = DEFAULT_CONFIG.taglineColor;
+  if (colorStart === "#34d399") normalized.gradientStart = DEFAULT_CONFIG.gradientStart;
+  if (colorEnd === "#10b981") normalized.gradientEnd = DEFAULT_CONFIG.gradientEnd;
+
+  return normalized;
+};
+
+const useCounter = (end: number, duration = 2000) => {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    let start = 0;
+    if (end === 0) {
+      setCount(0);
+      return;
+    }
+
+    const increment = end / (duration / 16);
+    const timer = setInterval(() => {
+      start += increment;
+      if (start >= end) {
+        setCount(end);
+        clearInterval(timer);
+      } else {
+        setCount(Math.ceil(start));
+      }
+    }, 16);
+
+    return () => clearInterval(timer);
+  }, [duration, end]);
+
+  return count;
+};
+
+type StatColor = "blue" | "indigo" | "cyan";
+
+type StatCardProps = {
+  icon: React.ComponentType<{ className?: string }>;
+  value: number;
+  label: string;
+  color: StatColor;
+};
+
+const StatCard = ({ icon: Icon, value, label, color }: StatCardProps) => {
+  const count = useCounter(value);
+  const colors: Record<StatColor, string> = {
+    blue: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+    indigo: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
+    cyan: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
+  };
+
+  return (
+    <div className="flex flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 backdrop-blur-md transition-all hover:scale-105">
+      <div className={`mb-3 rounded-full p-3 ${colors[color]}`}>
+        <Icon className="h-6 w-6" />
+      </div>
+      <span className="text-3xl font-black tracking-tight text-white">{count}</span>
+      <span className="mt-1 text-center text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+        {label}
+      </span>
+    </div>
+  );
+};
+
+type PublicLandingPageProps = {
+  tenantSlugOverride?: string;
+};
+
+const resolveFallbackBrand = (fallbackSlug: string): BrandState => {
+  const fallbackName = fallbackSlug.toUpperCase() || "TENANT";
+  return {
+    sigla: fallbackName,
+    nome: fallbackName,
+    subtitle: "Landing oficial da atletica.",
+    logoUrl: "/logo.png",
+  };
+};
+
+export default function PublicLandingPage({
+  tenantSlugOverride = "",
+}: PublicLandingPageProps) {
+  const router = useRouter();
+  const { user, loginAsGuest, loginGoogle, loading: authLoading } = useAuth();
+  const { addToast } = useToast();
+
+  const tenantSlug = tenantSlugOverride.trim().toLowerCase();
+  const isTenantLanding = tenantSlug.length > 0;
+
+  const [config, setConfig] = useState<LandingConfig>(DEFAULT_CONFIG);
+  const [realStats, setRealStats] = useState({
+    users: 0,
+    tenants: 0,
+    partners: 0,
+  });
+  const [brand, setBrand] = useState<BrandState>(DEFAULT_BRAND);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"aluno" | "empresa">("aluno");
+
+  const dashboardPath = useMemo(() => {
+    if (user?.isAnonymous) {
+      return isTenantLanding ? withTenantSlug(tenantSlug, "/dashboard") : "/visitante";
+    }
+    return isTenantLanding ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
+  }, [isTenantLanding, tenantSlug, user?.isAnonymous]);
+
+  const adminPath = useMemo(
+    () => (isTenantLanding ? withTenantSlug(tenantSlug, "/admin") : "/admin"),
+    [isTenantLanding, tenantSlug]
+  );
+
+  const canOpenAdmin = Boolean(user && !user.isAnonymous && hasAdminPanelAccess(user));
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchData = async () => {
+      try {
+        const search = tenantSlug
+          ? `?tenant=${encodeURIComponent(tenantSlug)}`
+          : "?scope=platform";
+        const response = await fetch(`/api/public/landing${search}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`Falha ao carregar landing: ${response.status}`);
+        }
+
+        const data = (await response.json()) as Partial<PublicLandingPayload>;
+        const rawConfig =
+          data.config && typeof data.config === "object"
+            ? (data.config as LandingConfig)
+            : DEFAULT_CONFIG;
+        const nextConfig = isTenantLanding ? rawConfig : normalizeUscPalette(rawConfig);
+        const nextBrand =
+          data.brand && typeof data.brand === "object"
+            ? {
+                sigla:
+                  typeof data.brand.sigla === "string" && data.brand.sigla.trim()
+                    ? data.brand.sigla.trim()
+                    : DEFAULT_BRAND.sigla,
+                nome:
+                  typeof data.brand.nome === "string" && data.brand.nome.trim()
+                    ? data.brand.nome.trim()
+                    : DEFAULT_BRAND.nome,
+                subtitle:
+                  typeof data.brand.subtitle === "string" && data.brand.subtitle.trim()
+                    ? data.brand.subtitle.trim()
+                    : DEFAULT_BRAND.subtitle,
+                logoUrl:
+                  typeof data.brand.logoUrl === "string" && data.brand.logoUrl.trim()
+                    ? data.brand.logoUrl.trim()
+                    : DEFAULT_BRAND.logoUrl,
+              }
+            : isTenantLanding
+              ? resolveFallbackBrand(tenantSlug)
+              : DEFAULT_BRAND;
+
+        if (!mounted) return;
+
+        setConfig(nextConfig);
+        setBrand(nextBrand);
+        setRealStats({
+          users: typeof data.usersCount === "number" ? data.usersCount : 0,
+          tenants: typeof data.tenantsCount === "number" ? data.tenantsCount : 0,
+          partners: typeof data.partnersCount === "number" ? data.partnersCount : 0,
+        });
+      } catch (error: unknown) {
+        console.error("Erro ao carregar landing:", error);
+        if (mounted) {
+          setBrand(isTenantLanding ? resolveFallbackBrand(tenantSlug) : DEFAULT_BRAND);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void fetchData();
+    return () => {
+      mounted = false;
+    };
+  }, [isTenantLanding, tenantSlug]);
+
+  const handleGoogleLogin = async () => {
+    try {
+      await loginGoogle();
+    } catch {
+      addToast("Erro no login Google", "error");
+    }
+  };
+
+  const handleGuest = async () => {
+    try {
+      addToast("Modo visitante ativado.", "info");
+      await loginAsGuest();
+      router.push(dashboardPath);
+    } catch {
+      addToast("Erro ao entrar como visitante.", "error");
+    }
+  };
+
+  const stats = isTenantLanding
+    ? {
+        first: config.statUsers || 0,
+        second: config.statPosts || 0,
+        third: config.statPartners || 0,
+        firstLabel: "Atletas",
+        secondLabel: "Treinos",
+        thirdLabel: "Parceiros",
+      }
+    : {
+        first: config.statUsers || realStats.users,
+        second: config.statPosts || realStats.tenants,
+        third: config.statPartners || realStats.partners,
+        firstLabel: "Socios totais",
+        secondLabel: "Atleticas criadas",
+        thirdLabel: "Parceiros totais",
+      };
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#02050d] font-bold text-blue-400 animate-pulse">
+        CARREGANDO CARDUME...
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen overflow-x-hidden bg-[#02050d] font-sans text-white selection:bg-blue-500/30">
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute left-[-20%] top-[-10%] h-[80%] w-[80%] animate-pulse-slow rounded-full bg-blue-500/10 blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-20%] h-[80%] w-[80%] animate-pulse-slow rounded-full bg-cyan-500/10 blur-[120px] delay-700" />
+      </div>
+
+      <header className="relative z-20 container mx-auto flex items-center justify-between px-4 pt-5">
+        <div className="flex items-center gap-2">
+          <Image
+            src={brand.logoUrl || "/logo.png"}
+            alt={`Logo ${brand.sigla}`}
+            width={36}
+            height={36}
+            className="rounded-lg object-cover"
+            unoptimized={brand.logoUrl.startsWith("http")}
+          />
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-300">
+              {brand.sigla}
+            </p>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+              {brand.nome}
+            </p>
+          </div>
+        </div>
+        {isTenantLanding ? (
+          <Link
+            href="/"
+            className="rounded-lg border border-cyan-500/30 bg-cyan-600/20 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-cyan-300 hover:bg-cyan-600/30"
+          >
+            USC Oficial
+          </Link>
+        ) : (
+          <Link
+            href="/nova-atletica"
+            className="rounded-lg border border-cyan-500/30 bg-cyan-600/20 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-cyan-300 hover:bg-cyan-600/30"
+          >
+            Cadastrar Atletica
+          </Link>
+        )}
+      </header>
+
+      <main className="relative z-10 container mx-auto px-4 pb-20 pt-8 lg:flex lg:items-center lg:gap-16 lg:pt-14">
+        <div className="flex-1 space-y-8 text-center lg:text-left">
+          <div className="group mx-auto h-48 w-48 animate-float-slow lg:mx-0 lg:h-64 lg:w-64">
+            <div className="absolute inset-0 scale-75 rounded-full bg-blue-500/30 blur-[50px]" />
+            <Image
+              src={brand.logoUrl || "/logo.png"}
+              alt={`Logo ${brand.sigla}`}
+              width={256}
+              height={256}
+              className="relative z-10 object-contain mix-blend-screen drop-shadow-[0_0_35px_rgba(59,130,246,0.45)]"
+              priority
+              unoptimized={(brand.logoUrl || "").startsWith("http")}
+            />
+          </div>
+
+          <div className="space-y-4">
+            <div
+              className="mx-auto inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest animate-pulse lg:mx-0"
+              style={{ color: config.taglineColor }}
+            >
+              <Sparkles size={12} /> {config.tagline}
+            </div>
+
+            <h1
+              className="text-5xl font-black leading-[0.9] tracking-tighter lg:text-7xl"
+              style={{ color: config.titleColor }}
+            >
+              {config.heroTitle} <br className="hidden lg:block" />
+              <span
+                className="animate-text-shimmer bg-[length:200%_auto] bg-clip-text text-transparent"
+                style={{
+                  backgroundImage: `linear-gradient(to right, ${config.gradientStart}, ${config.gradientEnd}, ${config.gradientStart})`,
+                }}
+              >
+                {config.heroHighlight}
+              </span>
+            </h1>
+
+            <p className="mx-auto max-w-xl text-base font-medium leading-relaxed text-zinc-400 lg:mx-0 lg:text-lg">
+              {config.heroSubtitle}
+            </p>
+          </div>
+
+          <div className="mx-auto grid w-full max-w-lg grid-cols-3 gap-4 lg:mx-0">
+            <StatCard icon={Users} value={stats.first} label={stats.firstLabel} color="blue" />
+            <StatCard
+              icon={Building2}
+              value={stats.second}
+              label={stats.secondLabel}
+              color="indigo"
+            />
+            <StatCard
+              icon={Handshake}
+              value={stats.third}
+              label={stats.thirdLabel}
+              color="cyan"
+            />
+          </div>
+        </div>
+
+        <div className="mx-auto mt-12 w-full max-w-md flex-1 lg:mt-0">
+          <div className="relative rounded-[2rem] border border-zinc-800 bg-zinc-900/40 p-8 shadow-2xl backdrop-blur-xl">
+            <div className="mb-6 flex rounded-xl border border-zinc-800/50 bg-zinc-950/60 p-1.5">
+              <button
+                onClick={() => setActiveTab("aluno")}
+                className={`flex-1 rounded-lg py-3 text-[10px] font-extrabold uppercase tracking-wider transition-all ${
+                  activeTab === "aluno" ? "bg-zinc-800 text-white shadow-md" : "text-zinc-500"
+                }`}
+              >
+                Sou Aluno
+              </button>
+              <button
+                onClick={() => setActiveTab("empresa")}
+                className={`flex-1 rounded-lg py-3 text-[10px] font-extrabold uppercase tracking-wider transition-all ${
+                  activeTab === "empresa" ? "bg-zinc-800 text-white shadow-md" : "text-zinc-500"
+                }`}
+              >
+                Parceiro
+              </button>
+            </div>
+
+            {user ? (
+              <div className="space-y-4">
+                <button
+                  onClick={() => router.push(dashboardPath)}
+                  className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-black text-zinc-900 transition-all hover:bg-zinc-200"
+                >
+                  <LayoutDashboard size={18} />
+                  {user.isAnonymous ? "Abrir como visitante" : "Abrir dashboard"}
+                </button>
+                {canOpenAdmin && (
+                  <button
+                    onClick={() => router.push(adminPath)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600/20 py-3.5 text-xs font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-600/30"
+                  >
+                    <Shield size={16} /> Abrir painel admin
+                  </button>
+                )}
+              </div>
+            ) : activeTab === "aluno" ? (
+              <div className="space-y-6">
+                <button
+                  onClick={handleGoogleLogin}
+                  className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-black text-zinc-900 transition-all hover:bg-zinc-200"
+                >
+                  <Image src="https://www.google.com/favicon.ico" alt="G" width={20} height={20} />
+                  {authLoading ? "Conectando..." : "Entrar com Google"}
+                </button>
+                <button
+                  onClick={handleGuest}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-800/50 py-3.5 text-xs font-bold uppercase tracking-wider text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
+                >
+                  <Eye size={16} /> {isTenantLanding ? "Visitar esta atletica" : "Entrar como visitante"}
+                </button>
+                {isTenantLanding && (
+                  <Link
+                    href="/"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-600/10 py-3 text-xs font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-600/20"
+                  >
+                    <Building2 size={16} /> Ir para USC oficial
+                  </Link>
+                )}
+              </div>
+            ) : (
+              <div className="py-8 text-center text-xs text-zinc-500">
+                Area restrita a parceiros.
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      <section className="container mx-auto border-t border-white/5 bg-zinc-950/30 px-4 py-20">
+        <div className="mb-8 flex items-center justify-center gap-2 lg:justify-start">
+          <Star className="fill-blue-400 text-blue-400" />
+          <h3 className="text-xl font-black uppercase tracking-tight text-white">
+            O Cardume Aprova
+          </h3>
+        </div>
+
+        <div className="flex snap-x gap-6 overflow-x-auto px-4 pb-8 scrollbar-hide md:grid md:grid-cols-3 md:overflow-visible">
+          {(config.reviews || []).length > 0 ? (
+            config.reviews.map((review) => (
+              <div
+                key={review.id}
+                className="min-w-[300px] snap-center rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6 shadow-lg transition-all hover:border-blue-500/30"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-blue-500/30 bg-zinc-800">
+                    <Image
+                      src={review.profileUrl || "/logo.png"}
+                      alt={review.name}
+                      fill
+                      className={`object-cover ${review.profileUrl ? "" : "p-1 grayscale opacity-50"}`}
+                      unoptimized={(review.profileUrl || "").startsWith("http")}
+                    />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold leading-tight text-white">{review.name}</h4>
+                    <span className="text-[10px] font-bold uppercase text-zinc-500">
+                      {review.role}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-4 flex gap-1">
+                  {[1, 2, 3, 4, 5].map((index) => (
+                    <Star key={index} size={12} className="fill-amber-400 text-amber-400" />
+                  ))}
+                </div>
+                <p className="mt-4 line-clamp-4 text-xs italic leading-relaxed text-zinc-300">
+                  &quot;{review.text}&quot;
+                </p>
+              </div>
+            ))
+          ) : (
+            <p className="col-span-3 text-center text-xs italic text-zinc-500">
+              Nenhum depoimento cadastrado ainda.
+            </p>
+          )}
+        </div>
+      </section>
+
+      <footer className="border-t border-zinc-900 bg-zinc-950 pb-8 pt-16">
+        <div className="container mx-auto px-4">
+          <div className="mb-12 grid grid-cols-1 gap-12 md:grid-cols-4">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Crown className="h-5 w-5 text-blue-400" />
+                <span className="text-xl font-black text-white">{brand.sigla}</span>
+              </div>
+              <p className="text-xs leading-relaxed text-zinc-500">{brand.subtitle}</p>
+            </div>
+
+            <div>
+              <h4 className="mb-4 text-xs font-bold uppercase tracking-wider text-white">Suporte</h4>
+              <ul className="space-y-3 text-xs text-zinc-500">
+                <li className="flex items-center gap-2">
+                  <MapPin size={14} className="text-blue-500" /> {config.address}
+                </li>
+                <li className="flex items-center gap-2">
+                  <Mail size={14} className="text-blue-500" /> {config.email}
+                </li>
+                <li className="flex items-center gap-2">
+                  <Phone size={14} className="text-blue-500" /> {config.phone}
+                </li>
+                {(config.socialLinks || []).map((social) => (
+                  <li key={social.id} className="pt-2">
+                    <a
+                      href={social.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 font-bold capitalize text-blue-400 hover:text-blue-300"
+                    >
+                      <Instagram size={14} /> {social.platform}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <div className="border-t border-zinc-900 pt-8 text-center text-[10px] text-zinc-600">
+            <p>
+              &copy; {new Date().getFullYear()} {brand.sigla} - {brand.nome}.
+            </p>
+            <p className="mt-1">
+              {isTenantLanding
+                ? "Landing oficial da atletica."
+                : "Infraestrutura oficial para gestao de atleticas."}
+            </p>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}

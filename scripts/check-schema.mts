@@ -209,7 +209,7 @@ function resolveDatabaseUrls(): string[] {
 
   if (candidates.length === 0) {
     throw new Error(
-      "DATABASE_URL ausente. Defina DATABASE_URL (ou SUPABASE_DB_DIRECT_URL) para rodar scripts/check-schema.ts."
+      "DATABASE_URL ausente. Defina DATABASE_URL (ou SUPABASE_DB_DIRECT_URL) para rodar scripts/check-schema.mts."
     );
   }
 

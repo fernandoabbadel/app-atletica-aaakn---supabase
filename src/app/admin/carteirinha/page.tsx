@@ -156,11 +156,11 @@ export default function AdminCarteirinhaPage() {
 
             <div>
               <label className="text-[10px] font-bold text-zinc-500 uppercase mb-2 block">
-                Transparencia do Fundo
+                Intensidade do Fundo
               </label>
               <div className="rounded-2xl border border-zinc-800 bg-black/50 p-4">
                 <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase text-zinc-400">
-                  <span>Imagem da turma na carteirinha</span>
+                  <span>Visibilidade da imagem da turma</span>
                   <span>{config.backgroundOpacity}%</span>
                 </div>
                 <input

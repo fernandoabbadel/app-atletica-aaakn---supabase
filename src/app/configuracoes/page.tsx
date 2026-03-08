@@ -5,25 +5,32 @@ import {
   ArrowLeft, Bell, LogOut, ChevronRight,
   FileText, Smartphone,
   Trash2, Power, PowerOff, AlertTriangle, Loader2,
-  Crown, Shield, History
+  Crown, Shield, History, Sparkles, Copy, Check, UserPlus
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { auth } from "@/lib/backend";
 import { deleteUser } from "@/lib/supa/auth";
 import { logActivity } from "../../lib/logger";
 import { softDeleteAccount, toggleAccountStatus } from "../../lib/settingsService";
-import { resolvePlanTheme } from "../../constants/planVisuals";
+import { createMemberInvite } from "../../lib/tenantService";
+import { getTurmaImage } from "../../constants/turmaImages";
+import { resolvePlanTheme, resolveUserPlanIcon } from "../../constants/planVisuals";
 
 export default function SettingsPage() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const { addToast } = useToast();
+  const { tenantId, tenantName } = useTenantTheme();
   
   const [actionLoading, setActionLoading] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteLink, setInviteLink] = useState("");
+  const [inviteCopied, setInviteCopied] = useState(false);
   const [notificacoes, setNotificacoes] = useState(true);
 
   // --- AÇÃO 1: DESATIVAR / REATIVAR (Pausar) ---
@@ -91,6 +98,17 @@ export default function SettingsPage() {
     }
   };
 
+  const copyInviteLink = async (link: string) => {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setInviteCopied(true);
+      addToast("Link copiado para compartilhar.", "success");
+    } catch {
+      addToast("Nao consegui copiar. O link ficou visivel na tela.", "info");
+    }
+  };
+
   if (!user) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>;
 
   const roleLabel = user.role === "user" ? "Membro" : String(user.role || "Membro");
@@ -103,8 +121,65 @@ export default function SettingsPage() {
     !isGuestRole && rawPlanLabel.toLowerCase() === "visitante"
       ? "Bicho Solto"
       : (rawPlanLabel || "Bicho Solto");
+  const effectiveTenantId =
+    tenantId.trim() ||
+    (typeof user.tenant_id === "string" ? user.tenant_id.trim() : "");
+  const normalizedTenantStatus =
+    typeof user.tenant_status === "string" ? user.tenant_status.trim().toLowerCase() : "";
+  const canGenerateInvite =
+    !isGuestRole &&
+    effectiveTenantId.length > 0 &&
+    (normalizedTenantStatus === "" || normalizedTenantStatus === "approved");
   const planTheme = resolvePlanTheme(typeof user.plano_cor === "string" ? user.plano_cor : "zinc");
   const planBadgeClasses = planTheme.badgeClass;
+  const turmaLabel = typeof user.turma === "string" && user.turma.trim() ? user.turma.trim() : "T?";
+  const turmaLogo =
+    (typeof user.turmaPhoto === "string" && user.turmaPhoto.trim()) ||
+    getTurmaImage(turmaLabel, "/logo.png");
+  const PlanIcon = resolveUserPlanIcon(
+    typeof user.plano_icon === "string" ? user.plano_icon : null,
+    planLabel,
+    Crown
+  );
+
+  const handleCreateInvite = async () => {
+    if (!canGenerateInvite) {
+      addToast("Seu perfil ainda nao pode gerar convite neste tenant.", "error");
+      return;
+    }
+
+    try {
+      setInviteLoading(true);
+      setInviteCopied(false);
+
+      const invite = await createMemberInvite({
+        tenantId: effectiveTenantId,
+        maxUses: 1,
+        expiresInHours: 72,
+      });
+
+      const nextLink = `${window.location.origin}/cadastro?invite=${encodeURIComponent(invite.token)}`;
+      setInviteLink(nextLink);
+      await copyInviteLink(nextLink);
+
+      await logActivity(
+        user.uid,
+        user.nome,
+        "CREATE",
+        "Convite/Membro",
+        `Gerou convite social para ${tenantName || effectiveTenantId}`
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Erro ao gerar convite.";
+      addToast(message, "error");
+    } finally {
+      setInviteLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#050505] text-white pb-24 font-sans selection:bg-emerald-500">
@@ -134,17 +209,26 @@ export default function SettingsPage() {
                         />
                     </div>
                     <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-black p-1.5 rounded-full border-4 border-[#050505] z-10">
-                        <Crown size={12} strokeWidth={3} />
+                        <div className="relative h-5 w-5 overflow-hidden rounded-full">
+                            <Image
+                                src={turmaLogo}
+                                alt={`Logo da turma ${turmaLabel}`}
+                                fill
+                                sizes="20px"
+                                unoptimized
+                                className="object-cover"
+                            />
+                        </div>
                     </div>
                 </div>
 
                 <div className="flex-1">
                     <h2 className="font-black text-xl text-white leading-none mb-1">{user.nome}</h2>
-                    <p className="text-xs text-zinc-400 font-medium mb-3">{roleLabel} • {user.turma || "T?"}</p>
+                    <p className="text-xs text-zinc-400 font-medium mb-3">{roleLabel} • {turmaLabel}</p>
                     
                     <div className="flex items-center gap-2 mb-3">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider flex items-center gap-1 ${planBadgeClasses}`}>
-                            <Crown size={10} strokeWidth={3} /> {planLabel}
+                            <PlanIcon size={10} strokeWidth={3} /> {planLabel}
                         </span>
                         <span className={`text-[10px] px-2 py-0.5 rounded border font-bold uppercase ${user.status === 'ativo' ? 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20' : 'text-red-500 bg-red-500/10 border-red-500/20'}`}>
                             {user.status}
@@ -159,6 +243,63 @@ export default function SettingsPage() {
             </div>
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 blur-[50px] rounded-full pointer-events-none"></div>
         </section>
+
+        {canGenerateInvite && (
+          <section className="relative overflow-hidden rounded-[2rem] border border-amber-400/25 bg-[linear-gradient(135deg,rgba(120,53,15,0.35),rgba(10,10,10,0.96)_45%,rgba(120,53,15,0.2))] p-5 shadow-[0_18px_60px_rgba(245,158,11,0.16)]">
+            <div className="absolute -top-12 right-0 h-28 w-28 rounded-full bg-amber-300/20 blur-3xl animate-pulse pointer-events-none"></div>
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.22),transparent_38%)] pointer-events-none"></div>
+
+            <div className="relative z-10 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300/30 bg-amber-300/10 text-amber-200 shadow-[0_0_24px_rgba(251,191,36,0.18)]">
+                  <Sparkles size={20} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-amber-300">
+                    Convite de Amigos
+                  </p>
+                  <h3 className="mt-1 text-lg font-black uppercase tracking-tight text-white">
+                    Traga mais gente para {tenantName || "sua atletica"}
+                  </h3>
+                  <p className="mt-1 text-xs text-amber-100/75">
+                    Gera 1 link dourado, com 1 uso e validade de 72h. O cadastro continua entrando como
+                    <span className="font-black text-amber-300"> user</span>.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => void handleCreateInvite()}
+                disabled={inviteLoading}
+                className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-2xl border border-amber-200/30 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 px-5 py-4 text-xs font-black uppercase tracking-[0.24em] text-[#1b1300] shadow-[0_18px_45px_rgba(245,158,11,0.32)] transition duration-300 hover:scale-[1.01] hover:shadow-[0_22px_60px_rgba(245,158,11,0.42)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="absolute inset-y-0 left-[-30%] w-24 -skew-x-12 bg-white/35 blur-xl transition-transform duration-700 group-hover:translate-x-[340%]"></span>
+                {inviteLoading ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+                <span className="relative z-10">
+                  {inviteLoading ? "Gerando convite" : "Gerar Convite Dourado"}
+                </span>
+              </button>
+
+              {inviteLink && (
+                <div className="rounded-2xl border border-amber-200/15 bg-black/35 p-4">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-300">
+                      Link pronto para enviar
+                    </p>
+                    <button
+                      onClick={() => void copyInviteLink(inviteLink)}
+                      className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-100 transition hover:bg-amber-300/15"
+                    >
+                      {inviteCopied ? <Check size={12} /> : <Copy size={12} />}
+                      {inviteCopied ? "Copiado" : "Copiar"}
+                    </button>
+                  </div>
+                  <p className="break-all font-mono text-[11px] leading-5 text-zinc-200">{inviteLink}</p>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* 3. MENU DE NAVEGAÇÃO */}
         <div className="space-y-6">

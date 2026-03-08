@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff, LogIn, Waves } from "lucide-react";
 import { useToast } from "@/context/ToastContext";
 import { useAuth } from "@/context/AuthContext";
+import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -81,7 +82,7 @@ export default function LoginPage() {
       <div className="relative z-10 mb-8 animate-float-slow text-center">
         <div className="relative inline-block">
           <Image
-            src="/logo.png"
+            src={PLATFORM_LOGO_URL}
             alt="USC Logo"
             width={192}
             height={192}

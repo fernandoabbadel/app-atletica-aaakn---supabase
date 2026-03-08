@@ -30,10 +30,10 @@ export interface LaunchWorkspaceState {
 }
 
 export const getLaunchBasePath = (scope: LaunchScope): string =>
-  scope === "master" ? "/admin/master/lancamento" : "/admin/lancamento";
+  scope === "master" ? "/master/lancamento" : "/admin/lancamento";
 
 export const getLaunchBackPath = (scope: LaunchScope): string =>
-  scope === "master" ? "/admin/master" : "/admin";
+  scope === "master" ? "/master" : "/admin";
 
 export const getLaunchAudienceLabel = (scope: LaunchScope): string =>
   scope === "master" ? "painel master" : "painel admin";

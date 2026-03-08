@@ -1,0 +1,194 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import Image from "next/image";
+import {
+  Building2,
+  CreditCard,
+  Lock,
+  LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Rocket,
+  Waypoints,
+} from "lucide-react";
+
+import { useAuth } from "@/context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { isPlatformMaster } from "@/lib/roles";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
+
+type MasterNavItem = {
+  name: string;
+  path: string;
+  icon: React.ReactNode;
+};
+
+const SIDEBAR_STORAGE_KEY = "master_sidebar_collapsed";
+
+export default function MasterLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  const pathname = usePathname() || "/master";
+  const { user, logout } = useAuth();
+  const { tenantName, tenantSlug, isOverrideActive } = useTenantTheme();
+  const [collapsed, setCollapsed] = useState(false);
+
+  const canAccess = isPlatformMaster(user);
+  const currentPath = useMemo(
+    () => parseTenantScopedPath(pathname).scopedPath,
+    [pathname]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setCollapsed(window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1");
+  }, []);
+
+  const toggleSidebar = () => {
+    setCollapsed((previous) => {
+      const next = !previous;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(SIDEBAR_STORAGE_KEY, next ? "1" : "0");
+      }
+      return next;
+    });
+  };
+
+  if (!canAccess) return <>{children}</>;
+
+  const tenantAdminPath = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+  const navItems: MasterNavItem[] = [
+    { name: "Dashboard Master", path: "/master", icon: <Building2 size={18} /> },
+    { name: "Landing USC", path: "/master/landing", icon: <Rocket size={18} /> },
+    { name: "Permissoes Globais", path: "/master/permissoes", icon: <Lock size={18} /> },
+    { name: "Lancamento", path: "/master/lancamento", icon: <Rocket size={18} /> },
+    { name: "Solicitacoes", path: "/master/lancamento/pendentes", icon: <CreditCard size={18} /> },
+    { name: "Painel do Tenant", path: tenantAdminPath, icon: <Waypoints size={18} /> },
+  ];
+
+  return (
+    <div className="flex min-h-screen bg-[#050505]">
+      <aside
+        className={`fixed top-16 z-40 flex h-[calc(100vh-4rem)] flex-col justify-between overflow-y-auto border-r border-red-500/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] backdrop-blur-xl transition-all duration-300 ${
+          collapsed ? "w-[92px]" : "w-[280px]"
+        }`}
+      >
+        <button
+          onClick={toggleSidebar}
+          className="absolute -right-3 top-6 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-950 text-zinc-300 shadow-lg transition hover:border-red-500/40 hover:text-white"
+          title={collapsed ? "Expandir painel master" : "Recolher painel master"}
+        >
+          {collapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+        </button>
+
+        <div className="p-6">
+          <div className={`mb-6 flex items-center ${collapsed ? "justify-center" : "gap-3"}`}>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-300 shadow-[0_0_24px_rgba(239,68,68,0.18)]">
+              <Building2 size={22} />
+            </div>
+            {!collapsed && (
+              <div>
+                <h1 className="text-lg font-black uppercase tracking-tight text-white">
+                  Painel Master
+                </h1>
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">
+                  Plataforma USC
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div
+            className={`mb-5 flex items-center rounded-2xl border border-zinc-800 bg-black/35 p-3 ${
+              collapsed ? "justify-center" : "gap-3"
+            }`}
+          >
+            <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full border border-red-500/30">
+              <Image
+                src={user?.foto || "https://github.com/shadcn.png"}
+                alt="Master"
+                fill
+                className="object-cover"
+              />
+            </div>
+            {!collapsed && (
+              <div className="overflow-hidden">
+                <p className="truncate text-sm font-black text-white">
+                  {user?.nome ? user.nome.split(" ")[0] : "Master"}
+                </p>
+                <p className="truncate text-[9px] font-black uppercase tracking-[0.18em] text-red-300">
+                  Dono da Plataforma
+                </p>
+              </div>
+            )}
+          </div>
+
+          {!collapsed && (
+            <div className="mb-5 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200">
+                Contexto atual
+              </p>
+              <p className="mt-2 text-xs font-bold text-white">
+                {isOverrideActive ? tenantName || "Tenant selecionado" : "Plataforma USC"}
+              </p>
+              <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                {isOverrideActive ? "navegando com contexto forçado" : "modo global ativo"}
+              </p>
+            </div>
+          )}
+
+          <nav className="space-y-1">
+            {navItems.map((item) => {
+              const isActive =
+                currentPath === item.path || currentPath.startsWith(`${item.path}/`);
+              return (
+                <Link
+                  key={item.path}
+                  href={item.path}
+                  title={item.name}
+                  className={`group flex items-center rounded-xl px-3 py-3 transition ${
+                    isActive
+                      ? "bg-red-500/15 text-red-100 shadow-[0_10px_30px_rgba(239,68,68,0.1)]"
+                      : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                  } ${collapsed ? "justify-center" : "gap-3"}`}
+                >
+                  {item.icon}
+                  {!collapsed && (
+                    <span className="text-xs font-bold uppercase tracking-[0.12em]">
+                      {item.name}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        <div className="border-t border-red-500/10 p-6">
+          <button
+            onClick={() => logout()}
+            className={`flex w-full items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-[10px] font-black uppercase tracking-[0.18em] text-red-300 transition hover:bg-red-500 hover:text-white ${
+              collapsed ? "" : "gap-2"
+            }`}
+          >
+            <LogOut size={15} />
+            {!collapsed && "Sair"}
+          </button>
+        </div>
+      </aside>
+
+      <main
+        className={`flex-1 px-6 py-6 transition-all duration-300 ${
+          collapsed ? "ml-[92px]" : "ml-[280px]"
+        }`}
+      >
+        {children}
+      </main>
+    </div>
+  );
+}

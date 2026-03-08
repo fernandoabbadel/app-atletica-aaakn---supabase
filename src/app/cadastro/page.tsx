@@ -11,11 +11,13 @@ import { useAuth } from "../../context/AuthContext";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { markProfileComplete, uploadProfileImage } from "../../lib/profileService";
 import { validateImageFile } from "../../lib/upload";
 import { isPermissionError } from "../../lib/backendErrors";
 import { useToast } from "../../context/ToastContext"; 
 import { getTurmaImage } from "../../constants/turmaImages";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   fetchPendingMembershipStatusForCurrentUser,
   requestJoinWithInvite,
@@ -115,6 +117,7 @@ const extractErrorMessage = (error: unknown): string => {
 
 export default function CadastroPage() {
   const { user, updateUser, logout, loading: authLoading } = useAuth();
+  const { tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -160,6 +163,13 @@ export default function CadastroPage() {
     pets: "nenhum",
     foto: "" 
   });
+
+  const scopedPath = (path: string) =>
+    tenantSlug.trim() ? withTenantSlug(tenantSlug, path) : path;
+
+  const profilePath = user?.uid ? scopedPath(`/perfil/${user.uid}`) : scopedPath("/perfil");
+  const pendingPath = scopedPath("/aguardando-aprovacao");
+  const landingPath = scopedPath("/");
 
   // APIs IBGE
   useEffect(() => {
@@ -209,6 +219,11 @@ export default function CadastroPage() {
       });
     }
   }, [user]);
+
+  useEffect(() => {
+    if (authLoading || user) return;
+    router.replace(landingPath);
+  }, [authLoading, landingPath, router, user]);
 
   // ðŸ¦ˆ Lógica de Upload de Foto
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -331,7 +346,7 @@ export default function CadastroPage() {
             tenant_status: membership.status,
           });
           addToast("Cadastro concluido. Aguarde aprovacao da atletica.", "info");
-          router.push("/aguardando-aprovacao");
+          router.push(pendingPath);
           return;
         }
         if (membership?.status === "approved") {
@@ -346,7 +361,7 @@ export default function CadastroPage() {
       }
 
       addToast("Perfil atualizado! Bem-vindo ao cardume. \uD83E\uDD88", "success");
-      router.push("/perfil"); 
+      router.push(profilePath); 
     } catch (err: unknown) {
       const errLog =
         err instanceof Error
@@ -375,7 +390,18 @@ export default function CadastroPage() {
     }
   };
 
-  if (!authLoading && !user) { router.push("/"); return null; }
+  const handleExit = async () => {
+    await logout();
+    router.replace(landingPath);
+  };
+
+  if (!authLoading && !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#050505] text-white">
+        <Loader2 className="h-10 w-10 animate-spin text-emerald-500" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#050505] text-white p-4 pb-20 flex flex-col items-center overflow-hidden">
@@ -387,12 +413,14 @@ export default function CadastroPage() {
 
         {/* BOTÒO DE RETORNO */}
         <div className="w-full max-w-3xl flex justify-start mb-4 relative z-20">
-            <Link href="/perfil" className="bg-zinc-900 border border-zinc-800 p-3 rounded-full hover:bg-zinc-800 transition text-zinc-400 hover:text-white flex items-center gap-2 text-xs font-bold uppercase">
+            <Link href={profilePath} className="bg-zinc-900 border border-zinc-800 p-3 rounded-full hover:bg-zinc-800 transition text-zinc-400 hover:text-white flex items-center gap-2 text-xs font-bold uppercase">
                 <ArrowLeft size={18}/> Voltar ao Perfil
             </Link>
             <button
                 type="button"
-                onClick={() => { void logout(); }}
+                onClick={() => {
+                  void handleExit();
+                }}
                 className="ml-2 bg-zinc-900 border border-zinc-800 p-3 rounded-full hover:bg-zinc-800 transition text-zinc-400 hover:text-white text-xs font-bold uppercase"
             >
                 Sair

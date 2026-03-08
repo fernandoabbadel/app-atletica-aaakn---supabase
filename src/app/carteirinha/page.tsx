@@ -11,6 +11,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
+  CARTEIRINHA_CONFIG_SYNC_KEY,
+  CARTEIRINHA_CONFIG_UPDATED_EVENT_NAME,
   fetchCarteirinhaConfig,
   type CarteirinhaConfig,
 } from "@/lib/carteirinhaService";
@@ -31,9 +33,11 @@ export default function CarteirinhaPage() {
   useEffect(() => {
       let mounted = true;
 
-      const fetchConfig = async () => {
+      const loadConfig = async (forceRefresh = false) => {
           try {
-              const loadedConfig = await fetchCarteirinhaConfig();
+              const loadedConfig = await fetchCarteirinhaConfig(
+                forceRefresh ? { forceRefresh: true } : undefined
+              );
               if (mounted) setConfig(loadedConfig);
           } catch (error: unknown) {
               console.error("Erro config carteirinha", error);
@@ -42,10 +46,24 @@ export default function CarteirinhaPage() {
               if (mounted) setLoadingConfig(false);
           }
       };
-      void fetchConfig();
+
+      const handleRefresh = () => {
+        void loadConfig(true);
+      };
+
+      const handleStorage = (event: StorageEvent) => {
+        if (event.key !== CARTEIRINHA_CONFIG_SYNC_KEY) return;
+        handleRefresh();
+      };
+
+      void loadConfig();
+      window.addEventListener(CARTEIRINHA_CONFIG_UPDATED_EVENT_NAME, handleRefresh);
+      window.addEventListener("storage", handleStorage);
 
       return () => {
           mounted = false;
+          window.removeEventListener(CARTEIRINHA_CONFIG_UPDATED_EVENT_NAME, handleRefresh);
+          window.removeEventListener("storage", handleStorage);
       };
   }, [addToast]);
 
@@ -56,10 +74,14 @@ export default function CarteirinhaPage() {
   const bgPadrao = getTurmaImage(user.turma);
   const bgFinal = config?.backgrounds?.[user.turma || ""] || bgPadrao;
   const validadeTexto = config?.validade || "DEZ/2026";
-  const backgroundOpacity = Math.max(
+  const backgroundIntensity = Math.max(
     0,
     Math.min(100, config?.backgroundOpacity ?? 60)
   ) / 100;
+  const imageOpacity = 0.16 + backgroundIntensity * 0.58;
+  const imageBrightness = 0.42 + backgroundIntensity * 0.46;
+  const imageSaturation = 0.65 + backgroundIntensity * 0.7;
+  const overlayOpacity = 0.58 - backgroundIntensity * 0.28;
 
   // --- ðŸ¦ˆ LÃ“GICA VISUAL DINÃ‚MICA ---
   const userCor = user.plano_cor || "zinc"; 
@@ -102,12 +124,18 @@ export default function CarteirinhaPage() {
                  src={bgFinal}
                  alt="Background Turma"
                  fill
-                 className="object-cover mix-blend-overlay brightness-75 scale-105"
-                 style={{ opacity: backgroundOpacity }}
+                 className="object-cover scale-105 transition-all duration-500"
+                 style={{
+                   opacity: imageOpacity,
+                   filter: `brightness(${imageBrightness}) saturate(${imageSaturation}) contrast(${0.92 + backgroundIntensity * 0.18})`,
+                 }}
                   // Permite URLs externas/base64 sem config no next.config.js
                  priority
               />
-             <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-black/80"></div>
+             <div
+               className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/35 to-black/75 transition-opacity duration-500"
+               style={{ opacity: overlayOpacity }}
+             ></div>
              <div className="absolute inset-0 opacity-[0.07] bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
           </div>
 

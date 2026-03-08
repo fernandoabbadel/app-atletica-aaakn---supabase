@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
 import {
   LogOut,
@@ -35,9 +35,9 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { logActivity } from "../../lib/logger";
-import { isPlatformMaster } from "@/lib/roles";
-import { parseTenantScopedPath } from "@/lib/tenantRouting";
-import MasterTenantSwitcher from "./_components/MasterTenantSwitcher";
+import { isPlatformMaster, resolveEffectiveAccessRole } from "@/lib/roles";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
+import { usePermission } from "@/hooks/usePermission";
 
 interface SidebarItem {
   name: string;
@@ -50,11 +50,17 @@ interface SidebarItem {
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const currentPath = parseTenantScopedPath(pathname || "/").scopedPath;
+  const router = useRouter();
+  const pathInfo = parseTenantScopedPath(pathname || "/");
+  const currentPath = pathInfo.scopedPath;
   const { user, logout } = useAuth();
-  const { tenantName, tenantSigla, isOverrideActive } = useTenantTheme();
+  const { tenantName, tenantSigla, tenantSlug: activeTenantSlug, isOverrideActive } = useTenantTheme();
+  const { canAccess } = usePermission();
   const loginAuditRef = useRef(false);
   const isPlatformMasterUser = isPlatformMaster(user);
+  const effectiveAccessRole = resolveEffectiveAccessRole(user);
+  const canViewMasterLink = isPlatformMasterUser && effectiveAccessRole === "master";
+  const sidebarTenantSlug = pathInfo.tenantSlug || activeTenantSlug.trim();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
 
   useEffect(() => {
@@ -103,8 +109,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const sidebarItems: SidebarItem[] = [
     { name: "Dashboard", path: "/admin", icon: <LayoutDashboard size={18} /> },
     {
-      name: "Admin Master",
-      path: "/admin/master",
+      name: "Painel Master",
+      path: "/master",
       icon: <Building2 size={18} />,
       platformOnly: true,
     },
@@ -136,40 +142,34 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "Permissoes", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
   ];
 
-  const masterSidebarItems: SidebarItem[] = [
-    { name: "Dashboard Master", path: "/admin/master", icon: <Building2 size={18} /> },
-    { name: "Permissoes Globais", path: "/admin/permissoes", icon: <Lock size={18} /> },
-    { name: "Landing", path: "/admin/landing", icon: <Rocket size={18} /> },
-    { name: "Lancamento", path: "/admin/master/lancamento", icon: <Rocket size={18} /> },
-    {
-      name: "Solicitacoes",
-      path: "/admin/master/lancamento/pendentes",
-      icon: <Users size={18} />,
-    },
-    { name: "Voltar ao Admin", path: "/admin", icon: <LayoutDashboard size={18} /> },
-  ];
-  const isMasterContextRoute =
-    isPlatformMasterUser &&
-    [
-      "/admin/master",
-      "/admin/permissoes",
-      "/admin/landing",
-      "/admin/master/lancamento",
-    ].some(
-      (pathPrefix) =>
-        currentPath === pathPrefix || currentPath.startsWith(`${pathPrefix}/`)
-    );
-  const activeSidebarItems = isMasterContextRoute
-    ? masterSidebarItems
-    : sidebarItems.filter((item) => !item.platformOnly || isPlatformMasterUser);
+  const activeSidebarItems = sidebarItems.filter(
+    (item) => !item.platformOnly || canViewMasterLink
+  );
+
+  const resolveSidebarHref = (path: string): string => {
+    if (path.startsWith("/admin") && sidebarTenantSlug) {
+      return withTenantSlug(sidebarTenantSlug, path);
+    }
+    return path;
+  };
+  const semPermissaoHref = sidebarTenantSlug
+    ? withTenantSlug(sidebarTenantSlug, "/sem-permissao")
+    : "/sem-permissao";
 
   return (
     <div className="flex min-h-screen bg-[#050505]">
       <aside
-        className={`fixed z-40 flex h-full flex-col justify-between overflow-y-auto border-r border-white/5 bg-zinc-900/90 backdrop-blur-xl custom-scrollbar transition-all ${
-          isSidebarCollapsed ? "w-20" : "w-64"
+        className={`fixed z-40 flex h-full flex-col justify-between overflow-y-auto border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl custom-scrollbar transition-all duration-300 ${
+          isSidebarCollapsed ? "w-[88px]" : "w-64"
         }`}
       >
+        <button
+          onClick={toggleSidebar}
+          className="absolute -right-3 top-6 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-950 text-zinc-300 shadow-lg transition hover:border-emerald-500/40 hover:text-white"
+          title={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+        >
+          {isSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+        </button>
         <div className="p-6">
           <div className="mb-8 flex items-center gap-3">
             <div className="h-10 w-10 shrink-0 rounded-xl bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)] flex items-center justify-center">
@@ -183,13 +183,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </p>
               </div>
             )}
-            <button
-              onClick={toggleSidebar}
-              className="ml-auto inline-flex items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 p-1.5 text-zinc-300 hover:bg-zinc-800"
-              title={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
-            >
-              {isSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
-            </button>
           </div>
 
           <div
@@ -217,8 +210,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             )}
           </div>
 
-          {isPlatformMasterUser && !isSidebarCollapsed && <MasterTenantSwitcher />}
-
           {isOverrideActive && !isSidebarCollapsed && (
             <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-amber-300">
               Contexto: {tenantName || "Tenant selecionado"}
@@ -231,19 +222,49 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             )}
             {activeSidebarItems.map((item) => {
               const itemPath = item.path.split("#")[0];
-              const isActive = currentPath === itemPath;
+              const isActive =
+                currentPath === itemPath ||
+                (itemPath !== "/admin" && currentPath.startsWith(`${itemPath}/`));
+              const itemHref = resolveSidebarHref(item.path);
+              const isBlocked = item.path.startsWith("/admin") && !canAccess(item.path);
+              const itemClassName = `group flex items-center justify-between rounded-lg px-3 py-2.5 transition-all ${
+                isActive
+                  ? "bg-emerald-500 font-bold text-black shadow-lg shadow-emerald-500/20"
+                  : isBlocked
+                  ? "text-zinc-500 hover:bg-zinc-800/50"
+                  : item.isDanger
+                  ? "text-red-500 hover:bg-red-500/10"
+                  : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              }`;
+
+              if (isBlocked) {
+                return (
+                  <button
+                    key={item.path}
+                    type="button"
+                    title={`${item.name} bloqueado`}
+                    onClick={() => router.push(semPermissaoHref)}
+                    className={itemClassName}
+                  >
+                    <div
+                      className={`flex items-center ${isSidebarCollapsed ? "w-full justify-center" : "gap-3"}`}
+                    >
+                      {item.icon}
+                      {!isSidebarCollapsed && (
+                        <span className="text-xs font-medium uppercase tracking-wide">{item.name}</span>
+                      )}
+                    </div>
+                    {!isSidebarCollapsed && <Lock size={14} className="text-zinc-600" />}
+                  </button>
+                );
+              }
+
               return (
                 <Link
                   key={item.path}
-                  href={item.path}
+                  href={itemHref}
                   title={item.name}
-                  className={`group flex items-center justify-between rounded-lg px-3 py-2.5 transition-all ${
-                    isActive
-                      ? "bg-emerald-500 font-bold text-black shadow-lg shadow-emerald-500/20"
-                      : item.isDanger
-                      ? "text-red-500 hover:bg-red-500/10"
-                      : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
-                  }`}
+                  className={itemClassName}
                 >
                   <div
                     className={`flex items-center ${isSidebarCollapsed ? "w-full justify-center" : "gap-3"}`}
@@ -275,7 +296,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </aside>
 
-      <main className={`flex-1 p-8 transition-all ${isSidebarCollapsed ? "ml-20" : "ml-64"}`}>{children}</main>
+      <main className={`flex-1 p-8 transition-all duration-300 ${isSidebarCollapsed ? "ml-[88px]" : "ml-64"}`}>{children}</main>
     </div>
   );
 }

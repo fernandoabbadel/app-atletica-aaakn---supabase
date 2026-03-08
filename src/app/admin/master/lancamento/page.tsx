@@ -1,7 +1,5 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { LaunchDashboardPage } from "@/app/admin/_components/launch/LaunchDashboardPage";
-
-export default function AdminMasterLancamentoPage() {
-  return <LaunchDashboardPage scope="master" />;
+export default function LegacyAdminMasterLancamentoPage() {
+  redirect("/master/lancamento");
 }

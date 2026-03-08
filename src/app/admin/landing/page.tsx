@@ -1,17 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
+import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { 
   Save, LayoutTemplate, Palette, Users, 
   MessageSquare, MapPin, Share2, Plus, Trash2,
-  Smartphone, Instagram, Linkedin, Twitter, Youtube, Music2, Globe
+  Smartphone, Instagram, Linkedin, Twitter, Youtube, Music2, Globe, Building2
 } from "lucide-react";
 
 // IMPORTS DO SISTEMA
 import { useAuth } from "@/context/AuthContext"; 
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
+import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import {
+  DEFAULT_LANDING_CONFIG,
   fetchLandingConfig,
   saveLandingConfig,
   type LandingConfig,
@@ -19,6 +23,7 @@ import {
 } from "@/lib/adminLandingService";
 import { logActivity } from "@/lib/logger"; 
 import { isPermissionError } from "@/lib/backendErrors";
+import { parseTenantScopedPath } from "@/lib/tenantRouting";
 
 // --- TYPES & INTERFACES (Clean Code) ---
 
@@ -37,7 +42,7 @@ const extractErrorMessage = (error: unknown): string => {
 };
 
 // --- ESTADO INICIAL ---
-const INITIAL_CONFIG: LandingConfig = {
+const TENANT_INITIAL_CONFIG: LandingConfig = {
   tagline: "Gestão Esportiva 2.0",
   taglineColor: "#10b981",
   heroTitle: "SEJA UM",
@@ -59,27 +64,51 @@ const INITIAL_CONFIG: LandingConfig = {
   reviews: []
 };
 
+const MASTER_INITIAL_CONFIG: LandingConfig = {
+  ...DEFAULT_LANDING_CONFIG,
+  heroTitle: "ENTRE PARA",
+  heroHighlight: "SPOT CONNECT",
+  heroSubtitle: "Plataforma oficial multi-atleticas.",
+};
+
 export default function AdminLandingPage() {
+  const pathname = usePathname() || "/admin/landing";
   const { user } = useAuth();
-  const { tenantId: activeTenantId, tenantSigla, tenantName, palette } = useTenantTheme();
+  const {
+    tenantId: activeTenantId,
+    tenantSigla,
+    tenantName,
+    tenantLogoUrl,
+    palette,
+  } = useTenantTheme();
   const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [config, setConfig] = useState<LandingConfig>(INITIAL_CONFIG);
+  const currentPath = parseTenantScopedPath(pathname).scopedPath;
+  const isMasterScope = currentPath === "/master/landing";
+  const fallbackConfig = useMemo(
+    () => (isMasterScope ? MASTER_INITIAL_CONFIG : TENANT_INITIAL_CONFIG),
+    [isMasterScope]
+  );
+  const [config, setConfig] = useState<LandingConfig>(fallbackConfig);
+  const targetTenantId = isMasterScope ? undefined : activeTenantId || undefined;
+  const contextLabel = isMasterScope
+    ? "USC • Landing global"
+    : `${tenantSigla || tenantName || "Tenant atual"} • Landing do tenant`;
 
   // CARREGAR DADOS (COM BLINDAGEM ANTI-CRASH)
   useEffect(() => {
     const fetchConfig = async () => {
       try {
         const data = await fetchLandingConfig({
-          fallbackConfig: INITIAL_CONFIG,
-          tenantId: activeTenantId || undefined,
+          fallbackConfig,
+          tenantId: targetTenantId,
         });
         setConfig({
-          ...INITIAL_CONFIG,
+          ...fallbackConfig,
           ...data,
-          socialLinks: data.socialLinks || INITIAL_CONFIG.socialLinks || [],
-          reviews: data.reviews || INITIAL_CONFIG.reviews || [],
+          socialLinks: data.socialLinks || fallbackConfig.socialLinks || [],
+          reviews: data.reviews || fallbackConfig.reviews || [],
         });
       } catch (error: unknown) {
         if (isPermissionError(error)) {
@@ -94,25 +123,28 @@ export default function AdminLandingPage() {
       }
     };
     void fetchConfig();
-  }, [activeTenantId, addToast]);
+  }, [addToast, fallbackConfig, targetTenantId]);
 
   // SALVAR DADOS
   const handleSave = async () => {
     setSaving(true);
     try {
-      await saveLandingConfig(config, { tenantId: activeTenantId || undefined });
+      await saveLandingConfig(config, { tenantId: targetTenantId });
 
       if (user) {
         await logActivity(
           user.uid,
           String(user.displayName || user.email || "Admin"), 
           "UPDATE",
-          "Landing",
-          `Atualizou landing. Destaque: ${config.heroHighlight}`
+          isMasterScope ? "Landing USC" : "Landing Tenant",
+          `Atualizou ${isMasterScope ? "landing global" : "landing do tenant"}. Destaque: ${config.heroHighlight}`
         );
       }
 
-      addToast("Landing atualizada com sucesso.", "success");
+      addToast(
+        isMasterScope ? "Landing USC atualizada com sucesso." : "Landing do tenant atualizada com sucesso.",
+        "success"
+      );
     } catch (error: unknown) {
       if (isPermissionError(error)) {
         addToast("Sem permissão para salvar a landing.", "error");
@@ -187,11 +219,17 @@ export default function AdminLandingPage() {
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
         <div>
           <h1 className="text-3xl font-black text-white flex items-center gap-3">
-            <LayoutTemplate className="text-emerald-500" /> Editor da Landing
+            <LayoutTemplate className="text-emerald-500" /> {isMasterScope ? "Landing USC" : "Editor da Landing"}
           </h1>
-          <p className="text-sm font-bold uppercase tracking-[0.22em]" style={{ color: palette.primary }}>
+          <p className="sr-only" style={{ color: palette.primary }}>
             {tenantSigla || tenantName || "Modo Global"} • Landing ativa
           </p>
+          <span
+            className="mt-1 block text-sm font-bold uppercase tracking-[0.22em]"
+            style={{ color: palette.primary }}
+          >
+            {contextLabel}
+          </span>
         </div>
         <button 
           onClick={handleSave}
@@ -201,6 +239,33 @@ export default function AdminLandingPage() {
           {saving ? "Salvando..." : <><Save size={18} /> Publicar Alterações</>}
         </button>
       </header>
+
+      <section className="mx-auto mb-8 flex max-w-7xl items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-lg">
+          <Image
+            src={isMasterScope ? PLATFORM_LOGO_URL : tenantLogoUrl || "/logo.png"}
+            alt={isMasterScope ? "Logo USC" : `Logo ${tenantSigla || tenantName || "Tenant"}`}
+            fill
+            className="object-contain p-3"
+            sizes="80px"
+            unoptimized={!isMasterScope && (tenantLogoUrl || "").startsWith("http")}
+          />
+        </div>
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+            {isMasterScope ? "Marca oficial da plataforma" : "Marca oficial da atletica"}
+          </p>
+          <h2 className="mt-1 flex items-center gap-2 text-xl font-black text-white">
+            <Building2 size={18} className="text-cyan-400" />
+            {isMasterScope ? "USC - Universidade Spot Connect" : tenantName || tenantSigla || "Tenant atual"}
+          </h2>
+          <p className="mt-1 text-xs text-zinc-400">
+            {isMasterScope
+              ? "Essa identidade aparece na landing publica de localhost:3000."
+              : "Essa identidade aparece na landing publica do tenant."}
+          </p>
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
         
@@ -281,11 +346,15 @@ export default function AdminLandingPage() {
                  </h2>
                  <div className="grid grid-cols-3 gap-3">
                      <div>
-                         <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Atletas</label>
+                         <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">
+                           {isMasterScope ? "Socios totais" : "Atletas"}
+                         </label>
                          <input type="number" value={config.statUsers} onChange={(e) => setConfig({...config, statUsers: Number(e.target.value)})} className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-white text-sm" />
                      </div>
                      <div>
-                         <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Treinos</label>
+                         <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">
+                           {isMasterScope ? "Atleticas criadas" : "Treinos"}
+                         </label>
                          <input type="number" value={config.statPosts} onChange={(e) => setConfig({...config, statPosts: Number(e.target.value)})} className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-white text-sm" />
                      </div>
                      <div>

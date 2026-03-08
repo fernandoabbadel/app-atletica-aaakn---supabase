@@ -1,7 +1,5 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { LaunchPendingPage } from "@/app/admin/_components/launch/LaunchPendingPage";
-
-export default function AdminMasterLancamentoPendentesPage() {
-  return <LaunchPendingPage scope="master" />;
+export default function LegacyAdminMasterLancamentoPendentesPage() {
+  redirect("/master/lancamento/pendentes");
 }

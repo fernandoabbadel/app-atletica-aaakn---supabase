@@ -1,7 +1,5 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { LaunchGenerationRankingPage } from "@/app/admin/_components/launch/LaunchGenerationRankingPage";
-
-export default function AdminMasterLancamentoConvitesPage() {
-  return <LaunchGenerationRankingPage scope="master" />;
+export default function LegacyAdminMasterLancamentoConvitesPage() {
+  redirect("/master/lancamento/convites");
 }

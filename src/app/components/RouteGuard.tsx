@@ -65,6 +65,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   );
   const currentPath = routePathInfo.scopedPath;
   const routeTenantSlug = routePathInfo.tenantSlug;
+  const isTenantLandingRoot = routeTenantSlug.length > 0 && currentPath === "/";
 
   const [authorized, setAuthorized] = useState(false);
   const [permissionMatrix, setPermissionMatrix] =
@@ -244,9 +245,11 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       return;
     }
 
-    const isPublic = PUBLIC_PATHS.some(
-      (path) => currentPath === path || currentPath.startsWith("/public")
-    );
+    const isPublic =
+      isTenantLandingRoot ||
+      PUBLIC_PATHS.some(
+        (path) => currentPath === path || currentPath.startsWith("/public")
+      );
     if (isPublic) {
       loginToastPathRef.current = "";
       pendingRedirectRef.current = "";
@@ -371,7 +374,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       }
     }
 
-    if (isPlatformMasterUser) {
+    if (isMasterOnlyAdminPath(currentPath) && isPlatformMasterUser) {
       setAuthorizedSafe(true);
       return;
     }
@@ -417,9 +420,16 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
         const allowedRoles = permissionMatrix[matchedRulePath].map((role) =>
           role.toLowerCase()
         );
+        const isTenantMasterCompatible =
+          !isMasterOnlyAdminPath(currentPath) &&
+          ((allowedRoles.includes("master") &&
+            currentRoleCandidates.includes("master_tenant")) ||
+            (allowedRoles.includes("master_tenant") &&
+              currentRoleCandidates.includes("master")));
         const isRoleAllowed =
           allowedRoles.includes(currentUserRole) ||
-          currentRoleCandidates.some((role) => allowedRoles.includes(role));
+          currentRoleCandidates.some((role) => allowedRoles.includes(role)) ||
+          isTenantMasterCompatible;
 
         if (!isRoleAllowed) {
           setAuthorizedSafe(false);
@@ -427,10 +437,10 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
           safeReplace(user.isAnonymous ? dashboardPath : "/sem-permissao");
           return;
         }
-      } else if (currentPath.startsWith("/admin/master") && isPlatformMasterUser) {
+      } else if (isMasterOnlyAdminPath(currentPath) && isPlatformMasterUser) {
         setAuthorizedSafe(true);
         return;
-      } else if (currentPath.startsWith("/admin")) {
+      } else if (currentPath.startsWith("/admin") || currentPath.startsWith("/master")) {
         setAuthorizedSafe(false);
         addToast("Opa! Area restrita da diretoria!", "error");
         safeReplace("/sem-permissao");
@@ -454,6 +464,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     routeTenantSlug,
     rawCurrentPath,
     currentPath,
+    isTenantLandingRoot,
     activeTenantSlug,
     router,
     permissionMatrix,
@@ -461,7 +472,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     setAuthorizedSafe,
   ]);
 
-  const isPublicRenderCheck = PUBLIC_PATHS.includes(currentPath);
+  const isPublicRenderCheck = isTenantLandingRoot || PUBLIC_PATHS.includes(currentPath);
 
   if (isPublicRenderCheck) return <>{children}</>;
   if (authLoading || rulesLoading || routeTenantLoading) return <SharkLoader />;

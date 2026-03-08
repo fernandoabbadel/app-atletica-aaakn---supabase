@@ -365,19 +365,34 @@ export async function fetchMenuConfig(options?: {
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("app_config")
-    .select("id,sections")
-    .eq("id", "menu")
-    .maybeSingle();
-  if (error) throwSupabaseError(error);
+  let selectColumns = ["id", "sections", "data"];
+  let data: Record<string, unknown> | null = null;
+
+  while (selectColumns.length > 0) {
+    const response = await supabase
+      .from("app_config")
+      .select(selectColumns.join(","))
+      .eq("id", "menu")
+      .maybeSingle();
+
+    if (!response.error) {
+      data = asObject(response.data);
+      break;
+    }
+
+    const missingColumnName = asString(extractMissingSchemaColumn(response.error));
+    const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumnName) ?? [];
+    if (nextColumns.length === 0) throwSupabaseError(response.error);
+    selectColumns = nextColumns;
+  }
 
   if (!data) {
     menuCache = { cachedAt: Date.now(), value: null };
     return null;
   }
 
-  const sections = sanitizeMenuSections(data.sections);
+  const nestedData = asObject(data.data);
+  const sections = sanitizeMenuSections(nestedData?.sections ?? data.sections);
   menuCache = { cachedAt: Date.now(), value: sections };
   return sections;
 }
@@ -392,15 +407,30 @@ export async function saveMenuConfig(
     { sections: normalized },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase.from("app_config").upsert(
-        {
-          id: "menu",
-          sections: normalized,
-          updatedAt: nowIso(),
-        },
-        { onConflict: "id" }
-      );
-      if (error) throwSupabaseError(error);
+      const mutablePayload: Record<string, unknown> = {
+        id: "menu",
+        sections: normalized,
+        data: { sections: normalized },
+        updatedAt: nowIso(),
+      };
+
+      while (true) {
+        const { error } = await supabase.from("app_config").upsert(mutablePayload, {
+          onConflict: "id",
+        });
+        if (!error) break;
+
+        const missingColumnName = asString(extractMissingSchemaColumn(error)).toLowerCase();
+        if (!missingColumnName) throwSupabaseError(error);
+
+        const removableKey = Object.keys(mutablePayload).find(
+          (key) => key !== "id" && key.toLowerCase() === missingColumnName
+        );
+        if (!removableKey) throwSupabaseError(error);
+
+        delete mutablePayload[String(removableKey)];
+      }
+
       return { ok: true };
     }
   );

@@ -93,6 +93,17 @@ export interface PublicLandingData {
   partnersCount: number;
 }
 
+export interface PublicLandingBrand {
+  sigla: string;
+  nome: string;
+  subtitle: string;
+  logoUrl: string;
+}
+
+export interface PublicLandingPayload extends PublicLandingData {
+  brand: PublicLandingBrand;
+}
+
 export async function fetchPublicLandingData(options?: {
   forceRefresh?: boolean;
   fallbackConfig?: LandingConfig;

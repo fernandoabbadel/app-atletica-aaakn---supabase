@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "type-check": "tsc --noEmit --pretty false",
-    "check-schema": "node --experimental-strip-types scripts/check-schema.ts",
+    "type-check": "next typegen && tsc --noEmit --pretty false",
+    "check-schema": "node --experimental-strip-types scripts/check-schema.mts",
     "verify": "npm run lint && npm run type-check",
     "build": "npm run verify && npm run check-schema && next build",
     "start": "next start",

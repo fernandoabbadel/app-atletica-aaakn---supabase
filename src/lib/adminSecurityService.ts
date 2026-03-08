@@ -514,7 +514,7 @@ export async function updatePermissionUserRole(payload: {
   const targetUserId = payload.targetUserId.trim();
   const tenantId = payload.tenantId?.trim() || "";
   const requestedRole = payload.role.trim().toLowerCase();
-  const role = requestedRole === "master_tenant" ? "master" : requestedRole;
+  const role = requestedRole;
   if (!targetUserId || !role) return;
 
   const requestPayload = { targetUserId, role, tenantId: tenantId || undefined };
@@ -524,12 +524,23 @@ export async function updatePermissionUserRole(payload: {
     async () => {
       const supabase = getSupabaseClient();
 
-      const toLegacyTenantRole = (value: string): string => {
+      const toFallbackTenantRole = (value: string): string => {
         const normalized = value.trim().toLowerCase();
         if (normalized === "admin_geral") return "admin_tenant";
+        if (normalized === "admin_tenant") return "admin_geral";
+        if (normalized === "master_tenant") return "master";
         if (normalized === "master") return "master_tenant";
-        if (normalized === "visitante") return "visitante";
-        if (normalized === "user") return "user";
+        if (
+          normalized === "visitante" ||
+          normalized === "user" ||
+          normalized === "vendas" ||
+          normalized === "treinador" ||
+          normalized === "empresa" ||
+          normalized === "admin_treino" ||
+          normalized === "admin_gestor"
+        ) {
+          return normalized;
+        }
         return "user";
       };
 
@@ -553,17 +564,17 @@ export async function updatePermissionUserRole(payload: {
         .eq("uid", targetUserId);
 
       if (updateResult.error) {
-        const legacyTenantRole = toLegacyTenantRole(role);
+        const fallbackTenantRole = toFallbackTenantRole(role);
         const isTenantRoleConstraintError =
           asString(updateResult.error.message).toLowerCase().includes("tenant_role") ||
           asString(updateResult.error.details).toLowerCase().includes("tenant_role") ||
           asString(updateResult.error.hint).toLowerCase().includes("tenant_role");
 
-        if (isTenantRoleConstraintError && legacyTenantRole !== role) {
-          finalTenantRole = legacyTenantRole;
+        if (isTenantRoleConstraintError && fallbackTenantRole !== role) {
+          finalTenantRole = fallbackTenantRole;
           updateResult = await supabase
             .from("users")
-            .update(buildUserPatch(legacyTenantRole))
+            .update(buildUserPatch(fallbackTenantRole))
             .eq("uid", targetUserId);
         }
       }
@@ -593,7 +604,7 @@ export async function updatePermissionUserRole(payload: {
           .eq("user_id", targetUserId);
 
         if (membershipUpdate.error) {
-          const fallbackRole = toLegacyTenantRole(finalTenantRole);
+          const fallbackRole = toFallbackTenantRole(finalTenantRole);
           if (fallbackRole !== finalTenantRole) {
             membershipUpdate = await supabase
               .from("tenant_memberships")

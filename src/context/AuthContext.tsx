@@ -10,7 +10,10 @@ import { getBackendErrorCode, isPermissionError } from "@/lib/backendErrors";
 import { ensureAlbumSelfCollected } from "@/lib/albumService";
 import {
   applyPlatformMasterTenantOverride,
+  getMasterRolePreview,
   MASTER_TENANT_OVERRIDE_EVENT_NAME,
+  MASTER_ROLE_PREVIEW_EVENT_NAME,
+  MASTER_ROLE_PREVIEW_STORAGE_KEY,
   getMasterTenantOverrideId,
   MASTER_TENANT_OVERRIDE_STORAGE_KEY,
 } from "@/lib/tenantContext";
@@ -486,6 +489,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [masterOverrideTenantId, setMasterOverrideTenantId] = useState("");
+  const [masterRolePreview, setMasterRolePreview] = useState("");
   
   // Ã°Å¸Â¦Ë† ESTADO LOCAL DE GUEST
   const [isLocalGuest, setIsLocalGuest] = useState(false);
@@ -504,8 +508,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [pathnameRaw]
   );
   const effectiveUser = useMemo(
-    () => applyPlatformMasterTenantOverride(user, masterOverrideTenantId) ?? null,
-    [masterOverrideTenantId, user]
+    () =>
+      applyPlatformMasterTenantOverride(
+        user,
+        masterOverrideTenantId,
+        masterRolePreview
+      ) ?? null,
+    [masterOverrideTenantId, masterRolePreview, user]
   );
 
   // 1. CARREGAMENTO INICIAL UNIFICADO
@@ -599,10 +608,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.getItem(MASTER_TENANT_OVERRIDE_STORAGE_KEY)
       )
     );
+    setMasterRolePreview(
+      getMasterRolePreview(localStorage.getItem(MASTER_ROLE_PREVIEW_STORAGE_KEY))
+    );
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key !== MASTER_TENANT_OVERRIDE_STORAGE_KEY) return;
-      setMasterOverrideTenantId(getMasterTenantOverrideId(event.newValue));
+      if (event.key === MASTER_TENANT_OVERRIDE_STORAGE_KEY) {
+        setMasterOverrideTenantId(getMasterTenantOverrideId(event.newValue));
+        return;
+      }
+      if (event.key === MASTER_ROLE_PREVIEW_STORAGE_KEY) {
+        setMasterRolePreview(getMasterRolePreview(event.newValue));
+      }
     };
     const onOverrideChanged = (event: Event) => {
       const rawEvent = event as CustomEvent<{ tenantId?: unknown }>;
@@ -610,17 +627,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         getMasterTenantOverrideId(rawEvent.detail?.tenantId)
       );
     };
+    const onRolePreviewChanged = (event: Event) => {
+      const rawEvent = event as CustomEvent<{ role?: unknown }>;
+      setMasterRolePreview(getMasterRolePreview(rawEvent.detail?.role));
+    };
 
     window.addEventListener("storage", onStorage);
     window.addEventListener(
       MASTER_TENANT_OVERRIDE_EVENT_NAME,
       onOverrideChanged as EventListener
     );
+    window.addEventListener(
+      MASTER_ROLE_PREVIEW_EVENT_NAME,
+      onRolePreviewChanged as EventListener
+    );
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(
         MASTER_TENANT_OVERRIDE_EVENT_NAME,
         onOverrideChanged as EventListener
+      );
+      window.removeEventListener(
+        MASTER_ROLE_PREVIEW_EVENT_NAME,
+        onRolePreviewChanged as EventListener
       );
     };
   }, []);

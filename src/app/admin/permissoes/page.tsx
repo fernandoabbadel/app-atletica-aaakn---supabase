@@ -20,7 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
@@ -37,6 +37,7 @@ import {
   isMasterOnlyAdminPath,
   isPlatformMaster,
 } from "@/lib/roles";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
 const ROLES = [
   { id: "master", label: "Master", icon: Crown, color: "text-red-500" },
@@ -50,17 +51,42 @@ const ROLES = [
   { id: "visitante", label: "Visitante", icon: User, color: "text-zinc-600" },
 ];
 
+const buildDefaultMatrix = (): PermissionMatrix => {
+  const defaultMatrix: PermissionMatrix = {};
+  APP_PAGES.forEach((page) => {
+    defaultMatrix[page.path] = isMasterOnlyAdminPath(page.path) ? ["master"] : ["master"];
+  });
+  return defaultMatrix;
+};
+
 export default function AdminPermissoesPage() {
   const { user, loading: authLoading } = useAuth();
   const { addToast } = useToast();
+  const pathname = usePathname() || "/admin/permissoes";
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [permissionMatrix, setPermissionMatrix] = useState<PermissionMatrix>({});
   const [savingMatrix, setSavingMatrix] = useState(false);
 
+  const pathInfo = parseTenantScopedPath(pathname);
+  const currentPath = pathInfo.scopedPath;
   const isPlatformMasterUser = isPlatformMaster(user);
-  const canViewPermissions = isPlatformMasterUser || canManageTenant(user);
+  const isMasterScope = currentPath === "/master/permissoes";
+  const canViewPermissions = isMasterScope
+    ? isPlatformMasterUser
+    : isPlatformMasterUser || canManageTenant(user);
+  const canEditMatrix = isMasterScope && isPlatformMasterUser;
+  const adminBasePath = pathInfo.tenantSlug ? withTenantSlug(pathInfo.tenantSlug, "/admin") : "/admin";
+  const tenantPermissionsPath = pathInfo.tenantSlug
+    ? withTenantSlug(pathInfo.tenantSlug, "/admin/permissoes/usuarios")
+    : "/admin/permissoes/usuarios";
+  const tenantUsersPath = pathInfo.tenantSlug
+    ? withTenantSlug(pathInfo.tenantSlug, "/admin/usuarios")
+    : "/admin/usuarios";
+  const visiblePages = isMasterScope
+    ? APP_PAGES
+    : APP_PAGES.filter((page) => !isMasterOnlyAdminPath(page.path));
 
   const getLocalCachedMatrix = (): PermissionMatrix | null => {
     if (typeof window === "undefined") return null;
@@ -103,13 +129,7 @@ export default function AdminPermissoesPage() {
         if (matrix && Object.keys(matrix).length > 0) {
           setPermissionMatrix(matrix);
         } else {
-          const defaultMatrix: PermissionMatrix = {};
-          APP_PAGES.forEach((page) => {
-            defaultMatrix[page.path] = isMasterOnlyAdminPath(page.path)
-              ? ["master"]
-              : ["master"];
-          });
-          setPermissionMatrix(defaultMatrix);
+          setPermissionMatrix(buildDefaultMatrix());
         }
       } catch (error: unknown) {
         if (isPermissionError(error)) {
@@ -117,12 +137,13 @@ export default function AdminPermissoesPage() {
           if (cached) {
             setPermissionMatrix(cached);
             addToast("Modo leitura: usando matriz local em cache.", "info");
-          } else if (isPlatformMasterUser) {
+          } else if (isMasterScope && isPlatformMasterUser) {
             addToast("Sem permissao para abrir o painel de permissoes.", "error");
             router.push("/sem-permissao");
             return;
           } else {
-            setPermissionMatrix({});
+            setPermissionMatrix(buildDefaultMatrix());
+            addToast("Modo leitura: exibindo matriz padrao do tenant.", "info");
           }
         } else {
           console.error(error);
@@ -140,10 +161,10 @@ export default function AdminPermissoesPage() {
     return () => {
       mounted = false;
     };
-  }, [authLoading, canViewPermissions, router, addToast, isPlatformMasterUser]);
+  }, [authLoading, canViewPermissions, router, addToast, isMasterScope, isPlatformMasterUser]);
 
   const togglePermission = (path: string, roleId: string) => {
-    if (!isPlatformMasterUser || roleId === "master" || isMasterOnlyAdminPath(path)) {
+    if (!canEditMatrix || roleId === "master" || isMasterOnlyAdminPath(path)) {
       return;
     }
 
@@ -159,7 +180,7 @@ export default function AdminPermissoesPage() {
   };
 
   const saveMatrix = async () => {
-    if (!isPlatformMasterUser) {
+    if (!canEditMatrix) {
       addToast("Somente o master da plataforma pode editar a matriz.", "error");
       return;
     }
@@ -207,15 +228,18 @@ export default function AdminPermissoesPage() {
     <div className="min-h-screen bg-[#050505] text-white pb-32 font-sans">
       <header className="p-6 border-b border-zinc-800 bg-[#09090b]/95 backdrop-blur sticky top-0 z-30 flex justify-between items-center gap-4">
         <div className="flex items-center gap-4">
-          <Link href="/admin" className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition">
+          <Link
+            href={isMasterScope ? "/master" : adminBasePath}
+            className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"
+          >
             <ArrowLeft size={20} />
           </Link>
           <div>
             <h1 className="text-xl font-black uppercase flex items-center gap-2">
-              <Shield className="text-red-600" /> Controle de Acesso
+              <Shield className="text-red-600" /> {isMasterScope ? "Permissoes Globais" : "Controle de Acesso"}
             </h1>
             <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">
-              {isPlatformMasterUser
+              {isMasterScope
                 ? "Area Restrita do Master da Plataforma"
                 : "Modo Leitura para Admin do Tenant"}
             </p>
@@ -223,20 +247,22 @@ export default function AdminPermissoesPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {canManageTenant(user) && (
+          {!isMasterScope && canManageTenant(user) && (
             <Link
-              href="/admin/permissoes/usuarios"
+              href={tenantPermissionsPath}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-cyan-700/40 bg-zinc-900 text-cyan-300 text-[11px] font-black uppercase hover:bg-zinc-800 transition"
             >
               <Users size={14} /> Cargos do Tenant
             </Link>
           )}
-          <Link
-            href="/admin/usuarios"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300 text-[11px] font-black uppercase hover:bg-zinc-800 transition"
-          >
-            <Users size={14} /> Status
-          </Link>
+          {!isMasterScope && (
+            <Link
+              href={tenantUsersPath}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300 text-[11px] font-black uppercase hover:bg-zinc-800 transition"
+            >
+              <Users size={14} /> Status
+            </Link>
+          )}
         </div>
       </header>
 
@@ -250,11 +276,12 @@ export default function AdminPermissoesPage() {
             <AlertTriangle className="text-yellow-500 shrink-0" size={20} />
             <div>
               <h3 className="text-sm font-bold text-yellow-500 uppercase">
-                {isPlatformMasterUser ? "Atencao, Master" : "Matriz Global"}
+                {canEditMatrix ? "Atencao, Master" : "Visualizacao do Tenant"}
               </h3>
               <p className="text-xs text-zinc-400 mt-1">
-                Esta matriz controla o acesso por rota. A edicao da matriz global fica apenas para o
-                master da plataforma.
+                {canEditMatrix
+                  ? "Esta matriz controla o acesso por rota. A edicao global fica apenas no painel master."
+                  : "Aqui o admin da atletica so visualiza a matriz. A edicao global continua restrita ao painel master."}
               </p>
             </div>
           </div>
@@ -284,10 +311,10 @@ export default function AdminPermissoesPage() {
                 </tr>
               </thead>
               <tbody className="bg-black">
-                {APP_PAGES.map((page, idx) => {
+                {visiblePages.map((page, idx) => {
                   const isAdmin = page.path.startsWith("/admin");
                   const isMasterOnlyRoute = isMasterOnlyAdminPath(page.path);
-                  const prevPage = idx > 0 ? APP_PAGES[idx - 1] : null;
+                  const prevPage = idx > 0 ? visiblePages[idx - 1] : null;
                   const prevIsAdmin = prevPage ? prevPage.path.startsWith("/admin") : isAdmin;
                   const showSeparator = prevPage && isAdmin !== prevIsAdmin;
 
@@ -301,7 +328,7 @@ export default function AdminPermissoesPage() {
 
                       <tr
                         className={`group hover:bg-zinc-900/30 transition ${
-                          idx !== APP_PAGES.length - 1 ? "border-b border-zinc-800/50" : ""
+                          idx !== visiblePages.length - 1 ? "border-b border-zinc-800/50" : ""
                         } ${isAdmin ? "bg-red-950/5 hover:bg-red-900/10" : ""}`}
                       >
                         <td
@@ -323,7 +350,7 @@ export default function AdminPermissoesPage() {
                               ? role.id === "master"
                               : (permissionMatrix[page.path] || []).includes(role.id) || role.id === "master";
                           const isLocked =
-                            !isPlatformMasterUser ||
+                            !canEditMatrix ||
                             role.id === "master" ||
                             isMasterOnlyRoute;
 
@@ -355,7 +382,7 @@ export default function AdminPermissoesPage() {
             </table>
           </div>
 
-          {isPlatformMasterUser && (
+          {canEditMatrix && (
             <div className="fixed bottom-6 right-6 z-50">
               <button
                 onClick={saveMatrix}
