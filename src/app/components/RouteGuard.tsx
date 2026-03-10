@@ -32,6 +32,7 @@ import {
   withTenantSlug,
 } from "@/lib/tenantRouting";
 import { fetchTenantBySlug } from "@/lib/tenantService";
+import { buildLoginPath } from "@/lib/authRedirect";
 
 const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
   if (typeof raw !== "object" || raw === null) return null;
@@ -53,7 +54,11 @@ const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
 
 export default function RouteGuard({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
-  const { tenantSlug: activeTenantSlug } = useTenantTheme();
+  const {
+    tenantId: activeTenantId,
+    tenantSlug: activeTenantSlug,
+    loading: tenantThemeLoading,
+  } = useTenantTheme();
   const { addToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
@@ -66,6 +71,11 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   const currentPath = routePathInfo.scopedPath;
   const routeTenantSlug = routePathInfo.tenantSlug;
   const isTenantLandingRoot = routeTenantSlug.length > 0 && currentPath === "/";
+  const tenantNotFoundPath = routeTenantSlug
+    ? withTenantSlug(routeTenantSlug, "/nao-encontrado")
+    : activeTenantSlug.trim()
+      ? withTenantSlug(activeTenantSlug, "/nao-encontrado")
+      : "/nao-encontrado";
 
   const [authorized, setAuthorized] = useState(false);
   const [permissionMatrix, setPermissionMatrix] =
@@ -102,13 +112,15 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
     const userTenantId =
       typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
+    const resolvedActiveTenantId =
+      typeof activeTenantId === "string" ? activeTenantId.trim() : "";
     const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
     if (
-      userTenantId &&
+      resolvedActiveTenantId &&
       normalizedActiveTenantSlug &&
       routeTenantSlug === normalizedActiveTenantSlug
     ) {
-      setRouteTenantId(userTenantId);
+      setRouteTenantId(resolvedActiveTenantId);
       setRouteTenantLoading(false);
       setRouteTenantResolved(true);
       return;
@@ -127,6 +139,12 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       } catch {
         if (!mounted) return;
         if (
+          resolvedActiveTenantId &&
+          normalizedActiveTenantSlug &&
+          routeTenantSlug === normalizedActiveTenantSlug
+        ) {
+          setRouteTenantId(resolvedActiveTenantId);
+        } else if (
           userTenantId &&
           normalizedActiveTenantSlug &&
           routeTenantSlug === normalizedActiveTenantSlug
@@ -147,7 +165,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     return () => {
       mounted = false;
     };
-  }, [hasUser, routeTenantSlug, user?.tenant_id, activeTenantSlug]);
+  }, [hasUser, routeTenantSlug, user?.tenant_id, activeTenantId, activeTenantSlug]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -239,12 +257,6 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
         ? withTenantSlug(activeTenantSlug, "/dashboard")
         : "/dashboard";
 
-    if (currentPath === "/login" && !authLoading && user) {
-      setAuthorizedSafe(false);
-      safeReplace(dashboardPath);
-      return;
-    }
-
     const isPublic =
       isTenantLandingRoot ||
       PUBLIC_PATHS.some(
@@ -260,6 +272,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     if (
       authLoading ||
       rulesLoading ||
+      tenantThemeLoading ||
       routeTenantLoading ||
       (hasUser && !!routeTenantSlug && !routeTenantResolved)
     ) {
@@ -295,7 +308,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
           addToast("Opa! Faz login pra nadar com o cardume!", "info");
           loginToastPathRef.current = rawCurrentPath;
         }
-        safeReplace("/login");
+        safeReplace(buildLoginPath(rawCurrentPath));
       } else {
         loginToastPathRef.current = "";
       }
@@ -318,7 +331,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     if (routeTenantSlug) {
       if (!routeTenantId) {
         setAuthorizedSafe(false);
-        safeReplace("/nao-encontrado");
+        safeReplace(tenantNotFoundPath);
         return;
       }
 
@@ -368,7 +381,8 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       if (!isAllowed) {
         setAuthorizedSafe(false);
         addToast("Essa area eh exclusiva para membros oficiais!", "error");
-        const fallbackPath = currentPath === "/dashboard" ? "/login" : dashboardPath;
+        const fallbackPath =
+          currentPath === "/dashboard" ? buildLoginPath(rawCurrentPath) : dashboardPath;
         safeReplace(fallbackPath);
         return;
       }
@@ -458,6 +472,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     isPlatformMasterUser,
     authLoading,
     rulesLoading,
+    tenantThemeLoading,
     routeTenantId,
     routeTenantLoading,
     routeTenantResolved,
@@ -466,6 +481,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     currentPath,
     isTenantLandingRoot,
     activeTenantSlug,
+    tenantNotFoundPath,
     router,
     permissionMatrix,
     addToast,
@@ -475,7 +491,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   const isPublicRenderCheck = isTenantLandingRoot || PUBLIC_PATHS.includes(currentPath);
 
   if (isPublicRenderCheck) return <>{children}</>;
-  if (authLoading || rulesLoading || routeTenantLoading) return <SharkLoader />;
+  if (authLoading || rulesLoading || tenantThemeLoading || routeTenantLoading) return <SharkLoader />;
   if (!authorized) return <SharkLoader />;
 
   return <>{children}</>;

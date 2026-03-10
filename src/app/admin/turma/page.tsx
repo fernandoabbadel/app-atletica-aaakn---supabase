@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
   addTurmaConfig,
   deleteTurmaConfig,
@@ -85,8 +86,9 @@ const buildFormFromTurma = (turma: TurmaConfig): TurmaFormState => ({
   logo: turma.logo,
 });
 
-export default function AdminCadastroPage() {
+export default function AdminTurmaPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -149,7 +151,10 @@ export default function AdminCadastroPage() {
   );
 
   const refreshTurmas = async (): Promise<void> => {
-    const rows = await fetchTurmasConfig({ forceRefresh: true });
+    const rows = await fetchTurmasConfig({
+      forceRefresh: true,
+      tenantId: activeTenantId || undefined,
+    });
     setTurmas(rows);
     syncEditMode(rows);
   };
@@ -158,7 +163,9 @@ export default function AdminCadastroPage() {
     let mounted = true;
     const load = async () => {
       try {
-        const rows = await fetchTurmasConfig();
+        const rows = await fetchTurmasConfig({
+          tenantId: activeTenantId || undefined,
+        });
         if (!mounted) return;
         setTurmas(rows);
         syncEditMode(rows);
@@ -174,7 +181,7 @@ export default function AdminCadastroPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast, syncEditMode]);
+  }, [activeTenantId, addToast, syncEditMode]);
 
   useEffect(() => {
     if (loading) return;
@@ -182,11 +189,11 @@ export default function AdminCadastroPage() {
   }, [loading, syncEditMode, turmas]);
 
   const handleStartEdit = (turmaId: string) => {
-    router.replace(`/admin/cadastro?edit=${turmaId}`);
+    router.replace(`/admin/turma?edit=${turmaId}`);
   };
 
   const handleCancelEdit = () => {
-    router.replace("/admin/cadastro");
+    router.replace("/admin/turma");
   };
 
   const handleSubmit = async () => {
@@ -206,14 +213,14 @@ export default function AdminCadastroPage() {
             mascote: form.mascote.trim() || undefined,
             capa: form.capa.trim() || undefined,
             logo: form.logo.trim() || undefined,
-          })
+          }, { tenantId: activeTenantId || undefined })
         : await addTurmaConfig({
             id: normalizedId,
             nome: form.nome.trim() || undefined,
             mascote: form.mascote.trim() || undefined,
             capa: form.capa.trim() || undefined,
             logo: form.logo.trim() || undefined,
-          });
+          }, { tenantId: activeTenantId || undefined });
 
       setTurmas(next);
 
@@ -237,7 +244,9 @@ export default function AdminCadastroPage() {
   const handleToggleHidden = async (turma: TurmaConfig) => {
     try {
       setRowActionId(turma.id);
-      const next = await toggleTurmaVisibility(turma.id, !turma.hidden);
+      const next = await toggleTurmaVisibility(turma.id, !turma.hidden, {
+        tenantId: activeTenantId || undefined,
+      });
       setTurmas(next);
       addToast(
         turma.hidden
@@ -260,7 +269,9 @@ export default function AdminCadastroPage() {
 
     try {
       setRowActionId(turma.id);
-      const next = await deleteTurmaConfig(turma.id);
+      const next = await deleteTurmaConfig(turma.id, {
+        tenantId: activeTenantId || undefined,
+      });
       setTurmas(next);
       if (editingTurmaId === turma.id) {
         handleCancelEdit();
@@ -277,7 +288,7 @@ export default function AdminCadastroPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center text-sm font-black uppercase">
-        Carregando cadastro...
+        Carregando turmas...
       </div>
     );
   }
@@ -295,7 +306,7 @@ export default function AdminCadastroPage() {
             </Link>
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight">
-                Cadastro Admin
+                Turma Admin
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold uppercase">
                 Turmas do Album
@@ -331,7 +342,7 @@ export default function AdminCadastroPage() {
                 className="px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-950 hover:bg-zinc-800 text-xs font-black uppercase inline-flex items-center gap-2"
               >
                 <X size={14} />
-                Novo Cadastro
+                Nova Turma
               </button>
             )}
           </div>

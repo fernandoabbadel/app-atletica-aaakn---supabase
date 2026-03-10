@@ -30,7 +30,7 @@ const DASHBOARD_LIGAS_SELECT =
   "id,nome,sigla,foto,logoUrl,logoBase64,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
 const DASHBOARD_POSTS_SELECT =
   "id,userId,userName,avatar,createdAt,texto,likes,tenant_id";
-const DASHBOARD_TREINOS_SELECT = "id,imagem";
+const DASHBOARD_TREINOS_SELECT = "id,imagem,tenant_id";
 const DASHBOARD_ALBUM_FALLBACK_SELECT = "totalColetado";
 
 const dashboardCache = new Map<string, CacheEntry<DashboardBundle>>();
@@ -206,27 +206,40 @@ async function fetchRowsWithFallback(
   return [];
 }
 
-async function fetchDashboardTotalCaca(): Promise<number> {
+async function fetchDashboardTotalCaca(tenantId?: string): Promise<number> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = asString(tenantId).trim();
   const { data, error } = await supabase.rpc(DASHBOARD_TOTAL_CACA_RPC);
-  if (!error) {
+  if (!error && !scopedTenantId) {
     return Math.max(0, asInteger(data, 0));
   }
 
   const albumRows = await fetchRowsWithFallback("album_rankings", DASHBOARD_ALBUM_FALLBACK_SELECT, [
-    { limit: DASHBOARD_ALBUM_FALLBACK_LIMIT },
+    {
+      limit: DASHBOARD_ALBUM_FALLBACK_LIMIT,
+      ...(scopedTenantId ? { eq: { tenant_id: scopedTenantId } } : {}),
+    },
   ]);
   return albumRows.reduce((acc, row) => acc + asNumber(row.totalColetado, 0), 0);
 }
 
-async function safeUsersCount(): Promise<number> {
+async function safeUsersCount(tenantId?: string): Promise<number> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = asString(tenantId).trim();
   try {
-    const { count, error } = await supabase.from("users").select("uid", { count: "exact", head: true });
+    let query = supabase.from("users").select("uid", { count: "exact", head: true });
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { count, error } = await query;
     if (error) throw error;
     return count ?? 0;
   } catch {
-    const { data, error } = await supabase.from("users").select("uid").limit(DASHBOARD_USERS_COUNT_FALLBACK_LIMIT);
+    let query = supabase.from("users").select("uid");
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query.limit(DASHBOARD_USERS_COUNT_FALLBACK_LIMIT);
     if (error) throwSupabaseError(error);
     return (data ?? []).length;
   }
@@ -321,19 +334,26 @@ const toTurmaKey = (raw: unknown): string | null => {
   return digits ? digits : null;
 };
 
-async function fetchUsersTurmaMap(uids: string[]): Promise<Map<string, string>> {
+async function fetchUsersTurmaMap(
+  uids: string[],
+  tenantId?: string
+): Promise<Map<string, string>> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = asString(tenantId).trim();
   const uniqueIds = [...new Set(uids.filter((entry) => entry.trim().length > 0))];
   const result = new Map<string, string>();
   if (!uniqueIds.length) return result;
 
   const chunks = chunkArray(uniqueIds, DASHBOARD_USERS_IN_CHUNK);
   for (const chunk of chunks) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("users")
       .select("uid,turma")
-      .in("uid", chunk)
-      .limit(chunk.length);
+      .in("uid", chunk);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query.limit(chunk.length);
     if (error) throwSupabaseError(error);
     for (const row of data ?? []) {
       const record = row as Record<string, unknown>;
@@ -346,7 +366,10 @@ async function fetchUsersTurmaMap(uids: string[]): Promise<Map<string, string>> 
   return result;
 }
 
-async function buildProductTurmaStats(products: DashboardProduct[]): Promise<Record<string, DashboardTurmaStat[]>> {
+async function buildProductTurmaStats(
+  products: DashboardProduct[],
+  tenantId?: string
+): Promise<Record<string, DashboardTurmaStat[]>> {
   const likesByProduct = new Map<string, string[]>();
   const sampledUids: string[] = [];
 
@@ -356,7 +379,7 @@ async function buildProductTurmaStats(products: DashboardProduct[]): Promise<Rec
     sampledUids.push(...sampled);
   }
 
-  const turmaByUid = await fetchUsersTurmaMap(sampledUids);
+  const turmaByUid = await fetchUsersTurmaMap(sampledUids, tenantId);
   const statsByProduct: Record<string, DashboardTurmaStat[]> = {};
 
   for (const [productId, likes] of likesByProduct.entries()) {
@@ -534,11 +557,15 @@ export async function fetchDashboardBundle(options?: {
         { limit: DASHBOARD_POSTS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
       ]),
       fetchRowsWithFallback("treinos", DASHBOARD_TREINOS_SELECT, [
-        { orderBy: { column: "createdAt", ascending: false }, limit: DASHBOARD_TREINOS_LIMIT },
-        { limit: DASHBOARD_TREINOS_LIMIT },
+        {
+          orderBy: { column: "createdAt", ascending: false },
+          limit: DASHBOARD_TREINOS_LIMIT,
+          ...(tenantFilter ? { eq: tenantFilter } : {}),
+        },
+        { limit: DASHBOARD_TREINOS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
       ]),
-      safeUsersCount(),
-      fetchDashboardTotalCaca(),
+      safeUsersCount(tenantId || undefined),
+      fetchDashboardTotalCaca(tenantId || undefined),
     ]);
 
   const events = eventRows
@@ -567,7 +594,7 @@ export async function fetchDashboardBundle(options?: {
     .map((row) => normalizePost(asString(row.id), row))
     .filter((row): row is DashboardPost => row !== null);
   const treinos = treinoRows.map((row) => asString(row.imagem)).filter((entry) => entry.length > 0);
-  const productTurmaStats = await buildProductTurmaStats(produtos);
+  const productTurmaStats = await buildProductTurmaStats(produtos, tenantId || undefined);
 
   const bundle: DashboardBundle = {
     events,

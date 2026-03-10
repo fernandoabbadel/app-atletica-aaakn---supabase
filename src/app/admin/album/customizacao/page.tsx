@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Save } from "lucide-react";
 
 import { useToast } from "../../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
   fetchAlbumConfig,
   fetchAlbumUiConfig,
@@ -39,6 +40,7 @@ const buildDefaultTurmaMap = (turmas: TurmaConfig[]): Record<string, AlbumCmsDat
 
 export default function AdminAlbumCustomizacaoPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [loading, setLoading] = useState(true);
   const [savingGlobal, setSavingGlobal] = useState(false);
   const [savingTurma, setSavingTurma] = useState(false);
@@ -54,8 +56,8 @@ export default function AdminAlbumCustomizacaoPage() {
     const load = async () => {
       try {
         const [globalDoc, turmasConfig] = await Promise.all([
-          fetchAlbumUiConfig(),
-          fetchTurmasConfig(),
+          fetchAlbumUiConfig({ tenantId: activeTenantId || undefined }),
+          fetchTurmasConfig({ tenantId: activeTenantId || undefined }),
         ]);
         if (!mounted) return;
 
@@ -63,7 +65,9 @@ export default function AdminAlbumCustomizacaoPage() {
         setTurmas(turmasConfig);
 
         const turmaDocs = await Promise.all(
-          turmasConfig.map((turma) => fetchAlbumConfig(turma.id))
+          turmasConfig.map((turma) =>
+            fetchAlbumConfig(turma.id, { tenantId: activeTenantId || undefined })
+          )
         );
         if (!mounted) return;
 
@@ -94,7 +98,7 @@ export default function AdminAlbumCustomizacaoPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   const selectedTurmaData = useMemo(() => {
     const selected = turmas.find((turma) => turma.id === selectedTurma);
@@ -110,7 +114,9 @@ export default function AdminAlbumCustomizacaoPage() {
   const handleSaveGlobal = async () => {
     try {
       setSavingGlobal(true);
-      await saveAlbumUiConfig(globalConfig);
+      await saveAlbumUiConfig(globalConfig, {
+        tenantId: activeTenantId || undefined,
+      });
       addToast("Customizacao da pagina /album salva.", "success");
     } catch {
       addToast("Erro ao salvar customizacao da home do album.", "error");
@@ -122,7 +128,9 @@ export default function AdminAlbumCustomizacaoPage() {
   const handleSaveTurma = async () => {
     try {
       setSavingTurma(true);
-      await saveAlbumConfig(selectedTurmaData.id, turmaConfig);
+      await saveAlbumConfig(selectedTurmaData.id, turmaConfig, {
+        tenantId: activeTenantId || undefined,
+      });
       addToast(`Customizacao da turma ${selectedTurmaData.id} salva.`, "success");
     } catch {
       addToast("Erro ao salvar customizacao da turma.", "error");

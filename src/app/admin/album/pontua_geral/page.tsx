@@ -6,10 +6,12 @@ import Link from "next/link";
 import { ArrowLeft, Trophy } from "lucide-react";
 
 import { fetchAlbumRankings, type AlbumRankingEntry } from "../../../../lib/albumService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const PAGE_SIZE = 20;
 
 export default function AdminAlbumPontuaGeralPage() {
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [rows, setRows] = useState<AlbumRankingEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -18,7 +20,9 @@ export default function AdminAlbumPontuaGeralPage() {
     let mounted = true;
     const load = async () => {
       try {
-        const ranking = await fetchAlbumRankings(240);
+        const ranking = await fetchAlbumRankings(240, {
+          tenantId: activeTenantId || undefined,
+        });
         if (!mounted) return;
         setRows([...ranking].sort((a, b) => (b.totalColetado || 0) - (a.totalColetado || 0)));
       } finally {
@@ -29,7 +33,7 @@ export default function AdminAlbumPontuaGeralPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [activeTenantId]);
 
   const paged = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;

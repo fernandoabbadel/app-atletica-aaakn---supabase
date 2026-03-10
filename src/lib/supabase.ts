@@ -27,6 +27,57 @@ const getSupabaseEnv = (): { url: string; anonKey: string } => {
   return { url, anonKey };
 };
 
+const getSupabaseAuthStorageKey = (url: string): string => {
+  const hostname = new URL(url).hostname;
+  const projectRef = hostname.split(".")[0]?.trim();
+  return projectRef ? `sb-${projectRef}-auth-token` : "supabase-auth-token";
+};
+
+const clearSupabaseAuthStorageByKey = (storageKey: string): void => {
+  if (typeof window === "undefined") return;
+
+  window.localStorage.removeItem(storageKey);
+  window.localStorage.removeItem(`${storageKey}-code-verifier`);
+  window.localStorage.removeItem(`${storageKey}-user`);
+};
+
+type StoredSupabaseSession = {
+  access_token?: unknown;
+  refresh_token?: unknown;
+  expires_at?: unknown;
+};
+
+const purgeExpiredSupabaseBrowserSession = (url: string): void => {
+  if (typeof window === "undefined") return;
+
+  const storageKey = getSupabaseAuthStorageKey(url);
+  const raw = window.localStorage.getItem(storageKey);
+  if (!raw) return;
+
+  try {
+    const parsed = JSON.parse(raw) as StoredSupabaseSession | null;
+    const accessToken =
+      typeof parsed?.access_token === "string" ? parsed.access_token.trim() : "";
+    const refreshToken =
+      typeof parsed?.refresh_token === "string" ? parsed.refresh_token.trim() : "";
+    const expiresAt =
+      typeof parsed?.expires_at === "number"
+        ? parsed.expires_at
+        : Number(parsed?.expires_at || 0);
+
+    if (!accessToken || !refreshToken || !Number.isFinite(expiresAt) || expiresAt <= 0) {
+      clearSupabaseAuthStorageByKey(storageKey);
+      return;
+    }
+
+    if (expiresAt * 1000 <= Date.now()) {
+      clearSupabaseAuthStorageByKey(storageKey);
+    }
+  } catch {
+    clearSupabaseAuthStorageByKey(storageKey);
+  }
+};
+
 const sharedAuthLock: LockFunc = async (name, acquireTimeout, fn) => {
   // Em alguns navegadores mobile o Navigator LockManager falha com timeout.
   // processLock evita esse bug mantendo serializacao local do auth client.
@@ -110,6 +161,8 @@ const shouldDetectSessionInUrl = (): boolean => {
 const createSupabaseBrowserClient = (): SupabaseClient => {
   const { url, anonKey } = getSupabaseEnv();
 
+  purgeExpiredSupabaseBrowserSession(url);
+
   // Mantemos sessao no navegador, mas sem habilitar realtime por padrao.
   return createClient(url, anonKey, {
     auth: {
@@ -119,6 +172,13 @@ const createSupabaseBrowserClient = (): SupabaseClient => {
       lock: sharedAuthLock,
     },
   });
+};
+
+export const clearSupabaseBrowserSessionStorage = (): void => {
+  if (typeof window === "undefined") return;
+
+  const { url } = getSupabaseEnv();
+  clearSupabaseAuthStorageByKey(getSupabaseAuthStorageKey(url));
 };
 
 export const getSupabaseClient = (): SupabaseClient => {

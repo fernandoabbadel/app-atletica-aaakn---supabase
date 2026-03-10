@@ -8,6 +8,8 @@ import {
   throwSupabaseError,
   type Row,
 } from "./supabaseData";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 
 const MAX_TREINOS_RESULTS = 260;
 const MAX_MONTH_RESULTS = 220;
@@ -27,6 +29,13 @@ const TREINOS_CHAMADA_SELECT_COLUMNS =
 const nowIso = (): string => new Date().toISOString();
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+const resolveTreinosTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+const resolveTreinosSettingsIds = (tenantId?: string | null): string[] => {
+  const scopedTenantId = resolveTreinosTenantId(tenantId);
+  if (!scopedTenantId) return ["treinos"];
+  return [buildTenantScopedRowId(scopedTenantId, "treinos"), "treinos"];
+};
 
 const normalizeModalidades = (value: unknown): string[] => {
   const unique = new Set<string>();
@@ -300,18 +309,22 @@ export interface TreinoSettingsRecord {
 
 export async function fetchTreinoSettings(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<TreinoSettingsRecord> {
   void options;
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("settings")
     .select("modalidades, data")
-    .eq("id", "treinos")
-    .maybeSingle();
+    .in("id", resolveTreinosSettingsIds(options?.tenantId));
+  const rows = Array.isArray(data) ? (data as Row[]) : [];
+  const selected = resolveTreinosSettingsIds(options?.tenantId)
+    .map((id) => rows.find((row) => asString(row.id) === id))
+    .find((row) => Boolean(row));
   if (error) throwSupabaseError(error);
 
-  const modalidades = normalizeModalidades(data?.modalidades);
-  const payload = asObject(data?.data) ?? {};
+  const modalidades = normalizeModalidades(selected?.modalidades);
+  const payload = asObject(selected?.data) ?? {};
   const modalidadeImagens = normalizeModalidadeImagens(payload.modalidadeImagens, modalidades);
   return { modalidades, modalidadeImagens };
 }
@@ -319,15 +332,16 @@ export async function fetchTreinoSettings(options?: {
 export async function saveTreinoSettings(payload: {
   modalidades: string[];
   modalidadeImagens?: Record<string, string>;
-}): Promise<void> {
+}, options?: { tenantId?: string | null }): Promise<void> {
   const supabase = getSupabaseClient();
   const normalized = normalizeModalidades(payload.modalidades);
   const modalidadeImagens = normalizeModalidadeImagens(payload.modalidadeImagens, normalized);
+  const settingsId = buildTenantScopedRowId(resolveTreinosTenantId(options?.tenantId), "treinos") || "treinos";
 
   const { data: currentData, error: currentError } = await supabase
     .from("settings")
     .select("data")
-    .eq("id", "treinos")
+    .eq("id", settingsId)
     .maybeSingle();
   if (currentError) throwSupabaseError(currentError);
 
@@ -339,7 +353,7 @@ export async function saveTreinoSettings(payload: {
 
   const { error } = await supabase.from("settings").upsert(
     {
-      id: "treinos",
+      id: settingsId,
       modalidades: normalized,
       data: nextSettingsData,
       updatedAt: nowIso(),
@@ -352,14 +366,19 @@ export async function saveTreinoSettings(payload: {
 export async function fetchTreinosAdminList(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<TreinoRecord[]> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_TREINOS_RESULTS);
-  const { data, error } = await supabase
+  let query = supabase
     .from("treinos")
     .select(TREINOS_SELECT_COLUMNS)
-    .order("dia", { ascending: false })
-    .limit(maxResults);
+    .order("dia", { ascending: false });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   return ((data ?? []) as Row[])
@@ -372,20 +391,25 @@ export async function fetchTreinosByDateRange(payload: {
   endDate: string;
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<TreinoRecord[]> {
   const startDate = payload.startDate.trim().slice(0, 10);
   const endDate = payload.endDate.trim().slice(0, 10);
   if (!startDate || !endDate) return [];
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
   const maxResults = boundedLimit(payload.maxResults ?? 120, MAX_MONTH_RESULTS);
-  const { data, error } = await supabase
+  let query = supabase
     .from("treinos")
     .select(TREINOS_SELECT_COLUMNS)
     .gte("dia", startDate)
     .lte("dia", endDate)
-    .order("dia", { ascending: true })
-    .limit(maxResults);
+    .order("dia", { ascending: true });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   return ((data ?? []) as Row[])
@@ -395,18 +419,22 @@ export async function fetchTreinosByDateRange(payload: {
 
 export async function fetchTreinoById(
   treinoId: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<TreinoRecord | null> {
   void options;
   const cleanTreinoId = treinoId.trim();
   if (!cleanTreinoId) return null;
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
+  let query = supabase
     .from("treinos")
     .select(TREINOS_SELECT_COLUMNS)
-    .eq("id", cleanTreinoId)
-    .maybeSingle();
+    .eq("id", cleanTreinoId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) throwSupabaseError(error);
   if (!data) return null;
 
@@ -415,19 +443,23 @@ export async function fetchTreinoById(
 
 export async function fetchTreinoRsvps(
   treinoId: string,
-  options?: { maxResults?: number; forceRefresh?: boolean }
+  options?: { maxResults?: number; forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<TreinoRsvpRecord[]> {
   const cleanTreinoId = treinoId.trim();
   if (!cleanTreinoId) return [];
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_RSVP_RESULTS);
-  const { data, error } = await supabase
+  let query = supabase
     .from("treinos_rsvps")
     .select(TREINOS_RSVPS_SELECT_COLUMNS)
     .eq("treinoId", cleanTreinoId)
-    .order("timestamp", { ascending: false })
-    .limit(maxResults);
+    .order("timestamp", { ascending: false });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   return ((data ?? []) as Row[])
@@ -437,20 +469,24 @@ export async function fetchTreinoRsvps(
 
 export async function fetchTreinoRsvpsPage(
   treinoId: string,
-  options?: { pageSize?: number; cursorId?: string | null; forceRefresh?: boolean }
+  options?: { pageSize?: number; cursorId?: string | null; forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<TreinoParticipantsPage<TreinoRsvpRecord>> {
   const cleanTreinoId = treinoId.trim();
   if (!cleanTreinoId) return { rows: [], nextCursor: null, hasMore: false };
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
   const pageSize = boundedLimit(options?.pageSize ?? 10, MAX_RSVP_RESULTS);
   const offset = parseOffsetCursor(options?.cursorId);
-  const { data, error } = await supabase
+  let query = supabase
     .from("treinos_rsvps")
     .select(TREINOS_RSVPS_SELECT_COLUMNS)
     .eq("treinoId", cleanTreinoId)
-    .order("timestamp", { ascending: false })
-    .range(offset, offset + pageSize);
+    .order("timestamp", { ascending: false });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.range(offset, offset + pageSize);
   if (error) throwSupabaseError(error);
 
   const rawRows = (data ?? []) as Row[];
@@ -464,19 +500,23 @@ export async function fetchTreinoRsvpsPage(
 }
 export async function fetchTreinoChamada(
   treinoId: string,
-  options?: { maxResults?: number; forceRefresh?: boolean }
+  options?: { maxResults?: number; forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<TreinoChamadaRecord[]> {
   const cleanTreinoId = treinoId.trim();
   if (!cleanTreinoId) return [];
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_CHAMADA_RESULTS);
-  const { data, error } = await supabase
+  let query = supabase
     .from("treinos_chamada")
     .select(TREINOS_CHAMADA_SELECT_COLUMNS)
     .eq("treinoId", cleanTreinoId)
-    .order("timestamp", { ascending: false })
-    .limit(maxResults);
+    .order("timestamp", { ascending: false });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   return ((data ?? []) as Row[])
@@ -486,20 +526,24 @@ export async function fetchTreinoChamada(
 
 export async function fetchTreinoChamadaPage(
   treinoId: string,
-  options?: { pageSize?: number; cursorId?: string | null; forceRefresh?: boolean }
+  options?: { pageSize?: number; cursorId?: string | null; forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<TreinoParticipantsPage<TreinoChamadaRecord>> {
   const cleanTreinoId = treinoId.trim();
   if (!cleanTreinoId) return { rows: [], nextCursor: null, hasMore: false };
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
   const pageSize = boundedLimit(options?.pageSize ?? 10, MAX_CHAMADA_RESULTS);
   const offset = parseOffsetCursor(options?.cursorId);
-  const { data, error } = await supabase
+  let query = supabase
     .from("treinos_chamada")
     .select(TREINOS_CHAMADA_SELECT_COLUMNS)
     .eq("treinoId", cleanTreinoId)
-    .order("timestamp", { ascending: false })
-    .range(offset, offset + pageSize);
+    .order("timestamp", { ascending: false });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.range(offset, offset + pageSize);
   if (error) throwSupabaseError(error);
 
   const rawRows = (data ?? []) as Row[];
@@ -515,14 +559,19 @@ export async function fetchTreinoChamadaPage(
 export async function fetchUserDirectory(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<TreinoUserDirectoryItem[]> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
   const maxResults = boundedLimit(options?.maxResults ?? 320, MAX_USERS_RESULTS);
-  const { data, error } = await supabase
+  let query = supabase
     .from("users")
     .select("uid, nome, turma, foto, email")
-    .order("nome", { ascending: true })
-    .limit(maxResults);
+    .order("nome", { ascending: true });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   return ((data ?? []) as Row[])
@@ -535,6 +584,7 @@ export async function fetchTreinoDashboardMetrics(payload: {
   maxRankingTreinos?: number;
   maxGhostTreinos?: number;
   formatDate?: (isoDate: string) => string;
+  tenantId?: string | null;
 }): Promise<TreinoDashboardMetrics> {
   const maxRankingTreinos = boundedLimit(payload.maxRankingTreinos ?? 20, 50);
   const maxGhostTreinos = boundedLimit(payload.maxGhostTreinos ?? 5, 12);
@@ -552,7 +602,10 @@ export async function fetchTreinoDashboardMetrics(payload: {
   const chamadasPorTreino = await Promise.all(
     rankingTreinos.map(async (treino) => ({
       treino,
-      chamada: await fetchTreinoChamada(treino.id, { maxResults: 200 }),
+      chamada: await fetchTreinoChamada(treino.id, {
+        maxResults: 200,
+        tenantId: payload.tenantId,
+      }),
     }))
   );
 
@@ -582,8 +635,14 @@ export async function fetchTreinoDashboardMetrics(payload: {
   const vergonhaRows = await Promise.all(
     ghostTreinos.map(async (treino) => {
       const [rsvps, chamada] = await Promise.all([
-        fetchTreinoRsvps(treino.id, { maxResults: 220 }),
-        fetchTreinoChamada(treino.id, { maxResults: 220 }),
+        fetchTreinoRsvps(treino.id, {
+          maxResults: 220,
+          tenantId: payload.tenantId,
+        }),
+        fetchTreinoChamada(treino.id, {
+          maxResults: 220,
+          tenantId: payload.tenantId,
+        }),
       ]);
 
       const presentesIds = new Set(
@@ -606,7 +665,11 @@ export async function fetchTreinoDashboardMetrics(payload: {
   return { rankings, listaVergonha: vergonhaRows.flat().slice(0, 120) };
 }
 
-export async function upsertTreino(payload: { id?: string; data: Partial<TreinoRecord> }): Promise<{ id: string }> {
+export async function upsertTreino(payload: {
+  id?: string;
+  data: Partial<TreinoRecord>;
+  tenantId?: string | null;
+}): Promise<{ id: string }> {
   const cleanId = payload.id?.trim() || "";
   const baseData = normalizeTreinoPayload(payload.data);
   if (!baseData.dia || !baseData.modalidade) throw new Error("Dados invalidos para treino.");
@@ -614,16 +677,29 @@ export async function upsertTreino(payload: { id?: string; data: Partial<TreinoR
   const diaObj = new Date(`${baseData.dia}T12:00:00`);
   const normalizedData = normalizeTreinoPayload(baseData, getDayLabel(diaObj), getDayOrder(diaObj));
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
 
   if (cleanId) {
-    const { error } = await supabase.from("treinos").update({ ...normalizedData, updatedAt: nowIso() }).eq("id", cleanId);
+    let query = supabase
+      .from("treinos")
+      .update({ ...normalizedData, updatedAt: nowIso() })
+      .eq("id", cleanId);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { error } = await query;
     if (error) throwSupabaseError(error);
     return { id: cleanId };
   }
 
   const { data, error } = await supabase
     .from("treinos")
-    .insert({ ...normalizedData, createdAt: nowIso(), updatedAt: nowIso() })
+    .insert({
+      ...normalizedData,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    })
     .select("id")
     .single();
   if (error) throwSupabaseError(error);
@@ -634,6 +710,7 @@ export async function createRecurringTreinos(payload: {
   data: Partial<TreinoRecord>;
   startDate: string;
   endDate: string;
+  tenantId?: string | null;
 }): Promise<{ count: number }> {
   const startDate = payload.startDate.trim().slice(0, 10);
   const endDate = payload.endDate.trim().slice(0, 10);
@@ -644,13 +721,19 @@ export async function createRecurringTreinos(payload: {
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return { count: 0 };
 
   const baseData = normalizeTreinoPayload(payload.data);
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
   const rows: Row[] = [];
   const current = new Date(start);
   let count = 0;
   while (current <= end && count < MAX_RECURRING_WEEKS) {
     const dia = createIsoDate(current);
     const dataByDay = normalizeTreinoPayload({ ...baseData, dia }, getDayLabel(current), getDayOrder(current));
-    rows.push({ ...dataByDay, createdAt: nowIso(), updatedAt: nowIso() });
+    rows.push({
+      ...dataByDay,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    });
     current.setDate(current.getDate() + 7);
     count += 1;
   }
@@ -664,22 +747,39 @@ export async function createRecurringTreinos(payload: {
   return { count };
 }
 
-export async function toggleTreinoStatus(payload: { treinoId: string; status: "ativo" | "cancelado" }): Promise<void> {
+export async function toggleTreinoStatus(payload: {
+  treinoId: string;
+  status: "ativo" | "cancelado";
+  tenantId?: string | null;
+}): Promise<void> {
   const treinoId = payload.treinoId.trim();
   if (!treinoId) return;
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  let query = supabase
     .from("treinos")
     .update({ status: normalizeStatus(payload.status), updatedAt: nowIso() })
     .eq("id", treinoId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
 }
 
-export async function deleteTreino(treinoId: string): Promise<void> {
+export async function deleteTreino(
+  treinoId: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const cleanTreinoId = treinoId.trim();
   if (!cleanTreinoId) return;
   const supabase = getSupabaseClient();
-  const { error } = await supabase.from("treinos").delete().eq("id", cleanTreinoId);
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
+  let query = supabase.from("treinos").delete().eq("id", cleanTreinoId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
 }
 export async function setTreinoRsvp(payload: {
@@ -689,15 +789,33 @@ export async function setTreinoRsvp(payload: {
   userAvatar: string;
   userTurma: string;
   status: "going" | "not_going";
+  tenantId?: string | null;
 }): Promise<void> {
   const treinoId = payload.treinoId.trim();
   const userId = payload.userId.trim();
   if (!treinoId || !userId) return;
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
   const [{ data: treinoRow, error: treinoError }, { data: existing, error: existingError }] = await Promise.all([
-    supabase.from("treinos").select("confirmados").eq("id", treinoId).maybeSingle(),
-    supabase.from("treinos_rsvps").select("id").eq("treinoId", treinoId).eq("userId", userId).maybeSingle(),
+    (() => {
+      let query = supabase.from("treinos").select("confirmados").eq("id", treinoId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      return query.maybeSingle();
+    })(),
+    (() => {
+      let query = supabase
+        .from("treinos_rsvps")
+        .select("id")
+        .eq("treinoId", treinoId)
+        .eq("userId", userId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      return query.maybeSingle();
+    })(),
   ]);
   if (treinoError) throwSupabaseError(treinoError);
   if (existingError) throwSupabaseError(existingError);
@@ -711,7 +829,11 @@ export async function setTreinoRsvp(payload: {
       : [...currentConfirmados, userId];
 
   if (payload.status === "not_going") {
-    const { error } = await supabase.from("treinos_rsvps").delete().eq("treinoId", treinoId).eq("userId", userId);
+    let query = supabase.from("treinos_rsvps").delete().eq("treinoId", treinoId).eq("userId", userId);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { error } = await query;
     if (error) throwSupabaseError(error);
   } else {
     const { error } = await supabase.from("treinos_rsvps").upsert(
@@ -723,6 +845,7 @@ export async function setTreinoRsvp(payload: {
         userAvatar: payload.userAvatar.trim().slice(0, 2000),
         userTurma: payload.userTurma.trim().slice(0, 30) || "Geral",
         status: "going",
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         timestamp: nowIso(),
       },
       { onConflict: "treinoId,userId" }
@@ -731,10 +854,14 @@ export async function setTreinoRsvp(payload: {
   }
 
   // Atualizacao em duas etapas para evitar RPC/Edge Function no plano free.
-  const { error: treinoUpdateError } = await supabase
+  let updateQuery = supabase
     .from("treinos")
     .update({ confirmados: nextConfirmados, updatedAt: nowIso() })
     .eq("id", treinoId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: treinoUpdateError } = await updateQuery;
   if (treinoUpdateError) throwSupabaseError(treinoUpdateError);
 }
 
@@ -746,12 +873,14 @@ export async function upsertChamadaPresence(payload: {
   avatar: string;
   origem: "app" | "manual";
   status?: "presente" | "falta" | "justificado";
+  tenantId?: string | null;
 }): Promise<void> {
   const treinoId = payload.treinoId.trim();
   const userId = payload.userId.trim();
   if (!treinoId || !userId) return;
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
   const { error } = await supabase.from("treinos_chamada").upsert(
     {
       treinoId,
@@ -762,6 +891,7 @@ export async function upsertChamadaPresence(payload: {
       avatar: payload.avatar.trim().slice(0, 2000),
       origem: payload.origem,
       status: payload.status ?? "presente",
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       timestamp: nowIso(),
       updatedAt: nowIso(),
     },
@@ -772,15 +902,20 @@ export async function upsertChamadaPresence(payload: {
 
 const resolveChamadaFilter = async (
   treinoId: string,
-  chamadaId: string
+  chamadaId: string,
+  tenantId?: string | null
 ): Promise<{ column: "id" | "userId"; value: string }> => {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveTreinosTenantId(tenantId);
+  let query = supabase
     .from("treinos_chamada")
     .select("id")
     .eq("treinoId", treinoId)
-    .eq("id", chamadaId)
-    .maybeSingle();
+    .eq("id", chamadaId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) throwSupabaseError(error);
   return data ? { column: "id", value: chamadaId } : { column: "userId", value: chamadaId };
 };
@@ -789,27 +924,40 @@ export async function updateChamadaStatus(payload: {
   treinoId: string;
   chamadaId: string;
   status: "presente" | "falta" | "justificado";
+  tenantId?: string | null;
 }): Promise<void> {
   const treinoId = payload.treinoId.trim();
   const chamadaId = payload.chamadaId.trim();
   if (!treinoId || !chamadaId) return;
 
   const supabase = getSupabaseClient();
-  const selector = await resolveChamadaFilter(treinoId, chamadaId);
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  const selector = await resolveChamadaFilter(treinoId, chamadaId, scopedTenantId);
   let query = supabase.from("treinos_chamada").update({ status: payload.status, updatedAt: nowIso() }).eq("treinoId", treinoId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
   query = query.eq(selector.column, selector.value);
   const { error } = await query;
   if (error) throwSupabaseError(error);
 }
 
-export async function deleteChamadaEntry(payload: { treinoId: string; chamadaId: string }): Promise<void> {
+export async function deleteChamadaEntry(payload: {
+  treinoId: string;
+  chamadaId: string;
+  tenantId?: string | null;
+}): Promise<void> {
   const treinoId = payload.treinoId.trim();
   const chamadaId = payload.chamadaId.trim();
   if (!treinoId || !chamadaId) return;
 
   const supabase = getSupabaseClient();
-  const selector = await resolveChamadaFilter(treinoId, chamadaId);
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  const selector = await resolveChamadaFilter(treinoId, chamadaId, scopedTenantId);
   let query = supabase.from("treinos_chamada").delete().eq("treinoId", treinoId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
   query = query.eq(selector.column, selector.value);
   const { error } = await query;
   if (error) throwSupabaseError(error);
@@ -818,6 +966,7 @@ export async function deleteChamadaEntry(payload: { treinoId: string; chamadaId:
 export async function addUserToChamada(payload: {
   treinoId: string;
   user: TreinoUserDirectoryItem;
+  tenantId?: string | null;
 }): Promise<void> {
   await upsertChamadaPresence({
     treinoId: payload.treinoId,
@@ -827,6 +976,7 @@ export async function addUserToChamada(payload: {
     avatar: payload.user.foto || "",
     origem: "manual",
     status: "presente",
+    tenantId: payload.tenantId,
   });
 }
 

@@ -2,6 +2,7 @@ import {
   setEventRsvpDetailed as setEventRsvpNative,
   toggleEventLike as toggleEventLikeNative,
 } from "./eventsNativeService";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { throwSupabaseError } from "./supabaseData";
 import { getSupabaseClient } from "./supabase";
 
@@ -45,11 +46,15 @@ const boundedPreviewLimit = (requested: number): number => {
   return Math.floor(requested);
 };
 
+const resolveEventCardTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(tenantId);
+
 const toCacheKey = (
   eventId: string,
   userId: string | null,
-  previewLimit: number
-): string => `${eventId}:${userId || "anon"}:${previewLimit}`;
+  previewLimit: number,
+  tenantId?: string | null
+): string => `${eventId}:${userId || "anon"}:${previewLimit}:${resolveEventCardTenantId(tenantId) || "global"}`;
 
 const getCacheValue = <T>(
   cache: Map<string, CacheEntry<T>>,
@@ -88,32 +93,43 @@ const invalidateEventCardCache = (eventId: string): void => {
 
 async function fetchUserRsvp(
   eventId: string,
-  userId: string | null
+  userId: string | null,
+  tenantId?: string | null
 ): Promise<EventRsvpStatus | null> {
   if (!userId) return null;
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveEventCardTenantId(tenantId);
+  let query = supabase
     .from("eventos_rsvps")
     .select("status")
     .eq("eventoId", eventId)
-    .eq("userId", userId)
-    .maybeSingle();
+    .eq("userId", userId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) throwSupabaseError(error);
   return normalizeStatus(asObject(data)?.status ?? data?.status);
 }
 
 async function fetchPreviewAvatars(
   eventId: string,
-  previewLimit: number
+  previewLimit: number,
+  tenantId?: string | null
 ): Promise<string[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveEventCardTenantId(tenantId);
+  let query = supabase
     .from("eventos_rsvps")
     .select("userAvatar")
     .eq("eventoId", eventId)
     .eq("status", "going")
     .limit(previewLimit);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query;
   if (error) throwSupabaseError(error);
 
   const avatars = (data ?? [])
@@ -128,6 +144,7 @@ export async function fetchEventCardState(options: {
   userId?: string | null;
   previewLimit?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<EventCardState> {
   const eventId = options.eventId.trim();
   if (!eventId) {
@@ -138,7 +155,8 @@ export async function fetchEventCardState(options: {
   const previewLimit = boundedPreviewLimit(
     options.previewLimit ?? DEFAULT_PREVIEW_RESULTS
   );
-  const cacheKey = toCacheKey(eventId, userId, previewLimit);
+  const tenantId = resolveEventCardTenantId(options.tenantId);
+  const cacheKey = toCacheKey(eventId, userId, previewLimit, tenantId);
   const forceRefresh = options.forceRefresh ?? false;
 
   if (!forceRefresh) {
@@ -147,8 +165,8 @@ export async function fetchEventCardState(options: {
   }
 
   const [userRsvp, previewAvatars] = await Promise.all([
-    fetchUserRsvp(eventId, userId),
-    fetchPreviewAvatars(eventId, previewLimit),
+    fetchUserRsvp(eventId, userId, tenantId),
+    fetchPreviewAvatars(eventId, previewLimit, tenantId),
   ]);
 
   const state: EventCardState = { userRsvp, previewAvatars };
@@ -160,6 +178,7 @@ export async function toggleEventLike(payload: {
   eventId: string;
   userId: string;
   currentlyLiked: boolean;
+  tenantId?: string | null;
 }): Promise<void> {
   const eventId = payload.eventId.trim();
   const userId = payload.userId.trim();
@@ -169,6 +188,7 @@ export async function toggleEventLike(payload: {
     eventId,
     userId,
     currentlyLiked: payload.currentlyLiked,
+    tenantId: resolveEventCardTenantId(payload.tenantId) || undefined,
   });
 
   invalidateEventCardCache(eventId);
@@ -181,6 +201,7 @@ export async function setEventRsvp(payload: {
   userName: string;
   userAvatar: string;
   userTurma: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const eventId = payload.eventId.trim();
   const userId = payload.userId.trim();
@@ -205,6 +226,7 @@ export async function setEventRsvp(payload: {
     userName: requestPayload.userName,
     userAvatar: requestPayload.userAvatar,
     userTurma: requestPayload.userTurma,
+    tenantId: resolveEventCardTenantId(payload.tenantId) || undefined,
   });
 
   invalidateEventCardCache(eventId);

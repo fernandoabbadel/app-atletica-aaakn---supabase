@@ -1,3 +1,5 @@
+import { normalizeTurmaId, resolveActiveTurmaConfig } from "@/lib/turmasService";
+
 const EXTENSIONS_PRIORITY = ["jpeg", "jpg", "webp", "png"] as const;
 
 const TURMA_IMAGE_BY_ID: Record<string, string> = {
@@ -8,33 +10,28 @@ const TURMA_IMAGE_BY_ID: Record<string, string> = {
   T5: "/turma5.jpeg",
   T6: "/turma6.jpeg",
   T7: "/turma7.jpeg",
-  T8: "/turma8.jpg",
-  T9: "/turma9.jpg",
+  T8: "/turma8.jpeg",
+  T9: "/turma9.jpeg",
 };
 
 export { TURMA_IMAGE_BY_ID };
 
-const normalizeTurmaId = (turma?: string): string | null => {
-  if (!turma) return null;
-
-  const normalized = turma.trim().toUpperCase();
-  if (TURMA_IMAGE_BY_ID[normalized]) return normalized;
-
-  const digits = normalized.replace(/\D/g, "");
-  if (!digits) return null;
-
-  const key = `T${digits}`;
-  return TURMA_IMAGE_BY_ID[key] ? key : null;
+const resolvePreferredTurmaImage = (turmaId: string): string => {
+  const activeTurma = resolveActiveTurmaConfig(turmaId);
+  const activeLogo = activeTurma?.logo.trim();
+  if (activeLogo) return activeLogo;
+  return TURMA_IMAGE_BY_ID[turmaId] || "";
 };
 
 export function getTurmaImageCandidates(
   turma?: string,
   fallback = "/logo.png"
 ): string[] {
-  const turmaId = normalizeTurmaId(turma);
+  const turmaId = normalizeTurmaId(turma || "");
   if (!turmaId) return [fallback];
 
-  const preferredPath = TURMA_IMAGE_BY_ID[turmaId];
+  const preferredPath = resolvePreferredTurmaImage(turmaId);
+  if (!preferredPath) return [fallback];
   const match = preferredPath.match(/^\/(turma\d+)\.(\w+)$/i);
   if (!match) return [preferredPath, fallback];
 

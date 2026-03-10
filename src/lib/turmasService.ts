@@ -1,4 +1,7 @@
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { getSupabaseClient } from "./supabase";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
+import { parseTenantScopedPath } from "./tenantRouting";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -8,6 +11,7 @@ type CacheEntry<T> = {
 const READ_CACHE_TTL_MS = 120_000;
 const TURMAS_CONFIG_DOC_ID = "turmas_config";
 const TURMAS_CONFIG_SELECT_COLUMNS = "id,data,updatedAt,createdAt";
+const ACTIVE_TURMAS_SNAPSHOT_STORAGE_KEY = "usc_active_turmas_config";
 
 const turmasCache = new Map<string, CacheEntry<TurmaConfig[]>>();
 
@@ -47,7 +51,7 @@ const setCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string, value
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
-const normalizeTurmaId = (raw: string): string => {
+export const normalizeTurmaId = (raw: string): string => {
   const input = raw.trim().toUpperCase();
   if (!input) return "";
   if (/^T\d{1,3}$/.test(input)) {
@@ -95,6 +99,13 @@ export interface TurmaConfig {
   capa: string;
   logo: string;
   hidden: boolean;
+}
+
+export interface ActiveTurmasSnapshot {
+  tenantId: string;
+  tenantSlug: string;
+  turmas: TurmaConfig[];
+  updatedAt: string;
 }
 
 const DEFAULT_TURMAS: TurmaConfig[] = [
@@ -201,7 +212,7 @@ const toTurmaConfig = (raw: unknown): TurmaConfig | null => {
   return { id, slug, nome, mascote, capa, logo, hidden };
 };
 
-const sanitizeTurmas = (rows: TurmaConfig[]): TurmaConfig[] => {
+const sanitizeTurmas = (rows: readonly unknown[]): TurmaConfig[] => {
   const normalized = rows
     .map((row) => toTurmaConfig(row))
     .filter((row): row is TurmaConfig => row !== null);
@@ -211,23 +222,158 @@ const sanitizeTurmas = (rows: TurmaConfig[]): TurmaConfig[] => {
 
 export const getDefaultTurmas = (): TurmaConfig[] => getFallbackTurmas();
 
-export async function fetchTurmasConfig(options?: { forceRefresh?: boolean }): Promise<TurmaConfig[]> {
+const resolveTurmasTenantId = (tenantId?: string): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const resolveCurrentTenantSlug = (): string => {
+  if (typeof window === "undefined") return "";
+  return parseTenantScopedPath(window.location.pathname || "/").tenantSlug.trim().toLowerCase();
+};
+
+const resolveTurmasCacheKey = (tenantId?: string): string => {
+  const cleanTenantId = resolveTurmasTenantId(tenantId);
+  return cleanTenantId || "default";
+};
+
+const resolveTurmasDocIds = (tenantId?: string): string[] => {
+  const cleanTenantId = resolveTurmasTenantId(tenantId);
+  if (!cleanTenantId) return [TURMAS_CONFIG_DOC_ID];
+  return [buildTenantScopedRowId(cleanTenantId, TURMAS_CONFIG_DOC_ID)];
+};
+
+const pickTurmasRow = (
+  rows: Array<Record<string, unknown>>,
+  tenantId?: string
+): Record<string, unknown> | null => {
+  const candidates = resolveTurmasDocIds(tenantId);
+  for (const candidate of candidates) {
+    const match = rows.find((row) => asString(row.id) === candidate);
+    if (match) return match;
+  }
+  return null;
+};
+
+const toActiveTurmasSnapshot = (raw: unknown): ActiveTurmasSnapshot | null => {
+  const data = asObject(raw);
+  if (!data) return null;
+
+  return {
+    tenantId: asString(data.tenantId).trim(),
+    tenantSlug: asString(data.tenantSlug).trim().toLowerCase(),
+    turmas: sanitizeTurmas(Array.isArray(data.turmas) ? data.turmas : []),
+    updatedAt: asString(data.updatedAt).trim() || nowIso(),
+  };
+};
+
+export function readActiveTurmasSnapshot(options?: {
+  tenantId?: string;
+  tenantSlug?: string;
+}): ActiveTurmasSnapshot | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const rawSnapshot = window.localStorage.getItem(ACTIVE_TURMAS_SNAPSHOT_STORAGE_KEY);
+    if (!rawSnapshot) return null;
+
+    const snapshot = toActiveTurmasSnapshot(JSON.parse(rawSnapshot));
+    if (!snapshot) return null;
+
+    const expectedTenantId = resolveTurmasTenantId(options?.tenantId);
+    const expectedTenantSlug =
+      asString(options?.tenantSlug).trim().toLowerCase() || resolveCurrentTenantSlug();
+
+    if (!expectedTenantId && !expectedTenantSlug) return null;
+    if (expectedTenantId && snapshot.tenantId !== expectedTenantId) return null;
+    if (expectedTenantSlug && snapshot.tenantSlug !== expectedTenantSlug) return null;
+
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
+export function persistActiveTurmasSnapshot(payload: {
+  tenantId?: string;
+  tenantSlug?: string;
+  turmas: readonly unknown[];
+}): void {
+  if (typeof window === "undefined") return;
+
+  const tenantId = resolveTurmasTenantId(payload.tenantId);
+  const tenantSlug =
+    asString(payload.tenantSlug).trim().toLowerCase() || resolveCurrentTenantSlug();
+  if (!tenantId && !tenantSlug) {
+    clearActiveTurmasSnapshot();
+    return;
+  }
+
+  try {
+    const snapshot: ActiveTurmasSnapshot = {
+      tenantId,
+      tenantSlug,
+      turmas: sanitizeTurmas(payload.turmas),
+      updatedAt: nowIso(),
+    };
+    window.localStorage.setItem(
+      ACTIVE_TURMAS_SNAPSHOT_STORAGE_KEY,
+      JSON.stringify(snapshot)
+    );
+  } catch {
+    // ignora erro de storage
+  }
+}
+
+export function clearActiveTurmasSnapshot(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(ACTIVE_TURMAS_SNAPSHOT_STORAGE_KEY);
+  } catch {
+    // ignora erro de storage
+  }
+}
+
+export function resolveActiveTurmaConfig(
+  turmaIdRaw: string,
+  options?: {
+    tenantId?: string;
+    tenantSlug?: string;
+  }
+): TurmaConfig | null {
+  const turmaId = normalizeTurmaId(turmaIdRaw);
+  if (!turmaId) return null;
+
+  const snapshot = readActiveTurmasSnapshot(options);
+  if (!snapshot) return null;
+
+  return snapshot.turmas.find((turma) => turma.id === turmaId) ?? null;
+}
+
+export async function fetchTurmasConfig(options?: {
+  forceRefresh?: boolean;
+  tenantId?: string;
+}): Promise<TurmaConfig[]> {
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = "default";
+  const scopedTenantId = resolveTurmasTenantId(options?.tenantId);
+  const cacheKey = resolveTurmasCacheKey(scopedTenantId);
   if (!forceRefresh) {
     const cached = getCachedValue(turmasCache, cacheKey);
     if (cached) return cached;
   }
 
   const supabase = getSupabaseClient();
+  const docIds = resolveTurmasDocIds(scopedTenantId);
   const { data, error } = await supabase
     .from("app_config")
     .select(TURMAS_CONFIG_SELECT_COLUMNS)
-    .eq("id", TURMAS_CONFIG_DOC_ID)
-    .maybeSingle();
+    .in("id", docIds);
   if (error) throwSupabaseError(error);
 
-  const row = asObject(data);
+  const rows = Array.isArray(data)
+    ? data
+        .map((entry) => asObject(entry))
+        .filter((entry): entry is Record<string, unknown> => entry !== null)
+    : [];
+  const row = pickTurmasRow(rows, scopedTenantId);
   const dataObj = asObject(row?.data);
   const turmasRaw = Array.isArray(dataObj?.turmas) ? dataObj.turmas : [];
   const parsed = turmasRaw
@@ -237,16 +383,28 @@ export async function fetchTurmasConfig(options?: { forceRefresh?: boolean }): P
   const hasStoredRow = Boolean(row);
   const resolved = parsed.length > 0 || hasStoredRow ? sortTurmas(parsed) : getFallbackTurmas();
   setCachedValue(turmasCache, cacheKey, resolved);
+  if (scopedTenantId) {
+    persistActiveTurmasSnapshot({
+      tenantId: scopedTenantId,
+      turmas: resolved,
+    });
+  }
   return resolved;
 }
 
-export async function saveTurmasConfig(turmas: TurmaConfig[]): Promise<TurmaConfig[]> {
+export async function saveTurmasConfig(
+  turmas: TurmaConfig[],
+  options?: { tenantId?: string }
+): Promise<TurmaConfig[]> {
   const next = sanitizeTurmas(turmas);
+  const scopedTenantId = resolveTurmasTenantId(options?.tenantId);
+  const docId =
+    buildTenantScopedRowId(scopedTenantId, TURMAS_CONFIG_DOC_ID) || TURMAS_CONFIG_DOC_ID;
 
   const supabase = getSupabaseClient();
   const { error } = await supabase.from("app_config").upsert(
     {
-      id: TURMAS_CONFIG_DOC_ID,
+      id: docId,
       data: { turmas: next },
       updatedAt: nowIso(),
     },
@@ -254,7 +412,13 @@ export async function saveTurmasConfig(turmas: TurmaConfig[]): Promise<TurmaConf
   );
   if (error) throwSupabaseError(error);
 
-  setCachedValue(turmasCache, "default", next);
+  setCachedValue(turmasCache, resolveTurmasCacheKey(scopedTenantId), next);
+  if (scopedTenantId) {
+    persistActiveTurmasSnapshot({
+      tenantId: scopedTenantId,
+      turmas: next,
+    });
+  }
   return next;
 }
 
@@ -264,11 +428,11 @@ export async function addTurmaConfig(payload: {
   mascote?: string;
   capa?: string;
   logo?: string;
-}): Promise<TurmaConfig[]> {
+}, options?: { tenantId?: string }): Promise<TurmaConfig[]> {
   const turmaId = normalizeTurmaId(payload.id);
   if (!turmaId) throw new Error("Codigo de turma invalido. Use formato T9, T10...");
 
-  const current = await fetchTurmasConfig({ forceRefresh: true });
+  const current = await fetchTurmasConfig({ forceRefresh: true, tenantId: options?.tenantId });
   if (current.some((turma) => turma.id === turmaId)) {
     throw new Error(`A turma ${turmaId} ja existe.`);
   }
@@ -284,7 +448,7 @@ export async function addTurmaConfig(payload: {
     hidden: false,
   };
 
-  return saveTurmasConfig([...current, nextTurma]);
+  return saveTurmasConfig([...current, nextTurma], options);
 }
 
 export async function updateTurmaConfig(payload: {
@@ -294,11 +458,11 @@ export async function updateTurmaConfig(payload: {
   capa?: string;
   logo?: string;
   hidden?: boolean;
-}): Promise<TurmaConfig[]> {
+}, options?: { tenantId?: string }): Promise<TurmaConfig[]> {
   const turmaId = normalizeTurmaId(payload.id);
   if (!turmaId) throw new Error("Codigo de turma invalido.");
 
-  const current = await fetchTurmasConfig({ forceRefresh: true });
+  const current = await fetchTurmasConfig({ forceRefresh: true, tenantId: options?.tenantId });
   const currentTurma = current.find((turma) => turma.id === turmaId);
   if (!currentTurma) {
     throw new Error(`Turma ${turmaId} nao encontrada.`);
@@ -317,37 +481,41 @@ export async function updateTurmaConfig(payload: {
       : turma
   );
 
-  return saveTurmasConfig(next);
+  return saveTurmasConfig(next, options);
 }
 
 export async function toggleTurmaVisibility(
   turmaIdRaw: string,
-  hidden?: boolean
+  hidden?: boolean,
+  options?: { tenantId?: string }
 ): Promise<TurmaConfig[]> {
   const turmaId = normalizeTurmaId(turmaIdRaw);
   if (!turmaId) throw new Error("Codigo de turma invalido.");
 
-  const current = await fetchTurmasConfig({ forceRefresh: true });
+  const current = await fetchTurmasConfig({ forceRefresh: true, tenantId: options?.tenantId });
   const currentTurma = current.find((turma) => turma.id === turmaId);
   if (!currentTurma) {
     throw new Error(`Turma ${turmaId} nao encontrada.`);
   }
 
   const nextHidden = typeof hidden === "boolean" ? hidden : !currentTurma.hidden;
-  return updateTurmaConfig({ id: turmaId, hidden: nextHidden });
+  return updateTurmaConfig({ id: turmaId, hidden: nextHidden }, options);
 }
 
-export async function deleteTurmaConfig(turmaIdRaw: string): Promise<TurmaConfig[]> {
+export async function deleteTurmaConfig(
+  turmaIdRaw: string,
+  options?: { tenantId?: string }
+): Promise<TurmaConfig[]> {
   const turmaId = normalizeTurmaId(turmaIdRaw);
   if (!turmaId) throw new Error("Codigo de turma invalido.");
 
-  const current = await fetchTurmasConfig({ forceRefresh: true });
+  const current = await fetchTurmasConfig({ forceRefresh: true, tenantId: options?.tenantId });
   if (!current.some((turma) => turma.id === turmaId)) {
     throw new Error(`Turma ${turmaId} nao encontrada.`);
   }
 
   const next = current.filter((turma) => turma.id !== turmaId);
-  return saveTurmasConfig(next);
+  return saveTurmasConfig(next, options);
 }
 
 export function clearTurmasCache(): void {

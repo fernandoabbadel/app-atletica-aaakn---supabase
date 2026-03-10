@@ -24,6 +24,7 @@ import {
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
 import { fetchFinanceiroConfig } from "../../../lib/eventsService";
+import { buildLoginPath } from "@/lib/authRedirect";
 
 interface ProdutoVariante {
   id?: string;
@@ -323,7 +324,7 @@ export default function DetalheProdutoPage() {
 
   const handleBuy = async () => {
     if (!user || !produto) {
-      router.push("/login");
+      router.push(buildLoginPath(`/loja/${String(params?.id || "")}`));
       return;
     }
     if (isOutOfStock || isSelectedColorUnavailable) {

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
+import { buildLoginPath } from "@/lib/authRedirect";
 import {
   fetchPendingMembershipStatusForCurrentUser,
   fetchTenantById,
@@ -89,7 +90,7 @@ export default function AguardandoAprovacaoPage() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
-      router.replace("/login");
+      router.replace(buildLoginPath("/aguardando-aprovacao"));
       return;
     }
     void loadStatus("initial");

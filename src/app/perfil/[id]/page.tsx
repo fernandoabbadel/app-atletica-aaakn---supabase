@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext"; 
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "../../../context/TenantThemeContext";
 import {
   fetchFollowCounts,
   fetchFollowList,
@@ -180,6 +181,7 @@ export default function PerfilPublicoPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -206,10 +208,15 @@ export default function PerfilPublicoPage() {
   useEffect(() => {
     if (!params.id) return;
     const uid = params.id as string;
+    const effectiveTenantId =
+      activeTenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
 
     const fetchProfile = async () => {
         try {
-            const bundle = await fetchPublicProfileBundle(uid, user?.uid, { forceRefresh: true });
+            const bundle = await fetchPublicProfileBundle(uid, user?.uid, {
+              forceRefresh: true,
+              tenantId: effectiveTenantId || undefined,
+            });
             if (bundle?.profile) {
                 const data = bundle.profile as UserProfile;
 
@@ -226,7 +233,10 @@ export default function PerfilPublicoPage() {
                 setFollowersCount(bundle.followersCount);
                 setFollowingCount(bundle.followingCount);
 
-                void fetchFollowCounts(uid, { forceRefresh: true })
+                void fetchFollowCounts(uid, {
+                  forceRefresh: true,
+                  tenantId: effectiveTenantId || undefined,
+                })
                   .then((counts) => {
                       setFollowersCount(counts.followersCount);
                       setFollowingCount(counts.followingCount);
@@ -252,7 +262,7 @@ export default function PerfilPublicoPage() {
         finally { setLoading(false); }
     };
     void fetchProfile();
-  }, [params.id, user, isOwnProfile, addToast, router]); // ðŸ¦ˆ Dependências adicionadas
+  }, [params.id, user, activeTenantId, isOwnProfile, addToast, router]); // ðŸ¦ˆ Dependências adicionadas
 
   const handleFollow = async () => {
       if (!user || !profile) return;
@@ -261,6 +271,7 @@ export default function PerfilPublicoPage() {
               viewerUid: user.uid,
               targetUid: profile.uid,
               currentlyFollowing: isFollowing,
+              tenantId: activeTenantId || user?.tenant_id || undefined,
               viewerData: {
                   uid: user.uid,
                   nome: user.nome || "Atleta",
@@ -308,6 +319,7 @@ export default function PerfilPublicoPage() {
           const list = await fetchFollowList(profile.uid, type, {
               maxResults: 80,
               forceRefresh: false,
+              tenantId: activeTenantId || user?.tenant_id || undefined,
           });
           if (type === 'followers') {
               setFollowersList(list);
@@ -392,7 +404,7 @@ export default function PerfilPublicoPage() {
             
             <div className="relative mb-3 group">
                 {/* ðŸ¦ˆ Correção de Imagem: Avatar */}
-                <div className={`w-32 h-32 rounded-full p-1 bg-gradient-to-tr shadow-[0_0_40px_rgba(16,185,129,0.3)] ${profile.status === 'paused' ? 'from-zinc-600 via-zinc-800 to-zinc-900 grayscale opacity-80' : 'from-emerald-500 via-zinc-800 to-zinc-900'} relative`}>
+                <div className={`relative h-32 w-32 rounded-full p-1 shadow-brand-strong ${profile.status === 'paused' ? 'bg-gradient-to-tr from-zinc-600 via-zinc-800 to-zinc-900 grayscale opacity-80' : 'bg-brand-gradient'}`}>
                     <div className="w-full h-full rounded-full overflow-hidden relative border-4 border-[#050505]">
                         <Image 
                             src={profile.foto || "https://github.com/shadcn.png"} 
@@ -405,13 +417,13 @@ export default function PerfilPublicoPage() {
                     </div>
                 </div>
                 {/* ðŸ¦ˆ Correção de Imagem: Badge da Turma Pequena */}
-                <div className="absolute bottom-1 right-1 w-10 h-10 bg-black rounded-full border-2 border-[#050505] flex items-center justify-center shadow-lg z-30 overflow-hidden">
+                <div className="absolute bottom-0 right-0 z-30 h-10 w-10 overflow-hidden rounded-full border-[3px] border-[#050505] bg-zinc-950 shadow-brand">
                     <Image 
                         src={turmaImage} 
                         alt="Badge Turma"
                         width={40}
                         height={40}
-                        className="object-cover w-full h-full"
+                        className="h-full w-full object-cover"
                     />
                 </div>
             </div>

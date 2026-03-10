@@ -1,4 +1,6 @@
 import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 type Row = Record<string, unknown>;
@@ -43,11 +45,34 @@ const setFinanceiroCachedValue = (cacheKey: string, value: Row | null): void => 
   financeiroCache.set(cacheKey, { cachedAt: Date.now(), value });
 };
 
+const resolveFinanceiroTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const resolveFinanceiroDocIds = (tenantId?: string | null): string[] => {
+  const scopedTenantId = resolveFinanceiroTenantId(tenantId);
+  if (!scopedTenantId) return [FINANCEIRO_DOC_ID];
+  return [buildTenantScopedRowId(scopedTenantId, FINANCEIRO_DOC_ID), FINANCEIRO_DOC_ID];
+};
+
+const pickFinanceiroRow = (
+  rows: Array<Record<string, unknown>>,
+  tenantId?: string | null
+): Row | null => {
+  const candidates = resolveFinanceiroDocIds(tenantId);
+  for (const candidateId of candidates) {
+    const match = rows.find((row) => asString(row.id).trim() === candidateId);
+    if (match) return match;
+  }
+  return null;
+};
+
 export async function fetchFinanceiroConfig(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<Row | null> {
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = FINANCEIRO_DOC_ID;
+  const scopedTenantId = resolveFinanceiroTenantId(options?.tenantId);
+  const cacheKey = scopedTenantId || FINANCEIRO_DOC_ID;
 
   if (!forceRefresh) {
     const cached = getFinanceiroCachedValue(cacheKey);
@@ -55,15 +80,18 @@ export async function fetchFinanceiroConfig(options?: {
   }
 
   const supabase = getSupabaseClient();
+  const docIds = resolveFinanceiroDocIds(scopedTenantId);
   const { data, error } = await supabase
     .from("app_config")
     .select("id,data,chave,banco,titular,whatsapp,updatedAt,createdAt")
-    .eq("id", FINANCEIRO_DOC_ID)
-    .maybeSingle();
+    .in("id", docIds);
 
   if (error) throwSupabaseError(error);
 
-  const row = data ? (data as Row) : null;
+  const row = pickFinanceiroRow(
+    ((data as Array<Record<string, unknown>> | null) ?? []).map((entry) => ({ ...entry })),
+    scopedTenantId
+  );
   setFinanceiroCachedValue(cacheKey, row);
   return row;
 }
@@ -73,10 +101,11 @@ export async function saveFinanceiroConfig(payload: {
   banco: string;
   titular: string;
   whatsapp?: string;
-}): Promise<void> {
+}, options?: { tenantId?: string | null }): Promise<void> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveFinanceiroTenantId(options?.tenantId);
   const writePayload = {
-    id: FINANCEIRO_DOC_ID,
+    id: buildTenantScopedRowId(scopedTenantId, FINANCEIRO_DOC_ID) || FINANCEIRO_DOC_ID,
     chave: payload.chave.trim(),
     banco: payload.banco.trim(),
     titular: payload.titular.trim(),
@@ -96,6 +125,7 @@ export async function fetchEventCheckoutData(options: {
   eventId: string;
   loteId: string;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<{ evento: Row | null; lote: Row | null; financeiro: Row | null }> {
   const eventId = options.eventId.trim();
   const loteId = options.loteId.trim();
@@ -122,6 +152,7 @@ export async function fetchEventCheckoutData(options: {
 
   const financeiro = await fetchFinanceiroConfig({
     forceRefresh: options.forceRefresh ?? false,
+    tenantId: options.tenantId,
   });
 
   return { evento, lote, financeiro };

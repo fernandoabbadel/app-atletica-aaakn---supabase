@@ -1,5 +1,15 @@
 ﻿import { getSupabaseClient } from "./supabase";
 
+import {
+  buildTenantScopedRowId,
+  isTenantScopedRowForTenant,
+  parseTenantScopedRowId,
+} from "./tenantScopedCatalog";
+import {
+  fetchTenantMembershipDirectory,
+  resolveTenantScopedXp,
+} from "./tenantMembershipDirectory";
+
 type CacheEntry<T> = {
   cachedAt: number;
   value: T;
@@ -11,7 +21,6 @@ const MAX_ACHIEVEMENT_RESULTS = 260;
 const MAX_PATENTE_RESULTS = 60;
 const MAX_LOG_RESULTS = 150;
 const MAX_RANKING_RESULTS = 60;
-
 const achievementsConfigCache = new Map<string, CacheEntry<AchievementConfigRecord[]>>();
 const patentesConfigCache = new Map<string, CacheEntry<PatenteConfigRecord[]>>();
 const achievementLogsCache = new Map<string, CacheEntry<AchievementLogRecord[]>>();
@@ -122,6 +131,14 @@ export interface PatenteConfigRecord {
   text?: string;
 }
 
+type ScopedAchievementConfigRow = AchievementConfigRecord & {
+  storageId: string;
+};
+
+type ScopedPatenteConfigRow = PatenteConfigRecord & {
+  storageId: string;
+};
+
 const normalizeAchievementConfig = (id: string, raw: unknown): AchievementConfigRecord | null => {
   const obj = asObject(raw);
   if (!obj) return null;
@@ -140,6 +157,22 @@ const normalizeAchievementConfig = (id: string, raw: unknown): AchievementConfig
   };
 };
 
+const normalizeScopedAchievementConfig = (
+  storageId: string,
+  raw: unknown
+): ScopedAchievementConfigRow | null => {
+  const normalized = normalizeAchievementConfig(
+    parseTenantScopedRowId(storageId).baseId,
+    raw
+  );
+  if (!normalized) return null;
+
+  return {
+    ...normalized,
+    storageId: asString(storageId).trim(),
+  };
+};
+
 const normalizePatenteConfig = (id: string, raw: unknown): PatenteConfigRecord | null => {
   const obj = asObject(raw);
   if (!obj) return null;
@@ -153,6 +186,22 @@ const normalizePatenteConfig = (id: string, raw: unknown): PatenteConfigRecord |
     bg: asString(obj.bg).trim().slice(0, 60) || undefined,
     border: asString(obj.border).trim().slice(0, 60) || undefined,
     text: asString(obj.text).trim().slice(0, 60) || undefined,
+  };
+};
+
+const normalizeScopedPatenteConfig = (
+  storageId: string,
+  raw: unknown
+): ScopedPatenteConfigRow | null => {
+  const normalized = normalizePatenteConfig(
+    parseTenantScopedRowId(storageId).baseId,
+    raw
+  );
+  if (!normalized) return null;
+
+  return {
+    ...normalized,
+    storageId: asString(storageId).trim(),
   };
 };
 
@@ -180,14 +229,80 @@ const normalizePatentePayload = (payload: PatenteConfigRecord): PatenteConfigRec
   text: payload.text?.trim().slice(0, 60) || undefined,
 });
 
+const selectScopedRowsForTenant = <
+  T extends {
+    storageId: string;
+  },
+>(
+  rows: T[],
+  tenantId?: string | null
+): T[] => {
+  const cleanTenantId = asString(tenantId).trim();
+  if (!cleanTenantId) {
+    return rows.filter((row) => !parseTenantScopedRowId(row.storageId).scoped);
+  }
+
+  const tenantRows = rows.filter((row) =>
+    isTenantScopedRowForTenant(row.storageId, cleanTenantId)
+  );
+  if (tenantRows.length > 0) {
+    return tenantRows;
+  }
+
+  return rows.filter((row) => !parseTenantScopedRowId(row.storageId).scoped);
+};
+
+const withoutStorageId = <
+  T extends {
+    storageId: string;
+  },
+>(
+  row: T
+): Omit<T, "storageId"> =>
+  Object.fromEntries(
+    Object.entries(row).filter(([key]) => key !== "storageId")
+  ) as Omit<T, "storageId">;
+
+const resolveCatalogStorageId = async (
+  tableName: "achievements_config" | "patentes_config",
+  baseId: string,
+  tenantId?: string | null
+): Promise<string> => {
+  const cleanId = baseId.trim();
+  if (!cleanId) return "";
+
+  const scopedId = buildTenantScopedRowId(tenantId, cleanId);
+  if (scopedId === cleanId) return cleanId;
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from(tableName)
+    .select("id")
+    .in("id", [scopedId, cleanId])
+    .limit(2);
+  if (error) throwSupabaseError(error);
+
+  const ids = new Set(
+    (data ?? [])
+      .map((row) => asString((row as Record<string, unknown>).id).trim())
+      .filter((id) => id.length > 0)
+  );
+
+  if (ids.has(scopedId)) return scopedId;
+  if (ids.has(cleanId)) return cleanId;
+  return scopedId;
+};
+
 export async function fetchAchievementsConfig(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AchievementConfigRecord[]> {
   const supabase = getSupabaseClient();
   const maxResults = boundedLimit(options?.maxResults ?? 220, MAX_ACHIEVEMENT_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const tenantId = options?.tenantId?.trim() || "";
+  const cacheKey = `${maxResults}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
     const cached = getCachedValue(achievementsConfigCache, cacheKey);
@@ -200,9 +315,15 @@ export async function fetchAchievementsConfig(options?: {
     .limit(maxResults);
   if (error) throwSupabaseError(error);
 
-  const rows = (data ?? [])
-    .map((row) => normalizeAchievementConfig(asString((row as { id?: unknown }).id), row))
-    .filter((row): row is AchievementConfigRecord => row !== null)
+  const rows = selectScopedRowsForTenant(
+    (data ?? [])
+      .map((row) =>
+        normalizeScopedAchievementConfig(asString((row as { id?: unknown }).id), row)
+      )
+      .filter((row): row is ScopedAchievementConfigRow => row !== null),
+    tenantId
+  )
+    .map((row) => withoutStorageId(row))
     .sort(
       (left, right) =>
         left.cat.localeCompare(right.cat, "pt-BR") ||
@@ -216,11 +337,13 @@ export async function fetchAchievementsConfig(options?: {
 export async function fetchPatentesConfig(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PatenteConfigRecord[]> {
   const supabase = getSupabaseClient();
   const maxResults = boundedLimit(options?.maxResults ?? 40, MAX_PATENTE_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const tenantId = options?.tenantId?.trim() || "";
+  const cacheKey = `${maxResults}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
     const cached = getCachedValue(patentesConfigCache, cacheKey);
@@ -234,9 +357,15 @@ export async function fetchPatentesConfig(options?: {
     .limit(maxResults);
   if (error) throwSupabaseError(error);
 
-  const rows = (data ?? [])
-    .map((row) => normalizePatenteConfig(asString((row as { id?: unknown }).id), row))
-    .filter((row): row is PatenteConfigRecord => row !== null)
+  const rows = selectScopedRowsForTenant(
+    (data ?? [])
+      .map((row) =>
+        normalizeScopedPatenteConfig(asString((row as { id?: unknown }).id), row)
+      )
+      .filter((row): row is ScopedPatenteConfigRow => row !== null),
+    tenantId
+  )
+    .map((row) => withoutStorageId(row))
     .sort((left, right) => left.minXp - right.minXp);
 
   setCachedValue(patentesConfigCache, cacheKey, rows);
@@ -246,33 +375,72 @@ export async function fetchPatentesConfig(options?: {
 export async function fetchAchievementsLogs(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AchievementLogRecord[]> {
   const supabase = getSupabaseClient();
   const maxResults = boundedLimit(options?.maxResults ?? 50, MAX_LOG_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const tenantId = options?.tenantId?.trim() || "";
+  const cacheKey = `${maxResults}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
     const cached = getCachedValue(achievementLogsCache, cacheKey);
     if (cached) return cached;
   }
 
-  const { data, error } = await supabase
+  let request = supabase
     .from("achievements_logs")
-    .select("id,userName,achievementTitle,timestamp")
+    .select("id,userId,userName,achievementTitle,timestamp,data")
     .order("timestamp", { ascending: false })
-    .limit(maxResults);
+    .limit(tenantId ? Math.min(MAX_LOG_RESULTS, maxResults * 8) : maxResults);
+
+  let primaryTenantByUserId = new Map<string, string>();
+  if (tenantId) {
+    const directory = await fetchTenantMembershipDirectory({
+      tenantId,
+      statuses: ["approved", "pending"],
+    });
+    const tenantUserIds = directory.map((entry) => entry.userId);
+    if (tenantUserIds.length === 0) {
+      setCachedValue(achievementLogsCache, cacheKey, []);
+      return [];
+    }
+    primaryTenantByUserId = new Map(
+      directory.map((entry) => [entry.userId, entry.globalTenantId])
+    );
+    request = request.in("userId", tenantUserIds);
+  }
+
+  const { data, error } = await request;
   if (error) throwSupabaseError(error);
 
   const rows = (data ?? [])
-    .map((row) => ({
-      id: asString((row as Record<string, unknown>).id),
-      userName: asString((row as Record<string, unknown>).userName, "Usuario"),
-      achievementTitle: asString((row as Record<string, unknown>).achievementTitle, "Conquista"),
-      timestamp: (row as Record<string, unknown>).timestamp,
-    }))
+    .map((row) => {
+      const raw = row as Record<string, unknown>;
+      const userId = asString(raw.userId).trim();
+      const dataPayload = asObject(raw.data);
+      const logTenantId = asString(dataPayload?.tenantId).trim();
+
+      if (tenantId) {
+        const primaryTenantId = primaryTenantByUserId.get(userId) ?? "";
+        const belongsToCurrentTenant =
+          logTenantId === tenantId || (!logTenantId && primaryTenantId === tenantId);
+        if (!belongsToCurrentTenant) {
+          return null;
+        }
+      }
+
+      return {
+        id: asString(raw.id),
+        userName: asString(raw.userName, "Usuario"),
+        achievementTitle: asString(raw.achievementTitle, "Conquista"),
+        timestamp: raw.timestamp,
+      } satisfies AchievementLogRecord;
+    })
+    .filter((row): row is AchievementLogRecord => row !== null)
     .filter((row) => row.id)
-    .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
+    .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp))
+    .slice(0, maxResults);
 
   setCachedValue(achievementLogsCache, cacheKey, rows);
   return rows;
@@ -281,15 +449,42 @@ export async function fetchAchievementsLogs(options?: {
 export async function fetchXpRanking(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<UserRankingRecord[]> {
   const supabase = getSupabaseClient();
   const maxResults = boundedLimit(options?.maxResults ?? 10, MAX_RANKING_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const tenantId = options?.tenantId?.trim() || "";
+  const cacheKey = `${maxResults}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
     const cached = getCachedValue(rankingCache, cacheKey);
     if (cached) return cached;
+  }
+
+  if (tenantId) {
+    const directory = await fetchTenantMembershipDirectory({
+      tenantId,
+      statuses: ["approved", "pending"],
+    });
+    const rows = directory
+      .map((entry) => ({
+        id: entry.userId,
+        nome: entry.nome,
+        turma: entry.turma,
+        xp: resolveTenantScopedXp(entry),
+        foto: entry.foto,
+      }))
+      .filter((row) => row.id)
+      .sort(
+        (left, right) =>
+          right.xp - left.xp ||
+          left.nome.localeCompare(right.nome, "pt-BR")
+      )
+      .slice(0, maxResults);
+
+    setCachedValue(rankingCache, cacheKey, rows);
+    return rows;
   }
 
   const { data, error } = await supabase
@@ -313,14 +508,19 @@ export async function fetchXpRanking(options?: {
   return rows;
 }
 
-export async function saveAchievementConfig(payload: AchievementConfigRecord): Promise<void> {
+export async function saveAchievementConfig(
+  payload: AchievementConfigRecord,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const supabase = getSupabaseClient();
   const safePayload = normalizeAchievementPayload(payload);
   if (!safePayload.id) return;
+  const storageId = buildTenantScopedRowId(options?.tenantId, safePayload.id);
 
   const { error } = await supabase.from("achievements_config").upsert(
     {
       ...safePayload,
+      id: storageId,
       updatedAt: new Date().toISOString(),
     },
     { onConflict: "id" }
@@ -330,39 +530,60 @@ export async function saveAchievementConfig(payload: AchievementConfigRecord): P
   clearReadCaches();
 }
 
-export async function deleteAchievementConfig(id: string): Promise<void> {
+export async function deleteAchievementConfig(
+  id: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const supabase = getSupabaseClient();
   const cleanId = id.trim();
   if (!cleanId) return;
 
-  const { error } = await supabase.from("achievements_config").delete().eq("id", cleanId);
+  const storageId = await resolveCatalogStorageId(
+    "achievements_config",
+    cleanId,
+    options?.tenantId
+  );
+  const { error } = await supabase.from("achievements_config").delete().eq("id", storageId);
   if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
 
-export async function toggleAchievementActive(payload: { id: string; active: boolean }): Promise<void> {
+export async function toggleAchievementActive(
+  payload: { id: string; active: boolean },
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const supabase = getSupabaseClient();
   const cleanId = payload.id.trim();
   if (!cleanId) return;
+  const storageId = await resolveCatalogStorageId(
+    "achievements_config",
+    cleanId,
+    options?.tenantId
+  );
 
   const { error } = await supabase
     .from("achievements_config")
     .update({ active: payload.active, updatedAt: new Date().toISOString() })
-    .eq("id", cleanId);
+    .eq("id", storageId);
   if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
 
-export async function savePatenteConfig(payload: PatenteConfigRecord): Promise<void> {
+export async function savePatenteConfig(
+  payload: PatenteConfigRecord,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const supabase = getSupabaseClient();
   const safePayload = normalizePatentePayload(payload);
   if (!safePayload.id) return;
+  const storageId = buildTenantScopedRowId(options?.tenantId, safePayload.id);
 
   const { error } = await supabase.from("patentes_config").upsert(
     {
       ...safePayload,
+      id: storageId,
       updatedAt: new Date().toISOString(),
     },
     { onConflict: "id" }
@@ -372,24 +593,40 @@ export async function savePatenteConfig(payload: PatenteConfigRecord): Promise<v
   clearReadCaches();
 }
 
-export async function deletePatenteConfig(id: string): Promise<void> {
+export async function deletePatenteConfig(
+  id: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const supabase = getSupabaseClient();
   const cleanId = id.trim();
   if (!cleanId) return;
 
-  const { error } = await supabase.from("patentes_config").delete().eq("id", cleanId);
+  const storageId = await resolveCatalogStorageId(
+    "patentes_config",
+    cleanId,
+    options?.tenantId
+  );
+  const { error } = await supabase.from("patentes_config").delete().eq("id", storageId);
   if (error) throwSupabaseError(error);
 
   clearReadCaches();
 }
 
-export async function seedPatentesConfig(entries: PatenteConfigRecord[]): Promise<void> {
+export async function seedPatentesConfig(
+  entries: PatenteConfigRecord[],
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const supabase = getSupabaseClient();
+  const tenantId = options?.tenantId?.trim() || "";
   const safeEntries = entries
     .slice(0, MAX_PATENTE_RESULTS)
     .map((entry) => normalizePatentePayload(entry))
     .filter((entry) => entry.id.length > 0)
-    .map((entry) => ({ ...entry, updatedAt: new Date().toISOString() }));
+    .map((entry) => ({
+      ...entry,
+      id: buildTenantScopedRowId(tenantId, entry.id),
+      updatedAt: new Date().toISOString(),
+    }));
 
   if (!safeEntries.length) return;
 

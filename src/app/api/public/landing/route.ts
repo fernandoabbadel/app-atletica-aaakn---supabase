@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import {
   DEFAULT_LANDING_CONFIG,
+  sanitizeLandingConfig,
   type LandingConfig,
 } from "@/lib/adminLandingService";
 import {
@@ -28,6 +29,8 @@ const DEFAULT_PLATFORM_BRAND: PublicLandingBrand = {
   subtitle: PLATFORM_BRAND_SUBTITLE,
   logoUrl: PLATFORM_LOGO_URL,
 };
+const LANDING_CONFIG_ROW_ID = "landing_page";
+const SITE_CONFIG_TABLE = "site_config";
 
 type TenantPublicBrand = {
   tenantId: string;
@@ -94,6 +97,40 @@ const resolveTenantPublicBrand = async (
   };
 };
 
+const buildLandingRowIds = (tenantId?: string): string[] => {
+  const cleanTenantId = (tenantId || "").trim();
+  if (!cleanTenantId) return [LANDING_CONFIG_ROW_ID];
+  return [`${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`, LANDING_CONFIG_ROW_ID];
+};
+
+const extractConfigPayload = (raw: unknown): unknown => {
+  if (!raw || typeof raw !== "object") return raw;
+  const record = raw as Record<string, unknown>;
+  if (record.data && typeof record.data === "object") return record.data;
+  if (record.config && typeof record.config === "object") return record.config;
+  if (record.payload && typeof record.payload === "object") return record.payload;
+  return raw;
+};
+
+const fetchLandingConfigWithAdmin = async (
+  tenantId?: string
+): Promise<LandingConfig> => {
+  for (const rowId of buildLandingRowIds(tenantId)) {
+    const { data, error } = await supabaseAdmin
+      .from(SITE_CONFIG_TABLE)
+      .select("id,data,updated_at")
+      .eq("id", rowId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (data) {
+      return sanitizeLandingConfig(extractConfigPayload(data), DEFAULT_LANDING_CONFIG);
+    }
+  }
+
+  return DEFAULT_LANDING_CONFIG;
+};
+
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const scope = (requestUrl.searchParams.get("scope") || "").trim().toLowerCase();
@@ -110,6 +147,7 @@ export async function GET(request: Request) {
     const tenant = tenantSlug ? await resolveTenantPublicBrand(tenantSlug) : null;
     const brand = tenant?.brand ??
       (tenantSlug ? buildTenantFallbackBrand(tenantSlug) : DEFAULT_PLATFORM_BRAND);
+    const config = await fetchLandingConfigWithAdmin(tenant?.tenantId || "");
 
     const data = await fetchPublicLandingData({
       forceRefresh: true,
@@ -120,6 +158,8 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         ...data,
+        tenantId: tenant?.tenantId || "",
+        config,
         brand,
       } satisfies PublicLandingPayload,
       {

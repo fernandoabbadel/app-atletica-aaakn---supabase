@@ -11,6 +11,8 @@ import {
   type DateLike,
   type Row,
 } from "./supabaseData";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { fetchCanonicalUserVisuals } from "./userVisualsService";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
@@ -63,6 +65,8 @@ const adminPollsCache = new Map<string, CacheEntry<Row[]>>();
 const financeiroCache = new Map<string, CacheEntry<Row | null>>();
 
 const nowIso = (): string => new Date().toISOString();
+const resolveEventsTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
 
 const asNum = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -205,9 +209,11 @@ async function selectRows(
     orderBy?: { column: string; ascending?: boolean };
     limit?: number;
     offset?: number;
+    tenantId?: string | null;
   }
 ): Promise<Row[]> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveEventsTenantId(options?.tenantId);
   const defaultSelectColumns =
     options?.selectColumns ??
     (table === "eventos"
@@ -233,6 +239,12 @@ async function selectRows(
       for (const [column, value] of Object.entries(options.eq)) {
         query = query.eq(column, value);
       }
+    }
+    if (
+      scopedTenantId &&
+      table !== "patentes_config"
+    ) {
+      query = query.eq("tenant_id", scopedTenantId);
     }
     if (mutableOrderBy) {
       query = query.order(mutableOrderBy.column, { ascending: mutableOrderBy.ascending ?? true });
@@ -267,26 +279,33 @@ async function selectRows(
   return [];
 }
 
-async function selectEventById(eventId: string): Promise<Row | null> {
+async function selectEventById(eventId: string, tenantId?: string): Promise<Row | null> {
   const rows = await selectRows("eventos", {
     eq: { id: eventId },
     limit: 1,
+    tenantId,
   });
   if (rows.length === 0) return null;
   return normalizeRowTimestamps(rows[0] as Row) as Row;
 }
 
-async function updateEventRow(eventId: string, patch: Row): Promise<void> {
+async function updateEventRow(eventId: string, patch: Row, tenantId?: string): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  const scopedTenantId = resolveEventsTenantId(tenantId);
+  let query = supabase
     .from("eventos")
     .update({ ...patch, updatedAt: nowIso() })
     .eq("id", eventId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
 }
 
 async function updateEventStatsAndLists(payload: {
   eventId: string;
+  tenantId?: string | null;
   mutate: (current: {
     stats: Row;
     interessados: string[];
@@ -294,11 +313,15 @@ async function updateEventStatsAndLists(payload: {
   }) => { stats?: Row; interessados?: string[]; likesList?: string[] };
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { data: row, error: selectError } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let selectQuery = supabase
     .from("eventos")
     .select("stats, interessados, \"likesList\"")
-    .eq("id", payload.eventId)
-    .maybeSingle();
+    .eq("id", payload.eventId);
+  if (scopedTenantId) {
+    selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: row, error: selectError } = await selectQuery.maybeSingle();
 
   if (selectError) throwSupabaseError(selectError);
   if (!row) return;
@@ -315,10 +338,14 @@ async function updateEventStatsAndLists(payload: {
   if (next.interessados) updatePayload.interessados = next.interessados;
   if (next.likesList) updatePayload.likesList = next.likesList;
 
-  const { error: updateError } = await supabase
+  let updateQuery = supabase
     .from("eventos")
     .update(updatePayload)
     .eq("id", payload.eventId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
 }
 
@@ -338,12 +365,14 @@ export async function fetchEventsFeed(options?: {
   forceRefresh?: boolean;
   includeInactive?: boolean;
   includePast?: boolean;
+  tenantId?: string | null;
 }): Promise<Row[]> {
+  const scopedTenantId = resolveEventsTenantId(options?.tenantId);
   const maxResults = boundedLimit(options?.maxResults ?? 60, MAX_EVENTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const includeInactive = options?.includeInactive ?? false;
   const includePast = options?.includePast ?? false;
-  const cacheKey = `${maxResults}:${includeInactive ? "all" : "active"}:${includePast ? "past" : "future"}`;
+  const cacheKey = `${scopedTenantId || "all"}:${maxResults}:${includeInactive ? "all" : "active"}:${includePast ? "past" : "future"}`;
 
   if (!forceRefresh) {
     const cached = getCache(feedCache, cacheKey);
@@ -408,9 +437,10 @@ export async function fetchEventsFeed(options?: {
       eq: includeInactive ? undefined : { status: "ativo" },
       orderBy: { column: includePast ? "createdAt" : "data", ascending: includePast ? false : true },
       limit: fetchLimit,
+      tenantId: scopedTenantId,
     });
   } catch {
-    rows = await selectRows("eventos", { limit: fetchLimit });
+    rows = await selectRows("eventos", { limit: fetchLimit, tenantId: scopedTenantId });
   }
 
   const nowMs = Date.now();
@@ -440,22 +470,32 @@ export async function fetchEventsFeed(options?: {
   return visibleRows;
 }
 
-async function fetchFinanceiroConfig(forceRefresh = false): Promise<Row | null> {
-  const cacheKey = "financeiro";
+async function fetchFinanceiroConfig(
+  forceRefresh = false,
+  tenantId?: string | null
+): Promise<Row | null> {
+  const scopedTenantId = resolveEventsTenantId(tenantId);
+  const cacheKey = `financeiro:${scopedTenantId || "all"}`;
   if (!forceRefresh) {
     const cached = getCache(financeiroCache, cacheKey);
     if (cached !== null) return cached;
   }
 
   const supabase = getSupabaseClient();
+  const configIds = scopedTenantId
+    ? [buildTenantScopedRowId(scopedTenantId, "financeiro"), "financeiro"]
+    : ["financeiro"];
   const { data, error } = await supabase
     .from("app_config")
     .select(FINANCEIRO_CONFIG_SELECT_COLUMNS)
-    .eq("id", "financeiro")
-    .maybeSingle();
+    .in("id", configIds);
   if (error) throwSupabaseError(error);
 
-  const row = data ? (normalizeRowTimestamps(data as Row) as Row) : null;
+  const rows = Array.isArray(data) ? (data as Row[]) : [];
+  const selected = configIds
+    .map((id) => rows.find((row) => asString(row.id) === id))
+    .find((row) => Boolean(row));
+  const row = selected ? (normalizeRowTimestamps(selected as Row) as Row) : null;
   setCache(financeiroCache, cacheKey, row);
   return row;
 }
@@ -779,6 +819,7 @@ export async function fetchEventDetailsBundle(options: {
   pollsLimit?: number;
   pedidosLimit?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<EventDetailsBundle> {
   const eventId = options.eventId.trim();
   if (!eventId) {
@@ -794,6 +835,7 @@ export async function fetchEventDetailsBundle(options: {
   }
 
   const userId = options.userId?.trim() || "";
+  const scopedTenantId = resolveEventsTenantId(options.tenantId);
   const rsvpsLimit = boundedLimit(options.rsvpsLimit ?? DEFAULT_EVENT_DETAILS_RSVPS_LIMIT, MAX_RSVPS);
   const commentsLimit = boundedLimit(
     options.commentsLimit ?? DEFAULT_EVENT_DETAILS_COMMENTS_LIMIT,
@@ -805,7 +847,7 @@ export async function fetchEventDetailsBundle(options: {
     MAX_TICKETS
   );
   const forceRefresh = options.forceRefresh ?? false;
-  const cacheKey = `${eventId}:${userId}:${rsvpsLimit}:${commentsLimit}:${pollsLimit}:${pedidosLimit}`;
+  const cacheKey = `${scopedTenantId || "all"}:${eventId}:${userId}:${rsvpsLimit}:${commentsLimit}:${pollsLimit}:${pedidosLimit}`;
 
   if (!forceRefresh) {
     const cached = getCache(detailsCache, cacheKey);
@@ -815,32 +857,41 @@ export async function fetchEventDetailsBundle(options: {
   const supabase = getSupabaseClient();
   const [evento, rsvpsRaw, comentariosRaw, enquetesRaw, patentesRaw, financeiro, meusPedidosRaw] =
     await Promise.all([
-      selectEventById(eventId),
-      selectRows("eventos_rsvps", { eq: { eventoId: eventId }, limit: rsvpsLimit }),
+      selectEventById(eventId, scopedTenantId),
+      selectRows("eventos_rsvps", {
+        eq: { eventoId: eventId },
+        limit: rsvpsLimit,
+        tenantId: scopedTenantId,
+      }),
       selectRows("eventos_comentarios", {
         eq: { eventoId: eventId },
         orderBy: { column: "createdAt", ascending: false },
         limit: commentsLimit,
+        tenantId: scopedTenantId,
       }),
       selectRows("eventos_enquetes", {
         eq: { eventoId: eventId },
         orderBy: { column: "createdAt", ascending: false },
         limit: pollsLimit,
+        tenantId: scopedTenantId,
       }),
       selectRows("patentes_config", {
         orderBy: { column: "minXp", ascending: true },
         limit: 25,
       }),
-      fetchFinanceiroConfig(forceRefresh),
+      fetchFinanceiroConfig(forceRefresh, scopedTenantId),
       userId
         ? (async () => {
-            const { data, error } = await supabase
+            let query = supabase
               .from("solicitacoes_ingressos")
               .select(SOLICITACOES_INGRESSOS_SELECT_COLUMNS)
               .eq("userId", userId)
               .eq("eventoId", eventId)
-              .order("dataSolicitacao", { ascending: false })
-              .limit(pedidosLimit);
+              .order("dataSolicitacao", { ascending: false });
+            if (scopedTenantId) {
+              query = query.eq("tenant_id", scopedTenantId);
+            }
+            const { data, error } = await query.limit(pedidosLimit);
             if (error) throwSupabaseError(error);
             return (data ?? []) as Row[];
           })()
@@ -863,12 +914,20 @@ export async function fetchEventDetailsBundle(options: {
   return bundle;
 }
 
-export async function cancelEventTicketRequest(requestId: string): Promise<void> {
+export async function cancelEventTicketRequest(
+  requestId: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const cleanId = requestId.trim();
   if (!cleanId) return;
 
   const supabase = getSupabaseClient();
-  const { error } = await supabase.from("solicitacoes_ingressos").delete().eq("id", cleanId);
+  const scopedTenantId = resolveEventsTenantId(options?.tenantId);
+  let query = supabase.from("solicitacoes_ingressos").delete().eq("id", cleanId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
 
   detailsCache.clear();
@@ -1026,7 +1085,7 @@ export async function updateAdminEventPollOptions(payload: {
 }
 
 export async function fetchEventTitleById(eventId: string): Promise<string | null> {
-  const row = await selectEventById(eventId);
+  const row = await selectEventById(eventId, resolveEventsTenantId());
   if (!row) return null;
   return typeof row.titulo === "string" ? row.titulo : null;
 }
@@ -1035,6 +1094,7 @@ export async function toggleEventLike(payload: {
   eventId: string;
   userId: string;
   currentlyLiked: boolean;
+  tenantId?: string | null;
 }): Promise<void> {
   const eventId = payload.eventId.trim();
   const userId = payload.userId.trim();
@@ -1042,6 +1102,7 @@ export async function toggleEventLike(payload: {
 
   await updateEventStatsAndLists({
     eventId,
+    tenantId: payload.tenantId,
     mutate: ({ stats, likesList }) => {
       const nextLikesList = toggleArrayValue(likesList, userId);
       const currentLikes = asNum((stats as Row).likes, 0);
@@ -1063,18 +1124,27 @@ export async function setEventRsvpDetailed(payload: {
   userName: string;
   userAvatar: string;
   userTurma: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const eventId = payload.eventId.trim();
   const userId = payload.userId.trim();
   if (!eventId || !userId) return;
 
   const supabase = getSupabaseClient();
-  const { data: existing, error: existingError } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  const eventRow = await selectEventById(eventId, scopedTenantId);
+  if (!eventRow) {
+    throw new Error("Evento fora do tenant ativo.");
+  }
+  let existingQuery = supabase
     .from("eventos_rsvps")
     .select("id, status")
     .eq("eventoId", eventId)
-    .eq("userId", userId)
-    .maybeSingle();
+    .eq("userId", userId);
+  if (scopedTenantId) {
+    existingQuery = existingQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle();
 
   if (existingError) throwSupabaseError(existingError);
 
@@ -1085,15 +1155,20 @@ export async function setEventRsvpDetailed(payload: {
 
   // Mantemos comportamento antigo: clicar na mesma opcao remove o RSVP.
   if (oldStatus === payload.status) {
-    const { error: deleteError } = await supabase
+    let deleteQuery = supabase
       .from("eventos_rsvps")
       .delete()
       .eq("eventoId", eventId)
       .eq("userId", userId);
+    if (scopedTenantId) {
+      deleteQuery = deleteQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { error: deleteError } = await deleteQuery;
     if (deleteError) throwSupabaseError(deleteError);
 
     await updateEventStatsAndLists({
       eventId,
+      tenantId: scopedTenantId,
       mutate: ({ stats, interessados }) => ({
         interessados: interessados.filter((entry) => entry !== userId),
         stats: {
@@ -1114,6 +1189,7 @@ export async function setEventRsvpDetailed(payload: {
         userName: payload.userName,
         userAvatar: payload.userAvatar,
         userTurma: payload.userTurma,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         timestamp: nowIso(),
       },
       {
@@ -1124,6 +1200,7 @@ export async function setEventRsvpDetailed(payload: {
 
     await updateEventStatsAndLists({
       eventId,
+      tenantId: scopedTenantId,
       mutate: ({ stats, interessados }) => {
         const nextStats: Row = { ...stats };
         if (oldStatus) {
@@ -1150,11 +1227,19 @@ export async function setEventRsvpDetailed(payload: {
 export async function createEventComment(payload: {
   eventId: string;
   data: Row;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
   const eventId = payload.eventId.trim();
   if (!eventId) return { id: "" };
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveEventsTenantId(
+    payload.tenantId ?? asString(payload.data.tenantId)
+  );
+  const eventRow = await selectEventById(eventId, scopedTenantId);
+  if (!eventRow) {
+    throw new Error("Evento fora do tenant ativo.");
+  }
   const userId = asString(payload.data.userId).trim();
   const visuals = userId ? await fetchCanonicalUserVisuals([userId]) : new Map();
   const visual = userId ? visuals.get(userId) : undefined;
@@ -1181,6 +1266,7 @@ export async function createEventComment(payload: {
   delete safePayloadData.texto;
   delete safePayloadData.userPatenteIcon;
   delete safePayloadData.userPatenteCor;
+  delete safePayloadData.tenantId;
 
   const { data, error } = await supabase
     .from("eventos_comentarios")
@@ -1188,6 +1274,7 @@ export async function createEventComment(payload: {
       eventoId: eventId,
       ...safePayloadData,
       ...visualPatch,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       createdAt: nowIso(),
       updatedAt: nowIso(),
     })
@@ -1207,14 +1294,19 @@ export async function toggleEventCommentLike(payload: {
   eventId: string;
   commentId: string;
   userId: string;
+  tenantId?: string | null;
 }): Promise<string[]> {
   const supabase = getSupabaseClient();
-  const { data: row, error: selectError } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let selectQuery = supabase
     .from("eventos_comentarios")
     .select("id, likes, userId")
     .eq("id", payload.commentId)
-    .eq("eventoId", payload.eventId)
-    .maybeSingle();
+    .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: row, error: selectError } = await selectQuery.maybeSingle();
   if (selectError) throwSupabaseError(selectError);
   if (!row) return [];
 
@@ -1223,11 +1315,15 @@ export async function toggleEventCommentLike(payload: {
   const changed = nextLikes.length !== currentLikes.length;
   if (!changed) return currentLikes;
 
-  const { error: updateError } = await supabase
+  let updateQuery = supabase
     .from("eventos_comentarios")
     .update({ likes: nextLikes, updatedAt: nowIso() })
     .eq("id", payload.commentId)
     .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
 
   const authorId = typeof row.userId === "string" ? row.userId : "";
@@ -1244,13 +1340,19 @@ export async function toggleEventCommentLike(payload: {
 export async function deleteEventComment(payload: {
   eventId: string;
   commentId: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let query = supabase
     .from("eventos_comentarios")
     .delete()
     .eq("id", payload.commentId)
     .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
   invalidateEventCaches(payload.eventId);
 }
@@ -1259,21 +1361,26 @@ export async function reportEventComment(payload: {
   eventId: string;
   commentId: string;
   userId: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { data: row, error: selectError } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let selectQuery = supabase
     .from("eventos_comentarios")
     .select("reports")
     .eq("id", payload.commentId)
-    .eq("eventoId", payload.eventId)
-    .maybeSingle();
+    .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: row, error: selectError } = await selectQuery.maybeSingle();
   if (selectError) throwSupabaseError(selectError);
   if (!row) return;
 
   const currentReports = asStringArray(row.reports);
   if (currentReports.includes(payload.userId)) return;
 
-  const { error: updateError } = await supabase
+  let updateQuery = supabase
     .from("eventos_comentarios")
     .update({
       reports: [...currentReports, payload.userId],
@@ -1281,6 +1388,10 @@ export async function reportEventComment(payload: {
     })
     .eq("id", payload.commentId)
     .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
   invalidateEventCaches(payload.eventId);
 }
@@ -1289,13 +1400,19 @@ export async function setEventCommentHidden(payload: {
   eventId: string;
   commentId: string;
   hidden: boolean;
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let query = supabase
     .from("eventos_comentarios")
     .update({ hidden: payload.hidden, updatedAt: nowIso() })
     .eq("id", payload.commentId)
     .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
   invalidateEventCaches(payload.eventId);
 }
@@ -1306,14 +1423,19 @@ export async function voteEventPollOption(payload: {
   userId: string;
   userTurma: string;
   optionIndex: number;
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { data: pollRow, error: selectError } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let selectQuery = supabase
     .from("eventos_enquetes")
     .select("options, userVotes, voters")
     .eq("id", payload.pollId)
-    .eq("eventoId", payload.eventId)
-    .maybeSingle();
+    .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: pollRow, error: selectError } = await selectQuery.maybeSingle();
   if (selectError) throwSupabaseError(selectError);
   if (!pollRow) throw new Error("Enquete nao existe");
 
@@ -1356,7 +1478,7 @@ export async function voteEventPollOption(payload: {
   const nextVoters = voters.includes(payload.userId) ? voters : [...voters, payload.userId];
 
   // Sem RPC/Edge Function, usamos read-modify-write no cliente para manter o plano free.
-  const { error: updateError } = await supabase
+  let updateQuery = supabase
     .from("eventos_enquetes")
     .update({
       options,
@@ -1366,6 +1488,10 @@ export async function voteEventPollOption(payload: {
     })
     .eq("id", payload.pollId)
     .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
 
   invalidateEventCaches(payload.eventId);
@@ -1375,19 +1501,24 @@ export async function addEventPollOption(payload: {
   eventId: string;
   pollId: string;
   option: Row;
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { data: row, error: selectError } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let selectQuery = supabase
     .from("eventos_enquetes")
     .select("options")
     .eq("id", payload.pollId)
-    .eq("eventoId", payload.eventId)
-    .maybeSingle();
+    .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: row, error: selectError } = await selectQuery.maybeSingle();
   if (selectError) throwSupabaseError(selectError);
   if (!row) return;
 
   const currentOptions = Array.isArray(row.options) ? row.options : [];
-  const { error: updateError } = await supabase
+  let updateQuery = supabase
     .from("eventos_enquetes")
     .update({
       options: [...currentOptions, payload.option],
@@ -1395,6 +1526,10 @@ export async function addEventPollOption(payload: {
     })
     .eq("id", payload.pollId)
     .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
 
   invalidateEventCaches(payload.eventId);

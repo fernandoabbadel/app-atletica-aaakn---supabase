@@ -14,6 +14,7 @@ import { auth } from "@/lib/backend";
 import { useRouter } from "next/navigation";
 
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { buildLoginPath } from "@/lib/authRedirect";
 
 export default function BannedPage() {
   const router = useRouter();
@@ -24,7 +25,7 @@ export default function BannedPage() {
     setLoading(true);
     try {
       await signOut(auth);
-      router.push("/login");
+      router.push(buildLoginPath("/banned"));
     } catch (error: unknown) {
       console.error("Erro ao sair:", error);
       setLoading(false);

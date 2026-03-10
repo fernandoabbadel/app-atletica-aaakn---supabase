@@ -53,6 +53,11 @@ const shouldPersistAuditLog = (
     return actionKey === "DELETE";
   }
 
+  // 4.1) Aprovar/rejeitar fila de pendencias do lancamento
+  if (resourceKey === "tenantjoinrequests") {
+    return actionKey === "UPDATE";
+  }
+
   // 5) Evento criado/deletado
   if (resourceKey === "eventosadmin") {
     return actionKey === "CREATE" || actionKey === "DELETE";

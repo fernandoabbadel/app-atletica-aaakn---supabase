@@ -21,6 +21,7 @@ import { Html5Qrcode } from "html5-qrcode";
 import { QRCodeSVG } from "qrcode.react";
 
 import { useAuth } from "../../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../../context/ToastContext";
 import {
   fetchAlbumCollectedIds,
@@ -143,7 +144,9 @@ export default function AlbumTurmaPage() {
   );
 
   const { user, loading: authLoading } = useAuth();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const { addToast } = useToast();
+  const effectiveTenantId = activeTenantId || user?.tenant_id || "";
 
   const userUid = user?.uid;
   const [usuarios, setUsuarios] = useState<UserData[]>([]);
@@ -212,6 +215,7 @@ export default function AlbumTurmaPage() {
         const collectedIds = await fetchAlbumCollectedIds(userUid, {
           turma,
           maxResults: 240,
+          tenantId: effectiveTenantId || undefined,
         });
         if (!mounted) return;
         setMeuAlbum(collectedIds);
@@ -232,7 +236,7 @@ export default function AlbumTurmaPage() {
     return () => {
       mounted = false;
     };
-  }, [authLoading, userUid, turma, addToast]);
+  }, [authLoading, userUid, turma, addToast, effectiveTenantId]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -252,10 +256,13 @@ export default function AlbumTurmaPage() {
     const loadTurma = async () => {
       try {
         const [usersResult, cmsResult, uiResult, turmasResult] = await Promise.allSettled([
-          fetchUsersByTurmaPage(turma, { pageSize: USERS_PAGE_SIZE }),
-          fetchAlbumConfig(turma),
-          fetchAlbumUiConfig(),
-          fetchTurmasConfig(),
+          fetchUsersByTurmaPage(turma, {
+            pageSize: USERS_PAGE_SIZE,
+            tenantId: effectiveTenantId || undefined,
+          }),
+          fetchAlbumConfig(turma, { tenantId: effectiveTenantId || undefined }),
+          fetchAlbumUiConfig({ tenantId: effectiveTenantId || undefined }),
+          fetchTurmasConfig({ tenantId: effectiveTenantId || undefined }),
         ]);
         if (!mounted) return;
 
@@ -296,7 +303,7 @@ export default function AlbumTurmaPage() {
     return () => {
       mounted = false;
     };
-  }, [authLoading, userUid, turma, addToast]);
+  }, [authLoading, userUid, turma, addToast, effectiveTenantId]);
 
   const loadMoreUsers = useCallback(async () => {
     if (!hasMoreUsers || !usersCursorId || loadingMoreUsers) return;
@@ -305,6 +312,7 @@ export default function AlbumTurmaPage() {
       const page: AlbumUsersPageResult = await fetchUsersByTurmaPage(turma, {
         pageSize: USERS_PAGE_SIZE,
         cursorId: usersCursorId,
+        tenantId: effectiveTenantId || undefined,
       });
       setUsuarios((prev) => {
         const known = new Set(prev.map((row) => row.id));
@@ -318,7 +326,7 @@ export default function AlbumTurmaPage() {
     } finally {
       setLoadingMoreUsers(false);
     }
-  }, [hasMoreUsers, usersCursorId, loadingMoreUsers, turma, addToast]);
+  }, [hasMoreUsers, usersCursorId, loadingMoreUsers, turma, addToast, effectiveTenantId]);
 
   useEffect(() => {
     if (autoScanHandledRef.current) return;
@@ -364,6 +372,7 @@ export default function AlbumTurmaPage() {
             foto: user.foto,
           },
           targetId,
+          tenantId: effectiveTenantId || undefined,
         });
 
         if (result.status === "invalid-target") {
@@ -397,7 +406,7 @@ export default function AlbumTurmaPage() {
         setProcessingScan(false);
       }
     },
-    [user, meuAlbum, addToast, stopScanner]
+    [user, meuAlbum, addToast, stopScanner, effectiveTenantId]
   );
 
   useEffect(() => {

@@ -1,14 +1,14 @@
 // src/app/cadastro/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { 
   User, Hash, Instagram, FileText, Phone, Save, Loader2, ShieldAlert, 
   Eye, EyeOff, CheckCircle2, MapPin, Calendar, Heart, Trophy, PawPrint, 
   ArrowLeft, BadgeCheck, Lock, Camera, UploadCloud 
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext"; 
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -17,24 +17,25 @@ import { validateImageFile } from "../../lib/upload";
 import { isPermissionError } from "../../lib/backendErrors";
 import { useToast } from "../../context/ToastContext"; 
 import { getTurmaImage } from "../../constants/turmaImages";
-import { withTenantSlug } from "@/lib/tenantRouting";
+import { buildLoginPath } from "@/lib/authRedirect";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import {
+  fetchTenantPlatformConfig,
   fetchPendingMembershipStatusForCurrentUser,
   requestJoinWithInvite,
 } from "../../lib/tenantService";
-
-// --- DADOS ---
-const TURMAS = [
-  { id: "T1", nome: "Turma I - Jacare", img: getTurmaImage("T1") },
-  { id: "T2", nome: "Turma II - Cavalo Marinho", img: getTurmaImage("T2") },
-  { id: "T3", nome: "Turma III - Tartaruga", img: getTurmaImage("T3") },
-  { id: "T4", nome: "Turma IV - Baleia", img: getTurmaImage("T4") },
-  { id: "T5", nome: "Turma V - Pinguim", img: getTurmaImage("T5") }, 
-  { id: "T6", nome: "Turma VI - Lagosta", img: getTurmaImage("T6") },
-  { id: "T7", nome: "Turma VII - Urso Polar", img: getTurmaImage("T7") },
-  { id: "T8", nome: "Turma VIII - Calouro", img: getTurmaImage("T8") },
-  { id: "T9", nome: "Turma IX", img: getTurmaImage("T9") },
-];
+import {
+  clearStoredInviteToken,
+  readStoredInviteToken,
+  sanitizeInviteToken,
+  storeInviteToken,
+} from "@/lib/inviteTokenStorage";
+import {
+  fetchTurmasConfig,
+  getDefaultTurmas,
+  readActiveTurmasSnapshot,
+  type TurmaConfig,
+} from "@/lib/turmasService";
 
 const STATUS_RELACIONAMENTO = ["Solteiro(a)", "Namorando", "Casado(a)", "Enrolado(a)", "No QG da Atletica"];
 
@@ -117,16 +118,24 @@ const extractErrorMessage = (error: unknown): string => {
 
 export default function CadastroPage() {
   const { user, updateUser, logout, loading: authLoading } = useAuth();
-  const { tenantSlug } = useTenantTheme();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
+  const pathname = usePathname() || "/cadastro";
   const router = useRouter();
   const searchParams = useSearchParams();
-  const inviteToken = (searchParams.get("invite") || "").trim();
-  const hasInviteToken = inviteToken.length > 0;
+  const inviteTokenFromUrl = sanitizeInviteToken(searchParams.get("invite"));
+  const [effectiveInviteToken, setEffectiveInviteToken] = useState(
+    inviteTokenFromUrl || readStoredInviteToken()
+  );
+  const hasInviteToken = effectiveInviteToken.length > 0;
+  const activeTenantId = tenantId.trim() || String(user?.tenant_id || "").trim();
   
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false); 
+  const [loadingTurmas, setLoadingTurmas] = useState(true);
   const [error, setError] = useState("");
+  const [turmasLoadError, setTurmasLoadError] = useState("");
+  const [turmas, setTurmas] = useState<TurmaConfig[]>([]);
   
   // ðŸ¦ˆ ID 3: Tipagem correta
   const [ufs, setUfs] = useState<IBGEUF[]>([]);
@@ -170,6 +179,22 @@ export default function CadastroPage() {
   const profilePath = user?.uid ? scopedPath(`/perfil/${user.uid}`) : scopedPath("/perfil");
   const pendingPath = scopedPath("/aguardando-aprovacao");
   const landingPath = scopedPath("/");
+  const currentRoutePath = parseTenantScopedPath(pathname).tenantSlug
+    ? pathname
+    : scopedPath("/cadastro");
+  const loginPath = buildLoginPath(currentRoutePath);
+  const visibleTurmas = useMemo(
+    () => turmas.filter((turma) => !turma.hidden || turma.id === formData.turma),
+    [formData.turma, turmas]
+  );
+
+  useEffect(() => {
+    const nextInviteToken = inviteTokenFromUrl || readStoredInviteToken();
+    if (inviteTokenFromUrl) {
+      storeInviteToken(inviteTokenFromUrl);
+    }
+    setEffectiveInviteToken(nextInviteToken);
+  }, [inviteTokenFromUrl]);
 
   // APIs IBGE
   useEffect(() => {
@@ -222,8 +247,58 @@ export default function CadastroPage() {
 
   useEffect(() => {
     if (authLoading || user) return;
-    router.replace(landingPath);
-  }, [authLoading, landingPath, router, user]);
+    router.replace(loginPath);
+  }, [authLoading, loginPath, router, user]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const snapshot =
+      readActiveTurmasSnapshot({
+        tenantId: activeTenantId || undefined,
+        tenantSlug,
+      })?.turmas ?? [];
+
+    if (snapshot.length > 0) {
+      setTurmas(snapshot);
+    }
+
+    if (!activeTenantId && !tenantSlug.trim()) {
+      setTurmas(getDefaultTurmas());
+      setTurmasLoadError("");
+      setLoadingTurmas(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    const loadTurmas = async () => {
+      setLoadingTurmas(true);
+      setTurmasLoadError("");
+      try {
+        const rows = await fetchTurmasConfig({
+          tenantId: activeTenantId || undefined,
+          forceRefresh: true,
+        });
+        if (!mounted) return;
+        setTurmas(rows);
+      } catch (loadError: unknown) {
+        console.error("Erro ao carregar turmas da tenant:", loadError);
+        if (!mounted) return;
+        setTurmas(snapshot);
+        setTurmasLoadError("Nao foi possivel carregar as turmas desta atletica.");
+      } finally {
+        if (mounted) {
+          setLoadingTurmas(false);
+        }
+      }
+    };
+
+    void loadTurmas();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantId, tenantSlug]);
 
   // ðŸ¦ˆ Lógica de Upload de Foto
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -294,10 +369,13 @@ export default function CadastroPage() {
 
     try {
       // 1. Atualiza dados do usuário
+      const isGuestRole = String(user?.role || "").trim().toLowerCase() === "guest";
+      const platformConfig = isGuestRole ? await fetchTenantPlatformConfig() : null;
+      const tokenizationActive = platformConfig?.tokenizationActive ?? false;
+
       await updateUser({
         ...formData,
         instagram: formData.instagram ? `@${formData.instagram.replace("@", "")}` : "",
-        role: user?.role === 'guest' ? 'user' : user?.role 
       });
 
       // ðŸ¦ˆ ID 1: Lógica de Perfil Completo para Gamificação
@@ -327,39 +405,76 @@ export default function CadastroPage() {
 
       if (shouldTryInviteJoin) {
         try {
-          await requestJoinWithInvite(inviteToken);
+          await requestJoinWithInvite(effectiveInviteToken);
         } catch (joinError: unknown) {
           const joinMessage = extractErrorMessage(joinError);
-          setError(`Cadastro salvo, mas o convite falhou: ${joinMessage}`);
-          addToast("Cadastro salvo, mas o convite nao foi aplicado.", "error");
-          return;
+          const normalizedJoinMessage = joinMessage.toLowerCase();
+          const shouldClearInviteToken =
+            normalizedJoinMessage.includes("token invalido") ||
+            normalizedJoinMessage.includes("token expirado") ||
+            normalizedJoinMessage.includes("token esgotado") ||
+            normalizedJoinMessage.includes("inativo");
+          if (shouldClearInviteToken) {
+            clearStoredInviteToken();
+          }
+          if (!tokenizationActive) {
+            addToast("Cadastro salvo, mas o convite foi ignorado.", "info");
+          } else {
+            setError(`Cadastro salvo, mas o convite falhou: ${joinMessage}`);
+            addToast("Cadastro salvo, mas o convite nao foi aplicado.", "error");
+            return;
+          }
         }
+      } else if (hasInviteToken && (currentTenantStatus === "pending" || currentTenantStatus === "approved")) {
+        clearStoredInviteToken();
       }
 
       // 3. Se estiver pendente, manda para tela de espera
       try {
         const membership = await fetchPendingMembershipStatusForCurrentUser();
-        if (membership?.status === "pending") {
-          await updateUser({
+        if (membership) {
+          const membershipPatch: Parameters<typeof updateUser>[0] = {
             tenant_id: membership.tenantId,
             tenant_role: membership.role,
             tenant_status: membership.status,
-          });
+          };
+
+          if (isGuestRole && membership.status === "approved") {
+            membershipPatch.role = "user";
+          }
+
+          await updateUser(membershipPatch);
+        }
+
+        if (membership?.status === "pending") {
+          clearStoredInviteToken();
           addToast("Cadastro concluido. Aguarde aprovacao da atletica.", "info");
           router.push(pendingPath);
           return;
         }
         if (membership?.status === "approved") {
-          await updateUser({
-            tenant_id: membership.tenantId,
-            tenant_role: membership.role,
-            tenant_status: membership.status,
-          });
+          clearStoredInviteToken();
+          addToast("Perfil atualizado! Bem-vindo ao cardume. \uD83E\uDD88", "success");
+          router.push(profilePath);
+          return;
         }
       } catch {
         // Nao bloqueia fluxo principal se esta consulta falhar.
       }
 
+      if (isGuestRole) {
+        if (!tokenizationActive) {
+          await updateUser({ role: "user" });
+        } else {
+          setError(
+            "Ficha salva, mas o lancamento exige um convite valido antes de liberar seu acesso."
+          );
+          addToast("Ficha salva, mas falta um convite valido para liberar a entrada.", "info");
+          return;
+        }
+      }
+
+      clearStoredInviteToken();
       addToast("Perfil atualizado! Bem-vindo ao cardume. \uD83E\uDD88", "success");
       router.push(profilePath); 
     } catch (err: unknown) {
@@ -659,25 +774,47 @@ export default function CadastroPage() {
                 <div className="space-y-3">
                     <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Selecione seu Cardume</label>
                     <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
-                        {TURMAS.map((t) => (
+                        {loadingTurmas ? (
+                            <div className="rounded-2xl border border-zinc-800 bg-black/40 px-4 py-6 text-sm font-semibold text-zinc-400 flex items-center gap-3">
+                                <Loader2 className="animate-spin text-emerald-500" size={18} />
+                                Carregando turmas da sua atletica...
+                            </div>
+                        ) : null}
+                        {!loadingTurmas && turmasLoadError ? (
+                            <div className="rounded-2xl border border-red-500/20 bg-red-950/20 px-4 py-3 text-xs font-semibold text-red-300">
+                                {turmasLoadError}
+                            </div>
+                        ) : null}
+                        {!loadingTurmas && visibleTurmas.length === 0 ? (
+                            <div className="rounded-2xl border border-zinc-800 bg-black/40 px-4 py-6 text-sm font-semibold text-zinc-400">
+                                Nenhuma turma visivel foi configurada para esta tenant.
+                            </div>
+                        ) : null}
+                        {visibleTurmas.map((t, index) => {
+                            const turmaTitle = [t.nome.trim(), t.mascote.trim()]
+                                .filter((value) => value.length > 0)
+                                .join(" - ");
+
+                            return (
                             <div key={t.id} onClick={() => setFormData({...formData, turma: t.id})} className={`cursor-pointer rounded-2xl border p-4 flex items-center justify-between transition-all ${formData.turma === t.id ? "bg-emerald-500/10 border-emerald-500" : "bg-black/40 border-zinc-800 hover:bg-zinc-800"}`}>
                                 <div className="flex items-center gap-4">
                                     <div className="w-10 h-10 rounded-full bg-zinc-800 overflow-hidden relative">
                                         {/* ðŸ¦ˆ 1. Correção: Uso do Image do Next.js */}
                                         <Image 
-                                            src={getTurmaImage(t.id)} 
-                                            alt={t.nome} 
+                                            src={getTurmaImage(t.id, t.logo || "/logo.png")} 
+                                            alt={turmaTitle || t.id} 
                                             fill 
                                             className="object-cover" 
                                             
-                                            priority={t.id === "T1" || t.id === "T2"}
+                                            priority={index < 2}
                                         />
                                     </div>
-                                    <span className={`text-sm font-bold uppercase ${formData.turma === t.id ? "text-emerald-400" : "text-zinc-400"}`}>{t.nome}</span>
+                                    <span className={`text-sm font-bold uppercase ${formData.turma === t.id ? "text-emerald-400" : "text-zinc-400"}`}>{turmaTitle || t.id}</span>
                                 </div>
                                 {formData.turma === t.id && <CheckCircle2 className="text-emerald-500" size={20} />}
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
 

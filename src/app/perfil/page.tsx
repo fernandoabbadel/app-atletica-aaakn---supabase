@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
+import { buildLoginPath } from "@/lib/authRedirect";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
 export default function MeuPerfilRedirectPage() {
@@ -16,7 +17,7 @@ export default function MeuPerfilRedirectPage() {
     if (loading) return;
 
     if (!user) {
-      router.replace("/login");
+      router.replace(buildLoginPath(pathname));
       return;
     }
 
@@ -34,7 +35,7 @@ export default function MeuPerfilRedirectPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#050505] text-white">
-      <Loader2 className="h-10 w-10 animate-spin text-emerald-500" />
+      <Loader2 className="h-10 w-10 animate-spin text-brand" />
     </div>
   );
 }

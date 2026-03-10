@@ -74,6 +74,10 @@ export const ACHIEVEMENTS_CATALOG: Achievement[] = [
     // =================================================================
     // 6. SOCIAL (COMUNIDADE)
     // =================================================================
+    { id: "soc_10", titulo: "Convocador", desc: "Teve 5 convites ativados na atlética.", cat: "Social", xp: 250, target: 5, statKey: "inviteActivations", iconName: "UserPlus", iconEmoji: "📨" },
+    { id: "soc_11", titulo: "Puxador de Cardume", desc: "Teve 10 convites ativados na atlética.", cat: "Social", xp: 600, target: 10, statKey: "inviteActivations", iconName: "UserPlus", iconEmoji: "🦈" },
+    { id: "soc_12", titulo: "Embaixador", desc: "Teve 50 convites ativados na atlética.", cat: "Social", xp: 3000, target: 50, statKey: "inviteActivations", iconName: "Crown", iconEmoji: "🏛️" },
+    { id: "soc_13", titulo: "Lenda do Recrutamento", desc: "Teve 100 convites ativados na atlética.", cat: "Social", xp: 8000, target: 100, statKey: "inviteActivations", iconName: "Star", iconEmoji: "🚀" },
     { id: "soc_2", titulo: "Tubarao Social", desc: "Fez 5 posts na comunidade.", cat: "Social", xp: 100, target: 5, statKey: "postsCount", iconName: "Megaphone", iconEmoji: "📣" },
     { id: "soc_3", titulo: "A Voz do Oceano", desc: "Fez 50 posts na comunidade.", cat: "Social", xp: 1000, target: 50, statKey: "postsCount", iconName: "Megaphone", iconEmoji: "🌊" },
     { id: "soc_4", titulo: "Tagarela", desc: "Comentou em 20 publicacoes.", cat: "Social", xp: 150, target: 20, statKey: "commentsCount", iconName: "MessageCircle", iconEmoji: "💬" },

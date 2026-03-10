@@ -3,6 +3,7 @@ import { httpsCallable } from "@/lib/supa/functions";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -50,7 +51,6 @@ const REPORT_TABLE_SELECT_COLUMNS: Record<string, string[]> = {
     "content",
     "status",
     "timestamp",
-    "createdAt",
   ],
 };
 
@@ -372,7 +372,7 @@ const supportCategoryLabel = (category: SupportCategory): string => {
     case "denuncia":
       return "Denuncia";
     case "sugestorias":
-      return "Sugestorias";
+      return "Sugestões";
     case "outro":
       return "Outro";
     default:
@@ -576,10 +576,12 @@ export async function fetchSupportReports(
 }
 
 export async function fetchCommunityModerationReports(
-  maxResults = 200
+  maxResults = 200,
+  options?: { tenantId?: string }
 ): Promise<AdminModerationRecord[]> {
   const safeLimit = boundedLimit(maxResults, MAX_ADMIN_REPORT_RESULTS);
-  const cacheKey = `community:${safeLimit}`;
+  const tenantId = resolveStoredTenantScopeId(options?.tenantId);
+  const cacheKey = `community:${safeLimit}:${tenantId || "all"}`;
   const cached = getCachedValue(adminReportsCache, cacheKey, ADMIN_REPORT_CACHE_TTL_MS);
   if (cached) return cached as unknown as AdminModerationRecord[];
 
@@ -588,6 +590,7 @@ export async function fetchCommunityModerationReports(
       table: "denuncias",
       maxResults: safeLimit,
       orderField: "timestamp",
+      ...(tenantId ? { filters: [{ field: "tenant_id", value: tenantId }] } : {}),
       ignoreMissingTable: true,
     });
 
@@ -760,8 +763,8 @@ export async function submitSupportRequest(payload: {
     userName: payload.userName.trim().slice(0, 80) || "Usuario",
     userEmail: payload.userEmail?.trim().slice(0, 120) || "",
     category: normalizeSupportCategory(payload.category),
-    subject: payload.subject.trim().slice(0, 120),
-    message: payload.message.trim().slice(0, 5_000),
+    subject: payload.subject.trim().slice(0, 50),
+    message: payload.message.trim().slice(0, 300),
   };
 
   if (!requestPayload.subject || !requestPayload.message) {

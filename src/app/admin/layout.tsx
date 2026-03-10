@@ -40,6 +40,7 @@ import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import { usePermission } from "@/hooks/usePermission";
 
 interface SidebarItem {
+  group: "Base" | "Comercial" | "Conteudo" | "Esportes" | "Governanca" | "Plataforma";
   name: string;
   path: string;
   icon: React.ReactNode;
@@ -47,6 +48,15 @@ interface SidebarItem {
   isDanger?: boolean;
   platformOnly?: boolean;
 }
+
+const SIDEBAR_GROUP_ORDER: Array<SidebarItem["group"]> = [
+  "Base",
+  "Comercial",
+  "Conteudo",
+  "Esportes",
+  "Governanca",
+  "Plataforma",
+];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -107,43 +117,57 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }, [currentPath, pathname, user?.nome, user?.role, user?.uid]);
 
   const sidebarItems: SidebarItem[] = [
-    { name: "Dashboard", path: "/admin", icon: <LayoutDashboard size={18} /> },
+    { group: "Base", name: "Album da Galera", path: "/admin/album", icon: <Camera size={18} /> },
+    { group: "Esportes", name: "Arena Games", path: "/admin/games", icon: <Gamepad2 size={18} /> },
+    { group: "Base", name: "Turma", path: "/admin/turma", icon: <Users size={18} /> },
+    { group: "Base", name: "Carteirinha", path: "/admin/carteirinha", icon: <CreditCard size={18} /> },
+    { group: "Comercial", name: "Configuracoes", path: "/admin/configuracoes", icon: <Settings size={18} /> },
+    { group: "Conteudo", name: "Comunidade", path: "/admin/comunidade", icon: <MessageSquare size={18} /> },
+    { group: "Conteudo", name: "Conquistas", path: "/admin/conquistas", icon: <Trophy size={18} /> },
+    { group: "Base", name: "Dashboard", path: "/admin", icon: <LayoutDashboard size={18} /> },
+    { group: "Governanca", name: "Denuncias", path: "/admin/denuncias", icon: <ShieldAlert size={18} /> },
+    { group: "Conteudo", name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
+    { group: "Comercial", name: "Fidelidade", path: "/admin/fidelidade", icon: <Star size={18} /> },
+    { group: "Base", name: "Guia do App", path: "/admin/guia", icon: <BookOpen size={18} /> },
+    { group: "Esportes", name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },
+    { group: "Conteudo", name: "Historico", path: "/admin/historico", icon: <History size={18} /> },
     {
+      group: "Plataforma",
       name: "Painel Master",
       path: "/master",
       icon: <Building2 size={18} />,
       platformOnly: true,
     },
-    { name: "SharkRound", path: "/admin/sharkround", icon: <Dice5 size={18} /> },
-    { name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
-    { name: "Comunidade", path: "/admin/comunidade", icon: <MessageSquare size={18} /> },
-    { name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
-    { name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
-    { name: "Usuarios", path: "/admin/usuarios", icon: <Users size={18} /> },
-    { name: "Carteirinha", path: "/admin/carteirinha", icon: <CreditCard size={18} /> },
-    { name: "Cadastro", path: "/admin/cadastro", icon: <Users size={18} /> },
-    { name: "Album da Galera", path: "/admin/album", icon: <Camera size={18} /> },
-    { name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },
-    { name: "Arena Games", path: "/admin/games", icon: <Gamepad2 size={18} /> },
-    { name: "Fidelidade", path: "/admin/fidelidade", icon: <Star size={18} /> },
-    { name: "Conquistas", path: "/admin/conquistas", icon: <Trophy size={18} /> },
-    { name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
-    { name: "Lancamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
+    { group: "Comercial", name: "Landing", path: "/admin/landing", icon: <Rocket size={18} /> },
+    { group: "Plataforma", name: "Lancamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
+    { group: "Comercial", name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
+    { group: "Comercial", name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
+    { group: "Governanca", name: "Permissoes", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
     {
-      name: "Landing",
-      path: "/admin/landing",
-      icon: <Rocket size={18} />,
+      group: "Comercial",
+      name: "Planos",
+      path: "/admin/planos",
+      icon: <Crown size={18} />,
     },
-    { name: "Planos", path: "/admin/planos", icon: <Crown size={18} /> },
-    { name: "Historico", path: "/admin/historico", icon: <History size={18} /> },
-    { name: "Guia do App", path: "/admin/guia", icon: <BookOpen size={18} /> },
-    { name: "Denuncias", path: "/admin/denuncias", icon: <ShieldAlert size={18} /> },
-    { name: "Configuracoes", path: "/admin/configuracoes", icon: <Settings size={18} /> },
-    { name: "Permissoes", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
+    { group: "Esportes", name: "SharkRound", path: "/admin/sharkround", icon: <Dice5 size={18} /> },
+    { group: "Esportes", name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
+    { group: "Base", name: "Usuarios", path: "/admin/usuarios", icon: <Users size={18} /> },
   ];
 
   const activeSidebarItems = sidebarItems.filter(
     (item) => !item.platformOnly || canViewMasterLink
+  );
+  const groupedSidebarItems = React.useMemo(
+    () =>
+      SIDEBAR_GROUP_ORDER
+        .map((group) => ({
+          group,
+          items: activeSidebarItems
+            .filter((item) => item.group === group)
+            .sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+        }))
+        .filter((entry) => entry.items.length > 0),
+    [activeSidebarItems]
   );
 
   const resolveSidebarHref = (path: string): string => {
@@ -165,14 +189,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       >
         <button
           onClick={toggleSidebar}
-          className="absolute -right-3 top-6 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-950 text-zinc-300 shadow-lg transition hover:border-emerald-500/40 hover:text-white"
+          className="absolute -right-3 top-6 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-950 text-zinc-300 shadow-lg transition hover:border-brand hover:text-white"
           title={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
         >
           {isSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
         </button>
         <div className="p-6">
           <div className="mb-8 flex items-center gap-3">
-            <div className="h-10 w-10 shrink-0 rounded-xl bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)] flex items-center justify-center">
+            <div className="brand-icon-chip h-10 w-10 shrink-0 rounded-xl">
               <ShieldAlert size={24} className="text-black" />
             </div>
             {!isSidebarCollapsed && (
@@ -195,7 +219,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 src={user?.foto || "https://github.com/shadcn.png"}
                 alt="Admin Avatar"
                 fill
-                className="rounded-full border border-emerald-500 object-cover shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                className="rounded-full border border-brand-strong object-cover shadow-brand"
               />
             </div>
             {!isSidebarCollapsed && (
@@ -216,11 +240,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           )}
 
-          <nav className="space-y-1">
-            {!isSidebarCollapsed && (
-              <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Menu Principal</p>
-            )}
-            {activeSidebarItems.map((item) => {
+          <nav className="space-y-4">
+            {groupedSidebarItems.map(({ group, items }) => (
+              <div key={group} className="space-y-1">
+                {!isSidebarCollapsed && (
+                  <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                    {group}
+                  </p>
+                )}
+                {items.map((item) => {
               const itemPath = item.path.split("#")[0];
               const isActive =
                 currentPath === itemPath ||
@@ -229,7 +257,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               const isBlocked = item.path.startsWith("/admin") && !canAccess(item.path);
               const itemClassName = `group flex items-center justify-between rounded-lg px-3 py-2.5 transition-all ${
                 isActive
-                  ? "bg-emerald-500 font-bold text-black shadow-lg shadow-emerald-500/20"
+                  ? "bg-brand-solid font-bold text-black shadow-brand"
                   : isBlocked
                   ? "text-zinc-500 hover:bg-zinc-800/50"
                   : item.isDanger
@@ -249,7 +277,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     <div
                       className={`flex items-center ${isSidebarCollapsed ? "w-full justify-center" : "gap-3"}`}
                     >
-                      {item.icon}
+                      <div className="relative">
+                        {item.icon}
+                        {isSidebarCollapsed && (
+                          <span className="absolute -bottom-1 -right-1 rounded-full border border-zinc-800 bg-zinc-950 p-[2px]">
+                            <Lock size={8} className="text-zinc-500" />
+                          </span>
+                        )}
+                      </div>
                       {!isSidebarCollapsed && (
                         <span className="text-xs font-medium uppercase tracking-wide">{item.name}</span>
                       )}
@@ -275,13 +310,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     )}
                   </div>
                   {item.badge && !isSidebarCollapsed && (
-                    <span className="animate-pulse rounded border border-emerald-500/30 bg-zinc-800 px-1.5 py-0.5 text-[7px] font-black text-emerald-500">
+                    <span className="animate-pulse rounded border border-brand bg-zinc-800 px-1.5 py-0.5 text-[7px] font-black text-brand">
                       {item.badge}
                     </span>
                   )}
                 </Link>
               );
-            })}
+                })}
+              </div>
+            ))}
           </nav>
         </div>
 

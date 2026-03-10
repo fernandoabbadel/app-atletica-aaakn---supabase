@@ -24,6 +24,11 @@ import {
     type DashboardTurmaStat,
 } from '../../lib/dashboardPublicService';
 import { getTurmaImage } from "../../constants/turmaImages";
+import {
+  createDefaultTenantAppModulesConfig,
+  fetchTenantAppModulesConfig,
+  isTenantAppModuleVisible,
+} from "@/lib/tenantAppModulesService";
 
 // --- INTERFACES ESTRITAS ---
 
@@ -68,7 +73,7 @@ const getPartnerCoverSrc = (partner: Parceiro, fallbackLogo: string): string =>
 const NavButton = ({ onClick, icon: Icon }: { onClick: () => void, icon: React.ElementType }) => (
     <button 
         onClick={onClick} 
-        className="w-8 h-8 flex items-center justify-center bg-zinc-900 rounded-full border border-zinc-700 text-zinc-400 hover:text-white hover:border-emerald-500 hover:bg-zinc-800 transition-all shadow-md active:scale-95"
+        className="w-8 h-8 flex items-center justify-center bg-zinc-900 rounded-full border border-zinc-700 text-zinc-400 hover:text-white hover:border-brand-strong hover:bg-zinc-800 transition-all shadow-md active:scale-95"
     >
         <Icon size={16}/>
     </button>
@@ -83,14 +88,14 @@ interface SectionHeaderProps {
     colorClass?: string;
 }
 
-const SectionHeader = ({ title, icon: Icon, link, onPrev, onNext, colorClass = "text-emerald-500" }: SectionHeaderProps) => (
+const SectionHeader = ({ title, icon: Icon, link, onPrev, onNext, colorClass = "text-brand" }: SectionHeaderProps) => (
     <div className="flex items-center justify-between mb-4 px-1">
         <h2 className="text-sm font-black uppercase tracking-widest mb-0 flex items-center gap-2 text-white">
             <Icon size={18} className={colorClass}/> {title}
         </h2>
         <div className="flex items-center gap-3">
             {link && (
-                <Link href={link} className={`text-[10px] font-bold text-zinc-500 hover:${colorClass.replace('text-', 'text-hover-')} uppercase transition flex items-center gap-1`}>
+                <Link href={link} className="text-[10px] font-bold text-zinc-500 hover:text-white uppercase transition flex items-center gap-1">
                     Ver todos <ExternalLink size={10}/>
                 </Link>
             )}
@@ -143,8 +148,8 @@ const EventCardItem = ({
         <div>
             <h3 className="font-black text-2xl text-white italic uppercase leading-tight line-clamp-2">{evt.titulo}</h3>
             <div className="flex gap-4 mt-3 text-zinc-400 font-bold text-xs">
-                <p className="flex items-center gap-1.5"><Calendar size={14} className="text-emerald-500"/> {evt.data}</p>
-                {evt.local && <p className="flex items-center gap-1.5"><MapPin size={14} className="text-emerald-500"/> {evt.local}</p>}
+                <p className="flex items-center gap-1.5"><Calendar size={14} className="text-brand"/> {evt.data}</p>
+                {evt.local && <p className="flex items-center gap-1.5"><MapPin size={14} className="text-brand"/> {evt.local}</p>}
             </div>
         </div>
         <div className="flex items-center justify-between pt-4 border-t border-white/5">
@@ -155,7 +160,7 @@ const EventCardItem = ({
                 <Heart size={20} className={isLiked ? 'fill-current' : ''}/> {evt.likesList?.length || 0}
             </button>
             
-            <Link href={`/eventos/${evt.id}`} className={`px-6 py-3 rounded-xl font-black text-xs uppercase border transition flex items-center gap-2 shadow-lg ${isGoing ? 'bg-emerald-500 text-black border-emerald-500' : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:border-emerald-500 hover:text-white'}`}>
+            <Link href={`/eventos/${evt.id}`} className={`px-6 py-3 rounded-xl font-black text-xs uppercase border transition flex items-center gap-2 shadow-lg ${isGoing ? 'bg-brand-solid text-black border-brand-strong shadow-brand' : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:border-brand-strong hover:text-white'}`}>
                 {isGoing && <CheckCircle size={14}/>} {isGoing ? 'Confirmado' : 'Ver Detalhes'}
             </Link>
         </div>
@@ -267,6 +272,7 @@ export default function DashboardPage() {
 
   const [loadingData, setLoadingData] = useState(true);
   const [loadingLike, setLoadingLike] = useState(false);
+  const [modulesConfig, setModulesConfig] = useState(createDefaultTenantAppModulesConfig);
 
   // Refs com Tipagem Correta para scroll
   const eventsScrollRef = useRef<HTMLDivElement | null>(null);
@@ -278,9 +284,14 @@ export default function DashboardPage() {
 
     const loadDashboard = async () => {
       try {
-        const data = await fetchDashboardBundle({
-          tenantId: activeTenantId || undefined,
-        });
+        const [data, modules] = await Promise.all([
+          fetchDashboardBundle({
+            tenantId: activeTenantId || undefined,
+          }),
+          fetchTenantAppModulesConfig({
+            tenantId: activeTenantId || user?.tenant_id || undefined,
+          }),
+        ]);
         if (!active) return;
 
         setEvents(data.events);
@@ -292,6 +303,7 @@ export default function DashboardPage() {
         setTotalCaca(data.totalCaca);
         setTotalAlunos(data.totalAlunos);
         setProductTurmaStats(data.productTurmaStats);
+        setModulesConfig(modules);
       } catch (error: unknown) {
         console.error("Erro ao carregar dashboard:", error);
       } finally {
@@ -305,7 +317,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [activeTenantId]);
+  }, [activeTenantId, user?.tenant_id]);
 
   const scroll = (ref: React.RefObject<HTMLDivElement | null>, dir: 'left' | 'right') => { 
       if (ref.current) {
@@ -427,8 +439,10 @@ export default function DashboardPage() {
     return bizu;
   };
   const ligasNoDashboard = ligas.filter((l) => l.visivel === true);
+  const isModuleVisible = (key: Parameters<typeof isTenantAppModuleVisible>[1]): boolean =>
+    isTenantAppModuleVisible(modulesConfig, key);
 
-  if (loading || loadingData) return <div className="h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500 w-10 h-10" /></div>;
+  if (loading || loadingData) return <div className="h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-brand w-10 h-10" /></div>;
 
   const userData = user as unknown as UserData; 
   const userRoleNormalized =
@@ -442,7 +456,7 @@ export default function DashboardPage() {
       : "/em-breve";
 
   return (
-    <div className="flex flex-col gap-8 p-5 pb-32 max-w-md mx-auto w-full bg-[#050505] min-h-screen text-white font-sans selection:bg-emerald-500">
+    <div className="flex flex-col gap-8 p-5 pb-32 max-w-md mx-auto w-full bg-[#050505] min-h-screen text-white font-sans selection:bg-brand-primary/30">
       
       {/* HEADER */}
       <div className="flex items-center justify-between pt-2">
@@ -450,22 +464,24 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-black text-white tracking-tighter uppercase italic">Fala, {userData?.nome?.split(' ')[0]}! 🦈</h1>
           <p className="text-zinc-500 text-xs font-bold tracking-wide">Pronto para dominar?</p>
         </div>
-        <Link href="/perfil">
-            <div className="h-12 w-12 rounded-full bg-zinc-900 border-2 border-emerald-500 p-0.5 overflow-hidden shadow-[0_0_15px_rgba(16,185,129,0.3)] relative">
-                <Image 
-                    src={userData?.foto || "https://github.com/shadcn.png"} 
-                    alt="Perfil" 
-                    fill
-                    sizes="48px"
-                    className="rounded-full object-cover" 
-                    
-                />
-            </div>
-        </Link>
+        {isModuleVisible("perfil") ? (
+          <Link href="/perfil">
+              <div className="h-12 w-12 rounded-full bg-zinc-900 border-2 border-brand-strong p-0.5 overflow-hidden shadow-brand relative">
+                  <Image 
+                      src={userData?.foto || "https://github.com/shadcn.png"} 
+                      alt="Perfil" 
+                      fill
+                      sizes="48px"
+                      className="rounded-full object-cover" 
+                      
+                  />
+              </div>
+          </Link>
+        ) : null}
       </div>
 
       {/* 0. PARCEIROS PREMIUM (OURO/PRATA) */}
-      {(parceirosOuro.length > 0 || parceirosPrata.length > 0) && (
+      {isModuleVisible("parceiros") && (parceirosOuro.length > 0 || parceirosPrata.length > 0) && (
         <div className="space-y-4">
           <SectionHeader title="Parceiros Premium" icon={Crown} link="/parceiros" colorClass="text-yellow-500" />
 
@@ -553,6 +569,7 @@ export default function DashboardPage() {
       )}
 
       {/* 1. CARTEIRINHA */}
+      {isModuleVisible("carteirinha") && (
       <Link href="/carteirinha" className="relative h-40 w-full overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 active:scale-95 transition group shadow-2xl block">
           <Image 
             src={getTurmaImage(userData?.turma)} 
@@ -565,17 +582,26 @@ export default function DashboardPage() {
           />
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-transparent p-6 flex flex-col justify-center">
               <div className="flex items-center gap-2 mb-2">
-                  <Wallet size={16} className="text-emerald-500"/>
-                  <span className="text-[10px] font-bold uppercase text-emerald-500 bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-500/20">Sócio Ativo</span>
+                  <Wallet size={16} className="text-brand"/>
+                  <span className="text-[10px] font-bold uppercase text-brand-accent bg-brand-primary/15 px-2 py-0.5 rounded border border-brand">Sócio Ativo</span>
               </div>
               <h2 className="text-2xl font-black italic uppercase text-white drop-shadow-lg">Carteirinha</h2>
               <p className="text-xs text-zinc-400 font-bold uppercase tracking-widest mt-1">Turma {userData?.turma || "Geral"}</p>
           </div>
       </Link>
+      )}
 
       {/* 2. SHARK ROUND (COM FAIXA "EM BREVE") & TREINOS */}
-      <div className="grid grid-cols-2 gap-4">
-          <Link href={sharkroundHref} className="bg-emerald-600 rounded-3xl p-5 h-44 flex flex-col justify-between active:scale-95 transition relative overflow-hidden group shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+      {(isModuleVisible("sharkround") || isModuleVisible("treinos")) && (
+      <div
+        className={`grid gap-4 ${
+          isModuleVisible("sharkround") && isModuleVisible("treinos")
+            ? "grid-cols-2"
+            : "grid-cols-1"
+        }`}
+      >
+          {isModuleVisible("sharkround") && (
+          <Link href={sharkroundHref} className="bg-brand-solid rounded-3xl p-5 h-44 flex flex-col justify-between active:scale-95 transition relative overflow-hidden group shadow-brand">
               {/* ID 03: FAIXA EM BREVE */}
               <div className="absolute top-3 -right-8 w-32 bg-orange-500 text-black text-[9px] font-black uppercase text-center py-1 rotate-45 border-2 border-black z-20 shadow-lg">
                   Em Breve
@@ -585,7 +611,9 @@ export default function DashboardPage() {
               <Target size={32} className="text-black relative z-10" />
               <h3 className="font-black text-black text-xl uppercase italic leading-none relative z-10 drop-shadow-md">Shark<br/>Round</h3>
           </Link>
+          )}
           
+          {isModuleVisible("treinos") && (
           <Link href="/treinos" className="bg-zinc-900 rounded-3xl h-44 overflow-hidden relative active:scale-95 transition border border-zinc-800 group shadow-lg">
               <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 opacity-30 group-hover:opacity-50 transition">
                   {treinos.length > 0 ? treinos.map((img, i) => (
@@ -604,16 +632,19 @@ export default function DashboardPage() {
                   <h3 className="font-black text-white uppercase italic text-xl">Treinos</h3>
               </div>
           </Link>
+          )}
       </div>
+      )}
 
       {/* 🦈 3. ID 01 & 02: CAÇA AOS CALOUROS (ATUALIZADO PARA X/Y) */}
-      <Link href="/album" className="relative h-40 w-full overflow-hidden rounded-3xl bg-black border border-emerald-900/50 block group active:scale-95 transition-all shadow-[0_0_30px_rgba(16,185,129,0.1)]">
+      {isModuleVisible("album") && (
+      <Link href="/album" className="relative h-40 w-full overflow-hidden rounded-3xl bg-black border border-brand block group active:scale-95 transition-all shadow-brand">
             {/* Efeitos de Fundo (Sonar) */}
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-emerald-900/20 via-black to-black opacity-80"></div>
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-brand-primary/20 via-black to-black opacity-80"></div>
             
             {/* Radar Animation Ping */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150%] h-[150%] border border-emerald-500/10 rounded-full animate-[ping_3s_linear_infinite]"></div>
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[100%] h-[100%] border border-emerald-500/20 rounded-full animate-[ping_3s_linear_infinite_1s]"></div>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150%] h-[150%] border border-brand rounded-full animate-[ping_3s_linear_infinite]"></div>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[100%] h-[100%] border border-brand rounded-full animate-[ping_3s_linear_infinite_1s]"></div>
 
             {/* Grid Tático */}
             <div className="absolute inset-0 opacity-10 [background-size:16px_16px] [background-image:linear-gradient(to_right,rgba(16,185,129,0.09)_1px,transparent_1px),linear-gradient(to_bottom,rgba(16,185,129,0.09)_1px,transparent_1px)]"></div>
@@ -621,13 +652,13 @@ export default function DashboardPage() {
             <div className="absolute inset-0 flex flex-col justify-between p-6 z-10">
                 <div className="flex justify-between items-start">
                     <div className="flex flex-col">
-                        <h3 className="text-emerald-500 font-black uppercase italic text-xl flex items-center gap-2 drop-shadow-md">
+                        <h3 className="text-brand font-black uppercase italic text-xl flex items-center gap-2 drop-shadow-md">
                             <Crosshair size={20} className="animate-spin-slow-reverse"/> Caça aos Calouros
                         </h3>
                         <p className="text-zinc-500 text-[10px] font-bold tracking-[0.2em] uppercase mt-1">Status: Em Operação</p>
                     </div>
-                    <div className="bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 animate-pulse">
-                        <ScanBarcode className="text-emerald-500" size={20}/>
+                    <div className="bg-brand-primary/10 p-2 rounded-lg border border-brand animate-pulse">
+                        <ScanBarcode className="text-brand" size={20}/>
                     </div>
                 </div>
 
@@ -635,7 +666,7 @@ export default function DashboardPage() {
                     <div>
                         {/* ID 02: CONTADOR X/Y - ENCONTRADOS */}
                         <div className="flex items-baseline gap-1">
-                            <span className="text-4xl font-black text-emerald-400 tracking-tighter drop-shadow-[0_0_15px_rgba(16,185,129,0.5)]">
+                            <span className="text-4xl font-black text-brand-accent tracking-tighter shadow-brand-strong">
                                 {totalCaca}
                             </span>
                             <span className="text-2xl font-black text-zinc-600">/</span>
@@ -645,21 +676,22 @@ export default function DashboardPage() {
                         </div>
                         <span className="text-xs text-zinc-400 font-bold uppercase tracking-wider block mt-0.5">Encontrados</span>
                     </div>
-                    <div className="flex items-center gap-1 text-emerald-500 text-[10px] font-bold uppercase tracking-wider bg-emerald-950/50 px-3 py-1.5 rounded-full border border-emerald-900">
+                    <div className="flex items-center gap-1 text-brand text-[10px] font-bold uppercase tracking-wider bg-brand-primary/10 px-3 py-1.5 rounded-full border border-brand">
                         Ver Ranking <ChevronRight size={10}/>
                     </div>
                 </div>
             </div>
       </Link>
+      )}
 
       {/* 4. CARROSSEL EVENTOS (Padronizado) */}
-      {events.length > 0 && (
+      {isModuleVisible("eventos") && events.length > 0 && (
           <div className="relative group/car">
               <SectionHeader 
                   title="Eventos" 
                   icon={Calendar} 
                   link="/eventos" 
-                  colorClass="text-emerald-500"
+                  colorClass="text-brand"
                   onPrev={() => scroll(eventsScrollRef, 'left')} 
                   onNext={() => scroll(eventsScrollRef, 'right')} 
               />
@@ -678,7 +710,7 @@ export default function DashboardPage() {
       )}
 
       {/* --- BIZU DAS LIGAS (Reels + Letreiro) --- */}
-      {ligasNoDashboard.length > 0 && (
+      {isModuleVisible("ligas") && ligasNoDashboard.length > 0 && (
           <div className="space-y-4">
                <SectionHeader 
                   title="Ligas Acadêmicas" 
@@ -717,7 +749,7 @@ export default function DashboardPage() {
                                </div>
                                
                                <div className="text-center w-full overflow-hidden">
-                                   <span className="text-[11px] font-black text-emerald-500 uppercase tracking-widest block mb-2 group-hover:text-yellow-500 transition">{liga.sigla}</span>
+                                   <span className="text-[11px] font-black text-brand uppercase tracking-widest block mb-2 group-hover:text-yellow-500 transition">{liga.sigla}</span>
                                    
                                    <div className="w-full bg-zinc-900/50 py-2 px-3 rounded-lg border border-zinc-800/50 relative overflow-hidden">
                                        {bizuAtivo ? (
@@ -742,6 +774,7 @@ export default function DashboardPage() {
       )}
 
       {/* 5. LOJA (Tamanho igual Eventos + Contador Turmas) */}
+      {isModuleVisible("loja") && (
       <div className="relative group/car">
           <SectionHeader 
               title="Lojinha" 
@@ -781,9 +814,10 @@ export default function DashboardPage() {
             </Link>
           )}
       </div>
+      )}
 
       {/* 6. PARCEIROS STANDARD (Logo Aumentado) */}
-      {parceirosStandard.length > 0 && (
+      {isModuleVisible("parceiros") && parceirosStandard.length > 0 && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-6 relative overflow-hidden">
                <SectionHeader title="Parceiros Standard" icon={Users} link="/parceiros" colorClass="text-zinc-500"/>
                <div className="flex overflow-x-auto gap-4 scrollbar-hide snap-x relative z-10 pb-2">
@@ -806,6 +840,7 @@ export default function DashboardPage() {
       )}
 
       {/* 7. COMUNIDADE (Posts) */}
+      {isModuleVisible("comunidade") && (
       <div className="space-y-4">
           <SectionHeader title="Comunidade" icon={MessageCircle} link="/comunidade" colorClass="text-zinc-500"/>
           {mensagens.length > 0 ? mensagens.slice(0, 2).map((msg) => {
@@ -849,6 +884,7 @@ export default function DashboardPage() {
               </div>
           )}
       </div>
+      )}
 
       <div className="h-6"></div>
       

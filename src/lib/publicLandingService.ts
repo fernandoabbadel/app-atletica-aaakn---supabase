@@ -101,6 +101,7 @@ export interface PublicLandingBrand {
 }
 
 export interface PublicLandingPayload extends PublicLandingData {
+  tenantId?: string;
   brand: PublicLandingBrand;
 }
 

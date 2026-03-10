@@ -1,35 +1,42 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { 
-  ArrowLeft, Save, MessageSquare, AlertTriangle, 
-  Trash2, Pin, ShieldAlert, Palette, Loader2, 
-  Eye, Ban, MessageCircle, X, Search, CheckCircle, Lock, ExternalLink, Plus
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Image from "next/image"; // 🦈 Importando Image
-import { useToast } from "../../../context/ToastContext";
-import { useAuth } from "../../../context/AuthContext";
-import { logActivity } from "../../../lib/logger";
+import Image from "next/image";
+import {
+  ArrowLeft,
+  Ban,
+  ExternalLink,
+  Loader2,
+  Lock,
+  MessageSquare,
+  Palette,
+  Pin,
+  Plus,
+  Save,
+  Search,
+  ShieldAlert,
+  Trash2,
+  X,
+} from "lucide-react";
+
+import { useToast } from "@/context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
   deleteCommunityPost,
-  fetchCommunityCommentPostId,
-  deleteCommunityReport,
   fetchCommunityAdminPosts,
   fetchCommunityComments,
   fetchCommunityConfig,
-  fetchCommunityReports,
   saveCommunityConfig,
   setCommunityPostPatch,
-} from "../../../lib/communityService";
-import type { DateLike } from "../../../lib/supabaseData";
+} from "@/lib/communityService";
+import type { DateLike } from "@/lib/supabaseData";
 import {
   DEFAULT_COMMUNITY_CATEGORIES,
   normalizeCommunityCategories,
   normalizeCommunityCategoryName,
-} from "../../../constants/communityCategories";
+} from "@/constants/communityCategories";
 
-// --- TIPAGENS (O Escudo do Código) ---
 interface AppConfig {
   titulo: string;
   subtitulo: string;
@@ -50,17 +57,6 @@ interface PostData {
   commentsDisabled?: boolean;
   comentarios: number;
   denunciasCount: number;
-}
-
-interface DenunciaData {
-  id: string;
-  postId: string;
-  targetId?: string;
-  targetType?: "post" | "comment";
-  postText: string;
-  reporterId: string;
-  reason: string;
-  timestamp: DateLike;
 }
 
 interface CommentData {
@@ -96,37 +92,47 @@ const toSafeImageSrc = (value: string | null | undefined, fallback: string): str
   return isValidImageSrc(src) ? src : fallback;
 };
 
+const formatDateTime = (value: DateLike): string => {
+  if (value instanceof Date) return value.toLocaleString("pt-BR");
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString("pt-BR");
+  }
+
+  const raw = value as { toDate?: () => Date } | null;
+  if (raw && typeof raw.toDate === "function") {
+    const parsed = raw.toDate();
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleString("pt-BR");
+    }
+  }
+
+  return "Sem data";
+};
+
 export default function AdminComunidadePage() {
   const { addToast } = useToast();
-  const { user } = useAuth();
-  
-  // Estados de Controle
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [activeTab, setActiveTab] = useState<"config" | "posts" | "denuncias">("config");
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
-
-  // Dados do Supabase
   const [config, setConfig] = useState<AppConfig>(normalizeCommunityConfig());
   const [posts, setPosts] = useState<PostData[]>([]);
-  const [denuncias, setDenuncias] = useState<DenunciaData[]>([]);
-
-  // Estados de Modais
   const [viewCommentsId, setViewCommentsId] = useState<string | null>(null);
   const [adminComments, setAdminComments] = useState<CommentData[]>([]);
+
   const coverPreviewSrc = toSafeImageSrc(config.capaUrl, "/carteirinha-bg.jpg");
 
-    // 1. CARREGAR DADOS COM LEITURA CONTROLADA
   useEffect(() => {
     let mounted = true;
 
     const loadInitialData = async () => {
       setLoading(true);
       try {
-        const [configData, postsData, reportsData] = await Promise.all([
-          fetchCommunityConfig(),
-          fetchCommunityAdminPosts(60),
-          fetchCommunityReports(60),
+        const [configData, postsData] = await Promise.all([
+          fetchCommunityConfig({ tenantId: activeTenantId || undefined }),
+          fetchCommunityAdminPosts(60, { tenantId: activeTenantId || undefined }),
         ]);
 
         if (!mounted) return;
@@ -144,16 +150,6 @@ export default function AdminComunidadePage() {
               }) as PostData
           )
         );
-
-        setDenuncias(
-          reportsData.map(
-            (row) =>
-              ({
-                id: row.id,
-                ...(row.data as Omit<DenunciaData, "id">),
-              }) as DenunciaData
-          )
-        );
       } catch (error: unknown) {
         console.error(error);
         if (mounted) addToast("Erro ao carregar dados da comunidade.", "error");
@@ -166,45 +162,53 @@ export default function AdminComunidadePage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
-  // 2. CARREGAR COMENTARIOS AO ABRIR MODAL (SEM SNAPSHOT)
   useEffect(() => {
-      if (!viewCommentsId) {
-          setAdminComments([]);
-          return;
+    if (!viewCommentsId) {
+      setAdminComments([]);
+      return;
+    }
+
+    let mounted = true;
+    const loadComments = async () => {
+      try {
+        const rows = await fetchCommunityComments(viewCommentsId, {
+          order: "desc",
+          maxResults: 60,
+        });
+        if (!mounted) return;
+        setAdminComments(
+          rows.map(
+            (row) =>
+              ({
+                id: row.id,
+                ...(row.data as Omit<CommentData, "id">),
+              }) as CommentData
+          )
+        );
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) addToast("Erro ao carregar comentarios.", "error");
       }
+    };
 
-      let mounted = true;
-      const loadComments = async () => {
-          try {
-              const rows = await fetchCommunityComments(viewCommentsId, {
-                  order: "desc",
-                  maxResults: 60,
-              });
-              if (!mounted) return;
-              setAdminComments(
-                  rows.map(
-                      (row) =>
-                          ({
-                              id: row.id,
-                              ...(row.data as Omit<CommentData, "id">),
-                          }) as CommentData
-                  )
-              );
-          } catch (error: unknown) {
-              console.error(error);
-              if (mounted) addToast("Erro ao carregar comentarios.", "error");
-          }
-      };
+    void loadComments();
+    return () => {
+      mounted = false;
+    };
+  }, [addToast, viewCommentsId]);
 
-      void loadComments();
-      return () => {
-          mounted = false;
-      };
-  }, [viewCommentsId, addToast]);
+  const filteredPosts = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return posts;
+    return posts.filter(
+      (post) =>
+        post.userName?.toLowerCase().includes(term) ||
+        post.texto?.toLowerCase().includes(term)
+    );
+  }, [posts, searchTerm]);
 
-// --- AÇÕES DE CONFIGURAÇÃO ---
   const handleSaveConfig = async () => {
     const cleanCoverUrl = config.capaUrl.trim();
     if (cleanCoverUrl && !isValidImageSrc(cleanCoverUrl)) {
@@ -214,18 +218,21 @@ export default function AdminComunidadePage() {
 
     try {
       const normalizedCategories = normalizeCommunityCategories(config.categorias);
-      await saveCommunityConfig({
+      const nextConfig = {
         titulo: config.titulo,
         subtitulo: config.subtitulo,
         capaUrl: cleanCoverUrl,
         limitMessages: config.limitMessages,
         categorias: normalizedCategories,
+      };
+      await saveCommunityConfig(nextConfig, {
+        tenantId: activeTenantId || undefined,
       });
-      setConfig((prev) => ({ ...prev, capaUrl: cleanCoverUrl, categorias: normalizedCategories }));
+      setConfig(nextConfig);
       addToast("Configuracoes da Resenha salvas!", "success");
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao salvar config.", "error");
+      addToast("Erro ao salvar configuracoes.", "error");
     }
   };
 
@@ -240,7 +247,7 @@ export default function AdminComunidadePage() {
       (item) => item.toLowerCase() === cleanName.toLowerCase()
     );
     if (alreadyExists) {
-      addToast("Essa categoria já existe.", "info");
+      addToast("Essa categoria ja existe.", "info");
       return;
     }
 
@@ -262,482 +269,506 @@ export default function AdminComunidadePage() {
       return;
     }
 
-    setConfig((prev) => {
-      const next = prev.categorias.filter((_, currentIndex) => currentIndex !== index);
-      return { ...prev, categorias: next };
-    });
+    setConfig((prev) => ({
+      ...prev,
+      categorias: prev.categorias.filter((_, currentIndex) => currentIndex !== index),
+    }));
   };
 
-  // --- AÇÕES DE POSTAGEM ---
   const toggleBlockPost = async (id: string, currentStatus: boolean) => {
-      try {
-          const nextStatus = !currentStatus;
-          await setCommunityPostPatch(id, { blocked: nextStatus });
-          setPosts((prev) =>
-              prev.map((post) => (post.id === id ? { ...post, blocked: nextStatus } : post))
-          );
-          addToast(currentStatus ? "Post desbloqueado e visivel." : "Post bloqueado (oculto).", "info");
-      } catch (error: unknown) {
-          console.error(error);
-          addToast("Erro ao atualizar status.", "error");
-      }
+    try {
+      const nextStatus = !currentStatus;
+      await setCommunityPostPatch(id, { blocked: nextStatus });
+      setPosts((prev) =>
+        prev.map((post) => (post.id === id ? { ...post, blocked: nextStatus } : post))
+      );
+      addToast(
+        currentStatus ? "Post desbloqueado e visivel." : "Post bloqueado (oculto).",
+        "info"
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao atualizar status do post.", "error");
+    }
   };
 
   const toggleCommentsLock = async (id: string, currentStatus: boolean) => {
-      try {
-          const nextStatus = !currentStatus;
-          await setCommunityPostPatch(id, { commentsDisabled: nextStatus });
-          setPosts((prev) =>
-              prev.map((post) =>
-                  post.id === id ? { ...post, commentsDisabled: nextStatus } : post
-              )
-          );
-          addToast(currentStatus ? "Comentarios reabertos." : "Comentarios trancados.", "info");
-      } catch (error: unknown) {
-          console.error(error);
-          addToast("Erro ao atualizar status.", "error");
-      }
+    try {
+      const nextStatus = !currentStatus;
+      await setCommunityPostPatch(id, { commentsDisabled: nextStatus });
+      setPosts((prev) =>
+        prev.map((post) =>
+          post.id === id ? { ...post, commentsDisabled: nextStatus } : post
+        )
+      );
+      addToast(currentStatus ? "Comentarios reabertos." : "Comentarios trancados.", "info");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao atualizar comentarios.", "error");
+    }
   };
 
-  const togglePin = async (id: string, current: boolean) => {
-      try {
-          const nextStatus = !current;
-          await setCommunityPostPatch(id, { fixado: nextStatus });
-          setPosts((prev) =>
-              prev.map((post) => (post.id === id ? { ...post, fixado: nextStatus } : post))
-          );
-          addToast(current ? "Post desafixado." : "Post fixado no topo!", "success");
-      } catch (error: unknown) {
-          console.error(error);
-          addToast("Erro ao fixar.", "error");
-      }
+  const togglePin = async (id: string, currentStatus: boolean) => {
+    try {
+      const nextStatus = !currentStatus;
+      await setCommunityPostPatch(id, { fixado: nextStatus });
+      setPosts((prev) =>
+        prev.map((post) => (post.id === id ? { ...post, fixado: nextStatus } : post))
+      );
+      addToast(currentStatus ? "Post desafixado." : "Post fixado no topo!", "success");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao fixar postagem.", "error");
+    }
   };
 
-  const deletePost = async (id: string) => {
-      if (!confirm("Tem certeza que deseja EXCLUIR permanentemente este post?")) return;
-      try {
-          await deleteCommunityPost(id);
-          setPosts((prev) => prev.filter((post) => post.id !== id));
-          addToast("Post removido do banco de dados.", "info");
-      } catch (error: unknown) {
-          console.error(error);
-          addToast("Erro ao excluir.", "error");
-      }
+  const handleDeletePost = async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir permanentemente esta postagem?")) return;
+
+    try {
+      await deleteCommunityPost(id);
+      setPosts((prev) => prev.filter((post) => post.id !== id));
+      addToast("Post removido.", "info");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao excluir postagem.", "error");
+    }
   };
-
-  // --- AÇÕES DE DENÚNCIA ---
-  const resolveReportPostId = async (denuncia: DenunciaData): Promise<string> => {
-      const postIdDireto = typeof denuncia.postId === "string" ? denuncia.postId.trim() : "";
-      if (postIdDireto) return postIdDireto;
-
-      const targetId = typeof denuncia.targetId === "string" ? denuncia.targetId.trim() : "";
-      if (!targetId) return "";
-
-      if (denuncia.targetType === "comment") {
-          const mappedPostId = await fetchCommunityCommentPostId(targetId);
-          return mappedPostId || "";
-      }
-
-      return targetId;
-  };
-
-  const handleOpenReportContext = async (denuncia: DenunciaData) => {
-      try {
-          const postId = await resolveReportPostId(denuncia);
-          if (!postId) {
-              addToast("Nao foi possivel abrir o contexto desta denuncia.", "info");
-              return;
-          }
-          setViewCommentsId(postId);
-      } catch (error: unknown) {
-          console.error(error);
-          addToast("Erro ao abrir contexto da denuncia.", "error");
-      }
-  };
-
-  const resolveDenuncia = async (denuncia: DenunciaData, action: "ban" | "ignore" | "lock") => {
-      try {
-          const postId = await resolveReportPostId(denuncia);
-
-          if ((action === "ban" || action === "lock") && !postId) {
-              addToast("Denuncia sem post vinculado. Use Ignorar.", "info");
-              return;
-          }
-
-          if (action === "ban") {
-              await setCommunityPostPatch(postId, { blocked: true });
-              setPosts((prev) =>
-                  prev.map((post) => (post.id === postId ? { ...post, blocked: true } : post))
-              );
-              addToast("Post bloqueado por violacao!", "info");
-          }
-
-          if (action === "lock") {
-              await setCommunityPostPatch(postId, { commentsDisabled: true });
-              setPosts((prev) =>
-                  prev.map((post) =>
-                      post.id === postId ? { ...post, commentsDisabled: true } : post
-                  )
-              );
-              addToast("Comentarios trancados por precaucao!", "info");
-          }
-
-          await deleteCommunityReport(denuncia.id);
-          setDenuncias((prev) => prev.filter((row) => row.id !== denuncia.id));
-
-          if (user?.uid) {
-              await logActivity(
-                  user.uid,
-                  user.nome || "Admin",
-                  "DELETE",
-                  "Denuncias/Comunidade",
-                  `Excluiu denuncia ${denuncia.id} (acao: ${action})`
-              ).catch(() => {});
-          }
-
-          if (action === "ignore") addToast("Denuncia ignorada/removida.", "info");
-      } catch (error: unknown) {
-          console.error(error);
-          addToast("Erro ao resolver denuncia.", "error");
-      }
-  };
-
-  // Filtro de Busca
-  const filteredPosts = posts.filter(p => 
-      p.userName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      p.texto?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white p-8 font-sans pb-32">
-      
-      {/* HEADER */}
-      <header className="flex justify-between items-center mb-8 sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md py-4 border-b border-zinc-800">
-        <div className="flex items-center gap-4">
-          <Link href="/admin" className="p-3 bg-zinc-900 rounded-full border border-zinc-800 hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400"/></Link>
-          <div>
-              <h1 className="text-2xl font-black uppercase italic tracking-tighter">CMS Resenha</h1>
-              <p className="text-[10px] text-zinc-500 font-bold uppercase">Gestão de Comunidade</p>
-          </div>
-        </div>
-        
-        {/* BARRA DE PESQUISA (Só aparece na aba Posts) */}
-        {activeTab === "posts" && (
-            <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"/>
-                <input 
-                    type="text" 
-                    placeholder="Buscar postagem..." 
-                    className="bg-zinc-900 border border-zinc-800 rounded-full pl-9 pr-4 py-2 text-xs w-64 focus:border-emerald-500 outline-none transition"
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                />
+    <div className="min-h-screen bg-[#050505] pb-32 font-sans text-white">
+      <header className="sticky top-0 z-20 border-b border-zinc-800 bg-[#050505]/90 px-8 py-4 backdrop-blur-md">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Link
+              href="/admin"
+              className="rounded-full border border-zinc-800 bg-zinc-900 p-3 transition hover:bg-zinc-800"
+            >
+              <ArrowLeft size={20} className="text-zinc-400" />
+            </Link>
+            <div>
+              <h1 className="text-2xl font-black uppercase italic tracking-tighter">
+                CMS Resenha
+              </h1>
+              <p className="text-[10px] font-bold uppercase text-zinc-500">
+                Gestao de comunidade
+              </p>
             </div>
-        )}
+          </div>
+
+          {activeTab === "posts" && (
+            <div className="relative">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+              />
+              <input
+                type="text"
+                placeholder="Buscar postagem..."
+                className="w-64 rounded-full border border-zinc-800 bg-zinc-900 py-2 pl-9 pr-4 text-xs outline-none transition focus:border-brand"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+            </div>
+          )}
+        </div>
       </header>
 
-      {/* NAVEGAÇÃO */}
-      <div className="flex gap-4 border-b border-zinc-800 mb-8 pb-4 overflow-x-auto">
-          <button onClick={() => setActiveTab("config")} className={`text-xs font-black uppercase px-6 py-3 rounded-xl transition flex items-center gap-2 ${activeTab === "config" ? "bg-emerald-500 text-black shadow-lg shadow-emerald-500/20" : "bg-zinc-900 text-zinc-500 hover:text-white"}`}>
-              <Palette size={14}/> Aparência
+      <main className="mx-auto max-w-6xl px-8 py-8">
+        <div className="mb-8 flex gap-4 overflow-x-auto border-b border-zinc-800 pb-4">
+          <button
+            onClick={() => setActiveTab("config")}
+            className={`flex items-center gap-2 rounded-xl px-6 py-3 text-xs font-black uppercase transition ${
+              activeTab === "config"
+                ? "bg-brand-primary text-black shadow-brand"
+                : "bg-zinc-900 text-zinc-500 hover:text-white"
+            }`}
+          >
+            <Palette size={14} /> Aparencia
           </button>
-          <button onClick={() => setActiveTab("posts")} className={`text-xs font-black uppercase px-6 py-3 rounded-xl transition flex items-center gap-2 ${activeTab === "posts" ? "bg-emerald-500 text-black shadow-lg shadow-emerald-500/20" : "bg-zinc-900 text-zinc-500 hover:text-white"}`}>
-              <MessageSquare size={14}/> Postagens ({posts.length})
+          <button
+            onClick={() => setActiveTab("posts")}
+            className={`flex items-center gap-2 rounded-xl px-6 py-3 text-xs font-black uppercase transition ${
+              activeTab === "posts"
+                ? "bg-brand-primary text-black shadow-brand"
+                : "bg-zinc-900 text-zinc-500 hover:text-white"
+            }`}
+          >
+            <MessageSquare size={14} /> Postagens ({posts.length})
           </button>
-          <button onClick={() => setActiveTab("denuncias")} className={`text-xs font-black uppercase px-6 py-3 rounded-xl transition flex items-center gap-2 ${activeTab === "denuncias" ? "bg-red-600 text-white shadow-lg shadow-red-600/20" : "bg-zinc-900 text-zinc-500 hover:text-white"}`}>
-              <ShieldAlert size={14}/> Denúncias 
-              {denuncias.length > 0 && <span className="bg-white text-red-600 px-1.5 py-0.5 rounded text-[10px] font-bold">{denuncias.length}</span>}
+          <button
+            onClick={() => setActiveTab("denuncias")}
+            className={`flex items-center gap-2 rounded-xl px-6 py-3 text-xs font-black uppercase transition ${
+              activeTab === "denuncias"
+                ? "bg-red-600 text-white shadow-lg shadow-red-600/20"
+                : "bg-zinc-900 text-zinc-500 hover:text-white"
+            }`}
+          >
+            <ShieldAlert size={14} /> Denuncias
           </button>
-      </div>
+        </div>
 
-      <main className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-        
         {loading ? (
-            <div className="flex justify-center py-32"><Loader2 className="animate-spin text-emerald-500" size={48}/></div>
+          <div className="flex justify-center py-32">
+            <Loader2 size={48} className="animate-spin text-brand" />
+          </div>
         ) : (
-            <>
-                {/* --- ABA 1: CONFIGURAÇÕES --- */}
-                {activeTab === "config" && (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <section className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-8 space-y-6">
-                            <h3 className="font-bold flex items-center gap-2 text-emerald-400 text-lg uppercase"><Palette size={20}/> Identidade Visual</h3>
-                            <div className="space-y-4">
-                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Título da Página</label><input type="text" className="input-admin" value={config.titulo || ""} onChange={e => setConfig({...config, titulo: e.target.value})}/></div>
-                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Subtítulo</label><input type="text" className="input-admin" value={config.subtitulo || ""} onChange={e => setConfig({...config, subtitulo: e.target.value})}/></div>
-                                <div><label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">URL da Capa (Imagem)</label><input type="text" className="input-admin" value={config.capaUrl || ""} onChange={e => setConfig({...config, capaUrl: e.target.value})}/></div>
-                                
-                                <div className="flex items-center justify-between p-4 bg-black rounded-2xl border border-zinc-800 mt-4">
-                                    <div>
-                                        <p className="text-sm font-bold text-white">Paginação Rígida</p>
-                                        <p className="text-[10px] text-zinc-500">Travar feed em 20 posts por vez</p>
-                                    </div>
-                                    <button 
-                                        onClick={() => setConfig({...config, limitMessages: !config.limitMessages})}
-                                        className={`w-12 h-6 rounded-full transition-colors relative ${config.limitMessages ? 'bg-emerald-500' : 'bg-zinc-700'}`}
-                                    >
-                                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${config.limitMessages ? 'left-7' : 'left-1'}`}/>
-                                    </button>
-                                </div>
+          <>
+            {activeTab === "config" && (
+              <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+                <section className="space-y-6 rounded-[2rem] border border-zinc-800 bg-zinc-900 p-8">
+                  <h3 className="flex items-center gap-2 text-lg font-bold uppercase text-brand">
+                    <Palette size={20} /> Identidade visual
+                  </h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-500">
+                        Titulo da pagina
+                      </label>
+                      <input
+                        type="text"
+                        className="input-admin"
+                        value={config.titulo}
+                        onChange={(event) =>
+                          setConfig((prev) => ({ ...prev, titulo: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-500">
+                        Subtitulo
+                      </label>
+                      <input
+                        type="text"
+                        className="input-admin"
+                        value={config.subtitulo}
+                        onChange={(event) =>
+                          setConfig((prev) => ({ ...prev, subtitulo: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-500">
+                        URL da capa
+                      </label>
+                      <input
+                        type="text"
+                        className="input-admin"
+                        value={config.capaUrl}
+                        onChange={(event) =>
+                          setConfig((prev) => ({ ...prev, capaUrl: event.target.value }))
+                        }
+                      />
+                    </div>
 
-                                <div className="p-4 bg-black rounded-2xl border border-zinc-800 mt-4 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <p className="text-sm font-bold text-white">Categorias Dinâmicas</p>
-                                        <span className="text-[10px] text-zinc-500 uppercase">{config.categorias.length} categorias</span>
-                                    </div>
+                    <div className="mt-4 flex items-center justify-between rounded-2xl border border-zinc-800 bg-black p-4">
+                      <div>
+                        <p className="text-sm font-bold text-white">Paginacao rigida</p>
+                        <p className="text-[10px] uppercase text-zinc-500">
+                          Travar feed em 20 posts por vez
+                        </p>
+                      </div>
+                      <button
+                        onClick={() =>
+                          setConfig((prev) => ({
+                            ...prev,
+                            limitMessages: !prev.limitMessages,
+                          }))
+                        }
+                        className={`relative h-6 w-12 rounded-full transition-colors ${
+                          config.limitMessages ? "bg-brand-primary" : "bg-zinc-700"
+                        }`}
+                      >
+                        <div
+                          className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${
+                            config.limitMessages ? "left-7" : "left-1"
+                          }`}
+                        />
+                      </button>
+                    </div>
 
-                                    <div className="flex gap-2">
-                                        <input
-                                          type="text"
-                                          className="input-admin flex-1 !mt-0"
-                                          placeholder="Nova categoria"
-                                          value={newCategoryName}
-                                          onChange={(e) => setNewCategoryName(e.target.value)}
-                                          onKeyDown={(e) => {
-                                            if (e.key === "Enter") {
-                                              e.preventDefault();
-                                              handleAddCategory();
-                                            }
-                                          }}
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={handleAddCategory}
-                                          className="px-3 rounded-xl border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 transition flex items-center justify-center"
-                                        >
-                                          <Plus size={14} />
-                                        </button>
-                                    </div>
+                    <div className="mt-4 space-y-3 rounded-2xl border border-zinc-800 bg-black p-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold text-white">Categorias dinamicas</p>
+                        <span className="text-[10px] uppercase text-zinc-500">
+                          {config.categorias.length} categorias
+                        </span>
+                      </div>
 
-                                    <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
-                                        {config.categorias.map((categoria, index) => (
-                                          <div key={`${categoria}-${index}`} className="flex items-center gap-2">
-                                              <input
-                                                type="text"
-                                                className="input-admin flex-1 !mt-0"
-                                                value={categoria}
-                                                maxLength={40}
-                                                onChange={(e) => handleUpdateCategory(index, e.target.value)}
-                                              />
-                                              <button
-                                                type="button"
-                                                onClick={() => handleRemoveCategory(index)}
-                                                className="p-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition"
-                                                title="Remover categoria"
-                                              >
-                                                <Trash2 size={14} />
-                                              </button>
-                                          </div>
-                                        ))}
-                                    </div>
-                                </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          className="input-admin !mt-0 flex-1"
+                          placeholder="Nova categoria"
+                          value={newCategoryName}
+                          onChange={(event) => setNewCategoryName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              handleAddCategory();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddCategory}
+                          className="flex items-center justify-center rounded-xl border border-brand/40 px-3 text-brand transition hover:bg-brand-primary/10"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
 
-                                <button onClick={handleSaveConfig} className="bg-emerald-500 hover:bg-emerald-400 text-black px-8 py-4 rounded-xl font-black uppercase text-xs flex items-center gap-2 w-full justify-center shadow-lg transition mt-4">
-                                    <Save size={16}/> Salvar Alterações
-                                </button>
-                            </div>
-                        </section>
+                      <div className="max-h-56 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+                        {config.categorias.map((categoria, index) => (
+                          <div key={`${categoria}-${index}`} className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              className="input-admin !mt-0 flex-1"
+                              value={categoria}
+                              maxLength={40}
+                              onChange={(event) =>
+                                handleUpdateCategory(index, event.target.value)
+                              }
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCategory(index)}
+                              className="rounded-lg border border-red-500/30 p-2 text-red-400 transition hover:bg-red-500/10"
+                              title="Remover categoria"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
 
-                        <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-8 flex items-center justify-center relative overflow-hidden">
-                            <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
-                            <div className="relative z-10 text-center">
-                                <h3 className="text-xl font-black text-white uppercase mb-2">Preview da Capa</h3>
-                                <div className="h-40 w-full bg-black rounded-xl overflow-hidden border border-zinc-700 shadow-2xl relative">
-                                    {/* 🦈 Imagem Otimizada */}
-                                    <Image 
-                                      src={coverPreviewSrc} 
-                                      alt="Preview Capa" 
-                                      fill 
-                                      sizes="100vw"
-                                      className="object-cover opacity-60" 
-                                    />
-                                </div>
-                            </div>
+                    <button
+                      onClick={() => void handleSaveConfig()}
+                      className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-primary px-8 py-4 text-xs font-black uppercase text-black transition hover:opacity-90"
+                    >
+                      <Save size={16} /> Salvar alteracoes
+                    </button>
+                  </div>
+                </section>
+
+                <div className="relative overflow-hidden rounded-[2rem] border border-zinc-800 bg-zinc-900 p-8">
+                  <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]" />
+                  <div className="relative z-10 text-center">
+                    <h3 className="mb-2 text-xl font-black uppercase text-white">
+                      Preview da capa
+                    </h3>
+                    <div className="relative h-40 w-full overflow-hidden rounded-xl border border-zinc-700 bg-black shadow-2xl">
+                      <Image
+                        src={coverPreviewSrc}
+                        alt="Preview Capa"
+                        fill
+                        sizes="100vw"
+                        className="object-cover opacity-60"
+                      />
+                    </div>
+                    <h4 className="mt-6 text-3xl font-black italic uppercase tracking-tighter text-white">
+                      {config.titulo || "Resenha Tubarao"}
+                    </h4>
+                    <p className="mt-2 text-xs font-bold uppercase tracking-widest text-zinc-400">
+                      {config.subtitulo || "Onde o cardume se encontra"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "posts" && (
+              <div className="space-y-4">
+                {filteredPosts.length === 0 && (
+                  <div className="rounded-[2rem] border border-zinc-800 border-dashed bg-zinc-900 py-20 text-center">
+                    <MessageSquare size={40} className="mx-auto mb-4 text-zinc-500" />
+                    <p className="text-sm font-bold uppercase text-zinc-400">
+                      Nenhuma postagem encontrada.
+                    </p>
+                  </div>
+                )}
+
+                {filteredPosts.map((post) => (
+                  <article
+                    key={post.id}
+                    className="rounded-[2rem] border border-zinc-800 bg-zinc-900 p-6"
+                  >
+                    <div className="flex flex-col justify-between gap-4 lg:flex-row">
+                      <div className="flex-1">
+                        <div className="mb-3 flex items-center gap-3">
+                          <div className="relative h-12 w-12 overflow-hidden rounded-full border border-zinc-700">
+                            <Image
+                              src={post.avatar || "https://github.com/shadcn.png"}
+                              alt={post.userName || "Usuario"}
+                              fill
+                              sizes="48px"
+                              className="object-cover"
+                            />
+                          </div>
+                          <div>
+                            <p className="font-bold text-white">{post.userName || "Usuario"}</p>
+                            <p className="text-[11px] text-zinc-500">
+                              {post.handle || "@sem-handle"} • {formatDateTime(post.createdAt)}
+                            </p>
+                          </div>
                         </div>
+
+                        <p className="rounded-2xl border border-zinc-800 bg-black/40 p-4 text-sm text-zinc-200">
+                          {post.texto || "Post sem texto."}
+                        </p>
+
+                        <div className="mt-4 flex flex-wrap gap-3 text-[11px] font-bold uppercase text-zinc-500">
+                          <span>{post.comentarios || 0} comentarios</span>
+                          <span className={post.denunciasCount > 0 ? "text-red-400" : ""}>
+                            {post.denunciasCount || 0} denuncias
+                          </span>
+                          {post.fixado ? <span className="text-brand">Fixado</span> : null}
+                          {post.blocked ? <span className="text-red-400">Bloqueado</span> : null}
+                          {post.commentsDisabled ? (
+                            <span className="text-amber-400">Comentarios trancados</span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="flex min-w-[220px] flex-col gap-3">
+                        <button
+                          onClick={() => setViewCommentsId(post.id)}
+                          className="flex items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-black/40 px-4 py-3 text-xs font-black uppercase text-zinc-200 transition hover:bg-zinc-800"
+                        >
+                          <ExternalLink size={14} /> Ver comentarios
+                        </button>
+                        <button
+                          onClick={() => void togglePin(post.id, Boolean(post.fixado))}
+                          className="flex items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-black/40 px-4 py-3 text-xs font-black uppercase text-zinc-200 transition hover:bg-zinc-800"
+                        >
+                          <Pin size={14} /> {post.fixado ? "Desafixar" : "Fixar"}
+                        </button>
+                        <button
+                          onClick={() =>
+                            void toggleCommentsLock(post.id, Boolean(post.commentsDisabled))
+                          }
+                          className="flex items-center justify-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-black uppercase text-amber-200 transition hover:bg-amber-500/20"
+                        >
+                          <Lock size={14} />{" "}
+                          {post.commentsDisabled ? "Abrir comentarios" : "Trancar comentarios"}
+                        </button>
+                        <button
+                          onClick={() => void toggleBlockPost(post.id, Boolean(post.blocked))}
+                          className="flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-black uppercase text-red-200 transition hover:bg-red-500/20"
+                        >
+                          <Ban size={14} /> {post.blocked ? "Desbloquear" : "Bloquear"}
+                        </button>
+                        <button
+                          onClick={() => void handleDeletePost(post.id)}
+                          className="flex items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-xs font-black uppercase text-zinc-300 transition hover:bg-zinc-800"
+                        >
+                          <Trash2 size={14} /> Excluir
+                        </button>
+                      </div>
                     </div>
-                )}
+                  </article>
+                ))}
+              </div>
+            )}
 
-                {/* --- ABA 2: POSTAGENS --- */}
-                {activeTab === "posts" && (
-                    <div className="grid gap-4">
-                        {filteredPosts.map(post => (
-                            <div key={post.id} className={`bg-zinc-900 border p-5 rounded-2xl flex items-start gap-5 transition hover:border-zinc-700 ${post.blocked ? 'border-red-900/50 bg-red-950/10 opacity-70' : 'border-zinc-800'} ${post.fixado ? 'border-emerald-500/30 bg-emerald-900/10' : ''}`}>
-                                
-                                {/* Avatar */}
-                                <div className="relative shrink-0 w-12 h-12 rounded-full border-2 border-zinc-800 overflow-hidden">
-                                    <Image 
-                                        src={post.avatar || "https://github.com/shadcn.png"} 
-                                        alt={post.userName} 
-                                        fill 
-                                        sizes="48px"
-                                        className="object-cover" 
-                                    />
-                                    {post.fixado && <div className="absolute -top-2 -right-2 bg-emerald-500 text-black p-1 rounded-full z-10"><Pin size={10} fill="black"/></div>}
-                                </div>
-
-                                {/* Conteúdo */}
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between mb-1">
-                                        <p className="text-sm font-bold text-white flex items-center gap-2">
-                                            {post.userName} 
-                                            <span className="text-zinc-500 font-normal text-xs lowercase">({post.handle})</span>
-                                            {post.blocked && <span className="bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded uppercase">Bloqueado</span>}
-                                        </p>
-                                        <p className="text-[10px] text-zinc-600">{post.createdAt?.toDate().toLocaleString('pt-BR')}</p>
-                                    </div>
-                                    
-                                    <p className="text-xs text-zinc-300 line-clamp-3 mb-2 bg-black/30 p-2 rounded-lg border border-zinc-800/50">{post.texto}</p>
-                                    
-                                    {/* Stats Rápidos */}
-                                    <div className="flex gap-4 text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-3">
-                                        <span className="flex items-center gap-1"><MessageCircle size={12}/> {post.comentarios} Coments</span>
-                                        <span className="flex items-center gap-1"><ShieldAlert size={12} className={post.denunciasCount > 0 ? "text-red-500" : ""}/> {post.denunciasCount || 0} Denúncias</span>
-                                    </div>
-
-                                    {/* Botões de Ação */}
-                                    <div className="flex flex-wrap gap-2">
-                                        <button onClick={() => setViewCommentsId(post.id)} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 transition"><Eye size={12}/> Ver Conversa</button>
-                                        
-                                        <button onClick={() => togglePin(post.id, !!post.fixado)} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 transition ${post.fixado ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>
-                                            <Pin size={12}/> {post.fixado ? 'Desafixar' : 'Fixar no Topo'}
-                                        </button>
-                                        
-                                        <button onClick={() => toggleCommentsLock(post.id, !!post.commentsDisabled)} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 transition ${post.commentsDisabled ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>
-                                            {post.commentsDisabled ? <><Lock size={12}/> Destrancar</> : <><Lock size={12}/> Trancar Coments</>}
-                                        </button>
-
-                                        <button onClick={() => toggleBlockPost(post.id, !!post.blocked)} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 transition ${post.blocked ? 'bg-red-500/10 text-red-500 border border-red-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>
-                                            {post.blocked ? <><CheckCircle size={12}/> Desbloquear</> : <><Ban size={12}/> Bloquear</>}
-                                        </button>
-                                        
-                                        <button onClick={() => deletePost(post.id)} className="bg-red-900/10 text-red-500 hover:bg-red-900/30 border border-red-900/20 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 transition ml-auto">
-                                            <Trash2 size={12}/> Excluir
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* --- ABA 3: DENÚNCIAS --- */}
-                {activeTab === "denuncias" && (
-                    <div className="grid gap-4 max-w-4xl mx-auto">
-                        {denuncias.length === 0 && (
-                            <div className="text-center py-20 bg-zinc-900 border border-zinc-800 border-dashed rounded-3xl">
-                                <ShieldAlert size={40} className="text-emerald-500 mx-auto mb-4"/>
-                                <p className="text-zinc-400 font-bold uppercase text-sm">Tudo tranquilo no oceano.</p>
-                                <p className="text-zinc-600 text-xs">Nenhuma denúncia pendente.</p>
-                            </div>
-                        )}
-
-                        {denuncias.map(den => (
-                            <div key={den.id} className="bg-black/40 p-6 rounded-2xl border border-red-500/30 shadow-lg shadow-red-900/5 relative overflow-hidden">
-                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-600"></div>
-                                <div className="flex flex-col md:flex-row gap-6">
-                                    
-                                    {/* Info da Denúncia */}
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <div className="p-2 bg-red-500/10 text-red-500 rounded-lg"><AlertTriangle size={18}/></div>
-                                            <span className="text-red-400 font-bold text-xs uppercase tracking-wide">Nova Denúncia</span>
-                                            <span className="text-zinc-600 text-[10px] ml-auto">{den.timestamp?.toDate().toLocaleString()}</span>
-                                        </div>
-                                        
-                                        <div className="mb-4">
-                                            <p className="text-[10px] text-zinc-500 font-bold uppercase">Motivo Reportado</p>
-                                            <p className="text-white font-bold text-sm bg-zinc-900 p-2 rounded-lg border border-zinc-800 mt-1">
-                                                {den.reason || "Motivo não especificado"}
-                                            </p>
-                                        </div>
-
-                                        <div>
-                                            <p className="text-[10px] text-zinc-500 font-bold uppercase flex items-center gap-2">
-                                                Conteúdo Denunciado 
-                                                <button onClick={() => void handleOpenReportContext(den)} className="text-blue-400 underline flex items-center gap-1"><ExternalLink size={10}/> Ver Contexto</button>
-                                            </p>
-                                            {/* 🦈 EXIBIÇÃO DO TEXTO CORRETO DA MENSAGEM */}
-                                            <p className="text-zinc-300 text-xs italic mt-1 line-clamp-3 bg-red-950/20 p-3 rounded border border-red-900/30">
-                                                &quot;{den.postText || 'Carregando conteúdo...'}&quot;
-                                            </p>
-                                        </div>
-
-                                        <div className="mt-4 pt-4 border-t border-zinc-800/50 flex items-center gap-2">
-                                            <span className="text-[10px] text-zinc-500">Reportado por:</span>
-                                            <Link href={`/admin/usuarios/${den.reporterId}`} className="text-[10px] font-bold text-emerald-500 hover:underline">
-                                                Ver Usuário (ID: {den.reporterId.slice(0,6)}...)
-                                            </Link>
-                                        </div>
-                                    </div>
-
-                                    {/* Ações */}
-                                    <div className="flex flex-col justify-center gap-3 min-w-[160px]">
-                                        <button onClick={() => void resolveDenuncia(den, 'ban')} className="bg-red-600 hover:bg-red-500 text-white py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 shadow-lg transition">
-                                            <Ban size={14}/> Bloquear Post
-                                        </button>
-                                        <button onClick={() => void resolveDenuncia(den, 'lock')} className="bg-yellow-600 hover:bg-yellow-500 text-white py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 shadow-lg transition">
-                                            <Lock size={14}/> Trancar Coments
-                                        </button>
-                                        <button onClick={() => void resolveDenuncia(den, 'ignore')} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-3 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-2 border border-zinc-700 transition">
-                                            <CheckCircle size={14}/> Ignorar
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </>
+            {activeTab === "denuncias" && (
+              <div className="mx-auto max-w-3xl rounded-[2rem] border border-zinc-800 bg-zinc-900 p-8 text-center">
+                <ShieldAlert size={40} className="mx-auto mb-4 text-red-400" />
+                <p className="text-lg font-black uppercase text-white">Denuncias centralizadas</p>
+                <p className="mt-3 text-sm text-zinc-400">
+                  A moderacao da comunidade agora fica na central de denuncias do tenant.
+                </p>
+                <Link
+                  href="/admin/denuncias/comunidade"
+                  className="mt-6 inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-3 text-xs font-black uppercase tracking-wide text-red-200 transition hover:bg-red-500/20"
+                >
+                  <ShieldAlert size={14} /> Abrir central de denuncias
+                </Link>
+              </div>
+            )}
+          </>
         )}
       </main>
 
-      {/* MODAL COMENTÁRIOS ADMIN (Para ver o contexto da denúncia) */}
       {viewCommentsId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-6 animate-in fade-in" onClick={() => setViewCommentsId(null)}>
-              <div className="bg-zinc-900 w-full max-w-lg rounded-3xl border border-zinc-800 p-6 h-[600px] flex flex-col shadow-2xl relative" onClick={e => e.stopPropagation()}>
-                  <div className="flex justify-between mb-6 border-b border-zinc-800 pb-4">
-                      <h3 className="font-black text-white uppercase text-lg">Histórico de Conversa</h3>
-                      <button onClick={() => setViewCommentsId(null)} className="text-zinc-500 hover:text-white"><X size={20}/></button>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-6"
+          onClick={() => setViewCommentsId(null)}
+        >
+          <div
+            className="relative flex h-[600px] w-full max-w-lg flex-col rounded-3xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-6 flex justify-between border-b border-zinc-800 pb-4">
+              <h3 className="text-lg font-black uppercase text-white">Historico de conversa</h3>
+              <button
+                onClick={() => setViewCommentsId(null)}
+                className="text-zinc-500 transition hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="custom-scrollbar flex-1 space-y-3 overflow-y-auto pr-2">
+              {adminComments.length === 0 && (
+                <p className="py-10 text-center text-sm text-zinc-600">
+                  Nenhum comentario neste post.
+                </p>
+              )}
+              {adminComments.map((comment) => (
+                <div
+                  key={comment.id}
+                  className="flex gap-3 rounded-xl border border-zinc-800 bg-black p-3"
+                >
+                  <div className="relative h-8 w-8 shrink-0">
+                    <Image
+                      src={comment.avatar || "https://github.com/shadcn.png"}
+                      alt={comment.userName}
+                      fill
+                      sizes="32px"
+                      className="rounded-full border border-zinc-700 object-cover"
+                    />
                   </div>
-                  
-                  <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2">
-                      {adminComments.length === 0 && <p className="text-center text-zinc-600 text-sm py-10">Nenhum comentário neste post.</p>}
-                      {adminComments.map(c => (
-                          <div key={c.id} className="p-3 bg-black rounded-xl border border-zinc-800 flex gap-3">
-                              <div className="relative w-8 h-8 shrink-0">
-                                  <Image 
-                                    src={c.avatar || "https://github.com/shadcn.png"} 
-                                    alt={c.userName} 
-                                    fill 
-                                    sizes="32px"
-                                    className="rounded-full object-cover border border-zinc-700" 
-                                  />
-                              </div>
-                              <div>
-                                  <p className="text-[10px] font-bold text-emerald-500 mb-0.5">{c.userName} <span className="text-zinc-600 font-normal"> - {c.createdAt?.toDate().toLocaleTimeString()}</span></p>
-                                  <p className="text-xs text-zinc-300">{c.texto}</p>
-                              </div>
-                          </div>
-                      ))}
+                  <div>
+                    <p className="mb-0.5 text-[10px] font-bold text-brand">
+                      {comment.userName}{" "}
+                      <span className="font-normal text-zinc-600">
+                        - {formatDateTime(comment.createdAt)}
+                      </span>
+                    </p>
+                    <p className="text-xs text-zinc-300">{comment.texto}</p>
                   </div>
-              </div>
+                </div>
+              ))}
+            </div>
           </div>
+        </div>
       )}
 
       <style jsx global>{`
-        .input-admin { width: 100%; background: #000; border: 1px solid #27272a; border-radius: 0.75rem; padding: 0.875rem; color: white; outline: none; margin-top: 4px; transition: border-color 0.2s; }
-        .input-admin:focus { border-color: #10b981; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 10px; }
+        .input-admin {
+          width: 100%;
+          margin-top: 4px;
+          border-radius: 0.75rem;
+          border: 1px solid #27272a;
+          background: #000;
+          padding: 0.875rem;
+          color: white;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+        .input-admin:focus {
+          border-color: var(--tenant-primary, #10b981);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          border-radius: 9999px;
+          background: #3f3f46;
+        }
       `}</style>
     </div>
   );
 }
-
-
-
-
-
-
-
-
-

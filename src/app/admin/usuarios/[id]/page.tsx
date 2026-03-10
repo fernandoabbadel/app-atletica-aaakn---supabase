@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { isPermissionError } from "@/lib/backendErrors";
 import {
   deleteAdminUser,
@@ -67,6 +68,7 @@ export default function AdminUsuarioDetalhePage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
 
   const userId = useMemo(() => params?.id?.trim() || "", [params]);
 
@@ -86,7 +88,10 @@ export default function AdminUsuarioDetalhePage() {
 
     setLoading(true);
     try {
-      const result = await fetchAdminUserProfile(userId, { forceRefresh: false });
+      const result = await fetchAdminUserProfile(userId, {
+        forceRefresh: false,
+        tenantId: activeTenantId || undefined,
+      });
       if (!result) {
         addToast("Usuario nao encontrado.", "error");
         router.replace("/admin/usuarios");
@@ -101,7 +106,7 @@ export default function AdminUsuarioDetalhePage() {
     } finally {
       setLoading(false);
     }
-  }, [userId, addToast, router]);
+  }, [activeTenantId, userId, addToast, router]);
 
   useEffect(() => {
     void loadProfile();
@@ -120,6 +125,7 @@ export default function AdminUsuarioDetalhePage() {
         turma: form.turma,
         status: form.status,
         plano: form.plano,
+        tenantId: activeTenantId || undefined,
       });
 
       setProfile((prev) => {
@@ -152,7 +158,11 @@ export default function AdminUsuarioDetalhePage() {
 
     setChangingStatus(true);
     try {
-      await setAdminUserStatus({ userId, status: nextStatus });
+      await setAdminUserStatus({
+        userId,
+        status: nextStatus,
+        tenantId: activeTenantId || undefined,
+      });
       setForm((prev) => (prev ? { ...prev, status: nextStatus } : prev));
       setProfile((prev) => (prev ? { ...prev, status: nextStatus } : prev));
       addToast(
@@ -179,7 +189,7 @@ export default function AdminUsuarioDetalhePage() {
 
     setDeleting(true);
     try {
-      await deleteAdminUser(userId);
+      await deleteAdminUser(userId, { tenantId: activeTenantId || undefined });
       addToast("Usuario excluido.", "success");
       router.replace("/admin/usuarios");
     } catch (error: unknown) {

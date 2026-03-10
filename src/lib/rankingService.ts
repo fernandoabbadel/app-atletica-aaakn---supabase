@@ -1,3 +1,4 @@
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
@@ -39,6 +40,9 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
+const resolveRankingTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(tenantId);
+
 export interface RankingUserRecord {
   id: string;
   nome: string;
@@ -61,8 +65,10 @@ const normalizeUser = (raw: RawRow): RankingUserRecord => ({
 async function fetchRankingRows(options: {
   turma?: string;
   maxResults: number;
+  tenantId?: string | null;
 }): Promise<RawRow[]> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveRankingTenantId(options.tenantId);
 
   // Tentativa 1: leitura enxuta (menos banda no Supabase Free).
   let minimalQuery = supabase
@@ -71,6 +77,9 @@ async function fetchRankingRows(options: {
     .order("xp", { ascending: false })
     .limit(options.maxResults);
 
+  if (scopedTenantId) {
+    minimalQuery = minimalQuery.eq("tenant_id", scopedTenantId);
+  }
   if (options.turma) {
     minimalQuery = minimalQuery.eq("turma", options.turma);
   }
@@ -85,6 +94,9 @@ async function fetchRankingRows(options: {
     .from("users")
     .select("id,uid,nome,apelido,foto,turma,xp")
     .limit(options.maxResults);
+  if (scopedTenantId) {
+    fallbackQuery = fallbackQuery.eq("tenant_id", scopedTenantId);
+  }
   if (options.turma) {
     fallbackQuery = fallbackQuery.eq("turma", options.turma);
   }
@@ -100,17 +112,19 @@ async function fetchRankingRows(options: {
 export async function fetchGlobalRankingUsers(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<RankingUserRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 100, MAX_RANKING_USERS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `global:${maxResults}`;
+  const tenantId = resolveRankingTenantId(options?.tenantId);
+  const cacheKey = `global:${tenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(rankingCache, cacheKey);
     if (cached) return cached;
   }
 
-  const rows = await fetchRankingRows({ maxResults });
+  const rows = await fetchRankingRows({ maxResults, tenantId });
   const users = rows
     .map((row) => normalizeUser(row))
     .sort((left, right) => right.xp - left.xp)
@@ -124,13 +138,15 @@ export async function fetchTurmaRankingUsers(options: {
   turma: string;
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<RankingUserRecord[]> {
   const turma = options.turma.trim();
   if (!turma) return [];
 
   const maxResults = boundedLimit(options.maxResults ?? 60, MAX_RANKING_USERS);
   const forceRefresh = options.forceRefresh ?? false;
-  const cacheKey = `turma:${turma}:${maxResults}`;
+  const tenantId = resolveRankingTenantId(options.tenantId);
+  const cacheKey = `turma:${tenantId || "global"}:${turma}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(rankingCache, cacheKey);
@@ -140,6 +156,7 @@ export async function fetchTurmaRankingUsers(options: {
   const rows = await fetchRankingRows({
     turma,
     maxResults,
+    tenantId,
   });
 
   const users = rows

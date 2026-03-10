@@ -1,7 +1,5 @@
-"use client";
-
-import { LaunchDashboardPage } from "@/app/admin/_components/launch/LaunchDashboardPage";
+import { redirect } from "next/navigation";
 
 export default function MasterLancamentoPage() {
-  return <LaunchDashboardPage scope="master" />;
+  redirect("/master/solicitacoes");
 }

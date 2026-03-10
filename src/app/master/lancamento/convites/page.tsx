@@ -1,7 +1,5 @@
-"use client";
-
-import { LaunchGenerationRankingPage } from "@/app/admin/_components/launch/LaunchGenerationRankingPage";
+import { redirect } from "next/navigation";
 
 export default function MasterLancamentoConvitesPage() {
-  return <LaunchGenerationRankingPage scope="master" />;
+  redirect("/master/solicitacoes");
 }

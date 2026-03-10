@@ -27,6 +27,7 @@ const AUTO_SCOPE_PREFIXES = [
   "/planos",
   "/parceiros",
   "/fidelidade",
+  "/conquistas",
   "/historico",
   "/gym",
   "/carteirinha",

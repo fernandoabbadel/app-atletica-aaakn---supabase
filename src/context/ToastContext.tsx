@@ -60,18 +60,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           <div
             key={toast.id}
             className={`pointer-events-auto relative overflow-hidden flex items-start gap-4 p-5 rounded-3xl border-2 backdrop-blur-2xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)] transition-all animate-in slide-in-from-top-full zoom-in-95 duration-300 ${
-              toast.type === "success" ? "bg-[#050505]/95 border-emerald-500/50 shadow-emerald-900/40" : 
+              toast.type === "success" ? "bg-[#050505]/95 border-brand shadow-brand" : 
               toast.type === "error" ? "bg-[#050505]/95 border-red-500/50 shadow-red-900/40" : 
-              "bg-[#050505]/95 border-blue-500/50 shadow-blue-900/40"
+              "bg-[#050505]/95 border-brand shadow-brand"
             }`}
           >
-            <div className={`p-3 rounded-2xl shrink-0 ${toast.type === "success" ? "bg-emerald-500 text-black" : toast.type === "error" ? "bg-red-500 text-white" : "bg-blue-500 text-white"}`}>
+            <div className={`p-3 rounded-2xl shrink-0 ${toast.type === "success" ? "bg-brand-solid text-black" : toast.type === "error" ? "bg-red-500 text-white" : "bg-brand-solid text-black"}`}>
               {toast.type === "success" && <Trophy size={24} strokeWidth={2.5} />}
               {toast.type === "error" && <Syringe size={24} strokeWidth={2.5} />}
               {toast.type === "info" && <Stethoscope size={24} strokeWidth={2.5} />}
             </div>
             <div className="flex-1 pt-0.5">
-              <h4 className={`text-sm font-black uppercase tracking-wider mb-1 ${toast.type === "success" ? "text-emerald-500" : toast.type === "error" ? "text-red-500" : "text-blue-500"}`}>{toast.title}</h4>
+              <h4 className={`text-sm font-black uppercase tracking-wider mb-1 ${toast.type === "success" ? "text-brand" : toast.type === "error" ? "text-red-500" : "text-brand"}`}>{toast.title}</h4>
               <p className="text-zinc-300 text-sm font-medium leading-relaxed">{toast.message}</p>
             </div>
             <button onClick={() => removeToast(toast.id)} className="text-zinc-500 hover:text-white transition p-1 bg-white/5 rounded-full hover:bg-white/20"><X size={16} /></button>

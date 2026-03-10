@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "../../../context/TenantThemeContext";
 import { ACHIEVEMENTS_CATALOG } from "../../../lib/achievements";
 import {
   deleteAchievementConfig,
@@ -82,11 +83,9 @@ const mergeAchievementsWithDefaults = (entries: AchievementConfig[]): Achievemen
     };
   });
 
-  const missingEventDefaults = DEFAULT_ACHIEVEMENTS.filter(
-    (item) => item.id.startsWith("evt_") && !seen.has(item.id)
-  );
+  const missingDefaults = DEFAULT_ACHIEVEMENTS.filter((item) => !seen.has(item.id));
 
-  return [...merged, ...missingEventDefaults];
+  return [...merged, ...missingDefaults];
 };
 
 const ICON_OPTIONS = [
@@ -119,6 +118,7 @@ const withPatenteStyles = (patente: PatenteConfig): PatenteConfig => {
 
 export default function AdminConquistasPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
   
   const [activeTab, setActiveTab] = useState<"dashboard" | "conquistas" | "historico" | "patentes">("dashboard");
   const [activeCat, setActiveCat] = useState<string>("Todas");
@@ -138,10 +138,26 @@ export default function AdminConquistasPage() {
     setLoading(true);
     try {
       const [achievementsData, logsData, rankingData, patentesData] = await Promise.all([
-        fetchAchievementsConfig({ maxResults: 220, forceRefresh }),
-        fetchAchievementsLogs({ maxResults: 50, forceRefresh }),
-        fetchXpRanking({ maxResults: 10, forceRefresh }),
-        fetchPatentesConfig({ maxResults: 40, forceRefresh }),
+        fetchAchievementsConfig({
+          maxResults: 220,
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        }),
+        fetchAchievementsLogs({
+          maxResults: 50,
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        }),
+        fetchXpRanking({
+          maxResults: 10,
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        }),
+        fetchPatentesConfig({
+          maxResults: 40,
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        }),
       ]);
 
       setAchievements(
@@ -164,7 +180,7 @@ export default function AdminConquistasPage() {
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   // CARREGAR DADOS
   useEffect(() => {
@@ -200,7 +216,7 @@ export default function AdminConquistasPage() {
   const handleSaveAch = async () => {
     if (!editingAch) return;
     try {
-      await saveAchievementConfig(editingAch);
+      await saveAchievementConfig(editingAch, { tenantId: activeTenantId || undefined });
       setAchievements((prev) => {
         const exists = prev.some((item) => item.id === editingAch.id);
         const next = exists
@@ -223,7 +239,7 @@ export default function AdminConquistasPage() {
   const handleDeleteAch = async (id: string) => {
       if(!confirm("Deletar conquista?")) return;
       try {
-          await deleteAchievementConfig(id);
+          await deleteAchievementConfig(id, { tenantId: activeTenantId || undefined });
           setAchievements((prev) => prev.filter((item) => item.id !== id));
           addToast("Deletada.", "info");
       } catch (error: unknown) {
@@ -235,7 +251,10 @@ export default function AdminConquistasPage() {
   const toggleMissionStatus = async (ach: AchievementConfig) => {
     try {
       const nextStatus = !ach.active;
-      await toggleAchievementActive({ id: ach.id, active: nextStatus });
+      await toggleAchievementActive(
+        { id: ach.id, active: nextStatus },
+        { tenantId: activeTenantId || undefined }
+      );
       setAchievements((prev) =>
         prev.map((item) =>
           item.id === ach.id ? { ...item, active: nextStatus } : item
@@ -265,7 +284,7 @@ export default function AdminConquistasPage() {
       setLoading(true);
       try {
           const seededPatentes = DEFAULT_PATENTES.map(withPatenteStyles);
-          await seedPatentesConfig(seededPatentes);
+          await seedPatentesConfig(seededPatentes, { tenantId: activeTenantId || undefined });
           setPatentes(seededPatentes);
           addToast("Patentes Restauradas!", "success");
       } catch (error: unknown) {
@@ -280,7 +299,7 @@ export default function AdminConquistasPage() {
       if(!editingPatente) return;
       try {
           const payload = withPatenteStyles(editingPatente);
-          await savePatenteConfig(payload);
+          await savePatenteConfig(payload, { tenantId: activeTenantId || undefined });
           setPatentes((prev) => {
             const exists = prev.some((item) => item.id === payload.id);
             const next = exists
@@ -299,7 +318,7 @@ export default function AdminConquistasPage() {
   const handleDeletePatente = async (id: string) => {
       if(!confirm("Deletar patente?")) return;
       try {
-          await deletePatenteConfig(id);
+          await deletePatenteConfig(id, { tenantId: activeTenantId || undefined });
           setPatentes((prev) => prev.filter((item) => item.id !== id));
           addToast("Patente removida.", "info");
       } catch (error: unknown) {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Medal, Palette, Plus, Save, ShieldCheck, Trophy } from "lucide-react";
 
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
   fetchAlbumUiConfig,
   saveAlbumUiConfig,
@@ -31,7 +32,7 @@ const menuItems = [
     title: "Pontua Geral",
     description: "Top geral de capturas",
     icon: Trophy,
-    color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
+    color: "text-brand-accent border-brand bg-brand-soft",
   },
   {
     href: "/admin/album/customizacao",
@@ -50,6 +51,7 @@ const DEFAULT_GLOBAL: AlbumUiConfig = {
 
 export default function AdminAlbumMenuPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [globalConfig, setGlobalConfig] = useState<AlbumUiConfig>(DEFAULT_GLOBAL);
@@ -59,7 +61,9 @@ export default function AdminAlbumMenuPage() {
 
     const load = async () => {
       try {
-        const config = await fetchAlbumUiConfig();
+        const config = await fetchAlbumUiConfig({
+          tenantId: activeTenantId || undefined,
+        });
         if (!mounted) return;
         setGlobalConfig(config || DEFAULT_GLOBAL);
       } catch {
@@ -73,12 +77,14 @@ export default function AdminAlbumMenuPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   const handleSaveGlobal = async () => {
     try {
       setSavingConfig(true);
-      await saveAlbumUiConfig(globalConfig);
+      await saveAlbumUiConfig(globalConfig, {
+        tenantId: activeTenantId || undefined,
+      });
       addToast("Capa e textos da /album atualizados.", "success");
     } catch {
       addToast("Erro ao salvar configuracao da capa.", "error");
@@ -110,15 +116,15 @@ export default function AdminAlbumMenuPage() {
         <section className="mb-6 bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-black uppercase text-emerald-400">
+              <h2 className="text-sm font-black uppercase text-brand-accent">
                 Capa da Pagina /album
               </h2>
               <p className="text-[11px] text-zinc-500 font-bold">
                 Edita em tempo real titulo, subtitulo e imagem da home do album.
               </p>
               <Link
-                href="/admin/cadastro"
-                className="mt-2 inline-flex items-center gap-1 text-[10px] font-black uppercase text-cyan-300 hover:text-cyan-200"
+                href="/admin/turma"
+                className="mt-2 inline-flex items-center gap-1 text-[10px] font-black uppercase text-brand-accent hover:text-brand"
               >
                 <Plus size={12} />
                 Adicionar turma
@@ -127,7 +133,7 @@ export default function AdminAlbumMenuPage() {
             <button
               onClick={handleSaveGlobal}
               disabled={savingConfig || loadingConfig}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-xs font-black uppercase inline-flex items-center gap-2"
+              className="brand-button-solid px-4 py-2 disabled:opacity-60"
             >
               <Save size={14} />
               {savingConfig ? "Salvando..." : "Salvar Capa"}

@@ -20,10 +20,18 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { isPlatformMaster } from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
+const TENANT_BRAND_SNAPSHOT_STORAGE_KEY = "usc_active_tenant_brand";
+
+type TenantBrandSnapshot = {
+  tenantId?: string;
+  tenantSlug?: string;
+};
+
 type MasterNavItem = {
   name: string;
   path: string;
   icon: React.ReactNode;
+  disabled?: boolean;
 };
 
 const SIDEBAR_STORAGE_KEY = "master_sidebar_collapsed";
@@ -35,8 +43,9 @@ export default function MasterLayout({
 }>) {
   const pathname = usePathname() || "/master";
   const { user, logout } = useAuth();
-  const { tenantName, tenantSlug, isOverrideActive } = useTenantTheme();
+  const { tenantId, tenantName, tenantSlug, isOverrideActive } = useTenantTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const [resolvedTenantSlug, setResolvedTenantSlug] = useState("");
 
   const canAccess = isPlatformMaster(user);
   const currentPath = useMemo(
@@ -48,6 +57,41 @@ export default function MasterLayout({
     if (typeof window === "undefined") return;
     setCollapsed(window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1");
   }, []);
+
+  useEffect(() => {
+    if (tenantSlug.trim()) {
+      setResolvedTenantSlug(tenantSlug.trim().toLowerCase());
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      setResolvedTenantSlug("");
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(TENANT_BRAND_SNAPSHOT_STORAGE_KEY);
+      if (!raw) {
+        setResolvedTenantSlug("");
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as TenantBrandSnapshot;
+      const snapshotTenantId =
+        typeof parsed.tenantId === "string" ? parsed.tenantId.trim() : "";
+      const snapshotTenantSlug =
+        typeof parsed.tenantSlug === "string" ? parsed.tenantSlug.trim().toLowerCase() : "";
+
+      if (tenantId.trim() && snapshotTenantId === tenantId.trim() && snapshotTenantSlug) {
+        setResolvedTenantSlug(snapshotTenantSlug);
+        return;
+      }
+
+      setResolvedTenantSlug("");
+    } catch {
+      setResolvedTenantSlug("");
+    }
+  }, [tenantId, tenantSlug]);
 
   const toggleSidebar = () => {
     setCollapsed((previous) => {
@@ -61,14 +105,20 @@ export default function MasterLayout({
 
   if (!canAccess) return <>{children}</>;
 
-  const tenantAdminPath = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+  const tenantAdminPath = resolvedTenantSlug
+    ? withTenantSlug(resolvedTenantSlug, "/admin")
+    : "";
   const navItems: MasterNavItem[] = [
     { name: "Dashboard Master", path: "/master", icon: <Building2 size={18} /> },
     { name: "Landing USC", path: "/master/landing", icon: <Rocket size={18} /> },
     { name: "Permissoes Globais", path: "/master/permissoes", icon: <Lock size={18} /> },
-    { name: "Lancamento", path: "/master/lancamento", icon: <Rocket size={18} /> },
-    { name: "Solicitacoes", path: "/master/lancamento/pendentes", icon: <CreditCard size={18} /> },
-    { name: "Painel do Tenant", path: tenantAdminPath, icon: <Waypoints size={18} /> },
+    { name: "Solicitacoes", path: "/master/solicitacoes", icon: <CreditCard size={18} /> },
+    {
+      name: "Painel do Tenant",
+      path: tenantAdminPath,
+      icon: <Waypoints size={18} />,
+      disabled: tenantAdminPath.length === 0,
+    },
   ];
 
   return (
@@ -144,18 +194,42 @@ export default function MasterLayout({
 
           <nav className="space-y-1">
             {navItems.map((item) => {
+              const itemKey = `${item.name}:${item.path || "disabled"}`;
               const isActive =
-                currentPath === item.path || currentPath.startsWith(`${item.path}/`);
+                !item.disabled &&
+                (currentPath === item.path || currentPath.startsWith(`${item.path}/`));
+
+              const itemClassName = `group flex items-center rounded-xl px-3 py-3 transition ${
+                item.disabled
+                  ? "cursor-not-allowed text-zinc-600 opacity-60"
+                  : isActive
+                    ? "bg-red-500/15 text-red-100 shadow-[0_10px_30px_rgba(239,68,68,0.1)]"
+                    : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+              } ${collapsed ? "justify-center" : "gap-3"}`;
+
+              if (item.disabled) {
+                return (
+                  <div
+                    key={itemKey}
+                    title="Selecione um tenant no topo antes de abrir o painel da atletica."
+                    className={itemClassName}
+                  >
+                    {item.icon}
+                    {!collapsed && (
+                      <span className="text-xs font-bold uppercase tracking-[0.12em]">
+                        {item.name}
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+
               return (
                 <Link
-                  key={item.path}
+                  key={itemKey}
                   href={item.path}
                   title={item.name}
-                  className={`group flex items-center rounded-xl px-3 py-3 transition ${
-                    isActive
-                      ? "bg-red-500/15 text-red-100 shadow-[0_10px_30px_rgba(239,68,68,0.1)]"
-                      : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
-                  } ${collapsed ? "justify-center" : "gap-3"}`}
+                  className={itemClassName}
                 >
                   {item.icon}
                   {!collapsed && (

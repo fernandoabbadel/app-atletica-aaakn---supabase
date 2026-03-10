@@ -13,13 +13,18 @@ import { useAuth } from "@/context/AuthContext";
 import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import { fetchTenantById, type TenantPaletteKey } from "@/lib/tenantService";
 import {
+  clearActiveTurmasSnapshot,
+  fetchTurmasConfig,
+  persistActiveTurmasSnapshot,
+} from "@/lib/turmasService";
+import {
   dispatchMasterTenantOverrideChanged,
   getMasterTenantOverrideId,
   hasMasterTenantOverride,
   MASTER_TENANT_OVERRIDE_STORAGE_KEY,
   resolveEffectiveTenantId,
 } from "@/lib/tenantContext";
-import { TENANT_SLUG_COOKIE_NAME } from "@/lib/tenantRouting";
+import { parseTenantScopedPath, TENANT_SLUG_COOKIE_NAME } from "@/lib/tenantRouting";
 
 interface TenantPalette {
   key: TenantPaletteKey;
@@ -38,6 +43,7 @@ interface TenantThemeContextValue {
   tenantLogoUrl: string;
   isOverrideActive: boolean;
   loading: boolean;
+  turmasVersion: number;
   setMasterTenantOverride: (tenantId: string) => void;
   refreshTenantTheme: () => void;
 }
@@ -55,6 +61,34 @@ const PALETTES: Record<TenantPaletteKey, TenantPalette> = {
 const DEFAULT_PALETTE = PALETTES.green;
 const TENANT_BRAND_SNAPSHOT_STORAGE_KEY = "usc_active_tenant_brand";
 
+const hexToRgbTriplet = (value: string): string => {
+  const clean = value.trim().replace("#", "");
+  if (!/^[\da-fA-F]{3}$|^[\da-fA-F]{6}$/.test(clean)) {
+    return DEFAULT_PALETTE.rgb;
+  }
+
+  const normalized =
+    clean.length === 3
+      ? clean
+          .split("")
+          .map((char) => `${char}${char}`)
+          .join("")
+      : clean;
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+
+  return `${red} ${green} ${blue}`;
+};
+
+const buildPublicPalette = (primary: string, accent: string): TenantPalette => ({
+  key: DEFAULT_PALETTE.key,
+  primary: primary || DEFAULT_PALETTE.primary,
+  accent: accent || primary || DEFAULT_PALETTE.accent,
+  rgb: hexToRgbTriplet(primary || DEFAULT_PALETTE.primary),
+});
+
 const TenantThemeContext = createContext<TenantThemeContextValue>({
   palette: DEFAULT_PALETTE,
   tenantId: "",
@@ -65,6 +99,7 @@ const TenantThemeContext = createContext<TenantThemeContextValue>({
   tenantLogoUrl: PLATFORM_LOGO_URL,
   isOverrideActive: false,
   loading: true,
+  turmasVersion: 0,
   setMasterTenantOverride: () => {},
   refreshTenantTheme: () => {},
 });
@@ -141,6 +176,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
   const [masterOverrideTenantId, setMasterOverrideTenantId] = useState("");
   const [palette, setPalette] = useState<TenantPalette>(DEFAULT_PALETTE);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [turmasVersion, setTurmasVersion] = useState(0);
 
   const setMasterTenantOverride = useCallback((nextTenantId: string): void => {
     const cleanTenantId = getMasterTenantOverrideId(nextTenantId);
@@ -182,6 +218,10 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
     let mounted = true;
     const syncPalette = async () => {
       try {
+        const routeTenantSlug =
+          typeof window !== "undefined"
+            ? parseTenantScopedPath(window.location.pathname || "/").tenantSlug
+            : "";
         const userTenantStatus =
           typeof user?.tenant_status === "string" ? user.tenant_status.trim().toLowerCase() : "";
         const selectedTenantId = resolveEffectiveTenantId(
@@ -195,6 +235,85 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
             userTenantStatus === "approved");
 
         if (!hasTenantContext) {
+          if (routeTenantSlug) {
+            try {
+              const response = await fetch(
+                `/api/public/landing?tenant=${encodeURIComponent(routeTenantSlug)}`,
+                { cache: "no-store" }
+              );
+              if (!response.ok) {
+                throw new Error(`Falha ao carregar tenant publico: ${response.status}`);
+              }
+
+              const payload = (await response.json()) as {
+                tenantId?: string;
+                brand?: {
+                  sigla?: string;
+                  nome?: string;
+                  subtitle?: string;
+                  logoUrl?: string;
+                };
+                config?: {
+                  gradientEnd?: string;
+                  gradientStart?: string;
+                  taglineColor?: string;
+                };
+              };
+
+              const primary =
+                typeof payload.config?.gradientEnd === "string" && payload.config.gradientEnd.trim()
+                  ? payload.config.gradientEnd.trim()
+                  : DEFAULT_PALETTE.primary;
+              const accent =
+                typeof payload.config?.taglineColor === "string" && payload.config.taglineColor.trim()
+                  ? payload.config.taglineColor.trim()
+                  : typeof payload.config?.gradientStart === "string" &&
+                      payload.config.gradientStart.trim()
+                    ? payload.config.gradientStart.trim()
+                    : DEFAULT_PALETTE.accent;
+              const publicPalette = buildPublicPalette(primary, accent);
+              const publicLogo =
+                typeof payload.brand?.logoUrl === "string" && payload.brand.logoUrl.trim()
+                  ? payload.brand.logoUrl.trim()
+                  : "/logo.png";
+              const publicSigla =
+                typeof payload.brand?.sigla === "string" && payload.brand.sigla.trim()
+                  ? payload.brand.sigla.trim()
+                  : routeTenantSlug.toUpperCase();
+              const publicName =
+                typeof payload.brand?.nome === "string" && payload.brand.nome.trim()
+                  ? payload.brand.nome.trim()
+                  : publicSigla;
+              const publicCourse =
+                typeof payload.brand?.subtitle === "string" ? payload.brand.subtitle.trim() : "";
+              const publicTenantId =
+                typeof payload.tenantId === "string" ? payload.tenantId.trim() : "";
+
+              if (!mounted) return;
+              setTenantId(publicTenantId);
+              setTenantSlug(routeTenantSlug);
+              setPalette(publicPalette);
+              setTenantName(publicName);
+              setTenantSigla(publicSigla);
+              setTenantCourse(publicCourse);
+              setTenantLogoUrl(publicLogo);
+              setIsOverrideActive(false);
+              syncTenantSlugCookie(routeTenantSlug);
+              persistTenantBrandSnapshot({
+                tenantId: publicTenantId,
+                tenantSlug: routeTenantSlug,
+                tenantName: publicName,
+                tenantSigla: publicSigla,
+                tenantCourse: publicCourse,
+                tenantLogoUrl: publicLogo,
+              });
+              applyPaletteToRoot(publicPalette);
+              return;
+            } catch {
+              // se falhar, cai no fallback global logo abaixo
+            }
+          }
+
           if (!mounted) return;
           setTenantId("");
           setTenantSlug("");
@@ -280,6 +399,47 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
     user,
   ]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    const scopedTenantId = tenantId.trim();
+    const scopedTenantSlug = tenantSlug.trim().toLowerCase();
+    if (!scopedTenantId && !scopedTenantSlug) {
+      clearActiveTurmasSnapshot();
+      setTurmasVersion((previous) => previous + 1);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    const syncTurmas = async () => {
+      try {
+        const rows = await fetchTurmasConfig({
+          tenantId: scopedTenantId || undefined,
+          forceRefresh: true,
+        });
+        if (!mounted) return;
+        persistActiveTurmasSnapshot({
+          tenantId: scopedTenantId,
+          tenantSlug: scopedTenantSlug,
+          turmas: rows,
+        });
+      } catch {
+        if (!mounted) return;
+        clearActiveTurmasSnapshot();
+      } finally {
+        if (mounted) {
+          setTurmasVersion((previous) => previous + 1);
+        }
+      }
+    };
+
+    void syncTurmas();
+    return () => {
+      mounted = false;
+    };
+  }, [refreshVersion, tenantId, tenantSlug]);
+
   const value = useMemo(
     () => ({
       palette,
@@ -291,6 +451,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
       tenantLogoUrl,
       isOverrideActive,
       loading: authLoading || loading,
+      turmasVersion,
       setMasterTenantOverride,
       refreshTenantTheme,
     }),
@@ -307,6 +468,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
       tenantName,
       tenantSigla,
       tenantCourse,
+      turmasVersion,
     ]
   );
 

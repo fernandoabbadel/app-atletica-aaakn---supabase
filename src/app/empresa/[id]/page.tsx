@@ -6,7 +6,7 @@ import {
   Camera, LogOut, Loader2, X, FileText, ChevronRight
 } from "lucide-react";
 import Image from "next/image";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Html5Qrcode } from "html5-qrcode";
 import { useToast } from "../../../context/ToastContext";
@@ -19,6 +19,7 @@ import {
   type PartnerRecord,
 } from "../../../lib/partnersService";
 import { logActivity } from "../../../lib/logger";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGEM ---
 interface Cupom {
@@ -85,7 +86,13 @@ export default function EmpresaDashboard() {
   const { addToast } = useToast();
   const router = useRouter();
   const params = useParams(); 
+  const pathname = usePathname() || "/empresa";
   const empresaId = params.id as string;
+  const pathInfo = parseTenantScopedPath(pathname);
+  const companyBasePath = pathInfo.tenantSlug
+    ? withTenantSlug(pathInfo.tenantSlug, "/empresa")
+    : "/empresa";
+  const companyHistoryPath = `${companyBasePath}/${empresaId}/historico`;
 
   const [loading, setLoading] = useState(true);
   const [partner, setPartner] = useState<EmpresaData | null>(null);
@@ -126,7 +133,7 @@ export default function EmpresaDashboard() {
                 setEditForm(data); // Prepara form
             } else {
                 addToast("Empresa não encontrada.", "error");
-                router.push("/empresa");
+                router.push(companyBasePath);
             }
             setHistory((partnerScans as ScanData[]).slice(0, 10));
         } catch (error: unknown) {
@@ -136,7 +143,7 @@ export default function EmpresaDashboard() {
         }
     };
     fetchCompanyData();
-  }, [empresaId, addToast, router]);
+  }, [companyBasePath, empresaId, addToast, router]);
 
   // --- AÇÕES ---
 
@@ -347,7 +354,7 @@ export default function EmpresaDashboard() {
                   <p className="text-[10px] text-emerald-500 font-bold flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Painel de Controle</p>
               </div>
           </div>
-          <button onClick={() => router.push("/empresa")} className="bg-black p-2 rounded-full text-zinc-500 hover:text-red-500 transition border border-zinc-800"><LogOut size={18}/></button>
+          <button onClick={() => router.push(companyBasePath)} className="bg-black p-2 rounded-full text-zinc-500 hover:text-red-500 transition border border-zinc-800"><LogOut size={18}/></button>
       </header>
 
       <main className="p-6 space-y-8 max-w-6xl mx-auto animate-in fade-in duration-500">
@@ -359,7 +366,7 @@ export default function EmpresaDashboard() {
               </div>
               <div className="flex items-center gap-2">
                 <Link
-                  href={`/empresa/${empresaId}/historico`}
+                  href={companyHistoryPath}
                   className="p-2 bg-zinc-800 text-zinc-300 rounded-lg hover:bg-zinc-700 flex items-center gap-2 text-xs font-bold uppercase"
                 >
                   <FileText size={14} /> Historico
@@ -415,7 +422,7 @@ export default function EmpresaDashboard() {
                         <div className="flex items-center justify-between gap-3">
                           <h3 className="font-bold text-white flex items-center gap-2"><QrCode size={18} className="text-emerald-500"/> Ultimos scans</h3>
                           <Link
-                            href={`/empresa/${empresaId}/historico`}
+                            href={companyHistoryPath}
                             className="text-[10px] uppercase font-black text-emerald-400 flex items-center gap-1 hover:text-emerald-300"
                           >
                             Ver completo <ChevronRight size={12} />

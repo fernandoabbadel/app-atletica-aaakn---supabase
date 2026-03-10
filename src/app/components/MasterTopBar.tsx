@@ -68,6 +68,7 @@ export default function MasterTopBar() {
   const router = useRouter();
   const { user } = useAuth();
   const {
+    palette,
     tenantId,
     tenantName,
     tenantSigla,
@@ -95,7 +96,7 @@ export default function MasterTopBar() {
     : tenantId || routeTenant?.id || "";
   const selectedTenant =
     tenantOptions.find((tenant) => tenant.id === selectedTenantId) || routeTenant;
-  const adminTargetSlug = selectedTenant?.slug || tenantSlug;
+  const adminTargetSlug = pathInfo.tenantSlug || selectedTenant?.slug || tenantSlug;
   const activeTenantLabel =
     isMasterScope && !selectedTenantId
       ? "Plataforma USC"
@@ -185,7 +186,10 @@ export default function MasterTopBar() {
           <span className="hidden text-zinc-500 md:block">|</span>
 
           <span className="truncate text-zinc-200">
-            vendo <span className="text-red-200">{activeTenantLabel}</span>
+            vendo{" "}
+            <span style={{ color: selectedTenantId ? palette.accent : undefined }}>
+              {activeTenantLabel}
+            </span>
           </span>
 
           <span className="hidden text-zinc-500 xl:block">|</span>
@@ -195,7 +199,14 @@ export default function MasterTopBar() {
           </span>
 
           {isOverrideActive && (
-            <span className="hidden rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-[9px] text-amber-200 md:inline-flex">
+            <span
+              className="hidden rounded-full border px-2 py-1 text-[9px] md:inline-flex"
+              style={{
+                borderColor: "rgb(var(--tenant-primary-rgb) / 0.32)",
+                backgroundColor: "rgb(var(--tenant-primary-rgb) / 0.12)",
+                color: "var(--tenant-accent)",
+              }}
+            >
               contexto forcado
             </span>
           )}
@@ -243,13 +254,24 @@ export default function MasterTopBar() {
                 <Building2 size={11} />
                 Master
               </Link>
-              <Link
-                href={adminTargetSlug ? withTenantSlug(adminTargetSlug, "/admin") : "/admin"}
-                className="inline-flex items-center gap-1 rounded-full border border-emerald-400/20 bg-white/5 px-3 py-2 text-[9px] text-zinc-200 transition hover:bg-emerald-500/15 hover:text-white"
-              >
-                <Waypoints size={11} />
-                Admin
-              </Link>
+              {adminTargetSlug ? (
+                <Link
+                  href={withTenantSlug(adminTargetSlug, "/admin")}
+                  className="inline-flex items-center gap-1 rounded-full border bg-white/5 px-3 py-2 text-[9px] transition hover:text-white"
+                  style={{
+                    borderColor: "rgb(var(--tenant-primary-rgb) / 0.24)",
+                    color: "var(--tenant-accent)",
+                  }}
+                >
+                  <Waypoints size={11} />
+                  Admin
+                </Link>
+              ) : (
+                <div className="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-zinc-700 bg-white/5 px-3 py-2 text-[9px] text-zinc-500 opacity-60">
+                  <Waypoints size={11} />
+                  Admin
+                </div>
+              )}
             </div>
           </div>
         </div>

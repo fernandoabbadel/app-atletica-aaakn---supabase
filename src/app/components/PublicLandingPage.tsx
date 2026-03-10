@@ -68,6 +68,27 @@ const DEFAULT_BRAND: BrandState = {
   logoUrl: PLATFORM_LOGO_URL,
 };
 
+const hexToRgbTriplet = (value: string): string => {
+  const clean = value.trim().replace("#", "");
+  if (!/^[\da-fA-F]{3}$|^[\da-fA-F]{6}$/.test(clean)) {
+    return "16 185 129";
+  }
+
+  const normalized =
+    clean.length === 3
+      ? clean
+          .split("")
+          .map((char) => `${char}${char}`)
+          .join("")
+      : clean;
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+
+  return `${red} ${green} ${blue}`;
+};
+
 const normalizeUscPalette = (config: LandingConfig): LandingConfig => {
   const normalized = { ...config };
   const colorTagline = config.taglineColor.trim().toLowerCase();
@@ -108,7 +129,7 @@ const useCounter = (end: number, duration = 2000) => {
   return count;
 };
 
-type StatColor = "blue" | "indigo" | "cyan";
+type StatColor = "brand" | "brandAccent" | "neutral";
 
 type StatCardProps = {
   icon: React.ComponentType<{ className?: string }>;
@@ -120,9 +141,9 @@ type StatCardProps = {
 const StatCard = ({ icon: Icon, value, label, color }: StatCardProps) => {
   const count = useCounter(value);
   const colors: Record<StatColor, string> = {
-    blue: "text-blue-400 bg-blue-500/10 border-blue-500/20",
-    indigo: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
-    cyan: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
+    brand: "text-brand bg-brand-primary/10 border-brand",
+    brandAccent: "text-brand-accent bg-brand-primary/15 border-brand",
+    neutral: "text-zinc-300 bg-zinc-800/80 border-zinc-700",
   };
 
   return (
@@ -260,7 +281,7 @@ export default function PublicLandingPage({
 
   const handleGoogleLogin = async () => {
     try {
-      await loginGoogle();
+      await loginGoogle({ returnTo: dashboardPath });
     } catch {
       addToast("Erro no login Google", "error");
     }
@@ -294,19 +315,34 @@ export default function PublicLandingPage({
         thirdLabel: "Parceiros totais",
       };
 
+  const landingPrimary = config.gradientEnd?.trim() || config.taglineColor?.trim() || "#10b981";
+  const landingAccent = config.taglineColor?.trim() || landingPrimary;
+  const landingThemeStyle = useMemo(
+    () =>
+      ({
+        "--tenant-primary": landingPrimary,
+        "--tenant-accent": landingAccent,
+        "--tenant-primary-rgb": hexToRgbTriplet(landingPrimary),
+      }) as React.CSSProperties,
+    [landingAccent, landingPrimary]
+  );
+
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#02050d] font-bold text-blue-400 animate-pulse">
+      <div className="flex h-screen items-center justify-center bg-[#02050d] font-bold text-brand animate-pulse">
         CARREGANDO CARDUME...
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#02050d] font-sans text-white selection:bg-blue-500/30">
+    <div
+      className="min-h-screen overflow-x-hidden bg-[#02050d] font-sans text-white selection:bg-brand-primary/30"
+      style={landingThemeStyle}
+    >
       <div className="pointer-events-none fixed inset-0 z-0">
-        <div className="absolute left-[-20%] top-[-10%] h-[80%] w-[80%] animate-pulse-slow rounded-full bg-blue-500/10 blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-20%] h-[80%] w-[80%] animate-pulse-slow rounded-full bg-cyan-500/10 blur-[120px] delay-700" />
+        <div className="absolute left-[-20%] top-[-10%] h-[80%] w-[80%] animate-pulse-slow rounded-full bg-brand-primary/10 blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-20%] h-[80%] w-[80%] animate-pulse-slow rounded-full bg-brand-primary/10 blur-[120px] delay-700" />
       </div>
 
       <header className="relative z-20 container mx-auto flex items-center justify-between px-4 pt-5">
@@ -331,14 +367,14 @@ export default function PublicLandingPage({
         {isTenantLanding ? (
           <Link
             href="/"
-            className="rounded-lg border border-cyan-500/30 bg-cyan-600/20 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-cyan-300 hover:bg-cyan-600/30"
+            className="rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
           >
             USC Oficial
           </Link>
         ) : (
           <Link
             href="/nova-atletica"
-            className="rounded-lg border border-cyan-500/30 bg-cyan-600/20 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-cyan-300 hover:bg-cyan-600/30"
+            className="rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
           >
             Cadastrar Atletica
           </Link>
@@ -347,14 +383,17 @@ export default function PublicLandingPage({
 
       <main className="relative z-10 container mx-auto px-4 pb-20 pt-8 lg:flex lg:items-center lg:gap-16 lg:pt-14">
         <div className="flex-1 space-y-8 text-center lg:text-left">
-          <div className="group mx-auto h-48 w-48 animate-float-slow lg:mx-0 lg:h-64 lg:w-64">
-            <div className="absolute inset-0 scale-75 rounded-full bg-blue-500/30 blur-[50px]" />
+          <div className="group relative mx-auto h-48 w-48 animate-float-slow lg:mx-0 lg:h-64 lg:w-64">
+            <div className="absolute inset-0 scale-75 rounded-full bg-brand-primary/25 blur-[50px]" />
             <Image
               src={brand.logoUrl || "/logo.png"}
               alt={`Logo ${brand.sigla}`}
               width={256}
               height={256}
-              className="relative z-10 object-contain mix-blend-screen drop-shadow-[0_0_35px_rgba(59,130,246,0.45)]"
+              className="relative z-10 object-contain mix-blend-screen"
+              style={{
+                filter: "drop-shadow(0 0 35px rgba(var(--tenant-primary-rgb), 0.45))",
+              }}
               priority
               unoptimized={(brand.logoUrl || "").startsWith("http")}
             />
@@ -389,18 +428,18 @@ export default function PublicLandingPage({
           </div>
 
           <div className="mx-auto grid w-full max-w-lg grid-cols-3 gap-4 lg:mx-0">
-            <StatCard icon={Users} value={stats.first} label={stats.firstLabel} color="blue" />
+            <StatCard icon={Users} value={stats.first} label={stats.firstLabel} color="brand" />
             <StatCard
               icon={Building2}
               value={stats.second}
               label={stats.secondLabel}
-              color="indigo"
+              color="neutral"
             />
             <StatCard
               icon={Handshake}
               value={stats.third}
               label={stats.thirdLabel}
-              color="cyan"
+              color="brandAccent"
             />
           </div>
         </div>
@@ -438,7 +477,7 @@ export default function PublicLandingPage({
                 {canOpenAdmin && (
                   <button
                     onClick={() => router.push(adminPath)}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600/20 py-3.5 text-xs font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-600/30"
+                    className="brand-button-soft flex w-full"
                   >
                     <Shield size={16} /> Abrir painel admin
                   </button>
@@ -462,7 +501,7 @@ export default function PublicLandingPage({
                 {isTenantLanding && (
                   <Link
                     href="/"
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-600/10 py-3 text-xs font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-cyan-600/20"
+                    className="brand-button-soft flex w-full"
                   >
                     <Building2 size={16} /> Ir para USC oficial
                   </Link>
@@ -479,7 +518,7 @@ export default function PublicLandingPage({
 
       <section className="container mx-auto border-t border-white/5 bg-zinc-950/30 px-4 py-20">
         <div className="mb-8 flex items-center justify-center gap-2 lg:justify-start">
-          <Star className="fill-blue-400 text-blue-400" />
+          <Star className="fill-brand-solid text-brand" />
           <h3 className="text-xl font-black uppercase tracking-tight text-white">
             O Cardume Aprova
           </h3>
@@ -490,10 +529,10 @@ export default function PublicLandingPage({
             config.reviews.map((review) => (
               <div
                 key={review.id}
-                className="min-w-[300px] snap-center rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6 shadow-lg transition-all hover:border-blue-500/30"
+                className="min-w-[300px] snap-center rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6 shadow-lg transition-all hover:border-brand"
               >
                 <div className="flex items-center gap-3">
-                  <div className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-blue-500/30 bg-zinc-800">
+                  <div className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-brand bg-zinc-800">
                     <Image
                       src={review.profileUrl || "/logo.png"}
                       alt={review.name}
@@ -532,7 +571,7 @@ export default function PublicLandingPage({
           <div className="mb-12 grid grid-cols-1 gap-12 md:grid-cols-4">
             <div className="space-y-4">
               <div className="flex items-center gap-2">
-                <Crown className="h-5 w-5 text-blue-400" />
+                <Crown className="h-5 w-5 text-brand" />
                 <span className="text-xl font-black text-white">{brand.sigla}</span>
               </div>
               <p className="text-xs leading-relaxed text-zinc-500">{brand.subtitle}</p>
@@ -542,13 +581,13 @@ export default function PublicLandingPage({
               <h4 className="mb-4 text-xs font-bold uppercase tracking-wider text-white">Suporte</h4>
               <ul className="space-y-3 text-xs text-zinc-500">
                 <li className="flex items-center gap-2">
-                  <MapPin size={14} className="text-blue-500" /> {config.address}
+                  <MapPin size={14} className="text-brand" /> {config.address}
                 </li>
                 <li className="flex items-center gap-2">
-                  <Mail size={14} className="text-blue-500" /> {config.email}
+                  <Mail size={14} className="text-brand" /> {config.email}
                 </li>
                 <li className="flex items-center gap-2">
-                  <Phone size={14} className="text-blue-500" /> {config.phone}
+                  <Phone size={14} className="text-brand" /> {config.phone}
                 </li>
                 {(config.socialLinks || []).map((social) => (
                   <li key={social.id} className="pt-2">
@@ -556,7 +595,7 @@ export default function PublicLandingPage({
                       href={social.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-2 font-bold capitalize text-blue-400 hover:text-blue-300"
+                      className="flex items-center gap-2 font-bold capitalize text-brand-accent hover:text-brand"
                     >
                       <Instagram size={14} /> {social.platform}
                     </a>

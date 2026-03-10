@@ -1,5 +1,6 @@
-﻿import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { isTreinoDayExpired } from "./eventDateUtils";
+import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 const TTL_MS = 120_000;
@@ -8,6 +9,7 @@ const MAX_EVENT_RESULTS = 8;
 const MAX_TREINO_RESULTS = 8;
 const MAX_LIGA_RESULTS = 8;
 const MAX_FOLLOW_RESULTS = 260;
+const MAX_FOLLOW_SCAN_RESULTS = 5000;
 const PROFILE_USER_SELECT_COLUMNS =
   "uid,nome,apelido,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,status,whatsappPublico,idadePublica,relacionamentoPublico,esportes,pets,statusRelacionamento,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,tier,level,xp,stats";
 
@@ -57,6 +59,7 @@ const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null =
   }
   return hit.value;
 };
+
 const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void => {
   cache.set(key, { cachedAt: Date.now(), value });
 };
@@ -68,15 +71,79 @@ const throwSupabaseError = (error: { message: string; code?: string | null; name
   });
 };
 
-const clearProfilePublicCachesForUser = (uid: string): void => {
+const resolveProfileTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(tenantId);
+
+const buildProfileTenantCacheSuffix = (tenantId?: string | null): string =>
+  resolveProfileTenantId(tenantId) || "global";
+
+const clearProfilePublicCachesForUser = (uid: string, tenantId?: string | null): void => {
+  const cleanUid = uid.trim();
+  if (!cleanUid) return;
+
+  const tenantSuffix = buildProfileTenantCacheSuffix(tenantId);
   for (const key of publicBundleCache.keys()) {
-    if (key.startsWith(`${uid}:`) || key.endsWith(`:${uid}`)) publicBundleCache.delete(key);
+    const [targetUid, viewerUid, cachedTenantSuffix] = key.split(":");
+    const sameTenant = !tenantId || cachedTenantSuffix === tenantSuffix;
+    if (sameTenant && (targetUid === cleanUid || viewerUid === cleanUid)) {
+      publicBundleCache.delete(key);
+    }
   }
+
   for (const key of followListCache.keys()) {
-    if (key.startsWith(`${uid}:`)) followListCache.delete(key);
+    const [ownerUid, , , cachedTenantSuffix] = key.split(":");
+    const sameTenant = !tenantId || cachedTenantSuffix === tenantSuffix;
+    if (sameTenant && ownerUid === cleanUid) {
+      followListCache.delete(key);
+    }
   }
-  followCountsCache.delete(uid);
+
+  for (const key of followCountsCache.keys()) {
+    const [ownerUid, cachedTenantSuffix] = key.split(":");
+    const sameTenant = !tenantId || cachedTenantSuffix === tenantSuffix;
+    if (sameTenant && ownerUid === cleanUid) {
+      followCountsCache.delete(key);
+    }
+  }
 };
+
+const toUniqueUserIds = (values: string[]): string[] =>
+  Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
+
+async function fetchTenantUserIdSet(userIds: string[], tenantId?: string | null): Promise<Set<string>> {
+  const cleanUserIds = toUniqueUserIds(userIds);
+  if (!cleanUserIds.length) return new Set<string>();
+
+  const scopedTenantId = resolveProfileTenantId(tenantId);
+  if (!scopedTenantId) {
+    return new Set(cleanUserIds);
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("uid")
+    .eq("tenant_id", scopedTenantId)
+    .in("uid", cleanUserIds);
+  if (error) throwSupabaseError(error);
+
+  return new Set(
+    (data ?? [])
+      .map((row) => asString(asObject(row)?.uid).trim())
+      .filter((value) => value.length > 0)
+  );
+}
+
+async function ensureUsersBelongToTenant(userIds: string[], tenantId?: string | null): Promise<boolean> {
+  const cleanUserIds = toUniqueUserIds(userIds);
+  if (!cleanUserIds.length) return false;
+
+  const scopedTenantId = resolveProfileTenantId(tenantId);
+  if (!scopedTenantId) return true;
+
+  const tenantUserIds = await fetchTenantUserIdSet(cleanUserIds, scopedTenantId);
+  return cleanUserIds.every((userId) => tenantUserIds.has(userId));
+}
 
 export interface ProfileUserRecord {
   uid: string;
@@ -275,44 +342,77 @@ const normalizeFollowListItem = (raw: unknown): FollowListItem | null => {
   const data = asObject(raw);
   if (!data) return null;
   return {
-    uid: asString(data.uid),
+    uid: asString(data.uid).trim(),
     nome: asString(data.nome, "Atleta"),
     foto: asString(data.foto, ""),
     turma: asString(data.turma, "Geral"),
   };
 };
 
-async function fetchProfileById(uid: string): Promise<ProfileUserRecord | null> {
+async function filterFollowRowsByTenant<T extends FollowListItem>(
+  rows: T[],
+  tenantId?: string | null
+): Promise<T[]> {
+  const scopedTenantId = resolveProfileTenantId(tenantId);
+  if (!scopedTenantId) return rows;
+
+  const tenantUserIds = await fetchTenantUserIdSet(
+    rows.map((row) => row.uid),
+    scopedTenantId
+  );
+  return rows.filter((row) => tenantUserIds.has(row.uid));
+}
+
+async function fetchProfileById(
+  uid: string,
+  tenantId?: string | null
+): Promise<ProfileUserRecord | null> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let request = supabase
     .from("users")
     .select(PROFILE_USER_SELECT_COLUMNS)
-    .eq("uid", uid)
-    .maybeSingle();
+    .eq("uid", uid);
+  if (tenantId?.trim()) {
+    request = request.eq("tenant_id", tenantId.trim());
+  }
+  const { data, error } = await request.maybeSingle();
   if (error) throwSupabaseError(error);
   if (!data) return null;
   return normalizeUserProfile(data);
 }
 
-async function fetchProfilePosts(uid: string): Promise<ProfilePostRecord[]> {
+async function fetchProfilePosts(
+  uid: string,
+  tenantId?: string | null
+): Promise<ProfilePostRecord[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let request = supabase
     .from("posts")
     .select("id,texto,imagem,likes,comentarios,userId,createdAt")
-    .eq("userId", uid)
+    .eq("userId", uid);
+  if (tenantId?.trim()) {
+    request = request.eq("tenant_id", tenantId.trim());
+  }
+  const { data, error } = await request
     .order("createdAt", { ascending: false })
     .limit(MAX_POST_RESULTS);
   if (error) throwSupabaseError(error);
   return (data ?? []).map(normalizePost).filter((row): row is ProfilePostRecord => row !== null);
 }
 
-async function fetchProfileEvents(uid: string): Promise<ProfileEventRecord[]> {
+async function fetchProfileEvents(
+  uid: string,
+  tenantId?: string | null
+): Promise<ProfileEventRecord[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let request = supabase
     .from("eventos")
     .select("id,titulo,data,local,imagem,imagePositionY,interessados")
-    .contains("interessados", [uid])
-    .limit(MAX_EVENT_RESULTS);
+    .contains("interessados", [uid]);
+  if (tenantId?.trim()) {
+    request = request.eq("tenant_id", tenantId.trim());
+  }
+  const { data, error } = await request.limit(MAX_EVENT_RESULTS);
   if (error) throwSupabaseError(error);
   return (data ?? [])
     .map(normalizeEvent)
@@ -320,13 +420,19 @@ async function fetchProfileEvents(uid: string): Promise<ProfileEventRecord[]> {
     .sort((left, right) => toMillis(left.data) - toMillis(right.data));
 }
 
-async function fetchProfileTreinos(uid: string): Promise<ProfileTreinoRecord[]> {
+async function fetchProfileTreinos(
+  uid: string,
+  tenantId?: string | null
+): Promise<ProfileTreinoRecord[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let request = supabase
     .from("treinos")
     .select("id,modalidade,dia,horario,imagem,local,confirmados")
-    .contains("confirmados", [uid])
-    .limit(MAX_TREINO_RESULTS);
+    .contains("confirmados", [uid]);
+  if (tenantId?.trim()) {
+    request = request.eq("tenant_id", tenantId.trim());
+  }
+  const { data, error } = await request.limit(MAX_TREINO_RESULTS);
   if (error) throwSupabaseError(error);
   return (data ?? [])
     .map(normalizeTreino)
@@ -346,17 +452,49 @@ async function fetchProfileLigas(uid: string): Promise<ProfileLigaRecord[]> {
   return (data ?? []).map(normalizeLiga).filter((row): row is ProfileLigaRecord => row !== null);
 }
 
-async function countFollowRows(table: "users_followers" | "users_following", uid: string): Promise<number> {
+async function countFollowRows(
+  table: "users_followers" | "users_following",
+  uid: string,
+  tenantId?: string | null
+): Promise<number> {
   const supabase = getSupabaseClient();
-  const { count, error } = await supabase
+  const scopedTenantId = resolveProfileTenantId(tenantId);
+  if (!scopedTenantId) {
+    const { count, error } = await supabase
+      .from(table)
+      .select("id", { count: "exact", head: true })
+      .eq("userId", uid);
+    if (error) throwSupabaseError(error);
+    return count ?? 0;
+  }
+
+  const { data, error } = await supabase
     .from(table)
-    .select("id", { count: "exact", head: true })
-    .eq("userId", uid);
+    .select("uid")
+    .eq("userId", uid)
+    .range(0, MAX_FOLLOW_SCAN_RESULTS - 1);
   if (error) throwSupabaseError(error);
-  return count ?? 0;
+
+  const tenantUserIds = await fetchTenantUserIdSet(
+    (data ?? [])
+      .map((row) => asString(asObject(row)?.uid).trim())
+      .filter((value) => value.length > 0),
+    scopedTenantId
+  );
+  return tenantUserIds.size;
 }
 
-async function checkIsFollowing(targetUid: string, viewerUid: string): Promise<boolean> {
+async function checkIsFollowing(
+  targetUid: string,
+  viewerUid: string,
+  tenantId?: string | null
+): Promise<boolean> {
+  const scopedTenantId = resolveProfileTenantId(tenantId);
+  if (scopedTenantId) {
+    const usersBelongToTenant = await ensureUsersBelongToTenant([targetUid, viewerUid], scopedTenantId);
+    if (!usersBelongToTenant) return false;
+  }
+
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("users_followers")
@@ -371,38 +509,43 @@ async function checkIsFollowing(targetUid: string, viewerUid: string): Promise<b
 export async function fetchPublicProfileBundle(
   targetUidRaw: string,
   viewerUidRaw?: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<PublicProfileBundle | null> {
   const targetUid = targetUidRaw.trim();
   if (!targetUid) return null;
 
   const viewerUid = viewerUidRaw?.trim() || "";
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${targetUid}:${viewerUid || "anon"}`;
+  const tenantId = resolveProfileTenantId(options?.tenantId);
+  const cacheKey = `${targetUid}:${viewerUid || "anon"}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
     const cached = getCache(publicBundleCache, cacheKey);
     if (cached !== null || publicBundleCache.has(cacheKey)) return cached;
   }
 
-  const profile = await fetchProfileById(targetUid);
+  const profile = await fetchProfileById(targetUid, tenantId);
   if (!profile) {
     setCache(publicBundleCache, cacheKey, null);
     return null;
   }
 
-  const statsObj = asObject(profile.stats);
+  const statsObj = tenantId ? null : asObject(profile.stats);
   const followersCountRaw = statsObj?.followersCount;
   const followingCountRaw = statsObj?.followingCount;
 
   const [followersCount, followingCount, posts, events, treinos, ligas, isFollowing] = await Promise.all([
-    typeof followersCountRaw === "number" ? Math.max(0, Math.floor(followersCountRaw)) : countFollowRows("users_followers", targetUid),
-    typeof followingCountRaw === "number" ? Math.max(0, Math.floor(followingCountRaw)) : countFollowRows("users_following", targetUid),
-    fetchProfilePosts(targetUid),
-    fetchProfileEvents(targetUid),
-    fetchProfileTreinos(targetUid),
+    typeof followersCountRaw === "number"
+      ? Math.max(0, Math.floor(followersCountRaw))
+      : countFollowRows("users_followers", targetUid, tenantId),
+    typeof followingCountRaw === "number"
+      ? Math.max(0, Math.floor(followingCountRaw))
+      : countFollowRows("users_following", targetUid, tenantId),
+    fetchProfilePosts(targetUid, tenantId),
+    fetchProfileEvents(targetUid, tenantId),
+    fetchProfileTreinos(targetUid, tenantId),
     fetchProfileLigas(targetUid),
-    viewerUid ? checkIsFollowing(targetUid, viewerUid) : Promise.resolve(false),
+    viewerUid ? checkIsFollowing(targetUid, viewerUid, tenantId) : Promise.resolve(false),
   ]);
 
   const bundle: PublicProfileBundle = {
@@ -423,7 +566,7 @@ export async function fetchPublicProfileBundle(
 export async function fetchFollowList(
   uidRaw: string,
   type: "followers" | "following",
-  options?: { maxResults?: number; forceRefresh?: boolean }
+  options?: { maxResults?: number; forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<FollowListItem[]> {
   const supabase = getSupabaseClient();
   const uid = uidRaw.trim();
@@ -431,7 +574,8 @@ export async function fetchFollowList(
 
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_FOLLOW_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${uid}:${type}:${maxResults}`;
+  const tenantId = resolveProfileTenantId(options?.tenantId);
+  const cacheKey = `${uid}:${type}:${maxResults}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
     const cached = getCache(followListCache, cacheKey);
@@ -439,42 +583,53 @@ export async function fetchFollowList(
   }
 
   const table = type === "followers" ? "users_followers" : "users_following";
-  const { data, error } = await supabase
+  let request = supabase
     .from(table)
     .select("uid,nome,foto,turma,followedAt")
     .eq("userId", uid)
-    .order("followedAt", { ascending: false })
-    .limit(maxResults);
+    .order("followedAt", { ascending: false });
+
+  request = tenantId
+    ? request.range(0, MAX_FOLLOW_SCAN_RESULTS - 1)
+    : request.limit(maxResults);
+
+  const { data, error } = await request;
   if (error) throwSupabaseError(error);
 
-  const rows = (data ?? [])
-    .map(normalizeFollowListItem)
-    .filter((row): row is FollowListItem => row !== null);
+  const rows = await filterFollowRowsByTenant(
+    (data ?? [])
+      .map(normalizeFollowListItem)
+      .filter((row): row is FollowListItem => row !== null),
+    tenantId
+  );
 
-  setCache(followListCache, cacheKey, rows);
-  return rows;
+  const scopedRows = rows.slice(0, maxResults);
+  setCache(followListCache, cacheKey, scopedRows);
+  return scopedRows;
 }
 
 export async function fetchFollowCounts(
   uidRaw: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<FollowCounts> {
   const uid = uidRaw.trim();
   if (!uid) return { followersCount: 0, followingCount: 0 };
 
   const forceRefresh = options?.forceRefresh ?? false;
+  const tenantId = resolveProfileTenantId(options?.tenantId);
+  const cacheKey = `${uid}:${tenantId || "global"}`;
   if (!forceRefresh) {
-    const cached = getCache(followCountsCache, uid);
+    const cached = getCache(followCountsCache, cacheKey);
     if (cached) return cached;
   }
 
   const [followersCount, followingCount] = await Promise.all([
-    countFollowRows("users_followers", uid),
-    countFollowRows("users_following", uid),
+    countFollowRows("users_followers", uid, tenantId),
+    countFollowRows("users_following", uid, tenantId),
   ]);
 
   const counts = { followersCount, followingCount };
-  setCache(followCountsCache, uid, counts);
+  setCache(followCountsCache, cacheKey, counts);
   return counts;
 }
 
@@ -484,12 +639,24 @@ export async function toggleFollowProfile(payload: {
   currentlyFollowing: boolean;
   viewerData: FollowListItem;
   targetData: FollowListItem;
+  tenantId?: string | null;
 }): Promise<{ isFollowing: boolean; followersCount: number; followingCount: number }> {
   const supabase = getSupabaseClient();
   const viewerUid = payload.viewerUid.trim();
   const targetUid = payload.targetUid.trim();
+  const scopedTenantId = resolveProfileTenantId(payload.tenantId);
   if (!viewerUid || !targetUid || viewerUid === targetUid) {
     throw new Error("Relacao de follow invalida.");
+  }
+
+  if (scopedTenantId) {
+    const usersBelongToTenant = await ensureUsersBelongToTenant(
+      [viewerUid, targetUid],
+      scopedTenantId
+    );
+    if (!usersBelongToTenant) {
+      throw new Error("Nao e permitido seguir usuarios de outra tenant.");
+    }
   }
 
   const viewerData = {
@@ -526,11 +693,11 @@ export async function toggleFollowProfile(payload: {
     const [followersInsert, followingInsert] = await Promise.all([
       supabase.from("users_followers").upsert(
         { userId: targetUid, ...viewerData, followedAt: new Date().toISOString() },
-        { onConflict: 'userId,uid' }
+        { onConflict: "userId,uid" }
       ),
       supabase.from("users_following").upsert(
         { userId: viewerUid, ...targetData, followedAt: new Date().toISOString() },
-        { onConflict: 'userId,uid' }
+        { onConflict: "userId,uid" }
       ),
     ]);
     if (followersInsert.error) throwSupabaseError(followersInsert.error);
@@ -549,34 +716,53 @@ export async function toggleFollowProfile(payload: {
   }
 
   const [followersCount, followingCount, targetUserRes, viewerUserRes] = await Promise.all([
-    countFollowRows("users_followers", targetUid),
-    countFollowRows("users_following", viewerUid),
-    supabase.from("users").select("stats").eq("uid", targetUid).maybeSingle(),
-    supabase.from("users").select("stats").eq("uid", viewerUid).maybeSingle(),
+    countFollowRows("users_followers", targetUid, scopedTenantId),
+    countFollowRows("users_following", viewerUid, scopedTenantId),
+    (() => {
+      let query = supabase.from("users").select("stats").eq("uid", targetUid);
+      if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
+      return query.maybeSingle();
+    })(),
+    (() => {
+      let query = supabase.from("users").select("stats").eq("uid", viewerUid);
+      if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
+      return query.maybeSingle();
+    })(),
   ]);
 
   if (targetUserRes.error) throwSupabaseError(targetUserRes.error);
   if (viewerUserRes.error) throwSupabaseError(viewerUserRes.error);
+  if (scopedTenantId && (!targetUserRes.data || !viewerUserRes.data)) {
+    throw new Error("Nao e permitido seguir usuarios de outra tenant.");
+  }
 
   const targetStats = asObject(targetUserRes.data?.stats) ?? {};
   const viewerStats = asObject(viewerUserRes.data?.stats) ?? {};
 
   const [targetUpdate, viewerUpdate] = await Promise.all([
-    supabase
-      .from("users")
-      .update({ stats: { ...targetStats, followersCount }, updatedAt: new Date().toISOString() })
-      .eq("uid", targetUid),
-    supabase
-      .from("users")
-      .update({ stats: { ...viewerStats, followingCount }, updatedAt: new Date().toISOString() })
-      .eq("uid", viewerUid),
+    (() => {
+      let query = supabase
+        .from("users")
+        .update({ stats: { ...targetStats, followersCount }, updatedAt: new Date().toISOString() })
+        .eq("uid", targetUid);
+      if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
+      return query;
+    })(),
+    (() => {
+      let query = supabase
+        .from("users")
+        .update({ stats: { ...viewerStats, followingCount }, updatedAt: new Date().toISOString() })
+        .eq("uid", viewerUid);
+      if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
+      return query;
+    })(),
   ]);
 
   if (targetUpdate.error) throwSupabaseError(targetUpdate.error);
   if (viewerUpdate.error) throwSupabaseError(viewerUpdate.error);
 
-  clearProfilePublicCachesForUser(targetUid);
-  clearProfilePublicCachesForUser(viewerUid);
+  clearProfilePublicCachesForUser(targetUid, scopedTenantId);
+  clearProfilePublicCachesForUser(viewerUid, scopedTenantId);
 
   return {
     isFollowing: !shouldUnfollow,
@@ -584,5 +770,3 @@ export async function toggleFollowProfile(payload: {
     followingCount,
   };
 }
-
-

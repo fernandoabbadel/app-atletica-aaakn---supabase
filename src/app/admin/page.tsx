@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { 
   Users, ShoppingBag, Calendar, TrendingUp, 
-  ArrowUpRight, Clock, ShieldAlert, Activity
+  ArrowUpRight, Clock, ShieldAlert, Activity, LayoutDashboard
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // ðŸ¦ˆ CorreÃ§Ã£o: Next Image
@@ -108,7 +108,10 @@ export default function AdminDashboardPage() {
 
   if (loading) {
       return (
-        <div className="min-h-screen bg-[#050505] flex items-center justify-center text-emerald-500 font-bold animate-pulse">
+        <div
+          className="min-h-screen animate-pulse bg-[#050505] flex items-center justify-center font-bold"
+          style={{ color: "var(--tenant-primary)" }}
+        >
             CARREGANDO BASE...
         </div>
       );
@@ -140,14 +143,22 @@ export default function AdminDashboardPage() {
           </p>
         </div>
         </div>
-        {canOpenMasterPanel && (
+        <div className="flex items-center gap-2">
           <Link
-            href="/master"
-            className="inline-flex items-center gap-2 rounded-lg border border-cyan-700/40 bg-cyan-900/20 px-4 py-2 text-[11px] font-black uppercase text-cyan-200 hover:bg-cyan-900/35 transition"
+            href="/admin/dashboard-modulos"
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-700/40 bg-emerald-900/20 px-4 py-2 text-[11px] font-black uppercase text-emerald-200 hover:bg-emerald-900/35 transition"
           >
-            <ShieldAlert size={14} /> Admin Master
+            <LayoutDashboard size={14} /> Modulos do App
           </Link>
-        )}
+          {canOpenMasterPanel && (
+            <Link
+              href="/master"
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-700/40 bg-cyan-900/20 px-4 py-2 text-[11px] font-black uppercase text-cyan-200 hover:bg-cyan-900/35 transition"
+            >
+              <ShieldAlert size={14} /> Admin Master
+            </Link>
+          )}
+        </div>
       </header>
 
       {/* STAT CARDS */}
@@ -206,7 +217,7 @@ export default function AdminDashboardPage() {
                                   />
                               </div>
                               <div>
-                                  <p className="font-bold text-white text-sm group-hover:text-emerald-400 transition">{user.nome}</p>
+                                  <p className="font-bold text-white text-sm transition group-hover:opacity-90" style={{ color: "var(--tenant-accent)" }}>{user.nome}</p>
                                   <p className="text-[10px] text-zinc-500 uppercase font-bold">{user.turma} - {user.role}</p>
                               </div>
                           </div>
@@ -232,7 +243,7 @@ export default function AdminDashboardPage() {
                               <Clock size={10}/> {formatLogTime(log.timestamp)}
                           </p>
                           <p className="text-xs text-zinc-300">
-                              <span className="text-emerald-500 font-bold">{log.userName}</span> realizou 
+                              <span className="font-bold" style={{ color: "var(--tenant-primary)" }}>{log.userName}</span> realizou 
                               <span className="font-bold text-white mx-1">{log.action}</span> 
                               em {log.resource}
                           </p>
@@ -255,7 +266,15 @@ function StatCard({ title, value, icon, trend }: { title: string, value: string 
         <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 hover:border-zinc-700 transition">
             <div className="flex justify-between items-start mb-4">
                 <span className="p-3 bg-black rounded-xl border border-zinc-800">{icon}</span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded font-bold uppercase">{trend}</span>
+                <span
+                  className="rounded px-2 py-1 text-[10px] font-bold uppercase"
+                  style={{
+                    backgroundColor: "rgb(var(--tenant-primary-rgb) / 0.12)",
+                    color: "var(--tenant-primary)",
+                  }}
+                >
+                  {trend}
+                </span>
             </div>
             <p className="text-zinc-500 text-xs font-bold uppercase">{title}</p>
             <p className="text-3xl font-black text-white mt-1">{value}</p>

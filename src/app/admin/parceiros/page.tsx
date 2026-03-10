@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Building2, ClipboardList, History } from "lucide-react";
+import { ArrowLeft, BarChart3, Building2, ClipboardList, History, Plus } from "lucide-react";
 
 const menuItems = [
   {
@@ -38,19 +38,28 @@ export default function AdminParceirosMenuPage() {
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/admin"
-            className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
-          >
-            <ArrowLeft size={18} className="text-zinc-300" />
-          </Link>
-          <div>
-            <h1 className="text-xl font-black uppercase tracking-tight">Admin Parceiros</h1>
-            <p className="text-[11px] text-zinc-500 font-bold">
-              Menu leve: sem carregar tabelas nesta tela
-            </p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/admin"
+              className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
+            >
+              <ArrowLeft size={18} className="text-zinc-300" />
+            </Link>
+            <div>
+              <h1 className="text-xl font-black uppercase tracking-tight">Admin Parceiros</h1>
+              <p className="text-[11px] text-zinc-500 font-bold">
+                Menu leve: sem carregar tabelas nesta tela
+              </p>
+            </div>
           </div>
+          <Link
+            href="/admin/parceiros/empresas?new=1"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-brand bg-brand-primary/10 px-4 py-2.5 text-[11px] font-black uppercase tracking-wide text-brand hover:bg-brand-primary/15"
+          >
+            <Plus size={14} />
+            Criar Parceiro
+          </Link>
         </div>
       </header>
 

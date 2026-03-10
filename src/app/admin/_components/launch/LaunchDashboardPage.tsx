@@ -31,6 +31,7 @@ import {
   useLaunchWorkspace,
   type LaunchScope,
 } from "./LaunchShared";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 interface LaunchDashboardPageProps {
   scope: LaunchScope;
@@ -48,6 +49,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
     refreshWorkspace,
     selectedTenant,
     selectedTenantId,
+    tenantSlug,
   } = workspace;
   const [pageLoading, setPageLoading] = useState(true);
   const [pageRefreshing, setPageRefreshing] = useState(false);
@@ -69,13 +71,17 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
   const [onboardingRequests, setOnboardingRequests] = useState<TenantOnboardingRequest[]>([]);
 
   const isMasterScope = scope === "master" && isPlatformMasterUser;
-  const launchBasePath = getLaunchBasePath(scope);
+  const launchBasePath = getLaunchBasePath(scope, tenantSlug);
 
   const latestInviteLink = useMemo(() => {
     const latestInvite = invites[0];
     if (!latestInvite || !origin.trim()) return "";
-    return `${origin}/cadastro?invite=${encodeURIComponent(latestInvite.token)}`;
-  }, [invites, origin]);
+    const inviteTenantSlug = (selectedTenant?.slug || tenantSlug).trim();
+    const invitePath = inviteTenantSlug
+      ? withTenantSlug(inviteTenantSlug, "/cadastro")
+      : "/cadastro";
+    return `${origin}${invitePath}?invite=${encodeURIComponent(latestInvite.token)}`;
+  }, [invites, origin, selectedTenant?.slug, tenantSlug]);
 
   const activeInvitesCount = useMemo(
     () => invites.filter((invite) => invite.isActive).length,
@@ -232,6 +238,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
   return (
     <LaunchPageShell
       scope={scope}
+      tenantSlug={tenantSlug}
       title={isMasterScope ? "Lancamento Master" : "Projeto de Lancamento"}
       subtitle={
         isMasterScope

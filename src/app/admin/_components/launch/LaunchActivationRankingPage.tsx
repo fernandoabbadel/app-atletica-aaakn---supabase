@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Trophy, UserCheck2 } from "lucide-react";
 
 import {
+  fetchTenantInviteActivationListEntries,
   fetchTenantInviteActivationRanking,
   fetchTenantJoinRequests,
+  type TenantInviteActivationListEntry,
   type TenantInviteActivationRankingEntry,
   type TenantJoinRequest,
 } from "@/lib/tenantService";
@@ -37,12 +39,14 @@ export function LaunchActivationRankingPage({
     refreshing: workspaceRefreshing,
     refreshWorkspace,
     selectedTenantId,
+    tenantSlug,
   } = workspace;
   const [pageLoading, setPageLoading] = useState(true);
   const [pageRefreshing, setPageRefreshing] = useState(false);
   const [ranking, setRanking] = useState<TenantInviteActivationRankingEntry[]>([]);
   const [pendingRequests, setPendingRequests] = useState<TenantJoinRequest[]>([]);
-  const launchBasePath = getLaunchBasePath(scope);
+  const [activationEntries, setActivationEntries] = useState<TenantInviteActivationListEntry[]>([]);
+  const launchBasePath = getLaunchBasePath(scope, tenantSlug);
 
   const approvedTotal = useMemo(
     () => ranking.reduce((total, entry) => total + Math.max(0, entry.approvedCount), 0),
@@ -62,18 +66,21 @@ export function LaunchActivationRankingPage({
       if (!cleanTenantId) {
         setRanking([]);
         setPendingRequests([]);
+        setActivationEntries([]);
         if (mode === "initial") setPageLoading(false);
         if (mode === "refresh") setPageRefreshing(false);
         return;
       }
 
       try {
-        const [rankingRows, requestRows] = await Promise.all([
+        const [rankingRows, requestRows, activationListRows] = await Promise.all([
           fetchTenantInviteActivationRanking(cleanTenantId, { limit: 20 }),
           fetchTenantJoinRequests(cleanTenantId, { status: "pending", limit: 80 }),
+          fetchTenantInviteActivationListEntries(cleanTenantId, { limit: 80 }),
         ]);
         setRanking(rankingRows);
         setPendingRequests(requestRows);
+        setActivationEntries(activationListRows);
       } catch (error: unknown) {
         addToast(
           `Erro ao carregar ranking de ativacoes: ${extractErrorMessage(error)}`,
@@ -93,6 +100,7 @@ export function LaunchActivationRankingPage({
       setPageLoading(false);
       setRanking([]);
       setPendingRequests([]);
+      setActivationEntries([]);
       return;
     }
     void loadData(selectedTenantId, "initial");
@@ -116,6 +124,7 @@ export function LaunchActivationRankingPage({
   return (
     <LaunchPageShell
       scope={scope}
+      tenantSlug={tenantSlug}
       title="Ranking de Convites Ativados"
       subtitle="usuarios cujos links mais viraram cadastro realizado"
       refreshing={workspaceRefreshing || pageRefreshing}
@@ -227,6 +236,88 @@ export function LaunchActivationRankingPage({
           {ranking.length === 0 && (
             <p className="text-sm text-zinc-400">
               Ainda nao existem convites ativados para montar o ranking.
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="flex items-center gap-2">
+          <UserCheck2 size={16} className="text-cyan-300" />
+          <h2 className="text-sm font-black uppercase text-cyan-300">
+            Lista de ativações e solicitações
+          </h2>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {activationEntries.map((entry) => (
+            <div
+              key={entry.requestId}
+              className="rounded-2xl border border-zinc-800 bg-black/40 p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-white">
+                    {entry.requesterName || entry.requesterEmail || entry.requesterUserId}
+                  </p>
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    ativado por {entry.inviterName || entry.inviterEmail || "origem manual"} •{" "}
+                    {entry.requesterTurma || "Sem turma"}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
+                    entry.status === "approved"
+                      ? "bg-emerald-500/10 text-emerald-200"
+                      : entry.status === "pending"
+                      ? "bg-amber-500/10 text-amber-200"
+                      : "bg-zinc-800 text-zinc-400"
+                  }`}
+                >
+                  {entry.status}
+                </span>
+              </div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-4">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    Convidou
+                  </p>
+                  <p className="mt-2 text-xs font-black text-cyan-200">
+                    {entry.inviterName || entry.inviterEmail || "Sem usuario"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    Solicitou em
+                  </p>
+                  <p className="mt-2 text-xs font-black text-white">
+                    {formatLaunchDate(entry.requestedAt)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    Revisado em
+                  </p>
+                  <p className="mt-2 text-xs font-black text-white">
+                    {formatLaunchDate(entry.reviewedAt)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    Token
+                  </p>
+                  <p className="mt-2 truncate text-xs font-black text-amber-200">
+                    {entry.inviteToken || "manual"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {activationEntries.length === 0 && (
+            <p className="text-sm text-zinc-400">
+              Ainda nao existem ativações para montar a lista detalhada.
             </p>
           )}
         </div>

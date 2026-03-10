@@ -4,6 +4,8 @@ import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { throwSupabaseError } from "./supabaseData";
 import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -35,7 +37,7 @@ const SHARKROUND_CONFIG_SELECT_COLUMNS = [
 ];
 
 const configCache = new Map<string, CacheEntry<SharkroundAppConfig>>();
-let inflightConfig: Promise<SharkroundAppConfig> | null = null;
+const inflightConfig = new Map<string, Promise<SharkroundAppConfig>>();
 
 export interface SharkroundAppConfig {
   dailyRollsLimit: number;
@@ -210,8 +212,32 @@ const normalizeConfig = (raw: unknown): SharkroundAppConfig => {
   };
 };
 
-const getCached = (): SharkroundAppConfig | null => {
-  const key = "default";
+const resolveSharkroundTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const getCacheKey = (tenantId?: string | null): string =>
+  resolveSharkroundTenantId(tenantId) || "default";
+
+const resolveSharkroundDocIds = (tenantId?: string | null): string[] => {
+  const scopedTenantId = resolveSharkroundTenantId(tenantId);
+  if (!scopedTenantId) return [SHARKROUND_CONFIG_PATH[1]];
+  return [buildTenantScopedRowId(scopedTenantId, SHARKROUND_CONFIG_PATH[1]), SHARKROUND_CONFIG_PATH[1]];
+};
+
+const pickConfigRow = (
+  rows: Array<Record<string, unknown>>,
+  tenantId?: string | null
+): Record<string, unknown> | null => {
+  const candidates = resolveSharkroundDocIds(tenantId);
+  for (const candidateId of candidates) {
+    const match = rows.find((row) => asString(row.id).trim() === candidateId);
+    if (match) return match;
+  }
+  return null;
+};
+
+const getCached = (tenantId?: string | null): SharkroundAppConfig | null => {
+  const key = getCacheKey(tenantId);
   const cached = configCache.get(key);
   if (!cached) return null;
   if (Date.now() - cached.cachedAt > READ_CACHE_TTL_MS) {
@@ -221,8 +247,8 @@ const getCached = (): SharkroundAppConfig | null => {
   return cached.value;
 };
 
-const setCached = (value: SharkroundAppConfig): void => {
-  configCache.set("default", { cachedAt: Date.now(), value });
+const setCached = (value: SharkroundAppConfig, tenantId?: string | null): void => {
+  configCache.set(getCacheKey(tenantId), { cachedAt: Date.now(), value });
 };
 
 const shouldUseCallable = (): boolean => {
@@ -267,126 +293,150 @@ async function callCallableWithFallback<TReq, TRes>(
   }
 }
 
+async function fetchConfigFromClient(tenantId?: string | null): Promise<{ config?: unknown }> {
+  const supabase = getSupabaseClient();
+  let mutableColumns = [...SHARKROUND_CONFIG_SELECT_COLUMNS];
+  const docIds = resolveSharkroundDocIds(tenantId);
+
+  while (mutableColumns.length > 0) {
+    const { data, error } = await supabase
+      .from(SHARKROUND_CONFIG_PATH[0])
+      .select(mutableColumns.join(","))
+      .in("id", docIds);
+
+    if (!error) {
+      const rows = (Array.isArray(data) ? data : [])
+        .map((entry) => asObject(entry))
+        .filter((entry): entry is Record<string, unknown> => entry !== null)
+        .map((entry) => ({ ...entry }));
+      return { config: pickConfigRow(rows, tenantId) ?? DEFAULT_SHARKROUND_CONFIG };
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (!missingColumn) throwSupabaseError(error);
+
+    const nextColumns = removeMissingColumnFromSelection(mutableColumns, missingColumn) ?? [];
+    if (nextColumns.length === 0) throwSupabaseError(error);
+    mutableColumns = nextColumns;
+  }
+
+  return { config: DEFAULT_SHARKROUND_CONFIG };
+}
+
+async function saveConfigWithClient(
+  normalized: SharkroundAppConfig,
+  tenantId?: string | null
+): Promise<{ ok: boolean }> {
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveSharkroundTenantId(tenantId);
+  const dataPayload = {
+    dailyRollsLimit: normalized.dailyRollsLimit,
+    startingCoins: normalized.startingCoins,
+    bailCost: normalized.bailCost,
+    heartTarget: normalized.heartTarget,
+    heartHelpReward: normalized.heartHelpReward,
+    cycleBaseReward: normalized.cycleBaseReward,
+    rules: [...normalized.rules],
+  };
+
+  const mutablePayload: Record<string, unknown> = {
+    id: buildTenantScopedRowId(scopedTenantId, SHARKROUND_CONFIG_PATH[1]) || SHARKROUND_CONFIG_PATH[1],
+    data: dataPayload,
+    ...normalized,
+    daily_rolls_limit: normalized.dailyRollsLimit,
+    starting_coins: normalized.startingCoins,
+    bail_cost: normalized.bailCost,
+    heart_target: normalized.heartTarget,
+    heart_help_reward: normalized.heartHelpReward,
+    cycle_base_reward: normalized.cycleBaseReward,
+    updatedAt: nowIso(),
+  };
+
+  while (Object.keys(mutablePayload).length > 0) {
+    const { error } = await supabase
+      .from(SHARKROUND_CONFIG_PATH[0])
+      .upsert(mutablePayload, { onConflict: "id" });
+
+    if (!error) return { ok: true };
+
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (!missingColumn) throwSupabaseError(error);
+
+    const removableKey = Object.keys(mutablePayload).find(
+      (key) => key.toLowerCase() === missingColumn.toLowerCase()
+    );
+    const safeRemovableKey = typeof removableKey === "string" ? removableKey : "";
+    if (!safeRemovableKey || safeRemovableKey === "id") {
+      throwSupabaseError(error);
+    }
+    delete mutablePayload[safeRemovableKey];
+  }
+
+  throw new Error("Falha ao salvar configuracao SharkRound.");
+}
+
 export async function fetchSharkroundAppConfig(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<SharkroundAppConfig> {
   const forceRefresh = options?.forceRefresh ?? false;
+  const scopedTenantId = resolveSharkroundTenantId(options?.tenantId);
+  const cacheKey = getCacheKey(scopedTenantId);
   if (forceRefresh) {
     clearSharkroundAppConfigCache();
   } else {
-    const cached = getCached();
+    const cached = getCached(scopedTenantId);
     if (cached) return cached;
-    if (inflightConfig) return inflightConfig;
+    const pending = inflightConfig.get(cacheKey);
+    if (pending) return pending;
   }
 
-  const request = callCallableWithFallback<
-    { forceRefresh: boolean },
-    { config?: unknown }
-  >(
-    SHARKROUND_CONFIG_GET_CALLABLE,
-    { forceRefresh },
-    async () => {
-      const supabase = getSupabaseClient();
-      let mutableColumns = [...SHARKROUND_CONFIG_SELECT_COLUMNS];
+  const requestSource = scopedTenantId
+    ? fetchConfigFromClient(scopedTenantId)
+    : callCallableWithFallback<
+        { forceRefresh: boolean; tenantId?: string },
+        { config?: unknown }
+      >(
+        SHARKROUND_CONFIG_GET_CALLABLE,
+        { forceRefresh, tenantId: scopedTenantId || undefined },
+        async () => fetchConfigFromClient(scopedTenantId)
+      );
 
-      while (mutableColumns.length > 0) {
-        const { data, error } = await supabase
-          .from(SHARKROUND_CONFIG_PATH[0])
-          .select(mutableColumns.join(","))
-          .eq("id", SHARKROUND_CONFIG_PATH[1])
-          .maybeSingle();
-
-        if (!error) {
-          return { config: data ?? DEFAULT_SHARKROUND_CONFIG };
-        }
-
-        const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
-        if (!missingColumn) throwSupabaseError(error);
-
-        const nextColumns =
-          removeMissingColumnFromSelection(mutableColumns, missingColumn) ?? [];
-        if (nextColumns.length === 0) throwSupabaseError(error);
-        mutableColumns = nextColumns;
-      }
-
-      return { config: DEFAULT_SHARKROUND_CONFIG };
-    }
-  )
+  const request = requestSource
     .then((response) => {
       const normalized = normalizeConfig(response.config);
-      setCached(normalized);
+      setCached(normalized, scopedTenantId);
       return normalized;
     })
     .finally(() => {
-      inflightConfig = null;
+      inflightConfig.delete(cacheKey);
     });
 
-  inflightConfig = request;
+  inflightConfig.set(cacheKey, request);
   return request;
 }
 
 export async function saveSharkroundAppConfig(
-  payload: SharkroundAppConfig
+  payload: SharkroundAppConfig,
+  options?: { tenantId?: string | null }
 ): Promise<void> {
   const normalized = normalizeConfig(payload);
+  const scopedTenantId = resolveSharkroundTenantId(options?.tenantId);
 
-  await callCallableWithFallback<
-    { config: SharkroundAppConfig },
-    { ok: boolean }
-  >(
-    SHARKROUND_CONFIG_SAVE_CALLABLE,
-    { config: normalized },
-    async () => {
-      const supabase = getSupabaseClient();
-      const dataPayload = {
-        dailyRollsLimit: normalized.dailyRollsLimit,
-        startingCoins: normalized.startingCoins,
-        bailCost: normalized.bailCost,
-        heartTarget: normalized.heartTarget,
-        heartHelpReward: normalized.heartHelpReward,
-        cycleBaseReward: normalized.cycleBaseReward,
-        rules: [...normalized.rules],
-      };
+  if (scopedTenantId) {
+    await saveConfigWithClient(normalized, scopedTenantId);
+  } else {
+    await callCallableWithFallback<
+      { config: SharkroundAppConfig; tenantId?: string },
+      { ok: boolean }
+    >(
+      SHARKROUND_CONFIG_SAVE_CALLABLE,
+      { config: normalized, tenantId: scopedTenantId || undefined },
+      async () => saveConfigWithClient(normalized, scopedTenantId)
+    );
+  }
 
-      const mutablePayload: Record<string, unknown> = {
-        id: SHARKROUND_CONFIG_PATH[1],
-        data: dataPayload,
-        ...normalized,
-        daily_rolls_limit: normalized.dailyRollsLimit,
-        starting_coins: normalized.startingCoins,
-        bail_cost: normalized.bailCost,
-        heart_target: normalized.heartTarget,
-        heart_help_reward: normalized.heartHelpReward,
-        cycle_base_reward: normalized.cycleBaseReward,
-        updatedAt: nowIso(),
-      };
-
-      while (Object.keys(mutablePayload).length > 0) {
-        const { error } = await supabase
-          .from(SHARKROUND_CONFIG_PATH[0])
-          .upsert(mutablePayload, { onConflict: "id" });
-
-        if (!error) return { ok: true };
-
-        const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
-        if (!missingColumn) throwSupabaseError(error);
-
-        const removableKey = Object.keys(mutablePayload).find(
-          (key) => key.toLowerCase() === missingColumn.toLowerCase()
-        );
-        const safeRemovableKey =
-          typeof removableKey === "string" ? removableKey : "";
-        if (!safeRemovableKey || safeRemovableKey === "id") {
-          throwSupabaseError(error);
-        }
-        delete mutablePayload[safeRemovableKey];
-      }
-
-      throw new Error("Falha ao salvar configuracao SharkRound.");
-    }
-  );
-
-  setCached(normalized);
+  setCached(normalized, scopedTenantId);
 }
 
 export function getDefaultSharkroundAppConfig(): SharkroundAppConfig {
@@ -395,7 +445,7 @@ export function getDefaultSharkroundAppConfig(): SharkroundAppConfig {
 
 export function clearSharkroundAppConfigCache(): void {
   configCache.clear();
-  inflightConfig = null;
+  inflightConfig.clear();
 }
 
 

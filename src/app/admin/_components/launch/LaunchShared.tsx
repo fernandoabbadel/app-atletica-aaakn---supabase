@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { ArrowLeft, Building2, RefreshCw } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
@@ -10,6 +11,7 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import { canManageTenant, isPlatformMaster } from "@/lib/roles";
 import { fetchManageableTenants, type TenantSummary } from "@/lib/tenantService";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
 export type LaunchScope = "tenant" | "master";
 
@@ -21,6 +23,7 @@ export interface LaunchWorkspaceState {
   loading: boolean;
   refreshing: boolean;
   isPlatformMasterUser: boolean;
+  tenantSlug: string;
   tenants: TenantSummary[];
   selectedTenantId: string;
   selectedTenant: TenantSummary | null;
@@ -29,11 +32,21 @@ export interface LaunchWorkspaceState {
   addToast: ReturnType<typeof useToast>["addToast"];
 }
 
-export const getLaunchBasePath = (scope: LaunchScope): string =>
-  scope === "master" ? "/master/lancamento" : "/admin/lancamento";
+export const getLaunchBasePath = (
+  scope: LaunchScope,
+  tenantSlug = ""
+): string => {
+  if (scope === "master") return "/master/lancamento";
+  return tenantSlug.trim() ? withTenantSlug(tenantSlug, "/admin/lancamento") : "/admin/lancamento";
+};
 
-export const getLaunchBackPath = (scope: LaunchScope): string =>
-  scope === "master" ? "/master" : "/admin";
+export const getLaunchBackPath = (
+  scope: LaunchScope,
+  tenantSlug = ""
+): string => {
+  if (scope === "master") return "/master";
+  return tenantSlug.trim() ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+};
 
 export const getLaunchAudienceLabel = (scope: LaunchScope): string =>
   scope === "master" ? "painel master" : "painel admin";
@@ -96,14 +109,20 @@ const resolveNextTenantId = (
 
 export function useLaunchWorkspace(scope: LaunchScope): LaunchWorkspaceState {
   const { user, loading: authLoading } = useAuth();
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const initialLoadRef = useRef(false);
+  const pathInfo = useMemo(
+    () => parseTenantScopedPath(pathname || "/"),
+    [pathname]
+  );
 
   const isPlatformMasterUser = isPlatformMaster(user);
   const canAccess = scope === "master" ? isPlatformMasterUser : canManageTenant(user);
@@ -158,12 +177,27 @@ export function useLaunchWorkspace(scope: LaunchScope): LaunchWorkspaceState {
     void loadWorkspace("initial");
   }, [authLoading, loadWorkspace]);
 
+  useEffect(() => {
+    const cleanTenantSlug = tenantSlug.trim();
+    if (scope !== "tenant" || !cleanTenantSlug) return;
+    if (pathInfo.tenantSlug) return;
+    if (
+      pathInfo.scopedPath !== "/admin/lancamento" &&
+      !pathInfo.scopedPath.startsWith("/admin/lancamento/")
+    ) {
+      return;
+    }
+
+    router.replace(withTenantSlug(cleanTenantSlug, pathInfo.scopedPath));
+  }, [pathInfo.scopedPath, pathInfo.tenantSlug, router, scope, tenantSlug]);
+
   return {
     authLoading,
     canAccess,
     loading,
     refreshing,
     isPlatformMasterUser,
+    tenantSlug,
     tenants,
     selectedTenantId,
     selectedTenant,
@@ -185,20 +219,21 @@ interface LaunchPageShellProps {
 
 export function LaunchPageShell({
   scope,
+  tenantSlug = "",
   title,
   subtitle,
   refreshing = false,
   onRefresh,
   actions,
   children,
-}: LaunchPageShellProps) {
+}: LaunchPageShellProps & { tenantSlug?: string }) {
   return (
     <div className="min-h-screen bg-[#050505] pb-20 text-white">
       <header className="sticky top-0 z-20 border-b border-zinc-800 bg-[#050505]/95 px-6 py-5 backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Link
-              href={getLaunchBackPath(scope)}
+              href={getLaunchBackPath(scope, tenantSlug)}
               className="rounded-full border border-zinc-800 bg-zinc-900 p-2 hover:bg-zinc-800"
             >
               <ArrowLeft size={18} className="text-zinc-300" />

@@ -33,6 +33,39 @@ const asObject = (value: unknown): Record<string, unknown> | null => {
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
 
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+
+  return null;
+};
+
+const removeMissingColumnFromSelection = (
+  columns: string[],
+  missingColumn: string
+): string[] | null => {
+  const next = columns.filter(
+    (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+  );
+  if (next.length === columns.length) return null;
+  return next;
+};
+
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
   if (requested < 1) return 1;
@@ -135,7 +168,7 @@ const normalizeHistoricEvent = (
 const normalizePageConfig = (raw: unknown): HistoryPageConfig => {
   const data = asObject(raw) ?? {};
   return {
-    tituloPagina: asString(data.tituloPagina, "Nossa História").trim().slice(0, 120),
+    tituloPagina: asString(data.tituloPagina, "Nossa Historia").trim().slice(0, 120),
     subtituloPagina: asString(data.subtituloPagina, "Carregando legado...").trim().slice(0, 240),
     fotoCapa: asString(data.fotoCapa).trim().slice(0, 600),
   };
@@ -181,18 +214,35 @@ export async function fetchHistoryPageConfig(options?: {
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("app_config")
-    .select("id,tituloPagina,subtituloPagina,fotoCapa")
-    .eq("id", "historico")
-    .maybeSingle();
-  if (error) throwSupabaseError(error);
+  let selectColumns = ["id", "tituloPagina", "subtituloPagina", "fotoCapa", "data"];
+  let data: Record<string, unknown> | null = null;
+
+  while (selectColumns.length > 0) {
+    const response = await supabase
+      .from("app_config")
+      .select(selectColumns.join(","))
+      .eq("id", "historico")
+      .maybeSingle();
+
+    if (!response.error) {
+      data = asObject(response.data);
+      break;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(response.error));
+    const nextColumns =
+      removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+    if (nextColumns.length === 0) throwSupabaseError(response.error);
+    selectColumns = nextColumns;
+  }
+
   if (!data) {
     configCache = { cachedAt: Date.now(), value: null };
     return null;
   }
 
-  const config = normalizePageConfig(data);
+  const nestedData = asObject(data.data);
+  const config = normalizePageConfig(nestedData ?? data);
   configCache = { cachedAt: Date.now(), value: config };
   return config;
 }
@@ -307,17 +357,30 @@ export async function saveHistoryPageConfig(
     payload,
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
-        .from("app_config")
-        .upsert(
-          {
-            id: "historico",
-            ...payload,
-            updatedAt: nowIso(),
-          },
-          { onConflict: "id" }
+      const mutablePayload: Record<string, unknown> = {
+        id: "historico",
+        ...payload,
+        data: payload,
+        updatedAt: nowIso(),
+      };
+
+      while (true) {
+        const { error } = await supabase.from("app_config").upsert(mutablePayload, {
+          onConflict: "id",
+        });
+        if (!error) break;
+
+        const missingColumn = asString(extractMissingSchemaColumn(error)).toLowerCase();
+        if (!missingColumn) throwSupabaseError(error);
+
+        const removableKey = Object.keys(mutablePayload).find(
+          (key) => key !== "id" && key.toLowerCase() === missingColumn
         );
-      if (error) throwSupabaseError(error);
+        if (!removableKey) throwSupabaseError(error);
+
+        delete mutablePayload[String(removableKey)];
+      }
+
       return { ok: true };
     }
   );

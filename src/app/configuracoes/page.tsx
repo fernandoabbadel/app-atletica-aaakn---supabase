@@ -20,12 +20,14 @@ import { softDeleteAccount, toggleAccountStatus } from "../../lib/settingsServic
 import { createMemberInvite } from "../../lib/tenantService";
 import { getTurmaImage } from "../../constants/turmaImages";
 import { resolvePlanTheme, resolveUserPlanIcon } from "../../constants/planVisuals";
+import { buildLoginPath } from "@/lib/authRedirect";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 export default function SettingsPage() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const { addToast } = useToast();
-  const { tenantId, tenantName } = useTenantTheme();
+  const { tenantId, tenantName, tenantSlug } = useTenantTheme();
   
   const [actionLoading, setActionLoading] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -71,7 +73,7 @@ export default function SettingsPage() {
   const handleLogout = async () => {
     if (window.confirm("Sair do aplicativo?")) {
       await logout();
-      router.push("/login");
+      router.push(buildLoginPath("/configuracoes"));
     }
   };
 
@@ -89,7 +91,7 @@ export default function SettingsPage() {
         await logActivity(user.uid, "Ex-Usuário", "DELETE", "Conta", "Excluiu a própria conta (Soft Delete)");
         try { await deleteUser(auth.currentUser); } catch (authError) { console.warn("Erro ao deletar do Auth:", authError); }
         addToast("Sua conta foi excluída. Até logo! 👋", "info");
-        router.push("/login");
+        router.push(buildLoginPath("/configuracoes"));
     } catch (error: unknown) {
         console.error(error);
         addToast("Erro ao processar exclusão.", "error");
@@ -111,6 +113,10 @@ export default function SettingsPage() {
 
   if (!user) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>;
 
+  const extra = typeof user.extra === "object" && user.extra !== null
+    ? (user.extra as Record<string, unknown>)
+    : {};
+  const isTurmaLeader = extra.turmaLeader === true;
   const roleLabel = user.role === "user" ? "Membro" : String(user.role || "Membro");
   const rawPlanLabel =
     (typeof user.plano === "string" && user.plano.trim()) ||
@@ -141,6 +147,22 @@ export default function SettingsPage() {
     planLabel,
     Crown
   );
+  const perfilHref = tenantSlug ? withTenantSlug(tenantSlug, "/perfil") : "/perfil";
+  const pedidosHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/pedidos")
+    : "/configuracoes/pedidos";
+  const segurancaHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/seguranca")
+    : "/configuracoes/seguranca";
+  const suporteHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/suporte")
+    : "/configuracoes/suporte";
+  const termosHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/termos")
+    : "/configuracoes/termos";
+  const liderTurmaHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/lider-turma")
+    : "/configuracoes/lider-turma";
 
   const handleCreateInvite = async () => {
     if (!canGenerateInvite) {
@@ -158,7 +180,10 @@ export default function SettingsPage() {
         expiresInHours: 72,
       });
 
-      const nextLink = `${window.location.origin}/cadastro?invite=${encodeURIComponent(invite.token)}`;
+      const invitePath = tenantSlug.trim()
+        ? withTenantSlug(tenantSlug, "/cadastro")
+        : "/cadastro";
+      const nextLink = `${window.location.origin}${invitePath}?invite=${encodeURIComponent(invite.token)}`;
       setInviteLink(nextLink);
       await copyInviteLink(nextLink);
 
@@ -198,7 +223,7 @@ export default function SettingsPage() {
         <section className="relative overflow-hidden bg-gradient-to-br from-zinc-900 to-black border border-zinc-800 rounded-[2rem] p-5">
             <div className="flex items-center gap-4 relative z-10">
                 <div className="relative">
-                    <div className="w-20 h-20 rounded-full p-1 bg-gradient-to-tr from-emerald-500 to-emerald-900 relative">
+                    <div className="relative h-20 w-20 rounded-full bg-brand-gradient p-1 shadow-brand">
                         <Image 
                             src={user.foto || "https://github.com/shadcn.png"} 
                             alt="Perfil" 
@@ -208,17 +233,15 @@ export default function SettingsPage() {
                             
                         />
                     </div>
-                    <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-black p-1.5 rounded-full border-4 border-[#050505] z-10">
-                        <div className="relative h-5 w-5 overflow-hidden rounded-full">
-                            <Image
-                                src={turmaLogo}
-                                alt={`Logo da turma ${turmaLabel}`}
-                                fill
-                                sizes="20px"
-                                unoptimized
-                                className="object-cover"
-                            />
-                        </div>
+                    <div className="absolute -bottom-1 -right-1 z-10 h-8 w-8 overflow-hidden rounded-full border-[3px] border-[#050505] bg-zinc-950 shadow-brand">
+                        <Image
+                            src={turmaLogo}
+                            alt={`Logo da turma ${turmaLabel}`}
+                            fill
+                            sizes="32px"
+                            unoptimized
+                            className="object-cover"
+                        />
                     </div>
                 </div>
 
@@ -241,7 +264,7 @@ export default function SettingsPage() {
                     </Link>
                 </div>
             </div>
-            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 blur-[50px] rounded-full pointer-events-none"></div>
+            <div className="pointer-events-none absolute right-0 top-0 h-32 w-32 rounded-full bg-brand-primary/10 blur-[50px]"></div>
         </section>
 
         {canGenerateInvite && (
@@ -306,10 +329,19 @@ export default function SettingsPage() {
             <div className="space-y-2">
                 <h3 className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest px-2">Minha Conta</h3>
                 <div className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800">
-                    <MenuItem href="/perfil" icon={<FileText size={18} />} label="Dados Pessoais" desc="Atualizar cadastro" />
+                    <MenuItem href={perfilHref} icon={<FileText size={18} />} label="Dados Pessoais" desc="Atualizar cadastro" />
                     {/* Link para nova página de pedidos (ID 16) */}
-                    <MenuItem href="/configuracoes/pedidos" icon={<History size={18} />} label="Meus Pedidos" desc="Acompanhar compras" badge="Novo" />
-                    <MenuItem href="/configuracoes/seguranca" icon={<Shield size={18} />} label="Segurança & Senha" desc="Proteger conta" badge="Bloqueado" disabled />
+                    <MenuItem href={pedidosHref} icon={<History size={18} />} label="Meus Pedidos" desc="Acompanhar compras" badge="Novo" />
+                    {isTurmaLeader && (
+                      <MenuItem
+                        href={liderTurmaHref}
+                        icon={<UserPlus size={18} />}
+                        label="Lider da Turma"
+                        desc="Aprovar pendencias da sua turma"
+                        badge="Lider"
+                      />
+                    )}
+                    <MenuItem href={segurancaHref} icon={<Shield size={18} />} label="Segurança & Senha" desc="Proteger conta" badge="Bloqueado" disabled />
                 </div>
             </div>
 
@@ -331,8 +363,8 @@ export default function SettingsPage() {
             <div className="space-y-2">
                 <h3 className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest px-2">Suporte</h3>
                 <div className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800">
-                    <MenuItem href="/configuracoes/suporte" icon={<AlertTriangle size={18} />} label="Denúncias & Ajuda" desc="Reportar problemas" />
-                    <MenuItem href="/configuracoes/termos" icon={<FileText size={18} />} label="Termos de Uso" />
+                    <MenuItem href={suporteHref} icon={<AlertTriangle size={18} />} label="Denúncias & Ajuda" desc="Reportar problemas" />
+                    <MenuItem href={termosHref} icon={<FileText size={18} />} label="Termos de Uso" />
                 </div>
             </div>
         </div>

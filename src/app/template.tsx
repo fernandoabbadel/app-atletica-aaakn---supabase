@@ -34,7 +34,10 @@ export default function Template({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="fixed inset-0 z-[9999] bg-[#050505] flex flex-col items-center justify-center animate-in fade-in duration-300">
-        <div className="relative w-40 h-40 rounded-full border-4 border-zinc-800 overflow-hidden bg-black shadow-[0_0_50px_rgba(16,185,129,0.3)] mb-8 flex items-center justify-center">
+        <div
+          className="relative mb-8 flex h-40 w-40 items-center justify-center overflow-hidden rounded-full border-4 border-zinc-800 bg-black"
+          style={{ boxShadow: "0 0 50px rgb(var(--tenant-primary-rgb) / 0.3)" }}
+        >
           <div className="relative z-20 w-28 h-28 flex items-center justify-center">
             <Image
               src={tenantLogoUrl || "/logo.png"}
@@ -46,11 +49,17 @@ export default function Template({ children }: { children: React.ReactNode }) {
             />
           </div>
 
-          <div className="absolute left-[-50%] w-[200%] h-[200%] bg-emerald-600/90 rounded-[40%] animate-wave z-10 top-[100%]" />
+          <div
+            className="absolute left-[-50%] top-[100%] z-10 h-[200%] w-[200%] rounded-[40%] animate-wave"
+            style={{ backgroundColor: "rgb(var(--tenant-primary-rgb) / 0.9)" }}
+          />
         </div>
 
         <div className="text-center px-6">
-          <h2 className="text-emerald-500 font-black text-xl tracking-widest mb-3 animate-pulse">
+          <h2
+            className="mb-3 animate-pulse text-xl font-black tracking-widest"
+            style={{ color: "var(--tenant-primary)" }}
+          >
             CARREGANDO
           </h2>
           <p className="text-zinc-400 text-sm font-medium italic max-w-xs mx-auto leading-relaxed">

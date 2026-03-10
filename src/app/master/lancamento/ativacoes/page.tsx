@@ -1,7 +1,5 @@
-"use client";
-
-import { LaunchActivationRankingPage } from "@/app/admin/_components/launch/LaunchActivationRankingPage";
+import { redirect } from "next/navigation";
 
 export default function MasterLancamentoAtivacoesPage() {
-  return <LaunchActivationRankingPage scope="master" />;
+  redirect("/master/solicitacoes");
 }

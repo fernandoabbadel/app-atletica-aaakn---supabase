@@ -11,6 +11,8 @@ import {
   type Row,
 } from "./supabaseData";
 import { fetchCanonicalUserVisuals } from "./userVisualsService";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import {
   DEFAULT_COMMUNITY_CATEGORIES,
   normalizeCommunityCategories,
@@ -54,7 +56,7 @@ const COMMUNITY_READS_TABLE = "community_category_reads";
 const COMMUNITY_POSTS_SELECT_COLUMNS =
   "id,userId,userName,avatar,handle,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,imagem,categoria,likes,hype,comentarios,blocked,commentsDisabled,fixado,denunciasCount,createdAt,updatedAt";
 const COMMUNITY_REPORTS_SELECT_COLUMNS =
-  "id,targetId,targetType,postText,reporterId,reason,status,timestamp,reviewedAt,reviewedBy,createdAt";
+  "id,targetId,targetType,postText,reporterId,reporterName,reason,status,timestamp,reviewedAt,reviewedBy";
 const COMMUNITY_COMMENTS_SELECT_COLUMNS =
   "id,postId,userId,userName,avatar,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,likes,hidden,reports,createdAt,updatedAt";
 const COMMUNITY_CONFIG_SELECT_COLUMNS = "id,data,titulo,subtitulo,capaUrl,limitMessages,updatedAt";
@@ -69,6 +71,9 @@ const daysAgoIso = (days: number): string => {
 
 const sanitizeCategoryName = (value: string): string =>
   normalizeCommunityCategoryName(value);
+
+const resolveCommunityTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
 
 const toCategoryKey = (value: string): string =>
   sanitizeCategoryName(value).toLowerCase();
@@ -107,10 +112,33 @@ const normalizeCategoryReads = (
 const normalizeCommunityConfigRow = (row: Row): RawData => {
   const normalized = normalizeRowTimestamps(row) as RawData;
   const data = asObject(normalized.data) ?? {};
-  const categorias = normalizeCommunityCategories(data.categorias);
+  const titulo = asString(normalized.titulo || data.titulo).trim();
+  const subtitulo = asString(normalized.subtitulo || data.subtitulo).trim();
+  const capaUrl = asString(normalized.capaUrl || data.capaUrl).trim();
+  const limitMessages =
+    typeof normalized.limitMessages === "boolean"
+      ? normalized.limitMessages
+      : typeof data.limitMessages === "boolean"
+        ? data.limitMessages
+        : true;
+  const categorias = normalizeCommunityCategories(
+    normalized.categorias ?? data.categorias
+  );
   return {
     ...normalized,
+    titulo,
+    subtitulo,
+    capaUrl,
+    limitMessages,
     categorias,
+    data: {
+      ...data,
+      titulo,
+      subtitulo,
+      capaUrl,
+      limitMessages,
+      categorias,
+    },
   };
 };
 
@@ -261,21 +289,30 @@ async function selectRows(
   return (data ?? []) as unknown as Row[];
 }
 
-async function selectSinglePost(postId: string): Promise<Row | null> {
+async function selectSinglePost(postId: string, tenantId?: string): Promise<Row | null> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveCommunityTenantId(tenantId);
+  let query = supabase
     .from("posts")
     .select("id,userId,comentarios,likes,hype,denunciasCount")
-    .eq("id", postId)
-    .maybeSingle();
+    .eq("id", postId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
 
   if (error) throwSupabaseError(error);
   return (data as Row | null) ?? null;
 }
 
-async function updatePostCommentCount(postId: string, delta: number): Promise<void> {
+async function updatePostCommentCount(
+  postId: string,
+  delta: number,
+  tenantId?: string
+): Promise<void> {
   if (!delta) return;
-  const post = await selectSinglePost(postId);
+  const scopedTenantId = resolveCommunityTenantId(tenantId);
+  const post = await selectSinglePost(postId, scopedTenantId);
   if (!post) return;
 
   const currentCount =
@@ -285,13 +322,17 @@ async function updatePostCommentCount(postId: string, delta: number): Promise<vo
 
   const nextCount = Math.max(0, currentCount + delta);
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  let query = supabase
     .from("posts")
     .update({
       comentarios: nextCount,
       updatedAt: nowIso(),
     })
     .eq("id", postId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
 
   if (error) throwSupabaseError(error);
 }
@@ -299,9 +340,11 @@ async function updatePostCommentCount(postId: string, delta: number): Promise<vo
 async function updatePostArrayField(
   postId: string,
   field: "likes" | "hype",
-  userId: string
+  userId: string,
+  tenantId?: string
 ): Promise<{ values: string[]; changed: boolean; active: boolean; authorId: string | null }> {
-  const post = await selectSinglePost(postId);
+  const scopedTenantId = resolveCommunityTenantId(tenantId);
+  const post = await selectSinglePost(postId, scopedTenantId);
   if (!post) {
     return { values: [], changed: false, active: false, authorId: null };
   }
@@ -320,13 +363,17 @@ async function updatePostArrayField(
   }
 
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  let query = supabase
     .from("posts")
     .update({
       [field]: nextValues,
       updatedAt: nowIso(),
     })
     .eq("id", postId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
 
   if (error) throwSupabaseError(error);
 
@@ -341,15 +388,20 @@ async function updatePostArrayField(
 async function updateCommentLikes(
   postId: string,
   commentId: string,
-  userId: string
+  userId: string,
+  tenantId?: string
 ): Promise<{ values: string[]; changed: boolean; active: boolean; authorId: string | null }> {
   const supabase = getSupabaseClient();
-  const { data: row, error: selectError } = await supabase
+  const scopedTenantId = resolveCommunityTenantId(tenantId);
+  let selectQuery = supabase
     .from("posts_comments")
     .select("id, likes, userId")
     .eq("id", commentId)
-    .eq("postId", postId)
-    .maybeSingle();
+    .eq("postId", postId);
+  if (scopedTenantId) {
+    selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: row, error: selectError } = await selectQuery.maybeSingle();
 
   if (selectError) throwSupabaseError(selectError);
   if (!row) return { values: [], changed: false, active: false, authorId: null };
@@ -367,7 +419,7 @@ async function updateCommentLikes(
     };
   }
 
-  const { error: updateError } = await supabase
+  let updateQuery = supabase
     .from("posts_comments")
     .update({
       likes: nextValues,
@@ -375,6 +427,10 @@ async function updateCommentLikes(
     })
     .eq("id", commentId)
     .eq("postId", postId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
 
   if (updateError) throwSupabaseError(updateError);
 
@@ -386,58 +442,90 @@ async function updateCommentLikes(
   };
 }
 
-export async function fetchCommunityConfig(): Promise<RawData | null> {
+const resolveCommunityConfigDocIds = (tenantId?: string): string[] => {
+  const cleanTenantId = asString(tenantId).trim();
+  if (!cleanTenantId) return ["comunidade"];
+  return [buildTenantScopedRowId(cleanTenantId, "comunidade"), "comunidade"];
+};
+
+export async function fetchCommunityConfig(options?: {
+  tenantId?: string;
+}): Promise<RawData | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("app_config")
     .select(COMMUNITY_CONFIG_SELECT_COLUMNS)
-    .eq("id", "comunidade")
-    .maybeSingle();
+    .in("id", resolveCommunityConfigDocIds(options?.tenantId));
 
   if (error) throwSupabaseError(error);
-  if (!data) return null;
+  const rows = Array.isArray(data) ? (data as Row[]) : [];
+  const selected = resolveCommunityConfigDocIds(options?.tenantId)
+    .map((docId) => rows.find((row) => asString(row.id) === docId))
+    .find((entry) => Boolean(entry));
+  if (!selected) return null;
 
-  return normalizeCommunityConfigRow(data as Row);
+  return normalizeCommunityConfigRow(selected as Row);
 }
 
-export async function saveCommunityConfig(config: RawData): Promise<void> {
+export async function saveCommunityConfig(
+  config: RawData,
+  options?: { tenantId?: string }
+): Promise<void> {
   const supabase = getSupabaseClient();
+  const docId = buildTenantScopedRowId(options?.tenantId, "comunidade") || "comunidade";
   const { data: currentData, error: currentError } = await supabase
     .from("app_config")
     .select("data")
-    .eq("id", "comunidade")
+    .eq("id", docId)
     .maybeSingle();
   if (currentError) throwSupabaseError(currentError);
 
   const currentConfigData = asObject(currentData?.data) ?? {};
   const nextConfigData: Row = { ...currentConfigData };
 
-  if ("categorias" in config) {
-    nextConfigData.categorias = normalizeCommunityCategories(config.categorias);
-  } else if (!Array.isArray(nextConfigData.categorias)) {
-    nextConfigData.categorias = [...DEFAULT_COMMUNITY_CATEGORIES];
-  }
+  const categorias =
+    "categorias" in config
+      ? normalizeCommunityCategories(config.categorias)
+      : normalizeCommunityCategories(nextConfigData.categorias);
+  const titulo = asString(config.titulo ?? nextConfigData.titulo).trim();
+  const subtitulo = asString(config.subtitulo ?? nextConfigData.subtitulo).trim();
+  const capaUrl = asString(config.capaUrl ?? nextConfigData.capaUrl).trim();
+  const limitMessages =
+    typeof config.limitMessages === "boolean"
+      ? config.limitMessages
+      : typeof nextConfigData.limitMessages === "boolean"
+        ? nextConfigData.limitMessages
+        : true;
+
+  nextConfigData.categorias = categorias;
+  nextConfigData.titulo = titulo;
+  nextConfigData.subtitulo = subtitulo;
+  nextConfigData.capaUrl = capaUrl;
+  nextConfigData.limitMessages = limitMessages;
 
   const payload: Row = {
-    id: "comunidade",
+    id: docId,
     updatedAt: nowIso(),
     data: nextConfigData,
+    titulo,
+    subtitulo,
+    capaUrl,
+    limitMessages,
   };
-
-  for (const key of ["titulo", "subtitulo", "capaUrl", "limitMessages"]) {
-    if (key in config) {
-      payload[key] = config[key];
-    }
-  }
 
   const { error } = await supabase.from("app_config").upsert(payload, { onConflict: "id" });
   if (error) throwSupabaseError(error);
 }
 
-export async function fetchCommunityFeed(maxResults = MAX_FEED_RESULTS): Promise<QueryRow[]> {
+export async function fetchCommunityFeed(
+  maxResults = MAX_FEED_RESULTS,
+  options?: { tenantId?: string }
+): Promise<QueryRow[]> {
+  const tenantId = resolveCommunityTenantId(options?.tenantId);
   const rows = await selectRows("posts", {
     orderBy: { column: "createdAt", ascending: false },
     limit: boundedLimit(maxResults, MAX_FEED_RESULTS),
+    ...(tenantId ? { eq: { tenant_id: tenantId } } : {}),
   });
   const enriched = await applyCommunityAuthorVisuals(rows);
   return enriched.map((row) => mapRow(row));
@@ -447,9 +535,11 @@ export async function fetchCommunityFeedByCategory(payload: {
   categoria: string;
   maxResults?: number;
   includeBlocked?: boolean;
+  tenantId?: string;
 }): Promise<QueryRow[]> {
   const categoria = sanitizeCategoryName(payload.categoria);
   if (!categoria) return [];
+  const tenantId = resolveCommunityTenantId(payload.tenantId);
 
   const supabase = getSupabaseClient();
   let query = supabase
@@ -458,6 +548,10 @@ export async function fetchCommunityFeedByCategory(payload: {
     .eq("categoria", categoria)
     .order("createdAt", { ascending: false })
     .limit(boundedLimit(payload.maxResults ?? 120, MAX_FEED_RESULTS));
+
+  if (tenantId) {
+    query = query.eq("tenant_id", tenantId);
+  }
 
   if (!payload.includeBlocked) {
     query = query.or("blocked.is.null,blocked.eq.false");
@@ -473,7 +567,9 @@ export async function fetchCommunityRecentCategoryCounts(payload?: {
   categorias?: string[];
   includeBlocked?: boolean;
   windowDays?: number;
+  tenantId?: string;
 }): Promise<Record<string, number>> {
+  const tenantId = resolveCommunityTenantId(payload?.tenantId);
   const categories =
     payload?.categorias && payload.categorias.length > 0
       ? normalizeCommunityCategories(payload.categorias)
@@ -500,6 +596,10 @@ export async function fetchCommunityRecentCategoryCounts(payload?: {
         .eq("categoria", categoria)
         .gte("createdAt", sinceIso);
 
+      if (tenantId) {
+        query = query.eq("tenant_id", tenantId);
+      }
+
       if (!payload?.includeBlocked) {
         query = query.or("blocked.is.null,blocked.eq.false");
       }
@@ -514,62 +614,79 @@ export async function fetchCommunityRecentCategoryCounts(payload?: {
 }
 
 export async function fetchCommunityAdminPosts(
-  maxResults = MAX_ADMIN_POST_RESULTS
+  maxResults = MAX_ADMIN_POST_RESULTS,
+  options?: { tenantId?: string }
 ): Promise<QueryRow[]> {
+  const tenantId = resolveCommunityTenantId(options?.tenantId);
   const rows = await selectRows("posts", {
     orderBy: { column: "createdAt", ascending: false },
     limit: boundedLimit(maxResults, MAX_ADMIN_POST_RESULTS),
+    ...(tenantId ? { eq: { tenant_id: tenantId } } : {}),
   });
   const enriched = await applyCommunityAuthorVisuals(rows);
   return enriched.map((row) => mapRow(row));
 }
 
 export async function fetchCommunityReports(
-  maxResults = MAX_REPORT_RESULTS
+  maxResults = MAX_REPORT_RESULTS,
+  options?: { tenantId?: string }
 ): Promise<QueryRow[]> {
+  const tenantId = resolveCommunityTenantId(options?.tenantId);
   const rows = await selectRows("denuncias", {
     orderBy: { column: "timestamp", ascending: false },
     limit: boundedLimit(maxResults, MAX_REPORT_RESULTS),
+    ...(tenantId ? { eq: { tenant_id: tenantId } } : {}),
   });
   return rows.map((row) => normalizeReportRow(row));
 }
 
 export async function fetchCommunityComments(
   postId: string,
-  options?: { maxResults?: number; order?: "asc" | "desc" }
+  options?: { maxResults?: number; order?: "asc" | "desc"; tenantId?: string }
 ): Promise<QueryRow[]> {
   const cleanPostId = postId.trim();
   if (!cleanPostId) return [];
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
   const maxResults = boundedLimit(
     options?.maxResults ?? MAX_COMMENT_RESULTS,
     MAX_COMMENT_RESULTS
   );
   const ascending = (options?.order ?? "asc") === "asc";
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("posts_comments")
     .select(COMMUNITY_COMMENTS_SELECT_COLUMNS)
     .eq("postId", cleanPostId)
-    .order("createdAt", { ascending })
-    .limit(maxResults);
+    .order("createdAt", { ascending });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
 
   if (error) throwSupabaseError(error);
   const enriched = await applyCommunityAuthorVisuals((data ?? []) as Row[]);
   return enriched.map((row) => mapRow(row));
 }
 
-export async function fetchCommunityCommentPostId(commentId: string): Promise<string | null> {
+export async function fetchCommunityCommentPostId(
+  commentId: string,
+  options?: { tenantId?: string }
+): Promise<string | null> {
   const cleanCommentId = commentId.trim();
   if (!cleanCommentId) return null;
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
+  let query = supabase
     .from("posts_comments")
     .select("postId")
-    .eq("id", cleanCommentId)
-    .maybeSingle();
+    .eq("id", cleanCommentId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
 
   if (error) throwSupabaseError(error);
 
@@ -719,7 +836,9 @@ export async function fetchCommunityUnreadCounts(payload: {
   categorias: string[];
   includeBlocked?: boolean;
   unreadSinceDays?: number;
+  tenantId?: string;
 }): Promise<Record<string, number>> {
+  const scopedTenantId = resolveCommunityTenantId(payload.tenantId);
   const userId = payload.userId.trim();
   const categories = normalizeCommunityCategories(payload.categorias);
   const counts: Record<string, number> = {};
@@ -748,6 +867,10 @@ export async function fetchCommunityUnreadCounts(payload: {
         .eq("categoria", categoria)
         .gt("createdAt", readAtIso);
 
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+
       if (!payload.includeBlocked) {
         query = query.or("blocked.is.null,blocked.eq.false");
       }
@@ -765,18 +888,26 @@ export async function fetchCommunityUnreadCounts(payload: {
   return counts;
 }
 
-export async function createCommunityPost(payload: RawData): Promise<{ id: string }> {
+export async function createCommunityPost(
+  payload: RawData,
+  options?: { tenantId?: string }
+): Promise<{ id: string }> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveCommunityTenantId(
+    options?.tenantId ?? asString(payload.tenantId)
+  );
   const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
   const visuals = userId ? await fetchCanonicalUserVisuals([userId]) : new Map();
   const visual = userId ? visuals.get(userId) : undefined;
+  const payloadData: Row = { ...payload };
+  delete payloadData.tenantId;
 
   const visualPatch: Row = visual
     ? {
-        userName: visual.nome || payload.userName,
-        avatar: visual.foto || payload.avatar,
-        handle: visual.apelido ? `@${visual.apelido}` : payload.handle,
-        role: visual.role || payload.role,
+        userName: visual.nome || payloadData.userName,
+        avatar: visual.foto || payloadData.avatar,
+        handle: visual.apelido ? `@${visual.apelido}` : payloadData.handle,
+        role: visual.role || payloadData.role,
         plano: visual.plano,
         plano_cor: visual.plano_cor,
         plano_icon: visual.plano_icon,
@@ -787,8 +918,9 @@ export async function createCommunityPost(payload: RawData): Promise<{ id: strin
     : {};
 
   const insertPayload = {
-    ...payload,
+    ...payloadData,
     ...visualPatch,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -811,20 +943,36 @@ export async function createCommunityPost(payload: RawData): Promise<{ id: strin
 export async function createCommunityComment(payload: {
   postId: string;
   data: RawData;
+  tenantId?: string;
 }): Promise<{ id: string }> {
   const postId = payload.postId.trim();
   if (!postId) return { id: "" };
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveCommunityTenantId(
+    payload.tenantId ?? asString(payload.data.tenantId)
+  );
   const userId = typeof payload.data.userId === "string" ? payload.data.userId.trim() : "";
   const visuals = userId ? await fetchCanonicalUserVisuals([userId]) : new Map();
   const visual = userId ? visuals.get(userId) : undefined;
+  const payloadData: Row = { ...payload.data };
+  delete payloadData.tenantId;
+
+  let postLookup = supabase.from("posts").select("id").eq("id", postId);
+  if (scopedTenantId) {
+    postLookup = postLookup.eq("tenant_id", scopedTenantId);
+  }
+  const { data: postRow, error: postError } = await postLookup.maybeSingle();
+  if (postError) throwSupabaseError(postError);
+  if (!postRow) {
+    throw new Error("Post fora do tenant ativo.");
+  }
 
   const visualPatch: Row = visual
     ? {
-        userName: visual.nome || payload.data.userName,
-        avatar: visual.foto || payload.data.avatar,
-        role: visual.role || payload.data.role,
+        userName: visual.nome || payloadData.userName,
+        avatar: visual.foto || payloadData.avatar,
+        role: visual.role || payloadData.role,
         plano: visual.plano,
         plano_cor: visual.plano_cor,
         plano_icon: visual.plano_icon,
@@ -836,8 +984,9 @@ export async function createCommunityComment(payload: {
 
   const insertPayload = {
     postId,
-    ...payload.data,
+    ...payloadData,
     ...visualPatch,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -850,7 +999,7 @@ export async function createCommunityComment(payload: {
 
   if (error) throwSupabaseError(error);
 
-  await updatePostCommentCount(postId, 1);
+  await updatePostCommentCount(postId, 1, scopedTenantId || undefined);
 
   if (userId) {
     await incrementUserStats(userId, { commentsCount: 1 });
@@ -859,22 +1008,39 @@ export async function createCommunityComment(payload: {
   return { id: String(data?.id || "") };
 }
 
-export async function deleteCommunityPost(postId: string): Promise<void> {
+export async function deleteCommunityPost(
+  postId: string,
+  options?: { tenantId?: string }
+): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase.from("posts").delete().eq("id", postId);
+  const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
+  let query = supabase.from("posts").delete().eq("id", postId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
 }
 
-export async function deleteCommunityComment(postId: string, commentId: string): Promise<void> {
+export async function deleteCommunityComment(
+  postId: string,
+  commentId: string,
+  options?: { tenantId?: string }
+): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
+  let query = supabase
     .from("posts_comments")
     .delete()
     .eq("id", commentId)
     .eq("postId", postId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
 
   if (error) throwSupabaseError(error);
-  await updatePostCommentCount(postId, -1);
+  await updatePostCommentCount(postId, -1, scopedTenantId || undefined);
 }
 
 export async function createCommunityReport(payload: {
@@ -883,14 +1049,38 @@ export async function createCommunityReport(payload: {
   postText: string;
   reporterId: string;
   reason: string;
+  tenantId?: string;
 }): Promise<void> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveCommunityTenantId(payload.tenantId);
+
+  if (payload.targetType === "post") {
+    const targetPost = await selectSinglePost(payload.targetId, scopedTenantId || undefined);
+    if (!targetPost) {
+      throw new Error("Post fora do tenant ativo.");
+    }
+  } else {
+    let commentLookup = supabase
+      .from("posts_comments")
+      .select("id")
+      .eq("id", payload.targetId);
+    if (scopedTenantId) {
+      commentLookup = commentLookup.eq("tenant_id", scopedTenantId);
+    }
+    const { data: commentRow, error: commentError } = await commentLookup.maybeSingle();
+    if (commentError) throwSupabaseError(commentError);
+    if (!commentRow) {
+      throw new Error("Comentario fora do tenant ativo.");
+    }
+  }
+
   const insertPayload = {
     targetId: payload.targetId,
     targetType: payload.targetType,
     postText: payload.postText,
     reporterId: payload.reporterId,
     reason: payload.reason,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     timestamp: nowIso(),
     status: "pendente",
   };
@@ -899,35 +1089,45 @@ export async function createCommunityReport(payload: {
   if (error) throwSupabaseError(error);
 
   if (payload.targetType === "post") {
-    const post = await selectSinglePost(payload.targetId);
+    const post = await selectSinglePost(payload.targetId, scopedTenantId || undefined);
     if (!post) return;
     const currentCount =
       typeof post.denunciasCount === "number" && Number.isFinite(post.denunciasCount)
         ? post.denunciasCount
         : 0;
-    const { error: updateError } = await supabase
+    let query = supabase
       .from("posts")
       .update({
         denunciasCount: currentCount + 1,
         updatedAt: nowIso(),
       })
       .eq("id", payload.targetId);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { error: updateError } = await query;
     if (updateError) throwSupabaseError(updateError);
   }
 }
 
 export async function setCommunityPostPatch(
   postId: string,
-  patch: Partial<Pick<RawData, "blocked" | "commentsDisabled" | "fixado">>
+  patch: Partial<Pick<RawData, "blocked" | "commentsDisabled" | "fixado">>,
+  options?: { tenantId?: string }
 ): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
+  let query = supabase
     .from("posts")
     .update({
       ...patch,
       updatedAt: nowIso(),
     })
     .eq("id", postId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
 
   if (error) throwSupabaseError(error);
 }
@@ -942,8 +1142,14 @@ export async function toggleCommunityPostReaction(payload: {
   postId: string;
   field: "likes" | "hype";
   userId: string;
+  tenantId?: string;
 }): Promise<{ values: string[]; active: boolean; authorId: string | null }> {
-  const result = await updatePostArrayField(payload.postId, payload.field, payload.userId);
+  const result = await updatePostArrayField(
+    payload.postId,
+    payload.field,
+    payload.userId,
+    payload.tenantId
+  );
 
   if (!result.changed) {
     return { values: result.values, active: result.active, authorId: result.authorId };
@@ -967,8 +1173,14 @@ export async function toggleCommunityCommentLike(payload: {
   postId: string;
   commentId: string;
   userId: string;
+  tenantId?: string;
 }): Promise<{ values: string[]; active: boolean; authorId: string | null }> {
-  const result = await updateCommentLikes(payload.postId, payload.commentId, payload.userId);
+  const result = await updateCommentLikes(
+    payload.postId,
+    payload.commentId,
+    payload.userId,
+    payload.tenantId
+  );
 
   if (!result.changed) {
     return { values: result.values, active: result.active, authorId: result.authorId };

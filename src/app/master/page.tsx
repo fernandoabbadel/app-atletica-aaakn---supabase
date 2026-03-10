@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Building2, Loader2, Rocket, Shield, Waypoints } from "lucide-react";
+import { Building2, CreditCard, Loader2, Pencil, Rocket, Shield, Waypoints } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -15,7 +15,7 @@ import {
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const statusClass: Record<TenantSummary["status"], string> = {
-  active: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  active: "border-brand bg-brand-soft text-brand-accent",
   inactive: "border-zinc-600/40 bg-zinc-700/20 text-zinc-300",
   blocked: "border-red-500/30 bg-red-500/10 text-red-300",
 };
@@ -108,11 +108,11 @@ export default function MasterPage() {
               Permissoes Globais
             </Link>
             <Link
-              href="/master/lancamento"
+              href="/master/solicitacoes"
               className="rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:border-red-500/25 hover:bg-zinc-900"
             >
-              <Rocket size={15} className="mb-2 text-red-300" />
-              Lancamento
+              <CreditCard size={15} className="mb-2 text-red-300" />
+              Solicitacoes
             </Link>
           </div>
         </div>
@@ -198,10 +198,16 @@ export default function MasterPage() {
                 <div className="mt-5 flex flex-wrap gap-2">
                   <button
                     onClick={() => handleSetContext(tenant)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-emerald-200 transition hover:bg-emerald-500/15"
+                    className="inline-flex items-center gap-2 rounded-xl border border-brand bg-brand-soft px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-brand-accent transition hover:bg-brand-soft-strong"
                   >
                     <Waypoints size={14} /> Usar contexto
                   </button>
+                  <Link
+                    href={`/master/tenants/${tenant.id}`}
+                    className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:bg-zinc-800"
+                  >
+                    <Pencil size={14} /> Editar tenant
+                  </Link>
                   <Link
                     href={adminHref}
                     className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:bg-zinc-800"

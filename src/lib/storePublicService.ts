@@ -1,5 +1,6 @@
 ﻿import { getSupabaseClient } from "./supabase";
 
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 type CacheEntry<T> = { cachedAt: number; value: T };
 type Row = Record<string, unknown>;
 type DateLike = { toDate: () => Date };
@@ -31,6 +32,8 @@ const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : [
 const asString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 const asNum = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+const resolveStoreTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
@@ -121,6 +124,9 @@ const extractNonDefaultLockedColumn = (error: unknown): string | null => {
   return match?.[1] ?? null;
 };
 
+const isMissingTenantIdColumn = (error: unknown): boolean =>
+  extractMissingSchemaColumn(error)?.trim().toLowerCase() === "tenant_id";
+
 const toDateLike = (value: unknown): DateLike | null => {
   if (!value) return null;
   if (typeof value === "object" && value !== null && "toDate" in (value as Record<string, unknown>)) {
@@ -153,15 +159,20 @@ async function queryRows(table: string, options?: {
   eq?: Record<string, string | number | boolean>;
   orderBy?: { column: string; ascending: boolean };
   limit?: number;
+  tenantId?: string | null;
 }): Promise<Row[]> {
   const supabase = getSupabaseClient();
   const selectColumns = options?.selectColumns ?? "id";
+  const scopedTenantId = resolveStoreTenantId(options?.tenantId);
   let query = supabase.from(table).select(selectColumns);
 
   if (options?.eq) {
     for (const [column, value] of Object.entries(options.eq)) {
       query = query.eq(column, value);
     }
+  }
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
   }
   if (options?.orderBy) {
     query = query.order(options.orderBy.column, { ascending: options.orderBy.ascending });
@@ -171,7 +182,12 @@ async function queryRows(table: string, options?: {
   }
 
   const { data, error } = await query;
-  if (error) throwSupabaseError(error);
+  if (error) {
+    if (scopedTenantId && isMissingTenantIdColumn(error)) {
+      return [];
+    }
+    throwSupabaseError(error);
+  }
   const rows = (data ?? []) as unknown as Row[];
   return rows.map((row) => normalizeRowTimestamps(row));
 }
@@ -201,10 +217,12 @@ export interface StoreProductsPageResult {
 export async function fetchStoreCategories(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<Row[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_CATEGORIES);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveStoreTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "all"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(categoriesCache, cacheKey);
@@ -217,11 +235,13 @@ export async function fetchStoreCategories(options?: {
       selectColumns: STORE_CATEGORY_SELECT_COLUMNS,
       orderBy: { column: "nome", ascending: true },
       limit: maxResults,
+      tenantId: scopedTenantId,
     });
   } catch {
     rows = await queryRows("categorias", {
       selectColumns: STORE_CATEGORY_SELECT_COLUMNS,
       limit: maxResults,
+      tenantId: scopedTenantId,
     });
   }
 
@@ -234,14 +254,16 @@ export async function fetchStoreProductsPage(options?: {
   pageSize?: number;
   category?: string | null;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<StoreProductsPageResult> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveStoreTenantId(options?.tenantId);
   const page = Math.max(1, Math.floor(options?.page ?? 1));
   const pageSize = boundedLimit(options?.pageSize ?? 20, 60);
   const categoryRaw = asString(options?.category).trim();
   const category = categoryRaw && categoryRaw !== "Todos" ? categoryRaw : null;
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${category || "all"}:${page}:${pageSize}`;
+  const cacheKey = `${scopedTenantId || "all"}:${category || "all"}:${page}:${pageSize}`;
 
   if (!forceRefresh) {
     const cached = getCache(productsPageCache, cacheKey);
@@ -254,6 +276,7 @@ export async function fetchStoreProductsPage(options?: {
   const runQuery = async (withOrder: boolean): Promise<Row[]> => {
     let query = supabase.from("produtos").select(STORE_PRODUCT_SELECT_COLUMNS);
     query = query.eq("active", true).eq("aprovado", true);
+    if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
     if (category) query = query.eq("categoria", category);
     if (withOrder) {
       query = query.order("nome", { ascending: true });
@@ -261,7 +284,12 @@ export async function fetchStoreProductsPage(options?: {
     query = query.range(from, to);
 
     const { data, error } = await query;
-    if (error) throwSupabaseError(error);
+    if (error) {
+      if (scopedTenantId && isMissingTenantIdColumn(error)) {
+        return [];
+      }
+      throwSupabaseError(error);
+    }
     return (data ?? []).map((row) => normalizeRowTimestamps(row as Row));
   };
 
@@ -287,10 +315,12 @@ export async function fetchStoreProductsPage(options?: {
 export async function fetchStoreProducts(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<Row[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_PRODUCTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveStoreTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "all"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(productsFeedCache, cacheKey);
@@ -304,11 +334,13 @@ export async function fetchStoreProducts(options?: {
           eq: { active: true, aprovado: true },
           orderBy: { column: "nome", ascending: true },
           limit: maxResults,
+          tenantId: scopedTenantId,
         }
       : {
           selectColumns: STORE_PRODUCT_SELECT_COLUMNS,
           eq: { active: true, aprovado: true },
           limit: maxResults,
+          tenantId: scopedTenantId,
         });
   };
 
@@ -329,8 +361,10 @@ export async function fetchStoreProductDetail(options: {
   reviewsLimit?: number;
   ordersLimit?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<StoreProductDetailBundle> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveStoreTenantId(options.tenantId);
   const productId = options.productId.trim();
   const userId = options.userId?.trim() || "";
   if (!productId) return { produto: null, reviews: [], userOrders: [] };
@@ -342,20 +376,28 @@ export async function fetchStoreProductDetail(options: {
     : 0;
   const ordersLimit = boundedLimit(options.ordersLimit ?? 20, MAX_ORDERS);
   const forceRefresh = options.forceRefresh ?? false;
-  const cacheKey = `${productId}:${userId}:${reviewsLimit}:${ordersLimit}`;
+  const cacheKey = `${scopedTenantId || "all"}:${productId}:${userId}:${reviewsLimit}:${ordersLimit}`;
 
   if (!forceRefresh) {
     const cached = getCache(productDetailCache, cacheKey);
     if (cached) return cached;
   }
 
-  const productQuery = await supabase
+  let productQuery = supabase
     .from("produtos")
     .select(STORE_PRODUCT_SELECT_COLUMNS)
-    .eq("id", productId)
-    .maybeSingle();
-  if (productQuery.error) throwSupabaseError(productQuery.error);
-  const produtoCandidate = productQuery.data ? normalizeRowTimestamps(productQuery.data as Row) : null;
+    .eq("id", productId);
+  if (scopedTenantId) {
+    productQuery = productQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: productData, error: productError } = await productQuery.maybeSingle();
+  if (productError) {
+    if (scopedTenantId && isMissingTenantIdColumn(productError)) {
+      return { produto: null, reviews: [], userOrders: [] };
+    }
+    throwSupabaseError(productError);
+  }
+  const produtoCandidate = productData ? normalizeRowTimestamps(productData as Row) : null;
   const produto =
     produtoCandidate &&
     (produtoCandidate.active === false || produtoCandidate.aprovado === false)
@@ -368,11 +410,13 @@ export async function fetchStoreProductDetail(options: {
       eq: { productId },
       orderBy: { column: "createdAt", ascending: false },
       limit: reviewsLimit,
+      tenantId: scopedTenantId,
     }).catch(() =>
       queryRows("reviews", {
         selectColumns: STORE_REVIEW_SELECT_COLUMNS,
         eq: { productId },
         limit: reviewsLimit,
+        tenantId: scopedTenantId,
       })
     )
     : Promise.resolve([] as Row[]);
@@ -383,11 +427,13 @@ export async function fetchStoreProductDetail(options: {
         eq: { userId, productId },
         orderBy: { column: "createdAt", ascending: false },
         limit: ordersLimit,
+        tenantId: scopedTenantId,
       }).catch(() =>
         queryRows("orders", {
           selectColumns: STORE_ORDER_SELECT_COLUMNS,
           eq: { userId, productId },
           limit: ordersLimit,
+          tenantId: scopedTenantId,
         })
       )
     : Promise.resolve([] as Row[]);
@@ -403,8 +449,10 @@ export async function fetchStoreProductReviewsPage(options: {
   page?: number;
   pageSize?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<StoreProductReviewsPageResult> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveStoreTenantId(options.tenantId);
   const productId = options.productId.trim();
   if (!productId) {
     return { reviews: [], page: 1, pageSize: 20, hasMore: false, totalCount: 0 };
@@ -413,7 +461,7 @@ export async function fetchStoreProductReviewsPage(options: {
   const page = Math.max(1, Math.floor(options.page ?? 1));
   const pageSize = boundedLimit(options.pageSize ?? 20, 60);
   const forceRefresh = options.forceRefresh ?? false;
-  const cacheKey = `${productId}:${page}:${pageSize}`;
+  const cacheKey = `${scopedTenantId || "all"}:${productId}:${page}:${pageSize}`;
 
   if (!forceRefresh) {
     const cached = getCache(productReviewsPageCache, cacheKey);
@@ -429,6 +477,9 @@ export async function fetchStoreProductReviewsPage(options: {
       .select(STORE_REVIEW_SELECT_COLUMNS, { count: "exact" })
       .eq("productId", productId)
       .range(from, to);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
     if (withOrder) {
       query = query.order("createdAt", { ascending: false });
     }
@@ -440,12 +491,38 @@ export async function fetchStoreProductReviewsPage(options: {
 
   try {
     const { data: rows, error, count } = await runQuery(true);
-    if (error) throwSupabaseError(error);
+    if (error) {
+      if (scopedTenantId && isMissingTenantIdColumn(error)) {
+        const emptyResult: StoreProductReviewsPageResult = {
+          reviews: [],
+          page,
+          pageSize,
+          hasMore: false,
+          totalCount: 0,
+        };
+        setCache(productReviewsPageCache, cacheKey, emptyResult);
+        return emptyResult;
+      }
+      throwSupabaseError(error);
+    }
     data = rows ?? [];
     totalCount = typeof count === "number" ? count : null;
   } catch {
     const { data: rows, error, count } = await runQuery(false);
-    if (error) throwSupabaseError(error);
+    if (error) {
+      if (scopedTenantId && isMissingTenantIdColumn(error)) {
+        const emptyResult: StoreProductReviewsPageResult = {
+          reviews: [],
+          page,
+          pageSize,
+          hasMore: false,
+          totalCount: 0,
+        };
+        setCache(productReviewsPageCache, cacheKey, emptyResult);
+        return emptyResult;
+      }
+      throwSupabaseError(error);
+    }
     data = rows ?? [];
     totalCount = typeof count === "number" ? count : null;
   }
@@ -471,38 +548,59 @@ export async function fetchStoreProductUserReviewCount(options: {
   productId: string;
   userId: string;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<number> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveStoreTenantId(options.tenantId);
   const productId = options.productId.trim();
   const userId = options.userId.trim();
   if (!productId || !userId) return 0;
 
   const forceRefresh = options.forceRefresh ?? false;
-  const cacheKey = `${productId}:${userId}`;
+  const cacheKey = `${scopedTenantId || "all"}:${productId}:${userId}`;
   if (!forceRefresh) {
     const cached = getCache(productUserReviewCountCache, cacheKey);
     if (cached !== null) return cached;
   }
 
   try {
-    const { count, error } = await supabase
+    let query = supabase
       .from("reviews")
       .select("id", { count: "exact", head: true })
       .eq("productId", productId)
       .eq("userId", userId);
-    if (error) throwSupabaseError(error);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { count, error } = await query;
+    if (error) {
+      if (scopedTenantId && isMissingTenantIdColumn(error)) {
+        setCache(productUserReviewCountCache, cacheKey, 0);
+        return 0;
+      }
+      throwSupabaseError(error);
+    }
     const normalized = count ?? 0;
     setCache(productUserReviewCountCache, cacheKey, normalized);
     return normalized;
   } catch {
     const fallbackLimit = boundedLimit(MAX_REVIEWS, 2000);
-    const { data, error } = await supabase
+    let query = supabase
       .from("reviews")
       .select("id")
       .eq("productId", productId)
-      .eq("userId", userId)
-      .limit(fallbackLimit);
-    if (error) throwSupabaseError(error);
+      .eq("userId", userId);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query.limit(fallbackLimit);
+    if (error) {
+      if (scopedTenantId && isMissingTenantIdColumn(error)) {
+        setCache(productUserReviewCountCache, cacheKey, 0);
+        return 0;
+      }
+      throwSupabaseError(error);
+    }
     const normalized = (data ?? []).length;
     setCache(productUserReviewCountCache, cacheKey, normalized);
     return normalized;
@@ -513,13 +611,19 @@ export async function toggleStoreProductLike(payload: {
   productId: string;
   userId: string;
   currentlyLiked: boolean;
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
   const productId = payload.productId.trim();
   const userId = payload.userId.trim();
+  const scopedTenantId = resolveStoreTenantId(payload.tenantId);
   if (!productId || !userId) return;
 
-  const { data, error } = await supabase.from("produtos").select("likes").eq("id", productId).maybeSingle();
+  let selectQuery = supabase.from("produtos").select("likes").eq("id", productId);
+  if (scopedTenantId) {
+    selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await selectQuery.maybeSingle();
   if (error) throwSupabaseError(error);
 
   const currentLikes = asArray(asObject(data)?.likes).filter((v): v is string => typeof v === "string");
@@ -527,10 +631,14 @@ export async function toggleStoreProductLike(payload: {
     ? currentLikes.filter((entry) => entry !== userId)
     : Array.from(new Set([...currentLikes, userId]));
 
-  const { error: updateError } = await supabase
+  let updateQuery = supabase
     .from("produtos")
     .update({ likes: nextLikes, updatedAt: new Date().toISOString() })
     .eq("id", productId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
 
   invalidateStoreCaches(productId);
@@ -544,8 +652,10 @@ export async function createStoreOrder(payload: {
   price: number;
   quantity?: number;
   color?: string;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveStoreTenantId(payload.tenantId);
   const quantity = Math.max(1, Math.floor(Number(payload.quantity ?? 1) || 1));
   const unitPrice = Math.max(0, asNum(payload.price, 0));
   const totalPrice = Number((unitPrice * quantity).toFixed(2));
@@ -564,11 +674,22 @@ export async function createStoreOrder(payload: {
 
   const baseInsertPayload: Record<string, unknown> = {
     ...requestPayload,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     status: "pendente",
     createdAt: new Date().toISOString(),
   };
   if (baseInsertPayload.data === undefined) {
     delete baseInsertPayload.data;
+  }
+
+  let productLookup = supabase.from("produtos").select("id").eq("id", requestPayload.productId);
+  if (scopedTenantId) {
+    productLookup = productLookup.eq("tenant_id", scopedTenantId);
+  }
+  const { data: productRow, error: productError } = await productLookup.maybeSingle();
+  if (productError) throwSupabaseError(productError);
+  if (!productRow) {
+    throw new Error("Produto fora do tenant ativo.");
   }
 
   const nonRemovableColumns = new Set([
@@ -638,9 +759,14 @@ export async function createStoreOrder(payload: {
 export async function cancelStoreOrderRequest(orderIdRaw: string): Promise<void> {
   const supabase = getSupabaseClient();
   const orderId = orderIdRaw.trim();
+  const scopedTenantId = resolveStoreTenantId();
   if (!orderId) return;
 
-  const { error } = await supabase.from("orders").delete().eq("id", orderId);
+  let query = supabase.from("orders").delete().eq("id", orderId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
 
   invalidateStoreCaches();
@@ -653,8 +779,10 @@ export async function createStoreReview(payload: {
   userAvatar?: string;
   rating: number;
   comment: string;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveStoreTenantId(payload.tenantId);
   const requestPayload = {
     productId: payload.productId.trim(),
     userId: payload.userId.trim(),
@@ -664,10 +792,21 @@ export async function createStoreReview(payload: {
     comment: payload.comment.trim(),
   };
 
+  let productLookup = supabase.from("produtos").select("id").eq("id", requestPayload.productId);
+  if (scopedTenantId) {
+    productLookup = productLookup.eq("tenant_id", scopedTenantId);
+  }
+  const { data: productRow, error: productError } = await productLookup.maybeSingle();
+  if (productError) throwSupabaseError(productError);
+  if (!productRow) {
+    throw new Error("Produto fora do tenant ativo.");
+  }
+
   const { data, error } = await supabase
     .from("reviews")
     .insert({
       ...requestPayload,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       createdAt: new Date().toISOString(),
       status: "pending",
     })

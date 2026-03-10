@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useAuth } from "../../../context/AuthContext";
+import { useTenantTheme } from "../../../context/TenantThemeContext";
 import { useToast } from "../../../context/ToastContext";
 import {
   fetchEventCardState,
@@ -59,6 +60,7 @@ const applyConfirmedDelta = (
 
 export function EventCard({ evento }: EventCardProps) {
   const { user } = useAuth();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const { addToast } = useToast();
 
   const [isLoading, setIsLoading] = useState(false);
@@ -89,6 +91,7 @@ export function EventCard({ evento }: EventCardProps) {
           eventId: evento.id,
           userId: user?.uid || null,
           previewLimit: 4,
+          tenantId: activeTenantId || user?.tenant_id || undefined,
         });
 
         if (!isMounted) return;
@@ -106,7 +109,7 @@ export function EventCard({ evento }: EventCardProps) {
     return () => {
       isMounted = false;
     };
-  }, [evento.id, user?.uid]);
+  }, [activeTenantId, evento.id, user?.tenant_id, user?.uid]);
 
   const loteAtivo = evento.lotes?.find((l) => l.status === "ativo");
   const [dia, mes] = evento.data ? evento.data.split(" ") : ["??", "???"];
@@ -126,6 +129,7 @@ export function EventCard({ evento }: EventCardProps) {
         eventId: evento.id,
         userId: user.uid,
         currentlyLiked: !nextLiked,
+        tenantId: activeTenantId || user?.tenant_id || undefined,
       });
     } catch (error: unknown) {
       setIsLiked(!nextLiked);
@@ -160,6 +164,7 @@ export function EventCard({ evento }: EventCardProps) {
         userName: user.nome || "Anônimo",
         userAvatar: user.foto || "",
         userTurma: user.turma || "Geral",
+        tenantId: activeTenantId || user?.tenant_id || undefined,
       });
 
       const refreshedState = await fetchEventCardState({
@@ -167,6 +172,7 @@ export function EventCard({ evento }: EventCardProps) {
         userId: user.uid,
         previewLimit: 4,
         forceRefresh: false,
+        tenantId: activeTenantId || user?.tenant_id || undefined,
       });
 
       setUserRsvp(refreshedState.userRsvp);

@@ -3,6 +3,8 @@ import { httpsCallable } from "@/lib/supa/functions";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -112,7 +114,7 @@ const ORDER_CONFIG: Record<
   },
 };
 
-let menuCache: CacheEntry<MenuConfigSection[] | null> | null = null;
+const menuCache = new Map<string, CacheEntry<MenuConfigSection[] | null>>();
 const legalDocsCache = new Map<string, CacheEntry<LegalDocRecord[]>>();
 const userOrdersCache = new Map<string, CacheEntry<UserOrderRecord[]>>();
 
@@ -132,15 +134,6 @@ const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (requested < 1) return 1;
   if (requested > maxAllowed) return maxAllowed;
   return Math.floor(requested);
-};
-
-const getCachedValue = <T>(
-  cache: CacheEntry<T> | null,
-  ttlMs: number
-): T | null => {
-  if (!cache) return null;
-  if (Date.now() - cache.cachedAt > ttlMs) return null;
-  return cache.value;
 };
 
 const getMapCachedValue = <T>(
@@ -223,6 +216,63 @@ async function callWithFallback<TReq, TRes>(
     }
     throw error;
   }
+}
+
+const resolveMenuTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const getMenuCacheKey = (tenantId?: string | null): string =>
+  resolveMenuTenantId(tenantId) || "global";
+
+const resolveMenuDocIds = (tenantId?: string | null): string[] => {
+  const scopedTenantId = resolveMenuTenantId(tenantId);
+  if (!scopedTenantId) return ["menu"];
+  return [buildTenantScopedRowId(scopedTenantId, "menu"), "menu"];
+};
+
+const pickMenuRow = (
+  rows: Array<Record<string, unknown>>,
+  tenantId?: string | null
+): Record<string, unknown> | null => {
+  const candidates = resolveMenuDocIds(tenantId);
+  for (const candidateId of candidates) {
+    const match = rows.find((row) => asString(row.id).trim() === candidateId);
+    if (match) return match;
+  }
+  return null;
+};
+
+async function saveMenuConfigWithClient(
+  sections: MenuConfigSection[],
+  tenantId?: string | null
+): Promise<{ ok: boolean }> {
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveMenuTenantId(tenantId);
+  const mutablePayload: Record<string, unknown> = {
+    id: buildTenantScopedRowId(scopedTenantId, "menu") || "menu",
+    sections,
+    data: { sections },
+    updatedAt: nowIso(),
+  };
+
+  while (true) {
+    const { error } = await supabase.from("app_config").upsert(mutablePayload, {
+      onConflict: "id",
+    });
+    if (!error) break;
+
+    const missingColumnName = asString(extractMissingSchemaColumn(error)).toLowerCase();
+    if (!missingColumnName) throwSupabaseError(error);
+
+    const removableKey = Object.keys(mutablePayload).find(
+      (key) => key !== "id" && key.toLowerCase() === missingColumnName
+    );
+    if (!removableKey) throwSupabaseError(error);
+
+    delete mutablePayload[String(removableKey)];
+  }
+
+  return { ok: true };
 }
 
 const sanitizeMenuSections = (raw: unknown): MenuConfigSection[] => {
@@ -356,27 +406,33 @@ const updateUsersWithFallback = async (
 
 export async function fetchMenuConfig(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<MenuConfigSection[] | null> {
   const forceRefresh = options?.forceRefresh ?? false;
+  const cacheKey = getMenuCacheKey(options?.tenantId);
 
   if (!forceRefresh) {
-    const cached = getCachedValue(menuCache, MENU_CACHE_TTL_MS);
+    const cached = getMapCachedValue(menuCache, cacheKey, MENU_CACHE_TTL_MS);
     if (cached) return cached;
   }
 
   const supabase = getSupabaseClient();
   let selectColumns = ["id", "sections", "data"];
   let data: Record<string, unknown> | null = null;
+  const docIds = resolveMenuDocIds(options?.tenantId);
 
   while (selectColumns.length > 0) {
     const response = await supabase
       .from("app_config")
       .select(selectColumns.join(","))
-      .eq("id", "menu")
-      .maybeSingle();
+      .in("id", docIds);
 
     if (!response.error) {
-      data = asObject(response.data);
+      const rows = (Array.isArray(response.data) ? response.data : [])
+        .map((row) => asObject(row))
+        .filter((row): row is Record<string, unknown> => row !== null)
+        .map((row) => ({ ...row }));
+      data = pickMenuRow(rows, options?.tenantId);
       break;
     }
 
@@ -387,55 +443,37 @@ export async function fetchMenuConfig(options?: {
   }
 
   if (!data) {
-    menuCache = { cachedAt: Date.now(), value: null };
+    setMapCachedValue(menuCache, cacheKey, null);
     return null;
   }
 
   const nestedData = asObject(data.data);
   const sections = sanitizeMenuSections(nestedData?.sections ?? data.sections);
-  menuCache = { cachedAt: Date.now(), value: sections };
+  setMapCachedValue(menuCache, cacheKey, sections);
   return sections;
 }
 
 export async function saveMenuConfig(
-  sections: MenuConfigSection[]
+  sections: MenuConfigSection[],
+  options?: { tenantId?: string | null }
 ): Promise<void> {
   const normalized = sanitizeMenuSections(sections);
+  const scopedTenantId = resolveMenuTenantId(options?.tenantId);
 
-  await callWithFallback<{ sections: MenuConfigSection[] }, { ok: boolean }>(
-    SETTINGS_SAVE_MENU_CALLABLE,
-    { sections: normalized },
-    async () => {
-      const supabase = getSupabaseClient();
-      const mutablePayload: Record<string, unknown> = {
-        id: "menu",
-        sections: normalized,
-        data: { sections: normalized },
-        updatedAt: nowIso(),
-      };
+  if (scopedTenantId) {
+    await saveMenuConfigWithClient(normalized, scopedTenantId);
+  } else {
+    await callWithFallback<
+      { sections: MenuConfigSection[]; tenantId?: string },
+      { ok: boolean }
+    >(
+      SETTINGS_SAVE_MENU_CALLABLE,
+      { sections: normalized, tenantId: scopedTenantId || undefined },
+      async () => saveMenuConfigWithClient(normalized, scopedTenantId)
+    );
+  }
 
-      while (true) {
-        const { error } = await supabase.from("app_config").upsert(mutablePayload, {
-          onConflict: "id",
-        });
-        if (!error) break;
-
-        const missingColumnName = asString(extractMissingSchemaColumn(error)).toLowerCase();
-        if (!missingColumnName) throwSupabaseError(error);
-
-        const removableKey = Object.keys(mutablePayload).find(
-          (key) => key !== "id" && key.toLowerCase() === missingColumnName
-        );
-        if (!removableKey) throwSupabaseError(error);
-
-        delete mutablePayload[String(removableKey)];
-      }
-
-      return { ok: true };
-    }
-  );
-
-  menuCache = { cachedAt: Date.now(), value: normalized };
+  setMapCachedValue(menuCache, getMenuCacheKey(scopedTenantId), normalized);
 }
 
 export async function fetchLegalDocs(options?: {

@@ -11,8 +11,9 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
-        tenant: {
+        brand: {
           primary: "rgb(var(--tenant-primary-rgb) / <alpha-value>)",
+          solid: "var(--tenant-primary)",
           accent: "var(--tenant-accent)",
         },
       },

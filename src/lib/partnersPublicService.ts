@@ -1,4 +1,5 @@
-﻿import { getSupabaseClient } from "./supabase";
+import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 
 export type PartnerTier = "ouro" | "prata" | "standard";
 export type PartnerStatus = "active" | "pending" | "disabled";
@@ -62,6 +63,37 @@ const asNumber = (value: unknown, fallback = 0): number =>
 
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
+const resolvePartnersTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+  const message = [raw.message, raw.details, raw.hint]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!message) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const extracted = match[2] ?? match[1];
+    if (extracted) return extracted;
+  }
+
+  return null;
+};
+
+const isMissingTenantIdColumn = (error: unknown): boolean =>
+  extractMissingSchemaColumn(error)?.trim().toLowerCase() === "tenant_id";
+
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
   if (requested < 1) return 1;
@@ -110,8 +142,8 @@ const normalizePartner = (raw: unknown): PartnerRecord | null => {
     id,
     nome: asString(obj.nome, "Parceiro"),
     categoria: asString(obj.categoria, "Parceiro"),
-    tier: (asString(obj.tier, "standard") as PartnerTier),
-    status: (asString(obj.status, "pending") as PartnerStatus),
+    tier: asString(obj.tier, "standard") as PartnerTier,
+    status: asString(obj.status, "pending") as PartnerStatus,
     cnpj: asString(obj.cnpj),
     responsavel: asString(obj.responsavel),
     email: asString(obj.email).toLowerCase(),
@@ -143,15 +175,22 @@ const throwSupabaseError = (error: { message: string; code?: string | null; name
 export async function fetchPublicPartners(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PartnerRecord[]> {
   const supabase = getSupabaseClient();
   const maxResults = boundedLimit(options?.maxResults ?? 240, MAX_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "none"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(publicPartnersCache, cacheKey);
     if (cached) return cached;
+  }
+
+  if (!scopedTenantId) {
+    setCache(publicPartnersCache, cacheKey, []);
+    return [];
   }
 
   let data: unknown[] | null = null;
@@ -159,6 +198,7 @@ export async function fetchPublicPartners(options?: {
   const primary = await supabase
     .from("parceiros")
     .select(PARTNERS_SELECT_COLUMNS)
+    .eq("tenant_id", scopedTenantId)
     .eq("status", "active")
     .order("tier", { ascending: true })
     .order("nome", { ascending: true })
@@ -167,14 +207,26 @@ export async function fetchPublicPartners(options?: {
   if (!primary.error) {
     data = primary.data as unknown[];
   } else {
+    if (isMissingTenantIdColumn(primary.error)) {
+      setCache(publicPartnersCache, cacheKey, []);
+      return [];
+    }
+
     const fallback = await supabase
       .from("parceiros")
       .select(PARTNERS_SELECT_COLUMNS)
+      .eq("tenant_id", scopedTenantId)
       .eq("status", "active")
       .order("nome", { ascending: true })
       .limit(maxResults);
 
-    if (fallback.error) throwSupabaseError(fallback.error);
+    if (fallback.error) {
+      if (isMissingTenantIdColumn(fallback.error)) {
+        setCache(publicPartnersCache, cacheKey, []);
+        return [];
+      }
+      throwSupabaseError(fallback.error);
+    }
     data = fallback.data as unknown[];
   }
 
@@ -193,20 +245,28 @@ export async function fetchPublicPartners(options?: {
 export async function loginPartnerByEmail(payload: {
   email: string;
   senha: string;
+  tenantId?: string | null;
 }): Promise<PartnerLoginResult | null> {
   const supabase = getSupabaseClient();
   const email = payload.email.trim().toLowerCase();
   const senha = payload.senha.trim();
-  if (!email || !senha) return null;
+  const scopedTenantId = resolvePartnersTenantId(payload.tenantId);
+  if (!email || !senha || !scopedTenantId) return null;
 
   const { data, error } = await supabase
     .from("parceiros")
     .select("id,nome,status,senha,email")
+    .eq("tenant_id", scopedTenantId)
     .eq("email", email)
     .limit(1)
     .maybeSingle();
 
-  if (error) throwSupabaseError(error);
+  if (error) {
+    if (isMissingTenantIdColumn(error)) {
+      return null;
+    }
+    throwSupabaseError(error);
+  }
   if (!data) return null;
 
   const row = asObject(data);

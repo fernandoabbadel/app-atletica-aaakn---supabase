@@ -136,7 +136,11 @@ export default function AdminUsuariosPage() {
       row.status === "bloqueado" ? "ativo" : "bloqueado";
 
     try {
-      await setAdminUserStatus({ userId: row.id, status: nextStatus });
+      await setAdminUserStatus({
+        userId: row.id,
+        status: nextStatus,
+        tenantId: activeTenantId || undefined,
+      });
       setRows((prev) =>
         prev.map((user) =>
           user.id === row.id ? { ...user, status: nextStatus } : user
@@ -161,7 +165,7 @@ export default function AdminUsuariosPage() {
     if (!confirmed) return;
 
     try {
-      await deleteAdminUser(userId);
+      await deleteAdminUser(userId, { tenantId: activeTenantId || undefined });
       setRows((prev) => prev.filter((row) => row.id !== userId));
       addToast("Usuario removido.", "success");
     } catch (error: unknown) {

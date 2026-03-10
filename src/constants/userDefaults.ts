@@ -3,6 +3,7 @@
 // 1. Estatísticas Padrão (DNA do Tubarão)
 export const DEFAULT_STATS = {
     accountCreated: 1,
+    inviteActivations: 0,
     loginCount: 1,
     postsCount: 0,
     commentsCount: 0,

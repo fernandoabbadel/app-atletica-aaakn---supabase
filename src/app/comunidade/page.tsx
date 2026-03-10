@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../context/ToastContext";
 import { Security } from "../../lib/security";
 import { uploadImage, validateImageFile } from "../../lib/upload";
@@ -176,6 +177,7 @@ const UserBadges = ({ userData }: { userData: Partial<PostData | CommentData> })
 };
 export default function ComunidadePage() {
   const { user } = useAuth();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const { addToast } = useToast();
   
   const [activeTab, setActiveTab] = useState(DEFAULT_COMMUNITY_CATEGORIES[0] || "Geral");
@@ -228,7 +230,9 @@ export default function ComunidadePage() {
 
     const loadConfig = async () => {
       try {
-        const configData = await fetchCommunityConfig();
+        const configData = await fetchCommunityConfig({
+          tenantId: activeTenantId || user?.tenant_id || undefined,
+        });
         if (!mounted) return;
 
         const rawConfig = (configData as Partial<AppConfig> | null) ?? {};
@@ -254,7 +258,7 @@ export default function ComunidadePage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [activeTenantId, addToast, user?.tenant_id]);
 
   useEffect(() => {
     let mounted = true;
@@ -272,6 +276,7 @@ export default function ComunidadePage() {
           categoria: activeTab,
           maxResults: 120,
           includeBlocked: !!user?.role?.includes("admin"),
+          tenantId: activeTenantId || user?.tenant_id || undefined,
         });
 
         if (!mounted) return;
@@ -315,7 +320,7 @@ export default function ComunidadePage() {
     return () => {
       mounted = false;
     };
-  }, [activeTab, user?.role, addToast]);
+  }, [activeTab, activeTenantId, user?.role, user?.tenant_id, addToast]);
 
   useEffect(() => {
     const ordered = [...allPostsRaw];
@@ -355,12 +360,14 @@ export default function ComunidadePage() {
           categorias: modalidades,
           includeBlocked: !!user?.role?.includes("admin"),
           windowDays: RECENT_BADGE_WINDOW_DAYS,
+          tenantId: activeTenantId || user?.tenant_id || undefined,
         });
         const unreadCountsPromise = user?.uid
           ? fetchCommunityUnreadCounts({
               userId: user.uid,
               categorias: modalidades,
               includeBlocked: !!user?.role?.includes("admin"),
+              tenantId: activeTenantId || user?.tenant_id || undefined,
             })
           : Promise.resolve(
               modalidades.reduce<Record<string, number>>((acc, categoria) => {
@@ -386,7 +393,7 @@ export default function ComunidadePage() {
     return () => {
       mounted = false;
     };
-  }, [modalidades, user?.uid, user?.role, addToast, countsRefreshToken]);
+  }, [modalidades, user?.uid, user?.role, user?.tenant_id, addToast, countsRefreshToken, activeTenantId]);
 
   useEffect(() => {
     if (!user?.uid) return;

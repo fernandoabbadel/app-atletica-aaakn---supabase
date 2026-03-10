@@ -804,6 +804,16 @@ export default function DetalhesEventoPage() {
                             height={40}
                             className="rounded-full bg-zinc-800 object-cover border border-zinc-800 group-hover/avatar:border-emerald-500 transition-colors"
                         />
+                        <div className="absolute -bottom-1 -right-1 h-5 w-5 overflow-hidden rounded-full border border-black bg-zinc-950 shadow-brand">
+                            <Image
+                                src={getTurmaImage(c.userTurma, "/logo.png")}
+                                alt={`Turma ${(c.userTurma || "").trim() || "sem turma"}`}
+                                fill
+                                sizes="20px"
+                                unoptimized
+                                className="object-cover"
+                            />
+                        </div>
                     </div>
                 </Link>
                             
@@ -818,15 +828,8 @@ export default function DetalhesEventoPage() {
                                             <UserBadges data={c} patentesConfig={patentesConfig} />
                                         </div>
                                         {/* ID 653: Foto da Turma + Nome */}
-                                       <div className="flex items-center gap-1 mt-0.5 opacity-60">
-            <Image 
-                src={getTurmaImage(c.userTurma, "https://github.com/shadcn.png")} 
-                alt="Turma"
-                width={12}
-                height={12}
-                className="rounded-full object-cover border border-zinc-800"
-            />
-            <span className="text-[9px] text-zinc-300 font-mono">{c.userTurma || "Sem turma"}</span>
+                                       <div className="mt-0.5 flex items-center gap-1 opacity-60">
+            <span className="text-[9px] font-mono text-zinc-300">{c.userTurma || "Sem turma"}</span>
         </div>
                                     </div>
 
@@ -908,7 +911,7 @@ export default function DetalhesEventoPage() {
                       </h3>
                       <button onClick={() => setModalUsersType(null)} className="p-2 hover:bg-zinc-800 rounded-full transition"><XCircle size={20} className="text-zinc-500"/></button>
                   </div>
-                  <div className="p-2 overflow-y-auto space-y-1 custom-scrollbar flex-1">
+        <div className="p-2 overflow-y-auto space-y-1 custom-scrollbar flex-1">
                       {modalUsers.map((u, i) => (
                           <Link key={i} href={`/perfil/${u.userId}`} className="flex items-center gap-3 p-3 hover:bg-zinc-900 rounded-2xl transition group">
                            <div className="relative">
@@ -917,15 +920,22 @@ export default function DetalhesEventoPage() {
                 alt={u.userName} 
                 width={40}
                 height={40}
-                className="rounded-full object-cover border-2 border-zinc-800 group-hover:border-emerald-500 transition-colors"
+                className="rounded-full object-cover border-2 border-zinc-800 group-hover:border-brand transition-colors"
             />
-            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-zinc-800 rounded-full flex items-center justify-center text-[9px] font-black text-white border border-black">
-                {(u.userTurma || "").trim() || "Sem turma"}
+            <div className="absolute -bottom-1 -right-1 h-5 w-5 overflow-hidden rounded-full border border-black bg-zinc-950 shadow-brand">
+                <Image
+                    src={getTurmaImage(u.userTurma, "/logo.png")}
+                    alt={`Turma ${(u.userTurma || "").trim() || "sem turma"}`}
+                    fill
+                    sizes="20px"
+                    unoptimized
+                    className="object-cover"
+                />
             </div>
         </div>
                               <div className="flex-1">
                                   <p className="text-sm font-bold text-white group-hover:text-emerald-400 transition-colors">{u.userName}</p>
-                                  <p className="text-[10px] text-zinc-500 uppercase font-bold">Ver Perfil</p>
+                                  <p className="text-[10px] text-zinc-500 uppercase font-bold">{(u.userTurma || "").trim() || "Sem turma"} • Ver Perfil</p>
                               </div>
                               <ArrowLeft size={16} className="rotate-180 text-zinc-700 group-hover:text-white transition-colors"/>
                           </Link>

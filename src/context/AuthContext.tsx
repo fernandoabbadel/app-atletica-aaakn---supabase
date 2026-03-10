@@ -1,7 +1,7 @@
 "use client";
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { User as SupabaseAuthUser } from "@supabase/supabase-js";
-import { getSupabaseClient } from "@/lib/supabase";
+import { clearSupabaseBrowserSessionStorage, getSupabaseClient } from "@/lib/supabase";
 import { useRouter, usePathname } from "next/navigation"; 
 import { logActivity } from "../lib/logger"; 
 import LoadingScreen from "../app/loading";
@@ -17,7 +17,8 @@ import {
   getMasterTenantOverrideId,
   MASTER_TENANT_OVERRIDE_STORAGE_KEY,
 } from "@/lib/tenantContext";
-import { parseTenantScopedPath } from "@/lib/tenantRouting";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
+import { buildLoginPath, readStoredLoginReturnTo, sanitizeReturnToPath, storeLoginReturnTo } from "@/lib/authRedirect";
 import {
   getAccessRoleCandidates,
   hasAdminPanelAccess,
@@ -53,6 +54,7 @@ const DEFAULT_PATENTES: PatenteConfig[] = [
 ];
 
 export interface UserStats {
+    inviteActivations?: number;
     loginCount?: number;
     postsCount?: number;
     commentsCount?: number;
@@ -158,7 +160,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
-  loginGoogle: () => Promise<void>;
+  loginGoogle: (options?: { returnTo?: string }) => Promise<void>;
   loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
   checkPermission: (allowedRoles: string[]) => boolean;
@@ -221,6 +223,25 @@ const isNavigatorLockTimeoutError = (error: unknown): boolean => {
     candidates.includes("navigator lockmanage") ||
     candidates.includes("lockmanager") ||
     (candidates.includes("timed out waiting") && candidates.includes("auth-token"))
+  );
+};
+
+const isSupabaseRetryableFetchError = (error: unknown): boolean => {
+  const raw = asRecord(error);
+  const candidates = [
+    error instanceof Error ? error.message : "",
+    error instanceof Error ? error.name : "",
+    asString(raw?.message),
+    asString(raw?.name),
+    asString(raw?.details),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" | ")
+    .toLowerCase();
+
+  return (
+    candidates.includes("failed to fetch") ||
+    candidates.includes("authretryablefetcherror")
   );
 };
 
@@ -439,16 +460,29 @@ const buildUserPatchPayload = (
     dbPatch.stats = nextStats;
   }
 
-  dbPatch.updatedAt = new Date().toISOString();
   return { dbPatch };
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const USER_SELECT_COLUMNS =
-  "uid,nome,email,foto,role,status,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,capa,estadoOrigem,extra,createdAt,updatedAt";
+  "uid,nome,email,foto,role,status,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,capa,estadoOrigem,extra,createdAt";
 const USER_SELECT_COLUMNS_LIST = USER_SELECT_COLUMNS.split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);
+const MISSING_USER_WRITE_COLUMNS = new Set<string>();
+const MISSING_USER_SELECT_COLUMNS = new Set<string>();
+
+const filterMissingUsersWriteColumns = (
+  patch: Record<string, unknown>
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(patch).filter(
+      ([key]) => !MISSING_USER_WRITE_COLUMNS.has(key.toLowerCase())
+    )
+  );
+
+const filterMissingUsersSelectColumns = (columns: string[]): string[] =>
+  columns.filter((column) => !MISSING_USER_SELECT_COLUMNS.has(column.toLowerCase()));
 
 const removeMissingColumnFromSelection = (
   currentColumns: string[],
@@ -466,7 +500,11 @@ const runUsersRowQueryWithSelectFallback = async (
     selectColumns: string
   ) => PromiseLike<{ data: unknown; error: unknown }>
 ): Promise<Record<string, unknown> | null> => {
-  let mutableColumns = [...USER_SELECT_COLUMNS_LIST];
+  let mutableColumns = filterMissingUsersSelectColumns([...USER_SELECT_COLUMNS_LIST]);
+
+  if (mutableColumns.length === 0) {
+    return null;
+  }
 
   while (mutableColumns.length > 0) {
     const { data, error } = await runQuery(mutableColumns.join(","));
@@ -474,6 +512,7 @@ const runUsersRowQueryWithSelectFallback = async (
 
     const missingColumn = extractMissingSchemaColumn(error);
     if (!missingColumn) throw error;
+    MISSING_USER_SELECT_COLUMNS.add(missingColumn.toLowerCase());
 
     const nextColumns = removeMissingColumnFromSelection(mutableColumns, missingColumn);
     if (!nextColumns || nextColumns.length === 0) throw error;
@@ -503,9 +542,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const router = useRouter();
   const pathnameRaw = usePathname();
-  const pathname = useMemo(
-    () => parseTenantScopedPath(pathnameRaw ? pathnameRaw.split("?")[0] : "/").scopedPath,
+  const routePathInfo = useMemo(
+    () => parseTenantScopedPath(pathnameRaw ? pathnameRaw.split("?")[0] : "/"),
     [pathnameRaw]
+  );
+  const pathname = routePathInfo.scopedPath;
+  const resolveScopedAuthPath = useCallback(
+    (scopedPath: string): string => {
+      const normalizedPath = scopedPath.startsWith("/") ? scopedPath : `/${scopedPath}`;
+      if (routePathInfo.tenantSlug) {
+        return withTenantSlug(routePathInfo.tenantSlug, normalizedPath);
+      }
+
+      const storedReturnTo = readStoredLoginReturnTo();
+      const storedPathInfo = parseTenantScopedPath(storedReturnTo || "");
+      if (storedPathInfo.tenantSlug) {
+        return withTenantSlug(storedPathInfo.tenantSlug, normalizedPath);
+      }
+
+      return normalizedPath;
+    },
+    [routePathInfo.tenantSlug]
   );
   const effectiveUser = useMemo(
     () =>
@@ -798,6 +855,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
           console.error("Erro ao recuperar sessao:", error);
         }
+        if (isSupabaseRetryableFetchError(error)) {
+          clearSupabaseBrowserSessionStorage();
+        }
         if (active) {
           setLoading(false);
         }
@@ -816,9 +876,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const persistUserPatch = useCallback(
     async (currentUser: User, patch: Record<string, unknown>): Promise<User> => {
       const { dbPatch } = buildUserPatchPayload(currentUser, patch);
-      const mutablePatch: Record<string, unknown> = { ...dbPatch };
+      const mutablePatch: Record<string, unknown> = filterMissingUsersWriteColumns({
+        ...dbPatch,
+      });
       let data: Record<string, unknown> | null = null;
-      let mutableSelectColumns = [...USER_SELECT_COLUMNS_LIST];
+      let mutableSelectColumns = filterMissingUsersSelectColumns([
+        ...USER_SELECT_COLUMNS_LIST,
+      ]);
+
+      if (Object.keys(mutablePatch).length === 0) {
+        return currentUser;
+      }
 
       while (Object.keys(mutablePatch).length > 0 && mutableSelectColumns.length > 0) {
         const updateResult = await supabase
@@ -839,10 +907,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const removableKey =
           Object.keys(mutablePatch).find((key) => key.toLowerCase() === missingColumn.toLowerCase()) ?? null;
         if (removableKey) {
+          MISSING_USER_WRITE_COLUMNS.add(removableKey.toLowerCase());
           delete mutablePatch[removableKey];
           continue;
         }
 
+        MISSING_USER_SELECT_COLUMNS.add(missingColumn.toLowerCase());
         const nextSelectColumns = removeMissingColumnFromSelection(
           mutableSelectColumns,
           missingColumn
@@ -852,7 +922,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!data) {
-        const recoveryPayload: Record<string, unknown> = {
+        const recoveryPayload = filterMissingUsersWriteColumns({
           ...DEFAULT_USER_PROPS,
           uid: currentUser.uid,
           nome: asString(currentUser.nome, "Sem Nome"),
@@ -865,7 +935,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             asString(currentUser.ultimoLoginDiario) || new Date().toLocaleDateString("pt-BR"),
           data_adesao: asString(currentUser.data_adesao) || new Date().toISOString(),
           ...mutablePatch,
-        };
+        });
 
         const recoveredRow = await runUsersRowQueryWithSelectFallback((columns) =>
           supabase
@@ -1130,14 +1200,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (isPendingTenant) {
           if (isTenantPendingBypassPath(pathname)) return;
-          router.replace("/aguardando-aprovacao");
+          router.replace(resolveScopedAuthPath("/aguardando-aprovacao"));
           return;
       }
 
       if (pathname === "/aguardando-aprovacao") {
-          router.replace("/dashboard");
+          router.replace(resolveScopedAuthPath("/dashboard"));
       }
-  }, [isLocalGuest, loading, pathname, router, user]);
+  }, [isLocalGuest, loading, pathname, resolveScopedAuthPath, router, user]);
 
   useEffect(() => {
       if (loading || !user || isLocalGuest) return;
@@ -1146,25 +1216,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         asString(user.tenant_status).trim().toLowerCase() === "pending" &&
         asString(user.tenant_id).trim().length > 0
       ) return;
+      if (pathname === "/login") return;
       if (isCadastroBypassPath(pathname)) return;
       if (authSyncFallbackUidRef.current === user.uid) return;
 
       if (hasCadastroPendente(user)) {
-          router.replace("/cadastro");
+          router.replace(resolveScopedAuthPath("/cadastro"));
       }
-  }, [user, loading, pathname, router, isLocalGuest]);
+  }, [user, loading, pathname, resolveScopedAuthPath, router, isLocalGuest]);
 
   // --- FUNÃƒâ€¡Ãƒâ€¢ES PÃƒÅ¡BLICAS ---
 
-  const loginGoogle = async () => {
+  const loginGoogle = async (options?: { returnTo?: string }) => {
     try {
       if (isLocalGuest) {
           localStorage.removeItem("shark_guest_session");
           setIsLocalGuest(false);
           setUser(null);
       }
+      const desiredReturnTo = sanitizeReturnToPath(options?.returnTo);
+      storeLoginReturnTo(desiredReturnTo);
       const redirectTo =
-        typeof window !== "undefined" ? `${window.location.origin}/dashboard` : undefined;
+        typeof window !== "undefined"
+          ? `${window.location.origin}${buildLoginPath(desiredReturnTo)}`
+          : undefined;
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",

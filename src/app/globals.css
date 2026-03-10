@@ -14,6 +14,8 @@
   --tenant-primary-rgb: 16 185 129;
   --neon-green: var(--tenant-primary);
   --neon-red: #e53935;
+  --brand-shadow-soft: 0 14px 40px rgb(var(--tenant-primary-rgb) / 0.18);
+  --brand-shadow-strong: 0 0 24px rgb(var(--tenant-primary-rgb) / 0.28);
 }
 
 /* --- 1. ROLAGEM SUAVE --- */
@@ -106,4 +108,302 @@ samp {
 }
 .animate-fade-in {
   animation: fade-in 0.5s ease-out forwards;
+}
+
+@layer utilities {
+  .text-brand {
+    color: var(--tenant-primary);
+  }
+
+  .text-brand-accent {
+    color: var(--tenant-accent);
+  }
+
+  .bg-brand-solid {
+    background-color: var(--tenant-primary);
+  }
+
+  .bg-brand-soft {
+    background-color: rgb(var(--tenant-primary-rgb) / 0.12);
+  }
+
+  .bg-brand-soft-strong {
+    background-color: rgb(var(--tenant-primary-rgb) / 0.2);
+  }
+
+  .border-brand {
+    border-color: rgb(var(--tenant-primary-rgb) / 0.35);
+  }
+
+  .border-brand-strong {
+    border-color: var(--tenant-primary);
+  }
+
+  .shadow-brand {
+    box-shadow: var(--brand-shadow-soft);
+  }
+
+  .shadow-brand-strong {
+    box-shadow: var(--brand-shadow-strong);
+  }
+
+  .bg-brand-gradient {
+    background-image: linear-gradient(
+      135deg,
+      rgb(var(--tenant-primary-rgb) / 0.22),
+      rgb(0 0 0 / 1)
+    );
+  }
+}
+
+@layer components {
+  .brand-button-solid {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-wider text-white transition disabled:cursor-not-allowed disabled:opacity-60;
+    background: var(--tenant-primary);
+    box-shadow: var(--brand-shadow-soft);
+  }
+
+  .brand-button-solid:hover {
+    filter: brightness(1.08);
+  }
+
+  .brand-button-soft {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-xs font-bold uppercase tracking-wider transition disabled:cursor-not-allowed disabled:opacity-60;
+    border-color: rgb(var(--tenant-primary-rgb) / 0.32);
+    background: rgb(var(--tenant-primary-rgb) / 0.12);
+    color: var(--tenant-accent);
+  }
+
+  .brand-button-soft:hover {
+    background: rgb(var(--tenant-primary-rgb) / 0.18);
+  }
+
+  .brand-icon-chip {
+    @apply flex items-center justify-center rounded-xl text-black;
+    background: var(--tenant-primary);
+    box-shadow: var(--brand-shadow-strong);
+  }
+
+  .brand-badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-widest;
+    border-color: rgb(var(--tenant-primary-rgb) / 0.28);
+    background: rgb(var(--tenant-primary-rgb) / 0.1);
+    color: var(--tenant-accent);
+  }
+
+  .brand-input {
+    @apply w-full rounded-xl border border-zinc-700 bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600;
+  }
+
+  .brand-input:focus {
+    border-color: rgb(var(--tenant-primary-rgb) / 0.72);
+    box-shadow: 0 0 0 1px rgb(var(--tenant-primary-rgb) / 0.26);
+  }
+}
+
+/* Brand override para utilitarios emerald antigos nas telas tenant/admin. */
+@layer utilities {
+  .text-emerald-50,
+  .text-emerald-100,
+  .text-emerald-200,
+  .text-emerald-300,
+  .text-emerald-400,
+  .hover\:text-emerald-200:hover,
+  .hover\:text-emerald-300:hover,
+  .hover\:text-emerald-400:hover {
+    color: var(--tenant-accent) !important;
+  }
+
+  .text-emerald-500,
+  .text-emerald-600,
+  .text-emerald-700,
+  .hover\:text-emerald-500:hover,
+  .hover\:text-emerald-600:hover,
+  .focus\:text-emerald-500:focus {
+    color: var(--tenant-primary) !important;
+  }
+
+  .group:hover .group-hover\:text-emerald-300,
+  .group:hover .group-hover\:text-emerald-400,
+  .group:hover .group-hover\:text-emerald-500 {
+    color: var(--tenant-accent) !important;
+  }
+
+  .bg-emerald-400,
+  .bg-emerald-500,
+  .bg-emerald-600,
+  .hover\:bg-emerald-400:hover,
+  .hover\:bg-emerald-500:hover,
+  .hover\:bg-emerald-600:hover {
+    background-color: var(--tenant-primary) !important;
+  }
+
+  .bg-emerald-500\/10,
+  .bg-emerald-400\/10,
+  .bg-emerald-600\/10,
+  .hover\:bg-emerald-500\/10:hover,
+  .hover\:bg-emerald-400\/10:hover {
+    background-color: rgb(var(--tenant-primary-rgb) / 0.1) !important;
+  }
+
+  .bg-emerald-500\/20,
+  .bg-emerald-400\/20,
+  .bg-emerald-600\/20,
+  .hover\:bg-emerald-500\/20:hover,
+  .hover\:bg-emerald-400\/20:hover {
+    background-color: rgb(var(--tenant-primary-rgb) / 0.2) !important;
+  }
+
+  .bg-emerald-500\/30,
+  .bg-emerald-400\/30,
+  .bg-emerald-600\/30,
+  .hover\:bg-emerald-500\/30:hover {
+    background-color: rgb(var(--tenant-primary-rgb) / 0.3) !important;
+  }
+
+  .bg-emerald-500\/40,
+  .bg-emerald-400\/40,
+  .bg-emerald-600\/40 {
+    background-color: rgb(var(--tenant-primary-rgb) / 0.4) !important;
+  }
+
+  .border-emerald-400,
+  .border-emerald-500,
+  .border-emerald-600,
+  .focus\:border-emerald-500:focus,
+  .focus\:border-emerald-400:focus,
+  .hover\:border-emerald-400:hover,
+  .hover\:border-emerald-500:hover,
+  .hover\:border-emerald-600:hover {
+    border-color: var(--tenant-primary) !important;
+  }
+
+  .border-emerald-400\/20,
+  .border-emerald-500\/20,
+  .border-emerald-600\/20,
+  .hover\:border-emerald-400\/20:hover,
+  .hover\:border-emerald-500\/20:hover {
+    border-color: rgb(var(--tenant-primary-rgb) / 0.2) !important;
+  }
+
+  .border-emerald-400\/30,
+  .border-emerald-500\/30,
+  .border-emerald-600\/30,
+  .hover\:border-emerald-400\/30:hover,
+  .hover\:border-emerald-500\/30:hover {
+    border-color: rgb(var(--tenant-primary-rgb) / 0.3) !important;
+  }
+
+  .border-emerald-400\/40,
+  .border-emerald-500\/40,
+  .border-emerald-600\/40,
+  .hover\:border-emerald-400\/40:hover,
+  .hover\:border-emerald-500\/40:hover {
+    border-color: rgb(var(--tenant-primary-rgb) / 0.4) !important;
+  }
+
+  .border-emerald-400\/50,
+  .border-emerald-500\/50,
+  .hover\:border-emerald-400\/50:hover,
+  .hover\:border-emerald-500\/50:hover {
+    border-color: rgb(var(--tenant-primary-rgb) / 0.5) !important;
+  }
+
+  .from-emerald-400,
+  .from-emerald-500,
+  .from-emerald-600,
+  .from-emerald-700,
+  .from-emerald-900 {
+    --tw-gradient-from: var(--tenant-primary) var(--tw-gradient-from-position) !important;
+    --tw-gradient-to: rgb(var(--tenant-primary-rgb) / 0) var(--tw-gradient-to-position) !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+  }
+
+  .to-emerald-400,
+  .to-emerald-500 {
+    --tw-gradient-to: var(--tenant-accent) var(--tw-gradient-to-position) !important;
+  }
+
+  .to-emerald-600,
+  .to-emerald-700 {
+    --tw-gradient-to: var(--tenant-primary) var(--tw-gradient-to-position) !important;
+  }
+
+  .ring-emerald-400,
+  .ring-emerald-500,
+  .ring-emerald-500\/50,
+  .ring-emerald-400\/50 {
+    --tw-ring-color: rgb(var(--tenant-primary-rgb) / 0.52) !important;
+  }
+
+  .focus\:ring-emerald-500:focus,
+  .focus\:ring-emerald-400:focus {
+    --tw-ring-color: rgb(var(--tenant-primary-rgb) / 0.52) !important;
+  }
+
+  .accent-emerald-500,
+  .accent-emerald-400 {
+    accent-color: var(--tenant-primary) !important;
+  }
+
+  .shadow-emerald-500\/10,
+  .shadow-emerald-500\/20,
+  .shadow-emerald-500\/30,
+  .shadow-emerald-900\/10,
+  .shadow-emerald-900\/20,
+  .shadow-emerald-900\/30 {
+    --tw-shadow-color: rgb(var(--tenant-primary-rgb) / 0.22) !important;
+    --tw-shadow: var(--tw-shadow-colored) !important;
+  }
+}
+
+[class*="shadow-["][class*="16,185,129"] {
+  box-shadow: var(--brand-shadow-soft) !important;
+}
+
+[class*="border-[#10b981]"] {
+  border-color: var(--tenant-primary) !important;
+}
+
+[class*="bg-[#10b981]"] {
+  background-color: var(--tenant-primary) !important;
+}
+
+[class*="text-[#10b981]"] {
+  color: var(--tenant-primary) !important;
+}
+
+[class*="hover:border-[#10b981]"]:hover {
+  border-color: var(--tenant-primary) !important;
+}
+
+[class*="hover:bg-[#10b981]"]:hover {
+  background-color: var(--tenant-primary) !important;
+}
+
+[class*="hover:text-[#10b981]"]:hover {
+  color: var(--tenant-primary) !important;
+}
+
+[class*="shadow-["][class*="#10b981"],
+[class*="shadow-["][class*="#34d399"] {
+  box-shadow: var(--brand-shadow-soft) !important;
+}
+
+[stroke="#10b981"] {
+  stroke: var(--tenant-primary) !important;
+}
+
+[fill="#10b981"] {
+  fill: var(--tenant-primary) !important;
+}
+
+.input-admin:focus,
+.input-field:focus {
+  border-color: var(--tenant-primary) !important;
+  box-shadow: 0 0 15px rgb(var(--tenant-primary-rgb) / 0.12) !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--tenant-primary) !important;
 }

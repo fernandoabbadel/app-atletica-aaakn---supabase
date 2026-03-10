@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ChevronDown,
@@ -11,15 +13,22 @@ import {
   Search,
   ShieldCheck,
   ExternalLink,
+  Pencil,
+  Save,
+  X,
 } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
 import {
   fetchAdminPartnersPage,
   setPartnerStatus,
+  upsertPartner,
+  uploadPartnerImageToStorage,
   type PartnerRecord,
   type PartnerStatus,
+  type PartnerTier,
 } from "@/lib/partnersService";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
 
@@ -56,7 +65,11 @@ const statusClass: Record<PartnerStatus, string> = {
 };
 
 export default function AdminParceirosEmpresasPage() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { addToast } = useToast();
+  const pathInfo = useMemo(() => parseTenantScopedPath(pathname || ""), [pathname]);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
@@ -66,6 +79,18 @@ export default function AdminParceirosEmpresasPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [editingPartner, setEditingPartner] = useState<PartnerRecord | null>(null);
+  const [createMode, setCreateMode] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<PartnerRecord>>({});
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [uploadingImageField, setUploadingImageField] = useState<
+    "imgLogo" | "imgCapa" | null
+  >(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const backHref = pathInfo.tenantSlug
+    ? withTenantSlug(pathInfo.tenantSlug, "/admin/parceiros")
+    : "/admin/parceiros";
 
   const loadRows = useCallback(
     async (options?: { reset?: boolean; cursorId?: string | null }) => {
@@ -137,12 +162,149 @@ export default function AdminParceirosEmpresasPage() {
     }
   };
 
+  const openEditModal = (row: PartnerRecord) => {
+    setCreateMode(false);
+    setEditingPartner(row);
+    setEditForm({ ...row });
+  };
+
+  const openCreateModal = useCallback(() => {
+    setCreateMode(true);
+    setEditingPartner(null);
+    setEditForm({
+      nome: "",
+      categoria: "",
+      tier: "standard",
+      status: "active",
+      cnpj: "",
+      responsavel: "",
+      email: "",
+      telefone: "",
+      descricao: "",
+      endereco: "",
+      horario: "",
+      insta: "",
+      site: "",
+      whats: "",
+      imgLogo: "",
+      imgCapa: "",
+    });
+  }, []);
+
+  const closeEditModal = () => {
+    setCreateMode(false);
+    setEditingPartner(null);
+    setEditForm({});
+    setSavingEdit(false);
+    setUploadingImageField(null);
+  };
+
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") return;
+    openCreateModal();
+    router.replace(pathname || "/admin/parceiros/empresas", { scroll: false });
+  }, [openCreateModal, pathname, router, searchParams]);
+
+  const handleEditChange = (field: keyof PartnerRecord, value: string) => {
+    setEditForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleUploadImage = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    field: "imgLogo" | "imgCapa"
+  ) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || uploadingImageField !== null) {
+      input.value = "";
+      return;
+    }
+
+    try {
+      setUploadingImageField(field);
+      const imageUrl = await uploadPartnerImageToStorage({
+        file,
+        kind: field === "imgCapa" ? "capa" : "logo",
+        partnerId: editingPartner?.id,
+      });
+      setEditForm((prev) => ({ ...prev, [field]: imageUrl }));
+      addToast(
+        field === "imgLogo" ? "Logo enviada com sucesso." : "Capa enviada com sucesso.",
+        "success"
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao enviar imagem do parceiro.", "error");
+    } finally {
+      setUploadingImageField(null);
+      input.value = "";
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!createMode && !editingPartner) return;
+
+    const nome = String(editForm.nome || "").trim();
+    if (!nome) {
+      addToast("Nome do parceiro e obrigatorio.", "error");
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      const updated = await upsertPartner({
+        partnerId: createMode ? undefined : editingPartner?.id,
+        data: {
+          nome,
+          categoria: String(editForm.categoria || "").trim(),
+          tier: String(editForm.tier || editingPartner?.tier || "standard") as PartnerTier,
+          status: String(editForm.status || editingPartner?.status || "active") as PartnerStatus,
+          cnpj: String(editForm.cnpj || "").trim(),
+          responsavel: String(editForm.responsavel || "").trim(),
+          email: String(editForm.email || "").trim(),
+          telefone: String(editForm.telefone || "").trim(),
+          descricao: String(editForm.descricao || "").trim(),
+          endereco: String(editForm.endereco || "").trim(),
+          horario: String(editForm.horario || "").trim(),
+          insta: String(editForm.insta || "").trim(),
+          site: String(editForm.site || "").trim(),
+          whats: String(editForm.whats || "").trim(),
+          imgLogo: String(editForm.imgLogo || "").trim(),
+          imgCapa: String(editForm.imgCapa || "").trim(),
+        },
+      });
+
+      if (updated) {
+        setRows((prev) => {
+          const existingIndex = prev.findIndex((entry) => entry.id === updated.id);
+          if (existingIndex >= 0) {
+            return prev.map((entry) =>
+              entry.id === updated.id ? { ...entry, ...updated } : entry
+            );
+          }
+          return [updated, ...prev];
+        });
+      }
+
+      addToast(createMode ? "Parceiro criado." : "Parceiro atualizado.", "success");
+      closeEditModal();
+    } catch (error: unknown) {
+      console.error(error);
+      addToast(
+        createMode ? "Erro ao criar parceiro." : "Erro ao salvar parceiro.",
+        "error"
+      );
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center gap-3">
           <Link
-            href="/admin/parceiros"
+            href={backHref}
             className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
           >
             <ArrowLeft size={18} className="text-zinc-300" />
@@ -171,14 +333,15 @@ export default function AdminParceirosEmpresasPage() {
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-3 text-sm text-white outline-none focus:border-emerald-500"
               />
             </div>
-            <Link
-              href="/empresa/cadastro"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 whitespace-nowrap"
-              title="Abrir formulario de cadastro de parceiro"
+            <button
+              type="button"
+              onClick={openCreateModal}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-brand bg-brand-primary/10 px-4 py-2.5 text-xs font-black uppercase tracking-wide text-brand hover:bg-brand-primary/15 whitespace-nowrap"
+              title="Criar parceiro"
             >
               <Plus size={14} />
               Criar Parceiro
-            </Link>
+            </button>
           </div>
 
           <div className="flex gap-2">
@@ -249,13 +412,24 @@ export default function AdminParceirosEmpresasPage() {
                       <td className="p-4">
                         <div className="flex justify-end gap-2">
                           <Link
-                            href={`/parceiros/${row.id}`}
+                            href={
+                              pathInfo.tenantSlug
+                                ? withTenantSlug(pathInfo.tenantSlug, `/empresa/${row.id}`)
+                                : `/empresa/${row.id}`
+                            }
                             target="_blank"
                             className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700"
-                            title="Abrir pagina publica"
+                            title="Abrir pagina da empresa"
                           >
                             <ExternalLink size={15} />
                           </Link>
+                          <button
+                            onClick={() => openEditModal(row)}
+                            className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700"
+                            title="Editar parceiro"
+                          >
+                            <Pencil size={15} />
+                          </button>
                           <button
                             onClick={() => void handleToggleStatus(row)}
                             className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700"
@@ -293,6 +467,213 @@ export default function AdminParceirosEmpresasPage() {
               </>
             )}
           </button>
+        )}
+
+        {(editingPartner || createMode) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
+            <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+              <div className="mb-5 flex items-center justify-between gap-3 border-b border-zinc-800 pb-4">
+                <div>
+                  <h2 className="text-lg font-black uppercase tracking-tight text-white">
+                    {createMode ? "Criar Parceiro" : "Editar Parceiro"}
+                  </h2>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+                    {createMode
+                      ? "Cadastro completo da empresa parceira"
+                      : "Campos de cadastro, pagina publica e painel da empresa"}
+                  </p>
+                </div>
+                <button
+                  onClick={closeEditModal}
+                  className="rounded-full border border-zinc-700 bg-zinc-900 p-2 text-zinc-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-zinc-800 bg-black/30 p-4 md:col-span-2">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                        Logo do parceiro
+                      </p>
+                      <div className="relative aspect-square w-full max-w-[180px] overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
+                        {String(editForm.imgLogo || "").trim() ? (
+                          <Image
+                            src={String(editForm.imgLogo)}
+                            alt="Logo do parceiro"
+                            fill
+                            unoptimized
+                            className="object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-[11px] font-bold uppercase text-zinc-500">
+                            Sem logo
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => logoInputRef.current?.click()}
+                        disabled={uploadingImageField !== null}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-brand bg-brand-primary/10 px-4 py-2.5 text-xs font-black uppercase tracking-wide text-brand hover:bg-brand-primary/15 disabled:opacity-60"
+                      >
+                        {uploadingImageField === "imgLogo" ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Plus size={14} />
+                        )}
+                        {uploadingImageField === "imgLogo" ? "Enviando..." : "Adicionar logo"}
+                      </button>
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        hidden
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={(event) => void handleUploadImage(event, "imgLogo")}
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                        Capa do parceiro
+                      </p>
+                      <div className="relative aspect-[16/9] w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
+                        {String(editForm.imgCapa || "").trim() ? (
+                          <Image
+                            src={String(editForm.imgCapa)}
+                            alt="Capa do parceiro"
+                            fill
+                            unoptimized
+                            className="object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-[11px] font-bold uppercase text-zinc-500">
+                            Sem capa
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => coverInputRef.current?.click()}
+                        disabled={uploadingImageField !== null}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-brand bg-brand-primary/10 px-4 py-2.5 text-xs font-black uppercase tracking-wide text-brand hover:bg-brand-primary/15 disabled:opacity-60"
+                      >
+                        {uploadingImageField === "imgCapa" ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Plus size={14} />
+                        )}
+                        {uploadingImageField === "imgCapa" ? "Enviando..." : "Adicionar capa"}
+                      </button>
+                      <input
+                        ref={coverInputRef}
+                        type="file"
+                        hidden
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={(event) => void handleUploadImage(event, "imgCapa")}
+                      />
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-[11px] text-zinc-500">
+                    Restricoes automáticas: logo até 2MB, capa até 3MB, formatos PNG/JPG/WEBP.
+                    O upload já reduz peso e resolução para segurar storage, egress e leitura.
+                  </p>
+                </div>
+
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Nome</span>
+                  <input value={String(editForm.nome || "")} onChange={(event) => handleEditChange("nome", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Categoria</span>
+                  <input value={String(editForm.categoria || "")} onChange={(event) => handleEditChange("categoria", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Plano</span>
+                  <select value={String(editForm.tier || editingPartner?.tier || "standard")} onChange={(event) => handleEditChange("tier", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand">
+                    <option value="ouro">Ouro</option>
+                    <option value="prata">Prata</option>
+                    <option value="standard">Standard</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Status</span>
+                  <select value={String(editForm.status || editingPartner?.status || "active")} onChange={(event) => handleEditChange("status", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand">
+                    <option value="active">Ativo</option>
+                    <option value="pending">Pendente</option>
+                    <option value="disabled">Desativado</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Responsavel</span>
+                  <input value={String(editForm.responsavel || "")} onChange={(event) => handleEditChange("responsavel", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">CNPJ</span>
+                  <input value={String(editForm.cnpj || "")} onChange={(event) => handleEditChange("cnpj", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">E-mail</span>
+                  <input value={String(editForm.email || "")} onChange={(event) => handleEditChange("email", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Telefone</span>
+                  <input value={String(editForm.telefone || "")} onChange={(event) => handleEditChange("telefone", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Descricao</span>
+                  <textarea value={String(editForm.descricao || "")} onChange={(event) => handleEditChange("descricao", event.target.value)} rows={3} className="w-full resize-none rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Endereco</span>
+                  <input value={String(editForm.endereco || "")} onChange={(event) => handleEditChange("endereco", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Horario</span>
+                  <input value={String(editForm.horario || "")} onChange={(event) => handleEditChange("horario", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Instagram</span>
+                  <input value={String(editForm.insta || "")} onChange={(event) => handleEditChange("insta", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">WhatsApp</span>
+                  <input value={String(editForm.whats || "")} onChange={(event) => handleEditChange("whats", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Site</span>
+                  <input value={String(editForm.site || "")} onChange={(event) => handleEditChange("site", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Logo URL</span>
+                  <input value={String(editForm.imgLogo || "")} onChange={(event) => handleEditChange("imgLogo", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Capa URL</span>
+                  <input value={String(editForm.imgCapa || "")} onChange={(event) => handleEditChange("imgCapa", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                </label>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button onClick={closeEditModal} className="rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-xs font-black uppercase tracking-wide text-zinc-300 hover:bg-zinc-800">
+                  Cancelar
+                </button>
+                <button onClick={() => void handleSaveEdit()} disabled={savingEdit} className="inline-flex items-center gap-2 rounded-xl border border-brand bg-brand-primary/10 px-4 py-2.5 text-xs font-black uppercase tracking-wide text-brand hover:bg-brand-primary/15 disabled:opacity-60">
+                  {savingEdit ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {savingEdit
+                    ? createMode
+                      ? "Criando"
+                      : "Salvando"
+                    : createMode
+                      ? "Criar parceiro"
+                      : "Salvar parceiro"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

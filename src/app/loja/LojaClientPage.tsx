@@ -11,6 +11,7 @@ import {
 // addToast removido pois nao estava sendo usado, se precisar re-importe
 // import { useToast } from "../../context/ToastContext"; 
 import { fetchStoreCategories, fetchStoreProductsPage } from "../../lib/storePublicService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 // --- TIPAGEM EXATA DO SEU SUPABASE ---
 interface Variante {
   id: string;
@@ -93,6 +94,7 @@ export default function LojaClientPage({
   initialHasMore,
   initialHydrated,
 }: LojaClientPageProps) {
+  const { tenantId: activeTenantId } = useTenantTheme();
   const skipInitialCategoryFetch = useRef(initialHydrated && initialCategories.length > 0);
   const skipInitialProductsFetch = useRef(initialHydrated);
 
@@ -138,7 +140,11 @@ export default function LojaClientPage({
 
     const loadCategories = async () => {
       try {
-        const rows = await fetchStoreCategories({ maxResults: 120, forceRefresh: false });
+        const rows = await fetchStoreCategories({
+          maxResults: 120,
+          forceRefresh: false,
+          tenantId: activeTenantId || undefined,
+        });
         if (!mounted) return;
         const names = rows
           .map((row) => (typeof (row as { nome?: unknown }).nome === "string" ? ((row as { nome: string }).nome || "").trim() : ""))
@@ -153,7 +159,7 @@ export default function LojaClientPage({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [activeTenantId]);
 
   // 3. CARREGAR PRODUTOS POR PAGINA/CATEGORIA (reduz over-fetch no plano free)
   useEffect(() => {
@@ -172,6 +178,7 @@ export default function LojaClientPage({
           pageSize: STORE_PAGE_SIZE,
           category: filtroCategoria,
           forceRefresh: false,
+          tenantId: activeTenantId || undefined,
         });
         if (!mounted) return;
         setProdutos(page.products as unknown as Produto[]);
@@ -188,7 +195,7 @@ export default function LojaClientPage({
     return () => {
       mounted = false;
     };
-  }, [filtroCategoria]);
+  }, [activeTenantId, filtroCategoria]);
 
   const handleLoadMore = async () => {
     if (loading || loadingMore || !hasMore) return;
@@ -201,6 +208,7 @@ export default function LojaClientPage({
         pageSize: STORE_PAGE_SIZE,
         category: filtroCategoria,
         forceRefresh: false,
+        tenantId: activeTenantId || undefined,
       });
 
       setProdutos((prev) => {

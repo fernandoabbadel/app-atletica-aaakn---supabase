@@ -1,6 +1,7 @@
 import { httpsCallable } from "@/lib/supa/functions";
 import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { compressImageFile } from "./imageCompression";
 import { functions, storage } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
@@ -56,6 +57,9 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
+const resolveGymTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(tenantId);
+
 const isMissingColumnError = (error: unknown): boolean => {
   if (!error || typeof error !== "object") return false;
   const raw = error as { code?: unknown; message?: unknown };
@@ -101,12 +105,16 @@ async function callWithFallback<TReq, TRes>(
   }
 }
 
-async function queryPostsWithFallback(maxResults: number): Promise<RawRow[]> {
+async function queryPostsWithFallback(maxResults: number, tenantId?: string | null): Promise<RawRow[]> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveGymTenantId(tenantId);
   const attempts: Array<"createdAt" | "data" | null> = ["createdAt", "data", null];
 
   for (const orderField of attempts) {
     let request = supabase.from("posts").select(POSTS_SELECT_COLUMNS).limit(maxResults);
+    if (scopedTenantId) {
+      request = request.eq("tenant_id", scopedTenantId);
+    }
     if (orderField) {
       request = request.order(orderField, { ascending: false });
     }
@@ -161,17 +169,19 @@ const normalizePost = (raw: RawRow): GymPostRecord => ({
 export async function fetchGymFeed(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<GymPostRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_FEED_POSTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const tenantId = resolveGymTenantId(options?.tenantId);
+  const cacheKey = `${tenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(feedCache, cacheKey);
     if (cached) return cached;
   }
 
-  const rows = await queryPostsWithFallback(maxResults);
+  const rows = await queryPostsWithFallback(maxResults, tenantId);
   const posts = rows.map((entry) => normalizePost(entry));
   setCache(feedCache, cacheKey, posts);
   return posts;
@@ -181,9 +191,11 @@ export async function toggleGymPostLike(payload: {
   postId: string;
   userId: string;
   currentlyLiked: boolean;
+  tenantId?: string | null;
 }): Promise<void> {
   const postId = payload.postId.trim();
   const userId = payload.userId.trim();
+  const scopedTenantId = resolveGymTenantId(payload.tenantId);
   if (!postId || !userId) return;
 
   await callWithFallback<typeof payload, { ok: boolean }>(
@@ -191,11 +203,14 @@ export async function toggleGymPostLike(payload: {
     payload,
     async () => {
       const supabase = getSupabaseClient();
-      const { data: postData, error: postError } = await supabase
+      let postQuery = supabase
         .from("posts")
         .select("likedBy,likes")
-        .eq("id", postId)
-        .maybeSingle();
+        .eq("id", postId);
+      if (scopedTenantId) {
+        postQuery = postQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { data: postData, error: postError } = await postQuery.maybeSingle();
       if (postError) throwSupabaseError(postError);
 
       const currentLikedBy = asStringList(postData?.likedBy);
@@ -208,7 +223,7 @@ export async function toggleGymPostLike(payload: {
       const nextLikedBy = Array.from(likedBySet);
       const nextLikes = Math.max(0, asNumber(postData?.likes, currentLikedBy.length) + (payload.currentlyLiked ? -1 : 1));
 
-      const { error: updateError } = await supabase
+      let updateQuery = supabase
         .from("posts")
         .update({
           likes: nextLikes,
@@ -216,6 +231,10 @@ export async function toggleGymPostLike(payload: {
           updatedAt: new Date().toISOString(),
         })
         .eq("id", postId);
+      if (scopedTenantId) {
+        updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { error: updateError } = await updateQuery;
       if (updateError) throwSupabaseError(updateError);
 
       return { ok: true };
@@ -242,8 +261,10 @@ export async function submitGymCheckin(payload: {
   selectedType: string;
   title: string;
   photoDataUrl: string;
+  tenantId?: string | null;
 }): Promise<{ postId: string; photoUrl: string }> {
   const userId = payload.userId.trim();
+  const scopedTenantId = resolveGymTenantId(payload.tenantId);
   if (!userId) throw new Error("Usuario invalido.");
 
   const originalFile = await convertDataUrlToFile(payload.photoDataUrl);
@@ -307,23 +328,31 @@ export async function submitGymCheckin(payload: {
             hour: "2-digit",
             minute: "2-digit",
           }),
+          ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         })
         .select("id")
         .single();
       if (postError) throwSupabaseError(postError);
 
-      const { data: userRow, error: userError } = await supabase
+      let userQuery = supabase
         .from("users")
         .select("xp")
-        .eq("uid", requestPayload.userId)
-        .maybeSingle();
+        .eq("uid", requestPayload.userId);
+      if (scopedTenantId) {
+        userQuery = userQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { data: userRow, error: userError } = await userQuery.maybeSingle();
       if (userError) throwSupabaseError(userError);
 
       const nextXp = asNumber(userRow?.xp, 0) + CHECKIN_XP_REWARD;
-      const { error: userUpdateError } = await supabase
+      let userUpdateQuery = supabase
         .from("users")
         .update({ xp: nextXp, updatedAt: nowIso })
         .eq("uid", requestPayload.userId);
+      if (scopedTenantId) {
+        userUpdateQuery = userUpdateQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { error: userUpdateError } = await userUpdateQuery;
       if (userUpdateError) throwSupabaseError(userUpdateError);
 
       return { postId: asString((postRow as RawRow | null)?.id) };

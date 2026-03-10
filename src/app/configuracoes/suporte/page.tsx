@@ -28,9 +28,12 @@ const CATEGORY_OPTIONS: Array<{ value: SupportCategory; label: string }> = [
   { value: "conta", label: "Conta" },
   { value: "bug", label: "Bug" },
   { value: "denuncia", label: "Denuncia" },
-  { value: "sugestorias", label: "Sugestorias" },
+  { value: "sugestorias", label: "Sugestões" },
   { value: "outro", label: "Outro" },
 ];
+
+const SUBJECT_MAX_CHARS = 50;
+const MESSAGE_MAX_CHARS = 300;
 
 export default function SupportPage() {
   const { user } = useAuth();
@@ -160,10 +163,13 @@ export default function SupportPage() {
               type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              maxLength={120}
+              maxLength={SUBJECT_MAX_CHARS}
               placeholder="Ex: Nao consigo finalizar meu pedido"
               className="w-full bg-black border border-zinc-800 rounded-lg p-3 text-sm text-white outline-none focus:border-emerald-500 placeholder:text-zinc-600"
             />
+            <p className="mt-1 text-right text-[10px] font-bold uppercase tracking-wide text-zinc-600">
+              {subject.length}/{SUBJECT_MAX_CHARS}
+            </p>
           </div>
 
           <div>
@@ -173,11 +179,14 @@ export default function SupportPage() {
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              maxLength={5000}
+              maxLength={MESSAGE_MAX_CHARS}
               rows={5}
               placeholder="Descreva o que aconteceu"
               className="w-full bg-black border border-zinc-800 rounded-lg p-3 text-sm text-white outline-none focus:border-emerald-500 placeholder:text-zinc-600 resize-none"
             />
+            <p className="mt-1 text-right text-[10px] font-bold uppercase tracking-wide text-zinc-600">
+              {message.length}/{MESSAGE_MAX_CHARS}
+            </p>
           </div>
 
           <button

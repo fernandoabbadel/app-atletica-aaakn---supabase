@@ -2,6 +2,7 @@ import { httpsCallable } from "@/lib/supa/functions";
 import { getSupabaseClient } from "./supabase";
 
 import { functions } from "./backend";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { getBackendErrorCode } from "./backendErrors";
 import { uploadImage } from "./upload";
 
@@ -224,6 +225,45 @@ const asNumber = (value: unknown, fallback = 0): number =>
 
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
+const resolvePartnersTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const requirePartnersTenantId = (tenantId?: string | null): string => {
+  const scopedTenantId = resolvePartnersTenantId(tenantId);
+  if (!scopedTenantId) {
+    throw new Error("Tenant ativo nao identificado para parceiros.");
+  }
+  return scopedTenantId;
+};
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+  const message = [raw.message, raw.details, raw.hint]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!message) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const extracted = match[2] ?? match[1];
+    if (extracted) return extracted;
+  }
+
+  return null;
+};
+
+const isMissingTenantIdColumn = (error: unknown): boolean =>
+  extractMissingSchemaColumn(error)?.trim().toLowerCase() === "tenant_id";
+
 const throwSupabaseError = (error: {
   message: string;
   code?: string | null;
@@ -442,12 +482,15 @@ type RowsFetchAttempt = {
 
 async function fetchRowsWithFallback(
   tableName: "parceiros" | "scans",
-  attempts: RowsFetchAttempt[]
+  attempts: RowsFetchAttempt[],
+  options?: { tenantId?: string | null }
 ): Promise<Record<string, unknown>[]> {
   const safeAttempts = attempts.filter((entry) => entry.limit > 0);
   if (!safeAttempts.length) return [];
 
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  if (!scopedTenantId) return [];
   const selectColumns =
     tableName === "parceiros" ? PARCEIROS_SELECT_COLUMNS : SCANS_SELECT_COLUMNS;
   let lastError: unknown = null;
@@ -455,7 +498,11 @@ async function fetchRowsWithFallback(
   for (let index = 0; index < safeAttempts.length; index += 1) {
     const attempt = safeAttempts[index];
     try {
-      let q = supabase.from(tableName).select(selectColumns).limit(attempt.limit);
+      let q = supabase
+        .from(tableName)
+        .select(selectColumns)
+        .eq("tenant_id", scopedTenantId)
+        .limit(attempt.limit);
 
       if (attempt.eq) {
         for (const [column, value] of Object.entries(attempt.eq)) {
@@ -470,6 +517,9 @@ async function fetchRowsWithFallback(
       if (error) throw error;
       return ((data as unknown as Record<string, unknown>[] | null) ?? []);
     } catch (error: unknown) {
+      if (isMissingTenantIdColumn(error)) {
+        return [];
+      }
       lastError = error;
       const isLastAttempt = index === safeAttempts.length - 1;
       if (!isIndexRequiredError(error) || isLastAttempt) {
@@ -589,6 +639,7 @@ export async function fetchAdminPartnersBundle(options?: {
   partnersLimit?: number;
   scansLimit?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<{ partners: PartnerRecord[]; scans: PartnerScanRecord[] }> {
   const partnersLimit = boundedLimit(
     options?.partnersLimit ?? 500,
@@ -596,23 +647,28 @@ export async function fetchAdminPartnersBundle(options?: {
   );
   const scansLimit = boundedLimit(options?.scansLimit ?? 500, MAX_SCANS_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${partnersLimit}:${scansLimit}`;
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "none"}:${partnersLimit}:${scansLimit}`;
 
   if (!forceRefresh) {
     const cached = getMapCacheValue(adminBundleCache, cacheKey);
     if (cached) return cached;
   }
 
+  if (!scopedTenantId) {
+    return { partners: [], scans: [] };
+  }
+
   const [partnersRows, scansRows] = await Promise.all([
     fetchRowsWithFallback("parceiros", [
       { orderBy: { column: "nome", ascending: true }, limit: partnersLimit },
       { limit: partnersLimit },
-    ]),
+    ], { tenantId: scopedTenantId }),
     fetchRowsWithFallback("scans", [
       { orderBy: { column: "timestamp", ascending: false }, limit: scansLimit },
       { orderBy: { column: "data", ascending: false }, limit: scansLimit },
       { limit: scansLimit },
-    ]),
+    ], { tenantId: scopedTenantId }),
   ]);
 
   const partners = partnersRows
@@ -635,12 +691,14 @@ export async function fetchAdminPartnersPage(options?: {
   cursorId?: string | null;
   status?: PartnerStatus | "all";
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AdminPartnersPageResult> {
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_PARTNERS_RESULTS);
   const cursorId = options?.cursorId?.trim() || "";
   const statusFilter = normalizeStatusFilter(options?.status);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${statusFilter}:${pageSize}:${cursorId || "first"}`;
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "none"}:${statusFilter}:${pageSize}:${cursorId || "first"}`;
 
   if (forceRefresh) {
     clearAdminPartnersCaches();
@@ -652,6 +710,10 @@ export async function fetchAdminPartnersPage(options?: {
     if (pending) return pending;
   }
 
+  if (!scopedTenantId) {
+    return { partners: [], hasMore: false, nextCursor: null };
+  }
+
   const requestPromise = (async () => {
     const supabase = getSupabaseClient();
     const windowLimit = Math.min(MAX_PARTNERS_RESULTS, Math.max(pageSize * 12, 120));
@@ -659,6 +721,7 @@ export async function fetchAdminPartnersPage(options?: {
     let q = supabase
       .from("parceiros")
       .select(PARCEIROS_SELECT_COLUMNS)
+      .eq("tenant_id", scopedTenantId)
       .order("nome", { ascending: true })
       .limit(windowLimit);
     if (statusFilter !== "all") {
@@ -666,7 +729,12 @@ export async function fetchAdminPartnersPage(options?: {
     }
 
     const { data, error } = await q;
-    if (error) throwSupabaseError(error);
+    if (error) {
+      if (isMissingTenantIdColumn(error)) {
+        return { partners: [], hasMore: false, nextCursor: null };
+      }
+      throwSupabaseError(error);
+    }
 
     const rawRows = (data as unknown as Record<string, unknown>[] | null) ?? [];
     let rows = rawRows
@@ -702,12 +770,14 @@ export async function fetchAdminPartnerScansPage(options?: {
   cursorId?: string | null;
   partnerId?: string;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AdminPartnerScansPageResult> {
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_SCANS_RESULTS);
   const cursorId = options?.cursorId?.trim() || "";
   const partnerId = options?.partnerId?.trim() || "";
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${partnerId || "all"}:${pageSize}:${cursorId || "first"}`;
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "none"}:${partnerId || "all"}:${pageSize}:${cursorId || "first"}`;
 
   if (forceRefresh) {
     clearAdminPartnersCaches();
@@ -719,12 +789,20 @@ export async function fetchAdminPartnerScansPage(options?: {
     if (pending) return pending;
   }
 
+  if (!scopedTenantId) {
+    return { scans: [], hasMore: false, nextCursor: null };
+  }
+
   const requestPromise = (async () => {
     const supabase = getSupabaseClient();
     const windowLimit = Math.min(MAX_SCANS_RESULTS, Math.max(pageSize * 12, 120));
 
     const runQuery = async (orderColumn: "timestamp" | "data" | null) => {
-      let q = supabase.from("scans").select(SCANS_SELECT_COLUMNS).limit(windowLimit);
+      let q = supabase
+        .from("scans")
+        .select(SCANS_SELECT_COLUMNS)
+        .eq("tenant_id", scopedTenantId)
+        .limit(windowLimit);
       if (partnerId) {
         q = q.eq("empresaId", partnerId);
       }
@@ -737,9 +815,17 @@ export async function fetchAdminPartnerScansPage(options?: {
     let data: Record<string, unknown>[] = [];
     try {
       const { data: orderedRows, error } = await runQuery("timestamp");
-      if (error) throw error;
+      if (error) {
+        if (isMissingTenantIdColumn(error)) {
+          return { scans: [], hasMore: false, nextCursor: null };
+        }
+        throw error;
+      }
       data = (orderedRows as unknown as Record<string, unknown>[] | null) ?? [];
     } catch (error: unknown) {
+      if (isMissingTenantIdColumn(error)) {
+        return { scans: [], hasMore: false, nextCursor: null };
+      }
       if (!isIndexRequiredError(error)) {
         if (typeof (error as { message?: unknown })?.message === "string") {
           throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
@@ -749,8 +835,16 @@ export async function fetchAdminPartnerScansPage(options?: {
 
       const { data: fallbackRows, error: fallbackError } = await runQuery("data");
       if (fallbackError) {
+        if (isMissingTenantIdColumn(fallbackError)) {
+          return { scans: [], hasMore: false, nextCursor: null };
+        }
         const { data: noOrderRows, error: noOrderError } = await runQuery(null);
-        if (noOrderError) throwSupabaseError(noOrderError);
+        if (noOrderError) {
+          if (isMissingTenantIdColumn(noOrderError)) {
+            return { scans: [], hasMore: false, nextCursor: null };
+          }
+          throwSupabaseError(noOrderError);
+        }
         data = (noOrderRows as unknown as Record<string, unknown>[] | null) ?? [];
       } else {
         data = (fallbackRows as unknown as Record<string, unknown>[] | null) ?? [];
@@ -784,9 +878,23 @@ export async function fetchAdminPartnerScansPage(options?: {
 
 export async function fetchAdminPartnersTierCounts(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AdminPartnersTierCounts> {
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = "global";
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  const cacheKey = scopedTenantId || "none";
+
+  if (!scopedTenantId) {
+    return {
+      total: 0,
+      ativos: 0,
+      pendentes: 0,
+      desativados: 0,
+      ouro: 0,
+      prata: 0,
+      standard: 0,
+    };
+  }
 
   if (forceRefresh) {
     clearAdminPartnersCaches();
@@ -810,32 +918,41 @@ export async function fetchAdminPartnersTierCounts(options?: {
         prataSnap,
         standardSnap,
       ] = await Promise.all([
-        supabase.from("parceiros").select("id", { count: "exact", head: true }),
         supabase
           .from("parceiros")
           .select("id", { count: "exact", head: true })
+          .eq("tenant_id", scopedTenantId),
+        supabase
+          .from("parceiros")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", scopedTenantId)
           .eq("status", "active"),
         supabase
           .from("parceiros")
           .select("id", { count: "exact", head: true })
+          .eq("tenant_id", scopedTenantId)
           .eq("status", "pending"),
         supabase
           .from("parceiros")
           .select("id", { count: "exact", head: true })
+          .eq("tenant_id", scopedTenantId)
           .eq("status", "disabled"),
         supabase
           .from("parceiros")
           .select("id", { count: "exact", head: true })
+          .eq("tenant_id", scopedTenantId)
           .eq("status", "active")
           .eq("tier", "ouro"),
         supabase
           .from("parceiros")
           .select("id", { count: "exact", head: true })
+          .eq("tenant_id", scopedTenantId)
           .eq("status", "active")
           .eq("tier", "prata"),
         supabase
           .from("parceiros")
           .select("id", { count: "exact", head: true })
+          .eq("tenant_id", scopedTenantId)
           .eq("status", "active")
           .eq("tier", "standard"),
       ]);
@@ -863,7 +980,21 @@ export async function fetchAdminPartnersTierCounts(options?: {
         throw error;
       }
 
-      const rows = await fetchRowsWithFallback("parceiros", [{ limit: MAX_PARTNERS_RESULTS }]);
+      if (isMissingTenantIdColumn(error)) {
+        return {
+          total: 0,
+          ativos: 0,
+          pendentes: 0,
+          desativados: 0,
+          ouro: 0,
+          prata: 0,
+          standard: 0,
+        };
+      }
+
+      const rows = await fetchRowsWithFallback("parceiros", [{ limit: MAX_PARTNERS_RESULTS }], {
+        tenantId: scopedTenantId,
+      });
       const normalized = rows
         .map((row) => normalizePartner(asString(row.id), row))
         .filter((row): row is PartnerRecord => row !== null);
@@ -905,14 +1036,20 @@ const tierRank = (tier: PartnerTier): number => {
 export async function fetchPublicPartners(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PartnerRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 240, MAX_PARTNERS_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "none"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCacheValue(publicPartnersCache, cacheKey);
     if (cached) return cached;
+  }
+
+  if (!scopedTenantId) {
+    return [];
   }
 
   const rows = await fetchRowsWithFallback("parceiros", [
@@ -920,7 +1057,7 @@ export async function fetchPublicPartners(options?: {
     { eq: { status: "active" }, orderBy: { column: "nome", ascending: true }, limit: maxResults },
     { eq: { status: "active" }, limit: maxResults },
     { orderBy: { column: "nome", ascending: true }, limit: maxResults },
-  ]);
+  ], { tenantId: scopedTenantId });
 
   const partners = rows
     .map((row) => normalizePartner(asString(row.id), row))
@@ -939,32 +1076,44 @@ export async function fetchPublicPartners(options?: {
 
 export async function fetchPartnerById(
   partnerId: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<PartnerRecord | null> {
   const cleanPartnerId = partnerId.trim();
   if (!cleanPartnerId) return null;
 
   const forceRefresh = options?.forceRefresh ?? false;
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "none"}:${cleanPartnerId}`;
   if (!forceRefresh) {
-    const cached = getMapCacheValue(partnerByIdCache, cleanPartnerId);
+    const cached = getMapCacheValue(partnerByIdCache, cacheKey);
     if (cached !== null) return cached;
+  }
+
+  if (!scopedTenantId) {
+    return null;
   }
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("parceiros")
     .select(PARCEIROS_SELECT_COLUMNS)
+    .eq("tenant_id", scopedTenantId)
     .eq("id", cleanPartnerId)
     .maybeSingle();
-  if (error) throwSupabaseError(error);
+  if (error) {
+    if (isMissingTenantIdColumn(error)) {
+      return null;
+    }
+    throwSupabaseError(error);
+  }
 
   if (!data) {
-    setMapCacheValue(partnerByIdCache, cleanPartnerId, null);
+    setMapCacheValue(partnerByIdCache, cacheKey, null);
     return null;
   }
 
   const partner = normalizePartner(cleanPartnerId, data);
-  setMapCacheValue(partnerByIdCache, cleanPartnerId, partner);
+  setMapCacheValue(partnerByIdCache, cacheKey, partner);
   return partner;
 }
 
@@ -972,24 +1121,30 @@ export async function fetchPartnerScans(options: {
   partnerId: string;
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PartnerScanRecord[]> {
   const partnerId = options.partnerId.trim();
   if (!partnerId) return [];
 
   const maxResults = boundedLimit(options.maxResults ?? 300, MAX_SCANS_RESULTS);
   const forceRefresh = options.forceRefresh ?? false;
-  const cacheKey = `${partnerId}:${maxResults}`;
+  const scopedTenantId = resolvePartnersTenantId(options.tenantId);
+  const cacheKey = `${scopedTenantId || "none"}:${partnerId}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCacheValue(partnerScansCache, cacheKey);
     if (cached) return cached;
   }
 
+  if (!scopedTenantId) {
+    return [];
+  }
+
   const rows = await fetchRowsWithFallback("scans", [
     { eq: { empresaId: partnerId }, orderBy: { column: "timestamp", ascending: false }, limit: maxResults },
     { eq: { empresaId: partnerId }, orderBy: { column: "data", ascending: false }, limit: maxResults },
     { eq: { empresaId: partnerId }, limit: maxResults },
-  ]);
+  ], { tenantId: scopedTenantId });
 
   const scans = rows
     .map((row) => normalizeScan(asString(row.id), row))
@@ -1004,60 +1159,38 @@ export async function fetchPartnerScans(options: {
 export async function loginPartnerByEmail(payload: {
   email: string;
   senha: string;
+  tenantId?: string | null;
 }): Promise<PartnerLoginResult | null> {
   const email = payload.email.trim().toLowerCase();
   const senha = payload.senha.trim();
-  if (!email || !senha) return null;
+  const scopedTenantId = resolvePartnersTenantId(payload.tenantId);
+  if (!email || !senha || !scopedTenantId) return null;
 
-  const fallback = async (): Promise<PartnerLoginResult | null> => {
-    const supabase = getSupabaseClient();
-    const { data, error } = await supabase
-      .from("parceiros")
-      .select(PARCEIROS_SELECT_COLUMNS)
-      .eq("email", email)
-      .limit(1)
-      .maybeSingle();
-    if (error) throwSupabaseError(error);
-    if (!data) return null;
-
-    const safeData = data as unknown as Record<string, unknown>;
-    const row = normalizePartner(asString(safeData.id), safeData);
-    if (!row) return null;
-
-    return {
-      id: row.id,
-      nome: row.nome,
-      status: row.status,
-      passwordValid: asString(row.senha) === senha,
-    };
-  };
-
-  const rawResponse = await callWithFallback<
-    { email: string; senha: string },
-    unknown
-  >(PARTNERS_LOGIN_CALLABLE, { email, senha }, fallback);
-
-  if (rawResponse === null) return null;
-
-  const responseObj = asObject(rawResponse);
-  if (!responseObj) return null;
-
-  const dataLayer = asObject(responseObj.data) ?? responseObj;
-  if (dataLayer && dataLayer.ok === false) {
-    return null;
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("parceiros")
+    .select(PARCEIROS_SELECT_COLUMNS)
+    .eq("tenant_id", scopedTenantId)
+    .eq("email", email)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTenantIdColumn(error)) {
+      return null;
+    }
+    throwSupabaseError(error);
   }
+  if (!data) return null;
 
-  const partnerId = asString(dataLayer.id || dataLayer.partnerId).trim();
-  if (!partnerId) return null;
+  const safeData = data as unknown as Record<string, unknown>;
+  const row = normalizePartner(asString(safeData.id), safeData);
+  if (!row) return null;
 
   return {
-    id: partnerId,
-    nome: asString(dataLayer.nome || dataLayer.partnerName, "Parceiro"),
-    status: asString(dataLayer.status, "active"),
-    passwordValid:
-      typeof dataLayer.passwordValid === "boolean"
-        ? dataLayer.passwordValid
-        : true,
+    id: row.id,
+    nome: row.nome,
+    status: row.status,
+    passwordValid: asString(row.senha) === senha,
   };
 }
 
@@ -1074,7 +1207,9 @@ export async function createPartnerLead(payload: {
   endereco: string;
   horario: string;
   tier: string;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
+  const scopedTenantId = requirePartnersTenantId(payload.tenantId);
   const leadPayload = {
     nome: payload.nome,
     cnpj: payload.cnpj,
@@ -1088,6 +1223,7 @@ export async function createPartnerLead(payload: {
     endereco: payload.endereco,
     horario: payload.horario,
     tier: normalizeTier(payload.tier),
+    tenantId: scopedTenantId,
   };
 
   const result = await callWithFallback<typeof leadPayload, { id: string }>(
@@ -1106,6 +1242,7 @@ export async function createPartnerLead(payload: {
         .from("parceiros")
         .insert({
           ...sanitized,
+          tenant_id: scopedTenantId,
           createdAt: new Date().toISOString(),
         })
         .select("id")
@@ -1123,28 +1260,28 @@ export async function createPartnerLead(payload: {
 export async function setPartnerStatus(payload: {
   partnerId: string;
   status: PartnerStatus;
+  tenantId?: string | null;
 }): Promise<void> {
   const partnerId = payload.partnerId.trim();
   if (!partnerId) return;
 
   const status = normalizeStatus(payload.status);
-  const requestPayload = { partnerId, status };
-
-  await callWithFallback<typeof requestPayload, { ok: boolean }>(
-    PARTNERS_ADMIN_STATUS_CALLABLE,
-    requestPayload,
-    async () => {
-      const supabase = getSupabaseClient();
-      const { error } = await supabase
-        .from("parceiros")
-        .update({ status })
-        .eq("id", partnerId);
-      if (error) throwSupabaseError(error);
-      return { ok: true };
+  const scopedTenantId = requirePartnersTenantId(payload.tenantId);
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("parceiros")
+    .update({ status })
+    .eq("tenant_id", scopedTenantId)
+    .eq("id", partnerId);
+  if (error) {
+    if (isMissingTenantIdColumn(error)) {
+      throw new Error("Schema de parceiros ainda sem tenant_id.");
     }
-  );
+    throwSupabaseError(error);
+  }
 
-  partnerByIdCache.delete(partnerId);
+  partnerByIdCache.clear();
+  partnerScansCache.clear();
   clearAdminPartnersCaches();
   publicPartnersCache.clear();
 }
@@ -1152,49 +1289,58 @@ export async function setPartnerStatus(payload: {
 export async function upsertPartner(payload: {
   partnerId?: string;
   data: Partial<PartnerRecord>;
+  tenantId?: string | null;
 }): Promise<PartnerRecord | null> {
   const partnerId = payload.partnerId?.trim() || "";
   const sanitized = sanitizePartnerWritePayload(payload.data);
+  const scopedTenantId = requirePartnersTenantId(payload.tenantId);
+  const supabase = getSupabaseClient();
 
-  const requestPayload = {
-    ...(partnerId ? { partnerId } : {}),
-    data: sanitized,
-  };
-
-  const response = await callWithFallback<typeof requestPayload, unknown>(
-    PARTNERS_ADMIN_UPSERT_CALLABLE,
-    requestPayload,
-    async () => {
-      const supabase = getSupabaseClient();
-      if (partnerId) {
-        const { error: updateError } = await supabase
-          .from("parceiros")
-          .update(sanitized)
-          .eq("id", partnerId);
-        if (updateError) throwSupabaseError(updateError);
-
-        const { data: updatedRow, error: selectError } = await supabase
-          .from("parceiros")
-          .select(PARCEIROS_SELECT_COLUMNS)
-          .eq("id", partnerId)
-          .maybeSingle();
-        if (selectError) throwSupabaseError(selectError);
-        if (!updatedRow) return null;
-        return updatedRow;
+  let response: unknown = null;
+  if (partnerId) {
+    const { error: updateError } = await supabase
+      .from("parceiros")
+      .update(sanitized)
+      .eq("tenant_id", scopedTenantId)
+      .eq("id", partnerId);
+    if (updateError) {
+      if (isMissingTenantIdColumn(updateError)) {
+        throw new Error("Schema de parceiros ainda sem tenant_id.");
       }
-
-      const { data: createdRow, error: createError } = await supabase
-        .from("parceiros")
-        .insert({
-          ...sanitized,
-          createdAt: new Date().toISOString(),
-        })
-        .select(PARCEIROS_SELECT_COLUMNS)
-        .single();
-      if (createError) throwSupabaseError(createError);
-      return createdRow;
+      throwSupabaseError(updateError);
     }
-  );
+
+    const { data: updatedRow, error: selectError } = await supabase
+      .from("parceiros")
+      .select(PARCEIROS_SELECT_COLUMNS)
+      .eq("tenant_id", scopedTenantId)
+      .eq("id", partnerId)
+      .maybeSingle();
+    if (selectError) {
+      if (isMissingTenantIdColumn(selectError)) {
+        throw new Error("Schema de parceiros ainda sem tenant_id.");
+      }
+      throwSupabaseError(selectError);
+    }
+    response = updatedRow;
+  } else {
+    const { data: createdRow, error: createError } = await supabase
+      .from("parceiros")
+      .insert({
+        ...sanitized,
+        tenant_id: scopedTenantId,
+        createdAt: new Date().toISOString(),
+      })
+      .select(PARCEIROS_SELECT_COLUMNS)
+      .single();
+    if (createError) {
+      if (isMissingTenantIdColumn(createError)) {
+        throw new Error("Schema de parceiros ainda sem tenant_id.");
+      }
+      throwSupabaseError(createError);
+    }
+    response = createdRow;
+  }
 
   const normalized = normalizePartner(
     asString(asObject(response)?.id || partnerId),
@@ -1212,25 +1358,28 @@ export async function upsertPartner(payload: {
   return normalized;
 }
 
-export async function deletePartnerById(partnerId: string): Promise<void> {
+export async function deletePartnerById(
+  partnerId: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const cleanPartnerId = partnerId.trim();
   if (!cleanPartnerId) return;
-
-  await callWithFallback<{ partnerId: string }, { ok: boolean }>(
-    PARTNERS_ADMIN_DELETE_CALLABLE,
-    { partnerId: cleanPartnerId },
-    async () => {
-      const supabase = getSupabaseClient();
-      const { error } = await supabase
-        .from("parceiros")
-        .delete()
-        .eq("id", cleanPartnerId);
-      if (error) throwSupabaseError(error);
-      return { ok: true };
+  const scopedTenantId = requirePartnersTenantId(options?.tenantId);
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("parceiros")
+    .delete()
+    .eq("tenant_id", scopedTenantId)
+    .eq("id", cleanPartnerId);
+  if (error) {
+    if (isMissingTenantIdColumn(error)) {
+      throw new Error("Schema de parceiros ainda sem tenant_id.");
     }
-  );
+    throwSupabaseError(error);
+  }
 
-  partnerByIdCache.delete(cleanPartnerId);
+  partnerByIdCache.clear();
+  partnerScansCache.clear();
   clearAdminPartnersCaches();
   publicPartnersCache.clear();
 }
@@ -1244,11 +1393,13 @@ export async function createPartnerScan(payload: {
   valorEconomizado: string;
   data: string;
   hora: string;
+  tenantId?: string | null;
 }): Promise<{ scan: PartnerScanRecord; totalScans: number }> {
   const partnerId = payload.partnerId.trim();
   if (!partnerId) {
     throw new Error("partnerId obrigatorio");
   }
+  const scopedTenantId = requirePartnersTenantId(payload.tenantId);
 
   const requestPayload = {
     partnerId,
@@ -1261,61 +1412,73 @@ export async function createPartnerScan(payload: {
     hora: payload.hora.trim().slice(0, 20),
   };
 
-  const response = await callWithFallback<typeof requestPayload, unknown>(
-    PARTNERS_CREATE_SCAN_CALLABLE,
-    requestPayload,
-    async () => {
-      const supabase = getSupabaseClient();
-      const { data: partnerRow, error: partnerError } = await supabase
-        .from("parceiros")
-        .select("totalScans,scansCount")
-        .eq("id", partnerId)
-        .maybeSingle();
-      if (partnerError) throwSupabaseError(partnerError);
-
-      const partnerData = asObject(partnerRow);
-      const currentTotal = asNumber(partnerData?.totalScans, 0);
-      const currentScansCount = asNumber(partnerData?.scansCount, currentTotal);
-      const nextTotal = currentTotal + 1;
-      const nextScansCount = currentScansCount + 1;
-      const timestampIso = new Date().toISOString();
-
-      const { data: insertedScan, error: scanInsertError } = await supabase
-        .from("scans")
-        .insert({
-          empresaId: partnerId,
-          empresa: requestPayload.partnerName,
-          usuario: requestPayload.usuario,
-          userId: requestPayload.userId,
-          cupom: requestPayload.cupom,
-          valorEconomizado: requestPayload.valorEconomizado,
-          data: requestPayload.data,
-          hora: requestPayload.hora,
-          timestamp: timestampIso,
-        })
-        .select(SCANS_SELECT_COLUMNS)
-        .single();
-      if (scanInsertError) throwSupabaseError(scanInsertError);
-
-      const { error: partnerUpdateError } = await supabase
-        .from("parceiros")
-        .update({
-          totalScans: nextTotal,
-          scansCount: nextScansCount,
-        })
-        .eq("id", partnerId);
-      if (partnerUpdateError) throwSupabaseError(partnerUpdateError);
-
-      return {
-        scan: {
-          ...(asObject(insertedScan) ?? {}),
-          id: asString(asObject(insertedScan)?.id || crypto.randomUUID()),
-          timestamp: asObject(insertedScan)?.timestamp ?? timestampIso,
-        },
-        totalScans: nextTotal,
-      };
+  const supabase = getSupabaseClient();
+  const { data: partnerRow, error: partnerError } = await supabase
+    .from("parceiros")
+    .select("totalScans,scansCount")
+    .eq("tenant_id", scopedTenantId)
+    .eq("id", partnerId)
+    .maybeSingle();
+  if (partnerError) {
+    if (isMissingTenantIdColumn(partnerError)) {
+      throw new Error("Schema de parceiros ainda sem tenant_id.");
     }
-  );
+    throwSupabaseError(partnerError);
+  }
+
+  const partnerData = asObject(partnerRow);
+  const currentTotal = asNumber(partnerData?.totalScans, 0);
+  const currentScansCount = asNumber(partnerData?.scansCount, currentTotal);
+  const nextTotal = currentTotal + 1;
+  const nextScansCount = currentScansCount + 1;
+  const timestampIso = new Date().toISOString();
+
+  const { data: insertedScan, error: scanInsertError } = await supabase
+    .from("scans")
+    .insert({
+      tenant_id: scopedTenantId,
+      empresaId: partnerId,
+      empresa: requestPayload.partnerName,
+      usuario: requestPayload.usuario,
+      userId: requestPayload.userId,
+      cupom: requestPayload.cupom,
+      valorEconomizado: requestPayload.valorEconomizado,
+      data: requestPayload.data,
+      hora: requestPayload.hora,
+      timestamp: timestampIso,
+    })
+    .select(SCANS_SELECT_COLUMNS)
+    .single();
+  if (scanInsertError) {
+    if (isMissingTenantIdColumn(scanInsertError)) {
+      throw new Error("Schema de scans ainda sem tenant_id.");
+    }
+    throwSupabaseError(scanInsertError);
+  }
+
+  const { error: partnerUpdateError } = await supabase
+    .from("parceiros")
+    .update({
+      totalScans: nextTotal,
+      scansCount: nextScansCount,
+    })
+    .eq("tenant_id", scopedTenantId)
+    .eq("id", partnerId);
+  if (partnerUpdateError) {
+    if (isMissingTenantIdColumn(partnerUpdateError)) {
+      throw new Error("Schema de parceiros ainda sem tenant_id.");
+    }
+    throwSupabaseError(partnerUpdateError);
+  }
+
+  const response = {
+    scan: {
+      ...(asObject(insertedScan) ?? {}),
+      id: asString(asObject(insertedScan)?.id || crypto.randomUUID()),
+      timestamp: asObject(insertedScan)?.timestamp ?? timestampIso,
+    },
+    totalScans: nextTotal,
+  };
 
   const responseObj = asObject(response);
   const rawScan = asObject(responseObj?.scan);
@@ -1336,12 +1499,8 @@ export async function createPartnerScan(payload: {
   const totalScans = asNumber(responseObj?.totalScans, NaN);
   const normalizedTotal = Number.isFinite(totalScans) ? totalScans : 0;
 
-  partnerScansCache.forEach((_, key) => {
-    if (key.startsWith(`${partnerId}:`)) {
-      partnerScansCache.delete(key);
-    }
-  });
-  partnerByIdCache.delete(partnerId);
+  partnerScansCache.clear();
+  partnerByIdCache.clear();
   clearAdminPartnersCaches();
   publicPartnersCache.clear();
 
@@ -1354,28 +1513,28 @@ export async function createPartnerScan(payload: {
 export async function updatePartnerProfile(payload: {
   partnerId: string;
   data: Partial<PartnerRecord>;
+  tenantId?: string | null;
 }): Promise<void> {
   const partnerId = payload.partnerId.trim();
   if (!partnerId) return;
 
   const sanitized = sanitizePartnerWritePayload(payload.data);
-  const requestPayload = { partnerId, data: sanitized };
-
-  await callWithFallback<typeof requestPayload, { ok: boolean }>(
-    PARTNERS_UPDATE_PROFILE_CALLABLE,
-    requestPayload,
-    async () => {
-      const supabase = getSupabaseClient();
-      const { error } = await supabase
-        .from("parceiros")
-        .update(sanitized)
-        .eq("id", partnerId);
-      if (error) throwSupabaseError(error);
-      return { ok: true };
+  const scopedTenantId = requirePartnersTenantId(payload.tenantId);
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("parceiros")
+    .update(sanitized)
+    .eq("tenant_id", scopedTenantId)
+    .eq("id", partnerId);
+  if (error) {
+    if (isMissingTenantIdColumn(error)) {
+      throw new Error("Schema de parceiros ainda sem tenant_id.");
     }
-  );
+    throwSupabaseError(error);
+  }
 
-  partnerByIdCache.delete(partnerId);
+  partnerByIdCache.clear();
+  partnerScansCache.clear();
   clearAdminPartnersCaches();
   publicPartnersCache.clear();
 }

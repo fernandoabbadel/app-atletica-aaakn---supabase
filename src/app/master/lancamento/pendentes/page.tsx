@@ -1,7 +1,5 @@
-"use client";
-
-import { LaunchPendingPage } from "@/app/admin/_components/launch/LaunchPendingPage";
+import { redirect } from "next/navigation";
 
 export default function MasterLancamentoPendentesPage() {
-  return <LaunchPendingPage scope="master" />;
+  redirect("/master/solicitacoes");
 }

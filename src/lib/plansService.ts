@@ -3,6 +3,8 @@ import { getSupabaseClient } from "./supabase";
 
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -39,8 +41,8 @@ const planByIdCache = new Map<string, CacheEntry<PlanRecord | null>>();
 const subscriptionsCache = new Map<string, CacheEntry<PlanSubscriptionRecord[]>>();
 const adminRequestsCache = new Map<string, CacheEntry<PlanRequestRecord[]>>();
 const userRequestsCache = new Map<string, CacheEntry<PlanRequestRecord[]>>();
-let bannerCache: CacheEntry<BannerConfigRecord> | null = null;
-let financeConfigCache: CacheEntry<FinanceConfigRecord> | null = null;
+const bannerCache = new Map<string, CacheEntry<BannerConfigRecord>>();
+const financeConfigCache = new Map<string, CacheEntry<FinanceConfigRecord>>();
 
 const asObject = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== "object" || value === null) return null;
@@ -100,6 +102,31 @@ const setMapCachedValue = <T>(
   value: T
 ): void => {
   cache.set(key, { cachedAt: Date.now(), value });
+};
+
+const resolveConfigTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const resolveConfigDocIds = (
+  baseId: string,
+  tenantId?: string | null
+): string[] => {
+  const scopedTenantId = resolveConfigTenantId(tenantId);
+  if (!scopedTenantId) return [baseId];
+  return [buildTenantScopedRowId(scopedTenantId, baseId), baseId];
+};
+
+const pickConfigRow = (
+  rows: Array<Record<string, unknown>>,
+  baseId: string,
+  tenantId?: string | null
+): Record<string, unknown> | null => {
+  const candidates = resolveConfigDocIds(baseId, tenantId);
+  for (const candidateId of candidates) {
+    const match = rows.find((row) => asString(row.id).trim() === candidateId);
+    if (match) return match;
+  }
+  return null;
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
@@ -800,53 +827,65 @@ export async function fetchUserPlanRequests(
 
 export async function fetchMarketingBannerConfig(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<BannerConfigRecord> {
   const forceRefresh = options?.forceRefresh ?? false;
-  if (
-    !forceRefresh &&
-    bannerCache &&
-    Date.now() - bannerCache.cachedAt <= READ_CACHE_TTL_MS
-  ) {
-    return bannerCache.value;
+  const scopedTenantId = resolveConfigTenantId(options?.tenantId);
+  const cacheKey = scopedTenantId || "global";
+
+  if (!forceRefresh) {
+    const cached = getMapCachedValue(bannerCache, cacheKey);
+    if (cached) return cached;
   }
 
   const supabase = getSupabaseClient();
+  const docIds = resolveConfigDocIds("marketing_banner", scopedTenantId);
   const { data, error } = await supabase
     .from("app_config")
     .select(APP_CONFIG_BANNER_SELECT_COLUMNS)
-    .eq("id", "marketing_banner")
-    .maybeSingle();
+    .in("id", docIds);
   if (error) throwSupabaseError(error);
 
-  const normalized = data ? normalizeBannerConfig(data) : DEFAULT_BANNER_CONFIG;
+  const selected = pickConfigRow(
+    ((data as Array<Record<string, unknown>> | null) ?? []).map((entry) => ({ ...entry })),
+    "marketing_banner",
+    scopedTenantId
+  );
+  const normalized = selected ? normalizeBannerConfig(selected) : DEFAULT_BANNER_CONFIG;
 
-  bannerCache = { cachedAt: Date.now(), value: normalized };
+  setMapCachedValue(bannerCache, cacheKey, normalized);
   return normalized;
 }
 
 export async function fetchFinanceConfig(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<FinanceConfigRecord> {
   const forceRefresh = options?.forceRefresh ?? false;
-  if (
-    !forceRefresh &&
-    financeConfigCache &&
-    Date.now() - financeConfigCache.cachedAt <= READ_CACHE_TTL_MS
-  ) {
-    return financeConfigCache.value;
+  const scopedTenantId = resolveConfigTenantId(options?.tenantId);
+  const cacheKey = scopedTenantId || "global";
+
+  if (!forceRefresh) {
+    const cached = getMapCachedValue(financeConfigCache, cacheKey);
+    if (cached) return cached;
   }
 
   const supabase = getSupabaseClient();
+  const docIds = resolveConfigDocIds("financeiro", scopedTenantId);
   const { data, error } = await supabase
     .from("app_config")
     .select(APP_CONFIG_FINANCEIRO_SELECT_COLUMNS)
-    .eq("id", "financeiro")
-    .maybeSingle();
+    .in("id", docIds);
   if (error) throwSupabaseError(error);
 
-  const normalized = data ? normalizeFinanceConfig(data) : DEFAULT_FINANCE_CONFIG;
+  const selected = pickConfigRow(
+    ((data as Array<Record<string, unknown>> | null) ?? []).map((entry) => ({ ...entry })),
+    "financeiro",
+    scopedTenantId
+  );
+  const normalized = selected ? normalizeFinanceConfig(selected) : DEFAULT_FINANCE_CONFIG;
 
-  financeConfigCache = { cachedAt: Date.now(), value: normalized };
+  setMapCachedValue(financeConfigCache, cacheKey, normalized);
   return normalized;
 }
 
@@ -1004,18 +1043,23 @@ export async function restoreDefaultPlanCatalog(options?: {
 }
 
 export async function saveMarketingBannerConfig(
-  config: BannerConfigRecord
+  config: BannerConfigRecord,
+  options?: { tenantId?: string | null }
 ): Promise<void> {
   const normalized = normalizeBannerConfig(config);
+  const scopedTenantId = resolveConfigTenantId(options?.tenantId);
 
-  await callWithFallback<{ config: BannerConfigRecord }, { ok: boolean }>(
+  await callWithFallback<
+    { config: BannerConfigRecord; tenantId?: string },
+    { ok: boolean }
+  >(
     PLAN_SAVE_BANNER_CALLABLE,
-    { config: normalized },
+    { config: normalized, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
       const { error } = await supabase.from("app_config").upsert(
         {
-          id: "marketing_banner",
+          id: buildTenantScopedRowId(scopedTenantId, "marketing_banner") || "marketing_banner",
           ...normalized,
         },
         { onConflict: "id" }
@@ -1025,7 +1069,7 @@ export async function saveMarketingBannerConfig(
     }
   );
 
-  bannerCache = { cachedAt: Date.now(), value: normalized };
+  setMapCachedValue(bannerCache, scopedTenantId || "global", normalized);
 }
 
 export async function approvePlanRequest(payload: {
@@ -1203,8 +1247,8 @@ export async function deletePlanRequestAndUnlock(payload: {
 export function clearPlansServiceCaches(): void {
   clearPlanReadCaches();
   clearAdminPlanReadCaches();
-  bannerCache = null;
-  financeConfigCache = null;
+  bannerCache.clear();
+  financeConfigCache.clear();
 }
 
 

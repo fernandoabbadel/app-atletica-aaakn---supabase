@@ -8,6 +8,7 @@ import {
 import Link from "next/link";
 import Image from "next/image"; // 🦈 Importando Image
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "../../../context/TenantThemeContext";
 import {
   createFidelityReward,
   deleteFidelityReward,
@@ -28,6 +29,7 @@ type TabType = "dashboard" | "premios" | "regras";
 
 export default function AdminFidelidadePage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [activeTab, setActiveTab] = useState<TabType>("dashboard");
 
   // --- ESTADOS REAIS ---
@@ -44,9 +46,17 @@ export default function AdminFidelidadePage() {
     setLoading(true);
     try {
       const [rewardsData, configData, topUsersData] = await Promise.all([
-        fetchFidelityRewards({ maxResults: 120, forceRefresh }),
-        fetchFidelityConfig({ forceRefresh }),
-        fetchFidelityTopUsers({ maxResults: 5, forceRefresh }),
+        fetchFidelityRewards({
+          maxResults: 120,
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        }),
+        fetchFidelityConfig({ forceRefresh, tenantId: activeTenantId || undefined }),
+        fetchFidelityTopUsers({
+          maxResults: 5,
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        }),
       ]);
 
       setRewards(rewardsData);
@@ -58,7 +68,7 @@ export default function AdminFidelidadePage() {
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   // 1. CARREGAR DADOS
   useEffect(() => {
@@ -76,7 +86,7 @@ export default function AdminFidelidadePage() {
             cost: Number(newReward.cost),
             stock: Number(newReward.stock || 0),
             image: newReward.image,
-        });
+        }, { tenantId: activeTenantId || undefined });
         const freshReward: Reward = {
             id: created.id,
             title: newReward.title.trim(),
@@ -98,7 +108,7 @@ export default function AdminFidelidadePage() {
   const handleDeleteReward = async (id: string) => {
     if (confirm("Remover este prêmio permanentemente?")) {
         try {
-            await deleteFidelityReward(id);
+            await deleteFidelityReward(id, { tenantId: activeTenantId || undefined });
             setRewards((prev) => prev.filter((item) => item.id !== id));
             addToast("Item removido.", "info");
         } catch (error: unknown) {
@@ -126,7 +136,7 @@ export default function AdminFidelidadePage() {
 
   const handleSaveConfig = async () => {
     try {
-        await saveFidelityConfig(config);
+        await saveFidelityConfig(config, { tenantId: activeTenantId || undefined });
         addToast("Configurações salvas!", "success");
     } catch (error: unknown) {
         console.error(error);

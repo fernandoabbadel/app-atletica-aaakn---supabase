@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext"; 
+import { useTenantTheme } from "../../context/TenantThemeContext";
 import { ACHIEVEMENTS_CATALOG, AchievementCategory } from "../../lib/achievements";
 import {
   fetchAchievementsConfig,
@@ -19,6 +20,11 @@ import {
   type AchievementConfigRecord,
   type PatenteConfigRecord,
 } from "../../lib/achievementsService";
+import {
+  fetchTenantMembershipDirectory,
+  resolveTenantScopedStats,
+  resolveTenantScopedXp,
+} from "../../lib/tenantMembershipDirectory";
 
 // 🦈 Tipagem Segura para o Mapa de Ícones
 const IconMap: Record<string, React.ElementType> = {
@@ -119,11 +125,10 @@ const mergeCatalogWithDefaults = (entries: AchievementConfigRecord[]): Achieveme
     };
   });
 
-  const missingEventDefaults = ACHIEVEMENTS_CATALOG.filter(
-    (item) => item.id.startsWith("evt_") && !mergedEventIds.has(item.id)
-  );
+  const seenIds = new Set(withOverrides.map((item) => item.id));
+  const missingDefaults = ACHIEVEMENTS_CATALOG.filter((item) => !seenIds.has(item.id));
 
-  return [...withOverrides, ...missingEventDefaults];
+  return [...withOverrides, ...missingDefaults];
 };
 
 const mapBadgeConfig = (entry: PatenteConfigRecord): BadgeConfig => ({
@@ -139,27 +144,65 @@ const mapBadgeConfig = (entry: PatenteConfigRecord): BadgeConfig => ({
 export default function ConquistasPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [filtro, setFiltro] = useState<AchievementCategory | "Todas">("Todas");
   
   const [catalog, setCatalog] = useState<AchievementConfig[]>(ACHIEVEMENTS_CATALOG);
   const [badgesList, setBadgesList] = useState<BadgeConfig[]>(DEFAULT_BADGES);
+  const [tenantScopedStats, setTenantScopedStats] = useState<Record<string, number | undefined>>({});
+  const [tenantScopedXp, setTenantScopedXp] = useState(0);
   
   const [debugMode, setDebugMode] = useState(false);
   
   // 🦈 Verificação segura de role
   const role = typeof user?.role === 'string' ? user.role : '';
   const isAdmin = role === 'master' || role.includes('admin');
+  const effectiveTenantId =
+    activeTenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
   useEffect(() => {
+      if (!user) {
+          setTenantScopedStats({});
+          setTenantScopedXp(0);
+          return;
+      }
+
       let mounted = true;
 
       const loadCatalogData = async () => {
           try {
-              const [catalogData, badgesData] = await Promise.all([
-                  fetchAchievementsConfig({ maxResults: 220 }),
-                  fetchPatentesConfig({ maxResults: 40 }),
+              const membershipPromise =
+                  effectiveTenantId
+                      ? fetchTenantMembershipDirectory({
+                            tenantId: effectiveTenantId,
+                            userIds: [user.uid],
+                            statuses: ["approved", "pending", "disabled"],
+                            limit: 1,
+                        })
+                      : Promise.resolve([]);
+
+              const [catalogData, badgesData, membershipRows] = await Promise.all([
+                  fetchAchievementsConfig({
+                      maxResults: 220,
+                      tenantId: effectiveTenantId || undefined,
+                  }),
+                  fetchPatentesConfig({
+                      maxResults: 40,
+                      tenantId: effectiveTenantId || undefined,
+                  }),
+                  membershipPromise,
               ]);
 
               if (!mounted) return;
+
+              const membership = membershipRows[0];
+              setTenantScopedStats(
+                  membership
+                      ? (resolveTenantScopedStats(membership) as Record<string, number | undefined>)
+                      : (user.stats ?? {})
+              );
+              setTenantScopedXp(
+                  membership ? resolveTenantScopedXp(membership) : Math.max(0, user.xp || 0)
+              );
 
               if (catalogData.length > 0) {
                   setCatalog(mergeCatalogWithDefaults(catalogData));
@@ -173,6 +216,8 @@ export default function ConquistasPage() {
           } catch (error: unknown) {
               console.error(error);
               if (mounted) {
+                  setTenantScopedStats(user.stats ?? {});
+                  setTenantScopedXp(Math.max(0, user.xp || 0));
                   addToast("Nao foi possivel sincronizar conquistas agora.", "error");
               }
           }
@@ -182,9 +227,9 @@ export default function ConquistasPage() {
       return () => {
           mounted = false;
       };
-  }, [addToast]);
+  }, [addToast, effectiveTenantId, user]);
 
-  const userStats = useMemo(() => user?.stats ?? {}, [user?.stats]); 
+  const userStats = useMemo(() => tenantScopedStats, [tenantScopedStats]); 
   
   // 🦈 useMemo otimizado e seguro
   const calculatedAchievements = useMemo(() => {
@@ -215,7 +260,7 @@ export default function ConquistasPage() {
       return { list: processed, unlockedCount, totalXp, missingKeys };
   }, [catalog, userStats]);
 
-  const displayXp = Math.max(user?.xp || 0, calculatedAchievements.totalXp);
+  const displayXp = Math.max(tenantScopedXp, calculatedAchievements.totalXp);
 
   const generateIAPrompt = () => {
       const missing = calculatedAchievements.missingKeys;

@@ -18,10 +18,11 @@ import { logActivity } from "@/lib/logger";
 import { isPermissionError } from "@/lib/backendErrors";
 import {
   fetchAdminUsersPage,
+  setAdminUserTurmaLeader,
   type AdminUserListItem,
 } from "@/lib/adminUsersService";
 import { updatePermissionUserRole } from "@/lib/adminSecurityService";
-import { canManageTenant } from "@/lib/roles";
+import { canManageTenant, isPlatformMaster, resolveEffectiveAccessRole } from "@/lib/roles";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
@@ -85,6 +86,9 @@ export default function AdminPermissoesUsuariosPage() {
   const [searchTerm, setSearchTerm] = useState("");
 
   const canManageRoles = canManageTenant(user);
+  const effectiveAccessRole = resolveEffectiveAccessRole(user);
+  const canAssignTurmaLeader =
+    isPlatformMaster(user) || effectiveAccessRole === "master_tenant";
 
   const loadUsers = useCallback(
     async (options?: { reset?: boolean; cursorId?: string | null }) => {
@@ -193,6 +197,34 @@ export default function AdminPermissoesUsuariosPage() {
     }
   };
 
+  const handleToggleTurmaLeader = async (
+    targetUserId: string,
+    nextValue: boolean
+  ) => {
+    try {
+      await setAdminUserTurmaLeader({
+        userId: targetUserId,
+        enabled: nextValue,
+      });
+
+      setRows((prev) =>
+        prev.map((entry) =>
+          entry.id === targetUserId ? { ...entry, isTurmaLeader: nextValue } : entry
+        )
+      );
+
+      addToast(
+        nextValue
+          ? "Usuario marcado como lider de turma."
+          : "Lideranca de turma removida.",
+        "success"
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao atualizar lideranca de turma.", "error");
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#050505] flex items-center justify-center">
@@ -265,6 +297,11 @@ export default function AdminPermissoesUsuariosPage() {
                         VOCE
                       </span>
                     )}
+                    {entry.isTurmaLeader && (
+                      <span className="text-[9px] rounded-full border border-cyan-500/30 bg-cyan-500/15 px-2 text-cyan-300">
+                        LIDER DA TURMA
+                      </span>
+                    )}
                   </p>
                   <p className="text-xs text-zinc-500">{entry.email || "sem email"}</p>
                   <p className="text-[11px] text-zinc-500 mt-1">
@@ -291,6 +328,25 @@ export default function AdminPermissoesUsuariosPage() {
                       </option>
                     ))}
                   </select>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleToggleTurmaLeader(entry.id, !entry.isTurmaLeader)
+                    }
+                    disabled={
+                      !canAssignTurmaLeader ||
+                      entry.id === user?.uid ||
+                      !activeTenantId
+                    }
+                    className={`rounded px-3 py-1.5 text-[10px] font-black uppercase border transition ${
+                      entry.isTurmaLeader
+                        ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
+                        : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                  >
+                    {entry.isTurmaLeader ? "Remover Lider" : "Virar Lider"}
+                  </button>
                 </div>
               </div>
             ))

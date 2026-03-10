@@ -1,5 +1,11 @@
 import { getSupabaseClient } from "./supabase";
-import { asNumber, asObject, asString, throwSupabaseError } from "./supabaseData";
+import {
+  asNumber,
+  asObject,
+  asString,
+  throwSupabaseError,
+} from "./supabaseData";
+import { ACHIEVEMENTS_CATALOG } from "./achievements";
 import {
   normalizeTenantRole,
   toLegacyTenantRole,
@@ -150,6 +156,35 @@ export interface TenantInviteGenerationRankingEntry {
   inactiveInvites: number;
   totalUses: number;
   lastInviteAt: string;
+}
+
+export interface TenantInviteListEntry extends TenantInvite {
+  inviterName: string;
+  inviterEmail: string;
+  inviterTurma: string;
+  inviterPhoto: string;
+}
+
+export interface TenantInviteActivationListEntry {
+  requestId: string;
+  tenantId: string;
+  inviteId: string;
+  inviteToken: string;
+  status: TenantJoinRequestStatus;
+  requestedAt: string;
+  reviewedAt: string;
+  approvedRole: TenantInviteRole | "";
+  rejectionReason: string;
+  requesterUserId: string;
+  requesterName: string;
+  requesterEmail: string;
+  requesterTurma: string;
+  requesterPhoto: string;
+  inviterUserId: string;
+  inviterName: string;
+  inviterEmail: string;
+  inviterTurma: string;
+  inviterPhoto: string;
 }
 
 const TENANT_SELECT_COLUMNS_V1 =
@@ -399,6 +434,93 @@ const parseUserPreview = (
 
 const uniqueIds = (values: string[]): string[] =>
   Array.from(new Set(values.filter((value) => value.trim().length > 0)));
+
+const INVITE_ACTIVATION_ACHIEVEMENTS = ACHIEVEMENTS_CATALOG.filter(
+  (achievement) => achievement.statKey === "inviteActivations"
+).sort((left, right) => left.target - right.target);
+
+const registerInviteActivationForInviter = async (payload: {
+  inviterUserId: string;
+  tenantId: string;
+}): Promise<void> => {
+  const inviterUserId = payload.inviterUserId.trim();
+  const tenantId = payload.tenantId.trim();
+  if (!inviterUserId || !tenantId) return;
+
+  const supabase = getSupabaseClient();
+  const { data: inviterRow, error: inviterError } = await supabase
+    .from("users")
+    .select("uid,nome,stats")
+    .eq("uid", inviterUserId)
+    .maybeSingle();
+  if (inviterError) throwSupabaseError(inviterError);
+
+  const inviter = asObject(inviterRow);
+  if (!inviter) return;
+
+  const inviterName = asString(inviter.nome, "Atleta");
+  const currentStats = asObject(inviter.stats) ?? {};
+  const currentCount = Math.max(0, asNumber(currentStats.inviteActivations, 0));
+
+  for (const achievement of INVITE_ACTIVATION_ACHIEVEMENTS) {
+    if (currentCount < achievement.target) {
+      continue;
+    }
+
+    const { data: existingLog, error: existingLogError } = await supabase
+      .from("achievements_logs")
+      .select("id")
+      .eq("userId", inviterUserId)
+      .eq("achievementId", achievement.id)
+      .maybeSingle();
+    if (existingLogError) throwSupabaseError(existingLogError);
+    if (existingLog) continue;
+
+    const { error: insertLogError } = await supabase.from("achievements_logs").insert({
+      userId: inviterUserId,
+      userName: inviterName,
+      achievementId: achievement.id,
+      achievementTitle: achievement.titulo,
+      xp: achievement.xp,
+      timestamp: new Date().toISOString(),
+      data: {
+        tenantId,
+        statKey: "inviteActivations",
+        progress: currentCount,
+      },
+    });
+    if (insertLogError) throwSupabaseError(insertLogError);
+  }
+};
+
+const fetchUsersPreviewMap = async (
+  userIds: string[],
+  fields = "uid,nome,email,turma,foto"
+): Promise<
+  Map<string, { uid: string; nome: string; email: string; turma: string; foto: string }>
+> => {
+  const cleanUserIds = uniqueIds(userIds);
+  if (cleanUserIds.length === 0) return new Map();
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("users").select(fields).in("uid", cleanUserIds);
+  if (error || !Array.isArray(data)) {
+    if (error) throwSupabaseError(error);
+    return new Map();
+  }
+
+  return new Map(
+    data
+      .map((row) => parseUserPreview(row))
+      .filter(
+        (
+          row
+        ): row is { uid: string; nome: string; email: string; turma: string; foto: string } =>
+          row !== null
+      )
+      .map((row) => [row.uid, row])
+  );
+};
 
 const isRpcFunctionSignatureError = (
   error: unknown,
@@ -896,6 +1018,27 @@ export async function fetchTenantInvites(
     .filter((row): row is TenantInvite => row !== null);
 }
 
+export async function fetchTenantInviteListEntries(
+  tenantId: string,
+  options?: { limit?: number }
+): Promise<TenantInviteListEntry[]> {
+  const invites = await fetchTenantInvites(tenantId, options);
+  if (invites.length === 0) return [];
+
+  const usersMap = await fetchUsersPreviewMap(invites.map((invite) => invite.createdBy));
+
+  return invites.map((invite) => {
+    const inviter = usersMap.get(invite.createdBy);
+    return {
+      ...invite,
+      inviterName: inviter?.nome || "",
+      inviterEmail: inviter?.email || "",
+      inviterTurma: inviter?.turma || "",
+      inviterPhoto: inviter?.foto || "",
+    };
+  });
+}
+
 export async function createTenantInvite(payload: {
   tenantId: string;
   roleToAssign?: TenantInviteRole;
@@ -973,6 +1116,53 @@ export async function createMemberInvite(payload: {
   );
 
   const supabase = getSupabaseClient();
+  const {
+    data: sessionData,
+    error: sessionError,
+  } = await supabase.auth.getSession();
+  if (sessionError) throwSupabaseError(sessionError);
+
+  const accessToken = asString(sessionData.session?.access_token).trim();
+  if (!accessToken) {
+    throw new Error("Sessao invalida para gerar convite.");
+  }
+
+  try {
+    const response = await fetch("/api/member-invite", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        tenantId: cleanTenantId,
+        maxUses,
+        expiresInHours,
+      }),
+    });
+
+    const responseData = (await response.json()) as { invite?: unknown; error?: string };
+    if (!response.ok) {
+      throw new Error(asString(responseData.error, "Erro ao gerar convite."));
+    }
+
+    const parsedInvite = parseInvite(responseData.invite);
+    if (parsedInvite) return parsedInvite;
+    throw new Error("Convite criado, mas o payload retornado veio incompleto.");
+  } catch (fallbackError: unknown) {
+    const errorMessage =
+      fallbackError instanceof Error ? fallbackError.message : "";
+    const canFallbackToRpc =
+      errorMessage.length === 0 ||
+      errorMessage.toLowerCase().includes("failed to fetch") ||
+      errorMessage.toLowerCase().includes("network") ||
+      errorMessage.toLowerCase().includes("json");
+
+    if (!canFallbackToRpc) {
+      throw fallbackError;
+    }
+  }
+
   const { data, error } = await supabase.rpc("tenant_create_member_invite", {
     p_tenant_id: cleanTenantId,
     p_max_uses: maxUses,
@@ -1035,27 +1225,7 @@ export async function fetchTenantJoinRequests(
     .filter((row): row is TenantJoinRequest => row !== null);
   if (requests.length === 0) return [];
 
-  const requesterIds = uniqueIds(requests.map((request) => request.requesterUserId));
-  if (requesterIds.length === 0) return requests;
-
-  const { data: usersData, error: usersError } = await supabase
-    .from("users")
-    .select("uid,nome,email,turma,foto")
-    .in("uid", requesterIds);
-
-  if (usersError || !Array.isArray(usersData)) {
-    return requests;
-  }
-
-  const usersMap = new Map(
-    usersData
-      .map((row) => parseUserPreview(row))
-      .filter(
-        (row): row is { uid: string; nome: string; email: string; turma: string; foto: string } =>
-          row !== null
-      )
-      .map((row) => [row.uid, row])
-  );
+  const usersMap = await fetchUsersPreviewMap(requests.map((request) => request.requesterUserId));
 
   return requests.map((request) => {
     const requester = usersMap.get(request.requesterUserId);
@@ -1071,6 +1241,65 @@ export async function fetchTenantJoinRequests(
   });
 }
 
+export async function fetchTenantInviteActivationListEntries(
+  tenantId: string,
+  options?: { limit?: number }
+): Promise<TenantInviteActivationListEntry[]> {
+  const cleanTenantId = tenantId.trim();
+  if (!cleanTenantId) return [];
+
+  const limit = Math.max(1, Math.min(200, Math.floor(options?.limit ?? 80)));
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("tenant_join_requests")
+    .select(TENANT_JOIN_REQUEST_SELECT_COLUMNS)
+    .eq("tenant_id", cleanTenantId)
+    .order("requested_at", { ascending: false })
+    .limit(limit);
+  if (error) throwSupabaseError(error);
+
+  const requests = (Array.isArray(data) ? data : [])
+    .map((row) => parseJoinRequest(row))
+    .filter((row): row is TenantJoinRequest => row !== null);
+  if (requests.length === 0) return [];
+
+  const invites = await fetchTenantInvites(cleanTenantId, { limit: 200 });
+  const invitesMap = new Map(invites.map((invite) => [invite.id, invite]));
+  const usersMap = await fetchUsersPreviewMap([
+    ...requests.map((request) => request.requesterUserId),
+    ...invites.map((invite) => invite.createdBy),
+  ]);
+
+  return requests.map((request) => {
+    const requester = usersMap.get(request.requesterUserId);
+    const invite = invitesMap.get(request.inviteId);
+    const inviter = invite ? usersMap.get(invite.createdBy) : undefined;
+
+    return {
+      requestId: request.id,
+      tenantId: request.tenantId,
+      inviteId: request.inviteId,
+      inviteToken: invite?.token || "",
+      status: request.status,
+      requestedAt: request.requestedAt,
+      reviewedAt: request.reviewedAt,
+      approvedRole: request.approvedRole,
+      rejectionReason: request.rejectionReason,
+      requesterUserId: request.requesterUserId,
+      requesterName: requester?.nome || request.requesterName,
+      requesterEmail: requester?.email || request.requesterEmail,
+      requesterTurma: requester?.turma || request.requesterTurma,
+      requesterPhoto: requester?.foto || request.requesterPhoto,
+      inviterUserId: invite?.createdBy || "",
+      inviterName: inviter?.nome || "",
+      inviterEmail: inviter?.email || "",
+      inviterTurma: inviter?.turma || "",
+      inviterPhoto: inviter?.foto || "",
+    };
+  });
+}
+
 export async function approveTenantJoinRequest(payload: {
   requestId: string;
   approvedRole?: TenantInviteRole;
@@ -1080,11 +1309,38 @@ export async function approveTenantJoinRequest(payload: {
 
   const approvedRole = payload.approvedRole ?? "user";
   const supabase = getSupabaseClient();
+  const { data: requestRow, error: requestError } = await supabase
+    .from("tenant_join_requests")
+    .select("tenant_id,invite_id,status")
+    .eq("id", requestId)
+    .maybeSingle();
+  if (requestError) throwSupabaseError(requestError);
+
+  const request = asObject(requestRow) ?? {};
+  const tenantId = asString(request.tenant_id).trim();
+  const inviteId = asString(request.invite_id).trim();
+  const currentStatus = asString(request.status).trim();
+
+  let inviterUserId = "";
+  if (inviteId) {
+    const { data: inviteRow, error: inviteError } = await supabase
+      .from("tenant_invites")
+      .select("created_by")
+      .eq("id", inviteId)
+      .maybeSingle();
+    if (inviteError) throwSupabaseError(inviteError);
+    inviterUserId = asString(asObject(inviteRow)?.created_by).trim();
+  }
+
   const { error } = await supabase.rpc("tenant_approve_join_request", {
     p_request_id: requestId,
     p_approved_role: toLegacyTenantRole(approvedRole),
   });
   if (error) throwSupabaseError(error);
+
+  if (currentStatus === "pending" && inviterUserId && tenantId) {
+    await registerInviteActivationForInviter({ inviterUserId, tenantId });
+  }
 }
 
 export async function rejectTenantJoinRequest(payload: {

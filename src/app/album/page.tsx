@@ -21,6 +21,7 @@ import {
   type AlbumUiConfig,
 } from "../../lib/albumUiService";
 import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../context/ToastContext";
 import { resolveEffectiveAccessRole } from "../../lib/roles";
 import {
@@ -70,6 +71,7 @@ const resolveTurmaSlug = (turmaRaw: string | undefined, turmas: TurmaConfig[]): 
 
 export default function AlbumTurmasPage() {
   const { user } = useAuth();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const { addToast } = useToast();
   const [uiConfig, setUiConfig] = useState<AlbumUiConfig | null>(null);
   const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
@@ -84,8 +86,8 @@ export default function AlbumTurmasPage() {
     const loadData = async () => {
       try {
         const [config, turmasConfig] = await Promise.all([
-          fetchAlbumUiConfig(),
-          fetchTurmasConfig(),
+          fetchAlbumUiConfig({ tenantId: activeTenantId || undefined }),
+          fetchTurmasConfig({ tenantId: activeTenantId || undefined }),
         ]);
         if (!mounted) return;
         setUiConfig(config);
@@ -100,7 +102,7 @@ export default function AlbumTurmasPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [activeTenantId]);
 
   const title = uiConfig?.titulo?.trim() || "Album da Galera";
   const subtitle =
@@ -127,7 +129,9 @@ export default function AlbumTurmasPage() {
   const handleToggleHidden = async (turma: TurmaConfig) => {
     try {
       setProcessingTurmaId(turma.id);
-      const next = await toggleTurmaVisibility(turma.id, !turma.hidden);
+      const next = await toggleTurmaVisibility(turma.id, !turma.hidden, {
+        tenantId: activeTenantId || undefined,
+      });
       setTurmas(next);
       addToast(
         turma.hidden
@@ -154,7 +158,9 @@ export default function AlbumTurmasPage() {
 
     try {
       setProcessingTurmaId(turma.id);
-      const next = await deleteTurmaConfig(turma.id);
+      const next = await deleteTurmaConfig(turma.id, {
+        tenantId: activeTenantId || undefined,
+      });
       setTurmas(next);
       addToast(`Turma ${turma.id} excluida com sucesso.`, "success");
     } catch (error: unknown) {
@@ -294,7 +300,7 @@ export default function AlbumTurmasPage() {
                     </span>
                   )}
                   <Link
-                    href={`/admin/cadastro?edit=${turma.id}`}
+                    href={`/admin/turma?edit=${turma.id}`}
                     className="rounded-full border border-cyan-500/30 bg-black/70 p-2 text-cyan-300 backdrop-blur"
                     title={`Editar ${turma.id}`}
                   >

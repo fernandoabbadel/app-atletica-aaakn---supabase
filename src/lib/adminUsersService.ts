@@ -1,9 +1,15 @@
 import { httpsCallable } from "@/lib/supa/functions";
-import { resolveEffectiveAccessRole } from "@/lib/roles";
+import { isPlatformMaster, resolveEffectiveAccessRole } from "@/lib/roles";
 
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { getSupabaseClient } from "./supabase";
+import {
+  fetchTenantMembershipDirectory,
+  isPrimaryTenantForDirectoryEntry,
+  resolveTenantScopedXp,
+  type TenantMembershipDirectoryEntry,
+} from "./tenantMembershipDirectory";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -40,6 +46,9 @@ const asString = (value: unknown, fallback = ""): string =>
 
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const asBoolean = (value: unknown, fallback = false): boolean =>
+  typeof value === "boolean" ? value : fallback;
 
 const asStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
@@ -244,6 +253,27 @@ const updateUserWithColumnFallback = async (
   }
 };
 
+const ensureUserInTenant = async (
+  userId: string,
+  tenantId?: string | null
+): Promise<void> => {
+  const cleanTenantId = tenantId?.trim() || "";
+  if (!cleanTenantId) return;
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("tenant_memberships")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("tenant_id", cleanTenantId)
+    .in("status", ["approved", "pending", "disabled"])
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+  if (!data) {
+    throw new Error("Usuario fora do tenant ativo.");
+  }
+};
+
 const fetchTableRowsForUser = async (
   tableName: string,
   userId: string,
@@ -316,6 +346,7 @@ export interface AdminUserListItem {
   xp: number;
   role: string;
   tenantId: string;
+  isTurmaLeader: boolean;
 }
 
 export interface AdminUsersPageResult {
@@ -421,6 +452,7 @@ const normalizeAdminUserListItem = (
     xp: asNumber(data.xp, 0),
     role: resolveEffectiveAccessRole(data),
     tenantId: asString(data.tenant_id),
+    isTurmaLeader: asBoolean(asObject(data.extra)?.turmaLeader, false),
   };
 };
 
@@ -459,6 +491,72 @@ const normalizeAdminUserProfile = (
     patente: asString(data.patente) || undefined,
     createdAt: data.createdAt,
     ...(role ? { role } : {}),
+  };
+};
+
+const normalizeDirectoryAdminUserListItem = (
+  entry: TenantMembershipDirectoryEntry
+): AdminUserListItem => {
+  const statusRaw = entry.status || "pendente";
+  const status: AdminUserListItem["status"] =
+    statusRaw === "ativo" ||
+    statusRaw === "inadimplente" ||
+    statusRaw === "bloqueado"
+      ? statusRaw
+      : "pendente";
+
+  const planoRaw = entry.tier || "bicho";
+  const plano: AdminUserListItem["plano"] =
+    planoRaw === "lenda" || planoRaw === "atleta" || planoRaw === "cardume"
+      ? planoRaw
+      : "bicho";
+
+  return {
+    id: entry.userId,
+    nome: entry.nome,
+    email: entry.email || "---",
+    telefone: entry.telefone,
+    turma: entry.turma || "---",
+    matricula: entry.matricula || "---",
+    status,
+    plano,
+    foto: entry.foto || "https://github.com/shadcn.png",
+    xp: resolveTenantScopedXp(entry),
+    role: entry.membershipRole || entry.role || resolveEffectiveAccessRole({ role: entry.role }),
+    tenantId: entry.tenantId,
+    isTurmaLeader: asBoolean(asObject(entry.extra)?.turmaLeader, false),
+  };
+};
+
+const normalizeDirectoryAdminUserProfile = (
+  entry: TenantMembershipDirectoryEntry
+): AdminUserProfileRecord => {
+  const primaryTenant = isPrimaryTenantForDirectoryEntry(entry);
+  const statusRaw = entry.status || "ativo";
+  const status: AdminUserProfileRecord["status"] =
+    statusRaw === "inadimplente" ||
+    statusRaw === "pendente" ||
+    statusRaw === "bloqueado"
+      ? statusRaw
+      : "ativo";
+
+  return {
+    id: entry.userId,
+    nome: entry.nome,
+    email: entry.email,
+    ...(entry.foto ? { foto: entry.foto } : {}),
+    matricula: entry.matricula || undefined,
+    turma: entry.turma || undefined,
+    telefone: entry.telefone || undefined,
+    status,
+    level: primaryTenant ? Math.max(0, entry.level) : 1,
+    xp: primaryTenant ? resolveTenantScopedXp(entry) : 0,
+    sharkCoins: primaryTenant ? Math.max(0, entry.sharkCoins) : 0,
+    plano_badge: entry.planoBadge || undefined,
+    tier: entry.tier || undefined,
+    patente: primaryTenant ? entry.patente || undefined : undefined,
+    createdAt: entry.createdAt,
+    role: entry.membershipRole || entry.role || undefined,
   };
 };
 
@@ -537,6 +635,21 @@ export async function fetchAdminUsersList(options?: {
     if (cached) return cached;
   }
 
+  if (tenantId) {
+    const rows = (
+      await fetchTenantMembershipDirectory({
+        tenantId,
+        statuses: ["approved", "pending", "disabled"],
+        limit: Math.min(MAX_USERS_RESULTS, maxResults),
+      })
+    )
+      .map((entry) => normalizeDirectoryAdminUserListItem(entry))
+      .slice(0, maxResults);
+
+    setCachedValue(usersListCache, cacheKey, rows);
+    return rows;
+  }
+
   const supabase = getSupabaseClient();
   let selectColumns = [
     "uid",
@@ -553,6 +666,7 @@ export async function fetchAdminUsersList(options?: {
     "tenant_id",
     "tenant_role",
     "tenant_status",
+    "extra",
   ];
   let rows: AdminUserListItem[] = [];
 
@@ -647,9 +761,11 @@ export async function updateAdminUser(payload: {
   turma: string;
   status: "ativo" | "inadimplente" | "pendente" | "bloqueado";
   plano: "lenda" | "atleta" | "cardume" | "bicho";
+  tenantId?: string | null;
 }): Promise<void> {
   const userId = payload.userId.trim();
   if (!userId) return;
+  await ensureUserInTenant(userId, payload.tenantId);
 
   const requestPayload = {
     userId,
@@ -681,12 +797,87 @@ export async function updateAdminUser(payload: {
   clearAdminUsersCache();
 }
 
-export async function setAdminUserStatus(payload: {
+export async function setAdminUserTurmaLeader(payload: {
   userId: string;
-  status: "ativo" | "inadimplente" | "pendente" | "bloqueado";
+  enabled: boolean;
 }): Promise<void> {
   const userId = payload.userId.trim();
   if (!userId) return;
+
+  const supabase = getSupabaseClient();
+  const {
+    data: authData,
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError) throwSupabaseError(authError);
+
+  const actorUserId = asString(authData.user?.id).trim();
+  if (!actorUserId) {
+    throw new Error("Sessao invalida para definir lider de turma.");
+  }
+
+  const { data: actorRow, error: actorError } = await supabase
+    .from("users")
+    .select("uid,role,tenant_id,tenant_role,tenant_status")
+    .eq("uid", actorUserId)
+    .maybeSingle();
+  if (actorError) throwSupabaseError(actorError);
+
+  const actor = asObject(actorRow) ?? {};
+  const actorTenantId = asString(actor.tenant_id).trim();
+  const actorEffectiveRole = resolveEffectiveAccessRole(actor);
+  const actorCanAssign =
+    isPlatformMaster(actor) || actorEffectiveRole === "master_tenant";
+
+  if (!actorCanAssign) {
+    throw new Error("Apenas o master tenant pode definir lideres de turma.");
+  }
+
+  if (!isPlatformMaster(actor) && actorTenantId) {
+    const { data: membershipData, error: membershipError } = await supabase
+      .from("tenant_memberships")
+      .select("id")
+      .eq("tenant_id", actorTenantId)
+      .eq("user_id", userId)
+      .in("status", ["approved", "pending", "disabled"])
+      .maybeSingle();
+    if (membershipError) throwSupabaseError(membershipError);
+    if (!membershipData) {
+      throw new Error("Voce so pode definir lideres dentro do seu proprio tenant.");
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("extra")
+    .eq("uid", userId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const targetRow = asObject(data) ?? {};
+
+  const currentExtra = asObject(targetRow.extra) ?? {};
+  const nextExtra: Record<string, unknown> = {
+    ...currentExtra,
+    turmaLeader: payload.enabled,
+  };
+
+  await updateUserWithColumnFallback(userId, {
+    extra: nextExtra,
+    updatedAt: nowIso(),
+  });
+
+  clearAdminUsersCache();
+}
+
+export async function setAdminUserStatus(payload: {
+  userId: string;
+  status: "ativo" | "inadimplente" | "pendente" | "bloqueado";
+  tenantId?: string | null;
+}): Promise<void> {
+  const userId = payload.userId.trim();
+  if (!userId) return;
+  await ensureUserInTenant(userId, payload.tenantId);
 
   const requestPayload = { userId, status: payload.status };
   await callCallableWithFallback<typeof requestPayload, { ok: boolean }>(
@@ -704,9 +895,13 @@ export async function setAdminUserStatus(payload: {
   clearAdminUsersCache();
 }
 
-export async function deleteAdminUser(userIdRaw: string): Promise<void> {
+export async function deleteAdminUser(
+  userIdRaw: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const userId = userIdRaw.trim();
   if (!userId) return;
+  await ensureUserInTenant(userId, options?.tenantId);
 
   await callCallableWithFallback<{ userId: string }, { ok: boolean }>(
     ADMIN_USERS_DELETE_CALLABLE,
@@ -724,26 +919,41 @@ export async function deleteAdminUser(userIdRaw: string): Promise<void> {
 
 export async function fetchAdminUserProfile(
   userIdRaw: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<AdminUserProfileRecord | null> {
   const userId = userIdRaw.trim();
   if (!userId) return null;
 
   const forceRefresh = options?.forceRefresh ?? false;
+  const tenantId = options?.tenantId?.trim() || "";
+  const cacheKey = `${userId}:${tenantId || "all"}`;
   if (!forceRefresh) {
-    const cacheEntry = userProfileCache.get(userId);
+    const cacheEntry = userProfileCache.get(cacheKey);
     if (cacheEntry) {
       if (Date.now() - cacheEntry.cachedAt <= READ_CACHE_TTL_MS) {
         return cacheEntry.value;
       }
-      userProfileCache.delete(userId);
+      userProfileCache.delete(cacheKey);
     }
 
-    const pending = userProfileInflight.get(userId);
+    const pending = userProfileInflight.get(cacheKey);
     if (pending) return pending;
   }
 
   const requestPromise = (async () => {
+    if (tenantId) {
+      const directory = await fetchTenantMembershipDirectory({
+        tenantId,
+        userIds: [userId],
+        statuses: ["approved", "pending", "disabled"],
+        limit: 1,
+      });
+      const profile =
+        directory.length > 0 ? normalizeDirectoryAdminUserProfile(directory[0]) : null;
+      setCachedValue(userProfileCache, cacheKey, profile);
+      return profile;
+    }
+
     const supabase = getSupabaseClient();
     let selectColumns = [
       "uid",
@@ -765,11 +975,11 @@ export async function fetchAdminUserProfile(
     ];
 
     while (selectColumns.length > 0) {
-      const { data, error } = await supabase
+      const request = supabase
         .from("users")
         .select(selectColumns.join(","))
-        .eq("uid", userId)
-        .maybeSingle();
+        .eq("uid", userId);
+      const { data, error } = await request.maybeSingle();
       if (!error) {
         const profile = data
           ? normalizeAdminUserProfile(
@@ -777,7 +987,7 @@ export async function fetchAdminUserProfile(
               data
             )
           : null;
-        setCachedValue(userProfileCache, userId, profile);
+        setCachedValue(userProfileCache, cacheKey, profile);
         return profile;
       }
 
@@ -788,43 +998,45 @@ export async function fetchAdminUserProfile(
       selectColumns = nextColumns;
     }
 
-    setCachedValue(userProfileCache, userId, null);
+    setCachedValue(userProfileCache, cacheKey, null);
     return null;
   })();
 
-  userProfileInflight.set(userId, requestPromise);
+  userProfileInflight.set(cacheKey, requestPromise);
   try {
     return await requestPromise;
   } finally {
-    userProfileInflight.delete(userId);
+    userProfileInflight.delete(cacheKey);
   }
 }
 
 export async function fetchAdminUserDossier(
   userIdRaw: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<AdminUserDossier | null> {
   const userId = userIdRaw.trim();
   if (!userId) return null;
 
   const forceRefresh = options?.forceRefresh ?? false;
+  const tenantId = options?.tenantId?.trim() || "";
+  const cacheKey = `${userId}:${tenantId || "all"}`;
   if (!forceRefresh) {
-    const cacheEntry = userDossierCache.get(userId);
+    const cacheEntry = userDossierCache.get(cacheKey);
     if (cacheEntry) {
       if (Date.now() - cacheEntry.cachedAt <= READ_CACHE_TTL_MS) {
         return cacheEntry.value;
       }
-      userDossierCache.delete(userId);
+      userDossierCache.delete(cacheKey);
     }
 
-    const pending = userDossierInflight.get(userId);
+    const pending = userDossierInflight.get(cacheKey);
     if (pending) return pending;
   }
 
   const requestPromise = (async () => {
-    const userData = await fetchAdminUserProfile(userId, { forceRefresh });
+    const userData = await fetchAdminUserProfile(userId, { forceRefresh, tenantId });
     if (!userData) {
-      setCachedValue(userDossierCache, userId, null);
+      setCachedValue(userDossierCache, cacheKey, null);
       return null;
     }
 
@@ -893,15 +1105,15 @@ export async function fetchAdminUserDossier(
       gymLogs,
     };
 
-    setCachedValue(userDossierCache, userId, dossier);
+    setCachedValue(userDossierCache, cacheKey, dossier);
     return dossier;
   })();
 
-  userDossierInflight.set(userId, requestPromise);
+  userDossierInflight.set(cacheKey, requestPromise);
   try {
     return await requestPromise;
   } finally {
-    userDossierInflight.delete(userId);
+    userDossierInflight.delete(cacheKey);
   }
 }
 

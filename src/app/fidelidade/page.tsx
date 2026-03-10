@@ -8,6 +8,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
+import { useTenantTheme } from "../../context/TenantThemeContext";
 import {
   fetchFidelityConfig,
   fetchFidelityHistory,
@@ -17,6 +18,10 @@ import {
   type FidelityHistoryItem,
   type FidelityReward,
 } from "../../lib/fidelityService";
+import {
+  fetchTenantMembershipDirectory,
+  resolveTenantScopedXp,
+} from "../../lib/tenantMembershipDirectory";
 
 // --- INTERFACES ---
 type Premio = FidelityReward;
@@ -26,6 +31,7 @@ type ConfigFidelidade = FidelityConfig;
 export default function FidelidadePage() {
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [activeTab, setActiveTab] = useState<"cartao" | "regras">("cartao");
   
   // Estados de Dados Reais
@@ -33,6 +39,9 @@ export default function FidelidadePage() {
   const [premios, setPremios] = useState<Premio[]>([]);
   const [historico, setHistorico] = useState<HistoricoItem[]>([]);
   const [config, setConfig] = useState<ConfigFidelidade>({ xpPerStamp: 100, rules: [] });
+  const [tenantScopedXp, setTenantScopedXp] = useState(0);
+  const effectiveTenantId =
+    activeTenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
 
   // 1. CARREGAR DADOS DO SUPABASE
   useEffect(() => {
@@ -46,19 +55,44 @@ export default function FidelidadePage() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [configData, premiosData, historyData] = await Promise.all([
-          fetchFidelityConfig(),
-          fetchFidelityRewards({ activeOnly: true, maxResults: 80 }),
-          fetchFidelityHistory(user.uid, { maxResults: 20 }),
+        const membershipPromise =
+          effectiveTenantId
+            ? fetchTenantMembershipDirectory({
+                tenantId: effectiveTenantId,
+                userIds: [user.uid],
+                statuses: ["approved", "pending", "disabled"],
+                limit: 1,
+              })
+            : Promise.resolve([]);
+
+        const [configData, premiosData, historyData, membershipRows] = await Promise.all([
+          fetchFidelityConfig({ tenantId: effectiveTenantId || undefined }),
+          fetchFidelityRewards({
+            activeOnly: true,
+            maxResults: 80,
+            tenantId: effectiveTenantId || undefined,
+          }),
+          fetchFidelityHistory(user.uid, {
+            maxResults: 20,
+            tenantId: effectiveTenantId || undefined,
+          }),
+          membershipPromise,
         ]);
 
         if (!mounted) return;
+        const membership = membershipRows[0];
         setConfig(configData);
         setPremios(premiosData);
         setHistorico(historyData);
+        setTenantScopedXp(
+          membership ? resolveTenantScopedXp(membership) : Math.max(0, user.xp || 0)
+        );
       } catch (error: unknown) {
         console.error(error);
-        if (mounted) addToast("Erro ao carregar fidelidade.", "error");
+        if (mounted) {
+          setTenantScopedXp(Math.max(0, user.xp || 0));
+          addToast("Erro ao carregar fidelidade.", "error");
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -68,12 +102,12 @@ export default function FidelidadePage() {
     return () => {
       mounted = false;
     };
-  }, [user, addToast]);
+  }, [user, addToast, effectiveTenantId]);
 
   if (!user || loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500" size={40}/></div>;
 
   // CÁLCULOS DINÂMICOS
-  const userXP = user.xp || 0;
+  const userXP = tenantScopedXp;
   const XP_POR_SELO = config.xpPerStamp;
   const TOTAL_SELOS = 10;
 
@@ -94,6 +128,7 @@ export default function FidelidadePage() {
             userId: user.uid,
             userName: user.nome || "Atleta",
             reward: premio,
+            tenantId: effectiveTenantId || undefined,
         });
         setPremios((prev) =>
           prev.map((item) =>

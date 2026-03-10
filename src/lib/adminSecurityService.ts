@@ -458,7 +458,25 @@ export async function fetchPermissionMatrix(options?: {
     { forceRefresh },
     async () => {
       const supabase = getSupabaseClient();
-      let selectColumns = ["id", "data", "permissionMatrix"];
+      const baseResult = await supabase
+        .from("settings")
+        .select("id,data")
+        .eq("id", "permissions")
+        .maybeSingle();
+
+      if (!baseResult.error) {
+        if (!baseResult.data) return { matrix: null };
+
+        const extracted = extractPermissionMatrix(baseResult.data);
+        if (extracted) {
+          return { matrix: extracted };
+        }
+      } else {
+        const missingBaseColumn = asString(extractMissingSchemaColumn(baseResult.error));
+        if (!missingBaseColumn) throwSupabaseError(baseResult.error);
+      }
+
+      let selectColumns = ["id", "permissionMatrix"];
 
       while (selectColumns.length > 0) {
         const { data, error } = await supabase

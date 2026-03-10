@@ -4,13 +4,22 @@ import React, { useState } from "react";
 import { Loader2, Mail, Lock } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useToast } from "../../context/ToastContext";
 import { loginPartnerByEmail } from "../../lib/partnersPublicService";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
 export default function EmpresaLoginPage() {
   const router = useRouter();
+  const pathname = usePathname() || "/empresa";
   const { addToast } = useToast();
+  const pathInfo = parseTenantScopedPath(pathname);
+  const companyBasePath = pathInfo.tenantSlug
+    ? withTenantSlug(pathInfo.tenantSlug, "/empresa")
+    : "/empresa";
+  const companyRegisterPath = pathInfo.tenantSlug
+    ? withTenantSlug(pathInfo.tenantSlug, "/empresa/cadastro")
+    : "/empresa/cadastro";
   
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -47,7 +56,7 @@ export default function EmpresaLoginPage() {
       }
 
       addToast(`Bem-vindo, ${loginResult.nome}!`, "success");
-      router.push(`/empresa/${loginResult.id}`);
+      router.push(`${companyBasePath}/${loginResult.id}`);
 
     } catch (error: unknown) {
       console.error("Erro no login:", error);
@@ -105,7 +114,7 @@ export default function EmpresaLoginPage() {
             </form>
 
             <div className="text-center mt-6 pt-6 border-t border-zinc-800">
-                <Link href="/empresa/cadastro" className="text-emerald-400 font-bold text-sm hover:underline uppercase tracking-wide">Quero me Cadastrar</Link>
+                <Link href={companyRegisterPath} className="text-emerald-400 font-bold text-sm hover:underline uppercase tracking-wide">Quero me Cadastrar</Link>
             </div>
         </div>
     </div>

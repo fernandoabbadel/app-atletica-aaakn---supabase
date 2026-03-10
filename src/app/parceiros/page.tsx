@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { fetchPublicPartners, type PartnerRecord } from "../../lib/partnersPublicService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 
 interface TierSection {
   id: "ouro" | "prata" | "standard";
@@ -33,6 +34,7 @@ const tierBadgeClass: Record<string, string> = {
 };
 
 export default function ParceirosPage() {
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<PartnerRecord[]>([]);
@@ -45,6 +47,7 @@ export default function ParceirosPage() {
         const data = await fetchPublicPartners({
           maxResults: 240,
           forceRefresh: false,
+          tenantId: activeTenantId || undefined,
         });
         if (mounted) setRows(data);
       } catch (error: unknown) {
@@ -60,7 +63,7 @@ export default function ParceirosPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [activeTenantId]);
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();

@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 const DEFAULT_AVATAR_URL = "https://github.com/shadcn.png";
 const ALBUM_CAPTURES_TABLE = "album_captures";
@@ -10,13 +11,13 @@ const ALBUM_UI_DOC_ID = "album_ui";
 const ALBUM_SUMMARY_COLLECTION = "album_summary";
 const READ_CACHE_TTL_MS = 120_000;
 const ALBUM_RANKINGS_SELECT_COLUMNS =
-  "id,userId,nome,foto,turma,totalColetado,scansT8";
+  "id,userId,nome,foto,turma,totalColetado,scansT8,tenant_id";
 const ALBUM_USERS_SELECT_COLUMNS =
-  "uid,nome,turma,foto,apelido,dataNascimento,idadePublica,esportes,pets,cidadeOrigem,relacionamentoPublico,statusRelacionamento,bio,instagram";
+  "uid,nome,turma,foto,apelido,dataNascimento,idadePublica,esportes,pets,cidadeOrigem,relacionamentoPublico,statusRelacionamento,bio,instagram,tenant_id";
 const ALBUM_SUMMARY_SELECT_COLUMNS =
-  "userId,totalCollected,capturedByTurma,lastCaptureId,lastCaptureAt,updatedAt";
+  "userId,totalCollected,capturedByTurma,lastCaptureId,lastCaptureAt,updatedAt,tenant_id";
 const ALBUM_CONFIG_SELECT_COLUMNS = "id,capa,titulo,subtitulo,updatedAt";
-const ALBUM_UI_SELECT_COLUMNS = "id,capa,titulo,subtitulo,updatedAt";
+const ALBUM_UI_SELECT_COLUMNS = "id,capa,titulo,subtitulo,updatedAt,data";
 const ALBUM_CAPTURES_SELECT_COLUMNS = "id,collectorUserId,targetUserId,nome,turma,dataColada";
 
 type CacheEntry<T> = {
@@ -30,7 +31,7 @@ const usersByTurmaPageCache = new Map<string, CacheEntry<AlbumUsersPageResult>>(
 const collectedIdsCache = new Map<string, CacheEntry<string[]>>();
 const albumConfigCache = new Map<string, CacheEntry<AlbumCmsData | null>>();
 const albumSummaryCache = new Map<string, CacheEntry<AlbumSummary | null>>();
-let albumUiCache: CacheEntry<AlbumUiConfig | null> | null = null;
+const albumUiCache = new Map<string, CacheEntry<AlbumUiConfig | null>>();
 const inflightRankingsCache = new Map<string, Promise<AlbumRankingEntry[]>>();
 const inflightUsersByTurmaPageCache = new Map<string, Promise<AlbumUsersPageResult>>();
 const inflightCollectedIdsCache = new Map<string, Promise<string[]>>();
@@ -44,6 +45,8 @@ const asString = (value: unknown, fallback = ""): string =>
 
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const cleanTenantId = (value?: string): string => asString(value).trim();
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -101,6 +104,21 @@ const runWithInflight = async <T>(
   } finally {
     inflight.delete(key);
   }
+};
+
+const resolveTenantCacheKey = (tenantId?: string): string => cleanTenantId(tenantId) || "default";
+
+const buildTenantScopedCacheKey = (baseKey: string, tenantId?: string): string => {
+  const cleanBaseKey = baseKey.trim();
+  const cleanScopedTenantId = cleanTenantId(tenantId);
+  if (!cleanScopedTenantId) return cleanBaseKey;
+  return `${cleanScopedTenantId}::${cleanBaseKey}`;
+};
+
+const resolveScopedDocIds = (tenantId: string | undefined, baseId: string): string[] => {
+  const cleanScopedTenantId = cleanTenantId(tenantId);
+  if (!cleanScopedTenantId) return [baseId];
+  return [buildTenantScopedRowId(cleanScopedTenantId, baseId), baseId];
 };
 
 export interface AlbumRankingEntry {
@@ -286,35 +304,76 @@ const isUniqueViolationError = (error: unknown): boolean => {
   return details.includes("duplicate key") || details.includes("unique");
 };
 
-const resolveUserTurmaCode = async (userId: string): Promise<string> => {
+const resolveUserTurmaCode = async (
+  userId: string,
+  tenantId?: string
+): Promise<string> => {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("users")
-    .select("turma")
-    .eq("uid", userId)
-    .maybeSingle();
+  let query = supabase.from("users").select("turma").eq("uid", userId);
+  const scopedTenantId = cleanTenantId(tenantId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) throwSupabaseError(error);
   return normalizeTurmaCode((data as Record<string, unknown> | null)?.turma);
 };
 
+const filterUserIdsByTenant = async (
+  userIds: string[],
+  tenantId?: string
+): Promise<Set<string>> => {
+  const scopedTenantId = cleanTenantId(tenantId);
+  const uniqueIds = [...new Set(userIds.map((entry) => entry.trim()).filter(Boolean))];
+  if (!scopedTenantId || uniqueIds.length === 0) {
+    return new Set(uniqueIds);
+  }
+
+  const supabase = getSupabaseClient();
+  const allowedIds = new Set<string>();
+  for (let index = 0; index < uniqueIds.length; index += MAX_USERS_PAGE_SIZE) {
+    const chunk = uniqueIds.slice(index, index + MAX_USERS_PAGE_SIZE);
+    const { data, error } = await supabase
+      .from("users")
+      .select("uid")
+      .eq("tenant_id", scopedTenantId)
+      .in("uid", chunk);
+    if (error) throwSupabaseError(error);
+
+    for (const row of (data as Array<Record<string, unknown>> | null) ?? []) {
+      const uid = asString(row.uid).trim();
+      if (uid) allowedIds.add(uid);
+    }
+  }
+
+  return allowedIds;
+};
+
 export async function fetchAlbumRankings(
   maxResults = MAX_RANKING_RESULTS,
-  options?: { turma?: string }
+  options?: { turma?: string; tenantId?: string }
 ): Promise<AlbumRankingEntry[]> {
   const safeLimit = boundedLimit(maxResults, MAX_RANKING_RESULTS);
   const turmaFilter = options?.turma?.trim().toUpperCase() || "";
-  const cacheKey = `${safeLimit}:${turmaFilter || "all"}`;
+  const scopedTenantId = cleanTenantId(options?.tenantId);
+  const cacheKey = buildTenantScopedCacheKey(
+    `${safeLimit}:${turmaFilter || "all"}`,
+    scopedTenantId
+  );
   return runWithInflight(inflightRankingsCache, cacheKey, async () => {
     const cached = getCacheValue(rankingsCache, cacheKey);
     if (cached) return cached;
 
     const supabase = getSupabaseClient();
     const fetchFilteredByTurma = async (turmaValue: string): Promise<AlbumRankingEntry[]> => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("album_rankings")
         .select(ALBUM_RANKINGS_SELECT_COLUMNS)
-        .eq("turma", turmaValue)
-        .limit(safeLimit);
+        .eq("turma", turmaValue);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { data, error } = await query.limit(safeLimit);
       if (error) throwSupabaseError(error);
       return ((data as unknown as Record<string, unknown>[] | null) ?? []).map((row) =>
         toRankingEntry(asString(row.id), row)
@@ -331,11 +390,14 @@ export async function fetchAlbumRankings(
         (left, right) => (right.totalColetado || 0) - (left.totalColetado || 0)
       );
     } else {
-      const { data, error } = await supabase
+      let query = supabase
         .from("album_rankings")
         .select(ALBUM_RANKINGS_SELECT_COLUMNS)
-        .order("totalColetado", { ascending: false })
-        .limit(safeLimit);
+        .order("totalColetado", { ascending: false });
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { data, error } = await query.limit(safeLimit);
       if (error) throwSupabaseError(error);
       rows = ((data as unknown as Record<string, unknown>[] | null) ?? []).map((row) =>
         toRankingEntry(asString(row.id), row)
@@ -349,15 +411,20 @@ export async function fetchAlbumRankings(
 
 export async function fetchUsersByTurma(
   turma: string,
-  maxResults = MAX_USERS_PER_CLASS
+  maxResults = MAX_USERS_PER_CLASS,
+  options?: { tenantId?: string }
 ): Promise<AlbumUserEntry[]> {
   const safeLimit = boundedLimit(maxResults, MAX_USERS_PER_CLASS);
-  const cacheKey = `${turma.trim()}:${safeLimit}`;
+  const cacheKey = buildTenantScopedCacheKey(
+    `${turma.trim()}:${safeLimit}`,
+    options?.tenantId
+  );
   const cached = getCacheValue(usersByTurmaCache, cacheKey);
   if (cached) return cached;
 
   const page = await fetchUsersByTurmaPage(turma, {
     pageSize: safeLimit,
+    tenantId: options?.tenantId,
   });
   setCacheValue(usersByTurmaCache, cacheKey, page.users);
   return page.users;
@@ -369,6 +436,7 @@ export async function fetchUsersByTurmaPage(
     pageSize?: number;
     cursorId?: string | null;
     forceRefresh?: boolean;
+    tenantId?: string;
   }
 ): Promise<AlbumUsersPageResult> {
   const turmaCode = turma.trim().toUpperCase();
@@ -379,7 +447,11 @@ export async function fetchUsersByTurmaPage(
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_USERS_PAGE_SIZE);
   const cursorId = options?.cursorId?.trim() || "";
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${turmaCode}:${pageSize}:${cursorId || "first"}`;
+  const scopedTenantId = cleanTenantId(options?.tenantId);
+  const cacheKey = buildTenantScopedCacheKey(
+    `${turmaCode}:${pageSize}:${cursorId || "first"}`,
+    scopedTenantId
+  );
 
   const inflightKey = `${cacheKey}:${forceRefresh ? "f" : "c"}`;
   return runWithInflight(inflightUsersByTurmaPageCache, inflightKey, async () => {
@@ -395,10 +467,14 @@ export async function fetchUsersByTurmaPage(
     const allRows: AlbumUserEntry[] = [];
 
     for (const turmaCandidate of turmaCandidates) {
-      const { data, error } = await supabase
+      let query = supabase
         .from("users")
         .select(ALBUM_USERS_SELECT_COLUMNS)
-        .eq("turma", turmaCandidate)
+        .eq("turma", turmaCandidate);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { data, error } = await query
         .order("nome", { ascending: true })
         .limit(MAX_USERS_PER_CLASS);
       if (error) throwSupabaseError(error);
@@ -438,12 +514,17 @@ export async function fetchUsersByTurmaPage(
 
 export async function fetchAlbumCollectedIds(
   userId: string,
-  options?: { turma?: string; maxResults?: number; forceRefresh?: boolean }
+  options?: {
+    turma?: string;
+    maxResults?: number;
+    forceRefresh?: boolean;
+    tenantId?: string;
+  }
 ): Promise<string[]> {
   if (!userId) return [];
 
   try {
-    await ensureAlbumSelfCollected(userId);
+    await ensureAlbumSelfCollected(userId, options?.tenantId);
   } catch {
     // Se a semente falhar por politica/RLS, seguimos com leitura sem quebrar a tela.
   }
@@ -454,7 +535,11 @@ export async function fetchAlbumCollectedIds(
     MAX_USERS_PER_CLASS * 2
   );
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${userId}:${turma || "all"}:${maxResults}`;
+  const scopedTenantId = cleanTenantId(options?.tenantId);
+  const cacheKey = buildTenantScopedCacheKey(
+    `${userId}:${turma || "all"}:${maxResults}`,
+    scopedTenantId
+  );
   const inflightKey = `${cacheKey}:${forceRefresh ? "f" : "c"}`;
   return runWithInflight(inflightCollectedIdsCache, inflightKey, async () => {
     if (!forceRefresh) {
@@ -462,7 +547,10 @@ export async function fetchAlbumCollectedIds(
       if (cached) return cached;
     }
 
-    const summary = await fetchAlbumSummary(userId, { forceRefresh });
+    const summary = await fetchAlbumSummary(userId, {
+      forceRefresh,
+      tenantId: scopedTenantId,
+    });
     if (summary) {
       const source = turma
         ? summary.capturedByTurma[normalizeTurmaCode(turma)] || []
@@ -489,11 +577,16 @@ export async function fetchAlbumCollectedIds(
     if (error) throwSupabaseError(error);
 
     const rowsRaw = (data as unknown as Array<Record<string, unknown>> | null) ?? [];
+    const allowedTargetIds = await filterUserIdsByTenant(
+      rowsRaw.map((row) => asString(row.targetUserId).trim()),
+      scopedTenantId
+    );
     const ids = Array.from(
       new Set(
         [userId].concat(
         rowsRaw
           .map((row) => asString(row.targetUserId).trim())
+          .filter((targetUserId) => allowedTargetIds.has(targetUserId))
           .filter(Boolean)
         )
       )
@@ -503,7 +596,7 @@ export async function fetchAlbumCollectedIds(
       const capturedByTurma = rowsRaw.reduce<Record<string, string[]>>(
         (acc, row) => {
           const targetId = asString(row.targetUserId).trim();
-          if (!targetId) return acc;
+          if (!targetId || !allowedTargetIds.has(targetId)) return acc;
           const turmaKey = normalizeTurmaCode(row.turma);
           if (!acc[turmaKey]) acc[turmaKey] = [];
           acc[turmaKey].push(targetId);
@@ -512,7 +605,7 @@ export async function fetchAlbumCollectedIds(
         {}
       );
       try {
-        const userTurma = await resolveUserTurmaCode(userId);
+        const userTurma = await resolveUserTurmaCode(userId, scopedTenantId);
         capturedByTurma[userTurma] = Array.from(
           new Set([...(capturedByTurma[userTurma] || []), userId])
         );
@@ -534,6 +627,7 @@ export async function fetchAlbumCollectedIds(
           .upsert(
             {
               userId,
+              tenant_id: scopedTenantId || null,
               totalCollected: hydratedSummary.totalCollected,
               capturedByTurma: hydratedSummary.capturedByTurma,
               updatedAt: nowIso(),
@@ -544,7 +638,7 @@ export async function fetchAlbumCollectedIds(
       } catch {
         // Regras podem bloquear write do resumo. Nao interrompe a tela.
       }
-      setCacheValue(albumSummaryCache, userId, hydratedSummary);
+      setCacheValue(albumSummaryCache, buildTenantScopedCacheKey(userId, scopedTenantId), hydratedSummary);
     }
 
     setCacheValue(collectedIdsCache, cacheKey, ids);
@@ -552,16 +646,23 @@ export async function fetchAlbumCollectedIds(
   });
 }
 
-export async function ensureAlbumSelfCollected(userId: string): Promise<void> {
+export async function ensureAlbumSelfCollected(
+  userId: string,
+  tenantId?: string
+): Promise<void> {
   const cleanUserId = userId.trim();
   if (!cleanUserId) return;
+  const scopedTenantId = cleanTenantId(tenantId);
 
   return runWithInflight(
     inflightEnsureSelfCollectedCache,
-    cleanUserId,
+    buildTenantScopedCacheKey(cleanUserId, scopedTenantId),
     async () => {
-      const userTurma = await resolveUserTurmaCode(cleanUserId);
-      const summary = await fetchAlbumSummary(cleanUserId, { forceRefresh: true });
+      const userTurma = await resolveUserTurmaCode(cleanUserId, scopedTenantId);
+      const summary = await fetchAlbumSummary(cleanUserId, {
+        forceRefresh: true,
+        tenantId: scopedTenantId,
+      });
       const currentSummary = summary ?? {
         userId: cleanUserId,
         totalCollected: 0,
@@ -593,6 +694,7 @@ export async function ensureAlbumSelfCollected(userId: string): Promise<void> {
         .upsert(
           {
             userId: nextSummary.userId,
+            tenant_id: scopedTenantId || null,
             totalCollected: nextSummary.totalCollected,
             capturedByTurma: nextSummary.capturedByTurma,
             lastCaptureId: nextSummary.lastCaptureId,
@@ -603,7 +705,11 @@ export async function ensureAlbumSelfCollected(userId: string): Promise<void> {
         );
       if (error) throwSupabaseError(error);
 
-      setCacheValue(albumSummaryCache, cleanUserId, nextSummary);
+      setCacheValue(
+        albumSummaryCache,
+        buildTenantScopedCacheKey(cleanUserId, scopedTenantId),
+        nextSummary
+      );
       collectedIdsCache.clear();
     }
   );
@@ -611,54 +717,69 @@ export async function ensureAlbumSelfCollected(userId: string): Promise<void> {
 
 export async function fetchAlbumSummary(
   userId: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string }
 ): Promise<AlbumSummary | null> {
   if (!userId) return null;
+  const scopedTenantId = cleanTenantId(options?.tenantId);
+  const cacheKey = buildTenantScopedCacheKey(userId, scopedTenantId);
 
-  return runWithInflight(inflightAlbumSummaryCache, userId, async () => {
+  return runWithInflight(inflightAlbumSummaryCache, cacheKey, async () => {
     const forceRefresh = options?.forceRefresh ?? false;
     if (!forceRefresh) {
-      const cached = albumSummaryCache.get(userId);
+      const cached = albumSummaryCache.get(cacheKey);
       if (cached) {
         if (Date.now() - cached.cachedAt <= READ_CACHE_TTL_MS) {
           return cached.value;
         }
-        albumSummaryCache.delete(userId);
+        albumSummaryCache.delete(cacheKey);
       }
     }
 
     const supabase = getSupabaseClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from(ALBUM_SUMMARY_COLLECTION)
       .select(ALBUM_SUMMARY_SELECT_COLUMNS)
-      .eq("userId", userId)
-      .maybeSingle();
+      .eq("userId", userId);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query.maybeSingle();
     if (error) throwSupabaseError(error);
     if (!data) {
-      setCacheValue(albumSummaryCache, userId, null);
+      setCacheValue(albumSummaryCache, cacheKey, null);
       return null;
     }
 
     const summary = toAlbumSummary(userId, data as Record<string, unknown>);
-    setCacheValue(albumSummaryCache, userId, summary);
+    setCacheValue(albumSummaryCache, cacheKey, summary);
     return summary;
   });
 }
 
 export async function fetchAlbumConfig(
-  turma: string
+  turma: string,
+  options?: { tenantId?: string }
 ): Promise<AlbumCmsData | null> {
   const turmaCode = turma.trim().toUpperCase();
   if (!turmaCode) return null;
+  const scopedTenantId = cleanTenantId(options?.tenantId);
+  const cacheKey = buildTenantScopedCacheKey(turmaCode, scopedTenantId);
 
-  return runWithInflight(inflightAlbumConfigCache, turmaCode, async () => {
-    const cached = getCacheValue(albumConfigCache, turmaCode);
+  return runWithInflight(inflightAlbumConfigCache, cacheKey, async () => {
+    const cached = getCacheValue(albumConfigCache, cacheKey);
     if (cached) return cached;
 
     const supabase = getSupabaseClient();
-    const candidates = Array.from(
+    const baseCandidates = Array.from(
       new Set([turmaCode, turma.trim(), turma.trim().toLowerCase()])
     ).filter((value) => Boolean(value));
+    const candidates = scopedTenantId
+      ? Array.from(
+          new Set(
+            baseCandidates.flatMap((candidate) => resolveScopedDocIds(scopedTenantId, candidate))
+          )
+        )
+      : baseCandidates;
 
     for (const candidate of candidates) {
       const { data, error } = await supabase
@@ -670,57 +791,90 @@ export async function fetchAlbumConfig(
       if (!data) continue;
 
       const config = toAlbumConfig(data as Record<string, unknown>);
-      setCacheValue(albumConfigCache, turmaCode, config);
+      setCacheValue(albumConfigCache, cacheKey, config);
       return config;
     }
 
-    setCacheValue(albumConfigCache, turmaCode, null);
+    setCacheValue(albumConfigCache, cacheKey, null);
     return null;
   });
 }
 
 export async function saveAlbumConfig(
   turma: string,
-  config: AlbumCmsData
+  config: AlbumCmsData,
+  options?: { tenantId?: string }
 ): Promise<void> {
   const turmaCode = turma.trim().toUpperCase();
+  const scopedTenantId = cleanTenantId(options?.tenantId);
+  const storageId = buildTenantScopedRowId(scopedTenantId, turmaCode) || turmaCode;
   const supabase = getSupabaseClient();
   const { error } = await supabase.from("album_config").upsert(
-    { id: turmaCode, ...config, updatedAt: nowIso() },
+    { id: storageId, ...config, updatedAt: nowIso() },
     { onConflict: "id" }
   );
   if (error) throwSupabaseError(error);
 
-  albumConfigCache.delete(turmaCode);
+  albumConfigCache.delete(buildTenantScopedCacheKey(turmaCode, scopedTenantId));
   usersByTurmaCache.clear();
   usersByTurmaPageCache.clear();
 }
 
-export async function fetchAlbumUiConfig(): Promise<AlbumUiConfig | null> {
-  return runWithInflight(inflightAlbumUiCache, "albumUi", async () => {
-    if (albumUiCache && Date.now() - albumUiCache.cachedAt <= READ_CACHE_TTL_MS) {
-      return albumUiCache.value;
+export async function fetchAlbumUiConfig(options?: {
+  tenantId?: string;
+}): Promise<AlbumUiConfig | null> {
+  const scopedTenantId = cleanTenantId(options?.tenantId);
+  const cacheKey = buildTenantScopedCacheKey("albumUi", scopedTenantId);
+  return runWithInflight(inflightAlbumUiCache, cacheKey, async () => {
+    const cached = albumUiCache.get(cacheKey);
+    if (cached && Date.now() - cached.cachedAt <= READ_CACHE_TTL_MS) {
+      return cached.value;
     }
     const supabase = getSupabaseClient();
+    const docIds = resolveScopedDocIds(scopedTenantId, ALBUM_UI_DOC_ID);
     const { data, error } = await supabase
       .from(ALBUM_UI_DOC_COLLECTION)
       .select(ALBUM_UI_SELECT_COLUMNS)
-      .eq("id", ALBUM_UI_DOC_ID)
-      .maybeSingle();
+      .in("id", docIds);
     if (error) throwSupabaseError(error);
-    if (!data) return null;
+    const rows = Array.isArray(data)
+      ? data
+          .map((entry) =>
+            typeof entry === "object" && entry !== null
+              ? (entry as Record<string, unknown>)
+              : null
+          )
+          .filter((entry): entry is Record<string, unknown> => entry !== null)
+      : [];
+    const selectedRow = docIds
+      .map((docId) => rows.find((row) => asString(row.id) === docId))
+      .find((entry) => Boolean(entry));
+    if (!selectedRow) return null;
 
-    const config = toAlbumUiConfig(data as Record<string, unknown>);
-    albumUiCache = { cachedAt: Date.now(), value: config };
+    const selectedRowData = selectedRow as Record<string, unknown>;
+    const nestedData =
+      typeof selectedRowData.data === "object" && selectedRowData.data !== null
+        ? (selectedRowData.data as Record<string, unknown>)
+        : {};
+    const config = toAlbumUiConfig({
+      capa: selectedRowData.capa ?? nestedData.capa,
+      titulo: selectedRowData.titulo ?? nestedData.titulo,
+      subtitulo: selectedRowData.subtitulo ?? nestedData.subtitulo,
+    });
+    albumUiCache.set(cacheKey, { cachedAt: Date.now(), value: config });
     return config;
   });
 }
 
-export async function saveAlbumUiConfig(config: AlbumUiConfig): Promise<void> {
+export async function saveAlbumUiConfig(
+  config: AlbumUiConfig,
+  options?: { tenantId?: string }
+): Promise<void> {
   const supabase = getSupabaseClient();
+  const scopedTenantId = cleanTenantId(options?.tenantId);
   const { error } = await supabase.from(ALBUM_UI_DOC_COLLECTION).upsert(
     {
-      id: ALBUM_UI_DOC_ID,
+      id: buildTenantScopedRowId(scopedTenantId, ALBUM_UI_DOC_ID) || ALBUM_UI_DOC_ID,
       ...config,
       updatedAt: nowIso(),
     },
@@ -728,15 +882,20 @@ export async function saveAlbumUiConfig(config: AlbumUiConfig): Promise<void> {
   );
   if (error) throwSupabaseError(error);
 
-  albumUiCache = { cachedAt: Date.now(), value: config };
+  albumUiCache.set(buildTenantScopedCacheKey("albumUi", scopedTenantId), {
+    cachedAt: Date.now(),
+    value: config,
+  });
 }
 
 export async function registerAlbumCapture(payload: {
   collector: AlbumCollector;
   targetId: string;
+  tenantId?: string;
 }): Promise<AlbumCaptureResult> {
   const targetId = payload.targetId.trim();
   const collectorUid = payload.collector.uid.trim();
+  const scopedTenantId = cleanTenantId(payload.tenantId);
   if (!targetId || !collectorUid || targetId === collectorUid) {
     return { status: "invalid-target" };
   }
@@ -747,21 +906,25 @@ export async function registerAlbumCapture(payload: {
     albumSummaryCache.clear();
   };
   const supabase = getSupabaseClient();
+  let collectorQuery = supabase
+    .from("users")
+    .select("uid,nome,turma,foto,stats")
+    .eq("uid", collectorUid);
+  let targetQuery = supabase
+    .from("users")
+    .select("uid,nome,turma")
+    .eq("uid", targetId);
+  if (scopedTenantId) {
+    collectorQuery = collectorQuery.eq("tenant_id", scopedTenantId);
+    targetQuery = targetQuery.eq("tenant_id", scopedTenantId);
+  }
   const [collectorRes, targetRes] = await Promise.all([
-    supabase
-      .from("users")
-      .select("uid,nome,turma,foto,stats")
-      .eq("uid", collectorUid)
-      .maybeSingle(),
-    supabase
-      .from("users")
-      .select("uid,nome,turma")
-      .eq("uid", targetId)
-      .maybeSingle(),
+    collectorQuery.maybeSingle(),
+    targetQuery.maybeSingle(),
   ]);
   if (collectorRes.error) throwSupabaseError(collectorRes.error);
   if (targetRes.error) throwSupabaseError(targetRes.error);
-  if (!targetRes.data) {
+  if (!collectorRes.data || !targetRes.data) {
     return { status: "invalid-target" };
   }
 
@@ -803,11 +966,14 @@ export async function registerAlbumCapture(payload: {
   }
 
   const rankingWrite = async (): Promise<void> => {
-    const { data: rankingData, error: rankingReadError } = await supabase
+    let rankingReadQuery = supabase
       .from("album_rankings")
       .select("id,totalColetado,scansT8")
-      .eq("id", collectorUid)
-      .maybeSingle();
+      .eq("id", collectorUid);
+    if (scopedTenantId) {
+      rankingReadQuery = rankingReadQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { data: rankingData, error: rankingReadError } = await rankingReadQuery.maybeSingle();
     if (rankingReadError) throwSupabaseError(rankingReadError);
 
     const rankingRaw = (rankingData ?? {}) as Record<string, unknown>;
@@ -822,6 +988,7 @@ export async function registerAlbumCapture(payload: {
         nome: collectorName,
         turma: collectorTurma,
         foto: collectorFoto,
+        tenant_id: scopedTenantId || null,
         totalColetado: nextTotalColetado,
         scansT8: nextScansT8,
         ultimoScan: nowIso(),
@@ -849,11 +1016,14 @@ export async function registerAlbumCapture(payload: {
   };
 
   const summaryWrite = async (): Promise<void> => {
-    const { data: summaryData, error: summaryReadError } = await supabase
+    let summaryReadQuery = supabase
       .from(ALBUM_SUMMARY_COLLECTION)
       .select(ALBUM_SUMMARY_SELECT_COLUMNS)
-      .eq("userId", collectorUid)
-      .maybeSingle();
+      .eq("userId", collectorUid);
+    if (scopedTenantId) {
+      summaryReadQuery = summaryReadQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { data: summaryData, error: summaryReadError } = await summaryReadQuery.maybeSingle();
     if (summaryReadError) throwSupabaseError(summaryReadError);
 
     const currentSummary = summaryData
@@ -875,6 +1045,7 @@ export async function registerAlbumCapture(payload: {
       .upsert(
         {
           userId: collectorUid,
+          tenant_id: scopedTenantId || null,
           totalCollected: currentSummary.totalCollected + 1,
           capturedByTurma: nextCapturedByTurma,
           lastCaptureId: targetId,

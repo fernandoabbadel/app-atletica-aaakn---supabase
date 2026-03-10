@@ -14,14 +14,18 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
   fetchCarteirinhaConfig,
   saveCarteirinhaConfig,
   uploadCarteirinhaBackground,
   type CarteirinhaConfig,
 } from "../../../lib/carteirinhaService";
-
-const TURMAS_LIST = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"];
+import {
+  fetchTurmasConfig,
+  getDefaultTurmas,
+  type TurmaConfig,
+} from "../../../lib/turmasService";
 
 const DEFAULT_CONFIG: CarteirinhaConfig = {
   validade: "DEZ/2026",
@@ -31,22 +35,31 @@ const DEFAULT_CONFIG: CarteirinhaConfig = {
 
 export default function AdminCarteirinhaPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId } = useTenantTheme();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingTurma, setUploadingTurma] = useState<string | null>(null);
   const [config, setConfig] = useState<CarteirinhaConfig>(DEFAULT_CONFIG);
+  const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
 
   useEffect(() => {
     let mounted = true;
 
     const loadConfig = async () => {
       try {
-        const loadedConfig = await fetchCarteirinhaConfig();
-        if (mounted) setConfig(loadedConfig);
+        const [loadedConfig, loadedTurmas] = await Promise.all([
+          fetchCarteirinhaConfig(),
+          fetchTurmasConfig({ tenantId: activeTenantId || undefined }),
+        ]);
+        if (!mounted) return;
+        setConfig(loadedConfig);
+        setTurmas(loadedTurmas);
       } catch (error: unknown) {
         console.error("Erro ao carregar config:", error);
-        if (mounted) addToast("Erro ao carregar configuracoes.", "error");
+        if (!mounted) return;
+        setTurmas(getDefaultTurmas());
+        addToast("Erro ao carregar configuracoes.", "error");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -56,7 +69,7 @@ export default function AdminCarteirinhaPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   const handleImageUpload = async (turma: string, file: File) => {
     setUploadingTurma(turma);
@@ -196,16 +209,16 @@ export default function AdminCarteirinhaPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            {TURMAS_LIST.map((turma) => (
+            {turmas.map((turma) => (
               <div
-                key={turma}
+                key={turma.id}
                 className="bg-black/40 p-3 rounded-2xl border border-zinc-800 group relative"
               >
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-xs font-black text-white bg-zinc-800 px-2 py-1 rounded">
-                    {turma}
+                    {turma.nome}
                   </span>
-                  {config.backgrounds[turma] ? (
+                  {config.backgrounds[turma.id] ? (
                     <CheckCircle2 size={14} className="text-emerald-500" />
                   ) : (
                     <span className="text-[8px] text-zinc-600 uppercase font-bold">
@@ -215,10 +228,10 @@ export default function AdminCarteirinhaPage() {
                 </div>
 
                 <div className="relative h-32 w-full rounded-xl overflow-hidden bg-zinc-900 border border-zinc-700 mb-3">
-                  {config.backgrounds[turma] ? (
+                  {config.backgrounds[turma.id] ? (
                     <Image
-                      src={config.backgrounds[turma]}
-                      alt={`Background ${turma}`}
+                      src={config.backgrounds[turma.id]}
+                      alt={`Background ${turma.nome}`}
                       fill
                       className="object-cover"
                       
@@ -231,7 +244,7 @@ export default function AdminCarteirinhaPage() {
                     </div>
                   )}
 
-                  {uploadingTurma === turma && (
+                  {uploadingTurma === turma.id && (
                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-sm z-10">
                       <Loader2 className="animate-spin text-emerald-500" />
                     </div>
@@ -251,7 +264,7 @@ export default function AdminCarteirinhaPage() {
                     onChange={(event) => {
                       const selectedFile = event.target.files?.[0];
                       if (!selectedFile) return;
-                      void handleImageUpload(turma, selectedFile);
+                      void handleImageUpload(turma.id, selectedFile);
                       event.target.value = "";
                     }}
                   />

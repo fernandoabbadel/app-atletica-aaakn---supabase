@@ -8,11 +8,14 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import {
+  createTenantWithMaster,
   fetchMyTenantOnboardingRequests,
   submitTenantOnboardingRequest,
   type TenantOnboardingRequest,
   type TenantPaletteKey,
 } from "@/lib/tenantService";
+import { buildLoginPath } from "@/lib/authRedirect";
+import { isPlatformMaster } from "@/lib/roles";
 
 const PALETTE_OPTIONS: Array<{ key: TenantPaletteKey; label: string }> = [
   { key: "green", label: "Verde" },
@@ -47,9 +50,9 @@ const extractErrorMessage = (error: unknown): string => {
 };
 
 const statusBadgeClass = (status: string): string => {
-  if (status === "approved") return "bg-emerald-500/20 border-emerald-500/40 text-emerald-300";
+  if (status === "approved") return "bg-brand-primary/20 border-brand text-brand-accent";
   if (status === "rejected") return "bg-red-500/20 border-red-500/40 text-red-300";
-  return "bg-cyan-500/20 border-cyan-500/40 text-cyan-200";
+  return "bg-brand-primary/20 border-brand text-brand-accent";
 };
 
 export default function NovaAtleticaPage() {
@@ -75,6 +78,8 @@ export default function NovaAtleticaPage() {
   const [paletteKey, setPaletteKey] = useState<TenantPaletteKey>("green");
 
   const latestRequest = requests[0] || null;
+  const isPlatformMasterUser = isPlatformMaster(user);
+  const backHref = isPlatformMasterUser ? "/master/solicitacoes" : "/";
 
   const hasApprovedTenant = useMemo(() => {
     const status = String(user?.tenant_status || "").trim().toLowerCase();
@@ -98,7 +103,7 @@ export default function NovaAtleticaPage() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
-      router.replace("/login");
+      router.replace(buildLoginPath("/nova-atletica"));
       return;
     }
     void loadRequests("initial");
@@ -128,7 +133,7 @@ export default function NovaAtleticaPage() {
 
     try {
       setSubmitting(true);
-      await submitTenantOnboardingRequest({
+      const payload = {
         nome: nome.trim(),
         sigla: sigla.trim().toUpperCase(),
         faculdade: faculdade.trim(),
@@ -140,8 +145,16 @@ export default function NovaAtleticaPage() {
         contatoTelefone: contatoTelefone.trim() || undefined,
         logoUrl: logoUrl.trim() || undefined,
         paletteKey,
-      });
+      };
 
+      if (isPlatformMasterUser) {
+        await createTenantWithMaster(payload);
+        addToast("Atlética criada e liberada no painel master.", "success");
+        router.replace("/master/solicitacoes");
+        return;
+      }
+
+      await submitTenantOnboardingRequest(payload);
       addToast("Solicitacao enviada. Agora aguarde aprovacao do master da plataforma.", "success");
       await loadRequests("refresh");
     } catch (error: unknown) {
@@ -164,16 +177,21 @@ export default function NovaAtleticaPage() {
       <header className="sticky top-0 z-20 bg-[#050505]/95 backdrop-blur border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Link href="/" className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
+            <Link
+              href={backHref}
+              className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
+            >
               <ArrowLeft size={18} className="text-zinc-300" />
             </Link>
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight inline-flex items-center gap-2">
-                <Building2 size={18} className="text-emerald-400" />
-                Onboarding de Atletica
+                <Building2 size={18} className="text-brand-accent" />
+                {isPlatformMasterUser ? "Criar Atletica" : "Onboarding de Atletica"}
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold uppercase">
-                Cadastro inicial para criacao de tenant
+                {isPlatformMasterUser
+                  ? "Fluxo direto do master da plataforma"
+                  : "Cadastro inicial para criacao de tenant"}
               </p>
             </div>
           </div>
@@ -190,19 +208,35 @@ export default function NovaAtleticaPage() {
       </header>
 
       <main className="px-6 py-6 max-w-4xl mx-auto space-y-6">
-        {hasApprovedTenant && (
-          <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5">
-            <p className="text-sm text-emerald-200 font-bold">
+        {hasApprovedTenant && !isPlatformMasterUser && (
+          <section className="rounded-2xl border border-brand bg-brand-primary/10 p-5">
+            <p className="text-sm text-brand-accent font-bold">
               Seu usuario ja esta vinculado a uma atletica aprovada.
+            </p>
+          </section>
+        )}
+
+        {isPlatformMasterUser && (
+          <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-5">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200">
+              Permissao Elevada
+            </p>
+            <p className="mt-2 text-sm font-bold text-white">
+              Como master da plataforma, voce pode criar mais de uma atletica e manter vinculo
+              administrativo com varias delas.
             </p>
           </section>
         )}
 
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div>
-            <h2 className="text-sm font-black uppercase text-cyan-400">Nova Solicitacao</h2>
+            <h2 className="text-sm font-black uppercase text-brand-accent">
+              {isPlatformMasterUser ? "Nova Atletica" : "Nova Solicitacao"}
+            </h2>
             <p className="text-[11px] text-zinc-500 font-bold">
-              A criacao do tenant passa por aprovacao inicial do master da plataforma.
+              {isPlatformMasterUser
+                ? "Esse fluxo cria a atletica direto no tenant e adiciona ao seu painel master."
+                : "A criacao do tenant passa por aprovacao inicial do master da plataforma."}
             </p>
           </div>
 
@@ -211,36 +245,36 @@ export default function NovaAtleticaPage() {
               value={nome}
               onChange={(event) => setNome(event.target.value)}
               placeholder="Nome da atletica"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
             <input
               value={sigla}
               onChange={(event) => setSigla(event.target.value)}
               placeholder="Sigla (ex: AAAKN)"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
             <input
               value={faculdade}
               onChange={(event) => setFaculdade(event.target.value)}
               placeholder="Faculdade"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
             <input
               value={cidade}
               onChange={(event) => setCidade(event.target.value)}
               placeholder="Cidade"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
             <input
               value={curso}
               onChange={(event) => setCurso(event.target.value)}
               placeholder="Curso"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
             <select
               value={area}
               onChange={(event) => setArea(event.target.value)}
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             >
               {AREA_OPTIONS.map((option) => (
                 <option key={option.value || "default"} value={option.value}>
@@ -252,26 +286,26 @@ export default function NovaAtleticaPage() {
               value={cnpj}
               onChange={(event) => setCnpj(event.target.value)}
               placeholder="CNPJ (opcional)"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
             <input
               type="email"
               value={contatoEmail}
               onChange={(event) => setContatoEmail(event.target.value)}
               placeholder="Email de contato"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
             <input
               value={contatoTelefone}
               onChange={(event) => setContatoTelefone(event.target.value)}
               placeholder="Telefone de contato"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
             <input
               value={logoUrl}
               onChange={(event) => setLogoUrl(event.target.value)}
               placeholder="Logo URL (opcional)"
-              className="bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input px-3 py-2"
             />
           </div>
 
@@ -280,7 +314,7 @@ export default function NovaAtleticaPage() {
             <select
               value={paletteKey}
               onChange={(event) => setPaletteKey(event.target.value as TenantPaletteKey)}
-              className="mt-1 w-full max-w-xs bg-black border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+              className="brand-input mt-1 max-w-xs px-3 py-2"
             >
               {PALETTE_OPTIONS.map((entry) => (
                 <option key={entry.key} value={entry.key}>
@@ -293,17 +327,23 @@ export default function NovaAtleticaPage() {
           <button
             onClick={() => void handleSubmit()}
             disabled={submitting}
-            className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-xs font-black uppercase inline-flex items-center gap-2"
+            className="brand-button-solid px-4 py-2"
           >
             <Send size={14} />
-            {submitting ? "Enviando..." : "Enviar Solicitacao"}
+            {submitting
+              ? "Enviando..."
+              : isPlatformMasterUser
+                ? "Criar Atletica Agora"
+                : "Enviar Solicitacao"}
           </button>
         </section>
 
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Clock3 size={16} className="text-amber-300" />
-            <h2 className="text-sm font-black uppercase text-amber-300">Historico de Solicitacoes</h2>
+            <h2 className="text-sm font-black uppercase text-amber-300">
+              Historico de Solicitacoes
+            </h2>
           </div>
 
           <div className="space-y-2">
@@ -329,7 +369,7 @@ export default function NovaAtleticaPage() {
                   </p>
                 )}
                 {request.status === "approved" && request.approvedTenantId && (
-                  <p className="text-[11px] text-emerald-300 mt-2 inline-flex items-start gap-1">
+                  <p className="text-[11px] text-brand-accent mt-2 inline-flex items-start gap-1">
                     <CheckCircle2 size={12} className="mt-[1px]" />
                     Tenant aprovado com sucesso.
                   </p>
@@ -340,12 +380,14 @@ export default function NovaAtleticaPage() {
 
           {requests.length === 0 && (
             <p className="text-sm text-zinc-400">
-              Nenhuma solicitacao encontrada para seu usuario.
+              {isPlatformMasterUser
+                ? "Nenhuma solicitacao pendente criada por este usuario."
+                : "Nenhuma solicitacao encontrada para seu usuario."}
             </p>
           )}
 
           {latestRequest?.status === "pending" && (
-            <p className="text-[11px] text-cyan-300 font-bold uppercase">
+            <p className="text-[11px] text-brand-accent font-bold uppercase">
               Existe solicitacao pendente. Aguarde aprovacao inicial.
             </p>
           )}

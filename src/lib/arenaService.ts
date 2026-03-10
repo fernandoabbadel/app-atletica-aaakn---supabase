@@ -1,6 +1,7 @@
 import { httpsCallable } from "@/lib/supa/functions";
 
 import { functions } from "./backend";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { getBackendErrorCode } from "./backendErrors";
 import { throwSupabaseError } from "./supabaseData";
 import { getSupabaseClient } from "./supabase";
@@ -52,6 +53,9 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
+const resolveArenaTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(tenantId);
+
 const isIndexRequired = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
   if (code?.includes("failed-precondition")) return true;
@@ -93,19 +97,28 @@ async function callWithFallback<TReq, TRes>(
   }
 }
 
-async function queryRows(maxResults: number): Promise<RawRow[]> {
+async function queryRows(maxResults: number, tenantId?: string | null): Promise<RawRow[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveArenaTenantId(tenantId);
+  let query = supabase
     .from("users")
     .select("uid,nome,apelido,turma,foto,xp,sharkCoins,stats")
     .order("xp", { ascending: false })
     .limit(maxResults);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query;
   if (error) {
     if (!isIndexRequired(error)) throwSupabaseError(error);
-    const fallback = await supabase
+    let fallbackQuery = supabase
       .from("users")
       .select("uid,nome,apelido,turma,foto,xp,sharkCoins,stats")
       .limit(maxResults);
+    if (scopedTenantId) {
+      fallbackQuery = fallbackQuery.eq("tenant_id", scopedTenantId);
+    }
+    const fallback = await fallbackQuery;
     if (fallback.error) throwSupabaseError(fallback.error);
     return (fallback.data ?? []) as unknown as RawRow[];
   }
@@ -120,13 +133,18 @@ async function applyArenaUserDelta(payload: {
   sharkCoinsDelta?: number;
   winsDelta?: number;
   lossesDelta?: number;
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveArenaTenantId(payload.tenantId);
+  let selectQuery = supabase
     .from("users")
     .select("uid,xp,sharkCoins,stats")
-    .eq("uid", payload.userId)
-    .maybeSingle();
+    .eq("uid", payload.userId);
+  if (scopedTenantId) {
+    selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await selectQuery.maybeSingle();
   if (error) throwSupabaseError(error);
   if (!data) return;
 
@@ -139,7 +157,7 @@ async function applyArenaUserDelta(payload: {
     nextStats.arenaLosses = asNumber(stats.arenaLosses, 0) + payload.lossesDelta;
   }
 
-  const { error: updateError } = await supabase
+  let updateQuery = supabase
     .from("users")
     .update({
       xp: Math.max(0, asNumber(data.xp, 0) + (payload.xpDelta ?? 0)),
@@ -148,6 +166,10 @@ async function applyArenaUserDelta(payload: {
       updatedAt: nowIso(),
     })
     .eq("uid", payload.userId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
 }
 
@@ -179,17 +201,19 @@ const normalizeArenaUser = (raw: RawRow): ArenaUserRecord => {
 export async function fetchArenaUsers(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<ArenaUserRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 100, MAX_ARENA_USERS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const tenantId = resolveArenaTenantId(options?.tenantId);
+  const cacheKey = `${tenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(usersCache, cacheKey);
     if (cached) return cached;
   }
 
-  const rows = await queryRows(maxResults);
+  const rows = await queryRows(maxResults, tenantId);
 
   const users = rows
     .map((row) => normalizeArenaUser(row))
@@ -208,9 +232,11 @@ export async function registerArenaBattleResult(payload: {
   result: "victory" | "defeat" | "draw";
   rounds: number;
   rewardXp?: number;
+  tenantId?: string | null;
 }): Promise<void> {
   const attackerId = payload.attackerId.trim();
   const defenderId = payload.defenderId.trim();
+  const scopedTenantId = resolveArenaTenantId(payload.tenantId);
   if (!attackerId || !defenderId) return;
 
   const rewardXp = Math.max(0, Math.floor(payload.rewardXp ?? 0));
@@ -234,6 +260,7 @@ export async function registerArenaBattleResult(payload: {
         result: payload.result,
         rounds: Math.max(1, Math.floor(payload.rounds)),
         date: nowIso(),
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       });
       if (insertError) throwSupabaseError(insertError);
 
@@ -243,18 +270,21 @@ export async function registerArenaBattleResult(payload: {
           xpDelta: Math.max(1, rewardXp),
           winsDelta: 1,
           sharkCoinsDelta: 10,
+          tenantId: scopedTenantId,
         });
       } else {
         await applyArenaUserDelta({
           userId: attackerId,
           lossesDelta: 1,
           xpDelta: 5,
+          tenantId: scopedTenantId,
         });
         if (defenderId !== attackerId) {
           await applyArenaUserDelta({
             userId: defenderId,
             xpDelta: 10,
             winsDelta: 1,
+            tenantId: scopedTenantId,
           });
         }
       }
@@ -268,15 +298,22 @@ export async function registerArenaBattleResult(payload: {
 
 export async function registerArenaFlee(payload: {
   defenderId: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const defenderId = payload.defenderId.trim();
+  const scopedTenantId = resolveArenaTenantId(payload.tenantId);
   if (!defenderId) return;
 
   await callWithFallback<typeof payload, { ok: boolean }>(
     CALLABLE_ARENA_FLEE,
     payload,
     async () => {
-      await applyArenaUserDelta({ userId: defenderId, xpDelta: 5, winsDelta: 1 });
+      await applyArenaUserDelta({
+        userId: defenderId,
+        xpDelta: 5,
+        winsDelta: 1,
+        tenantId: scopedTenantId,
+      });
       return { ok: true };
     }
   );
