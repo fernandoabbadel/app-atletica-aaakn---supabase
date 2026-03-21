@@ -36,6 +36,7 @@ type RawUserVisualRow = {
   foto: string;
   turma: string;
   role: string;
+  tenant_role: string;
   plano: string;
   plano_cor: string;
   plano_icon: string;
@@ -52,6 +53,7 @@ export type CanonicalUserVisual = {
   foto: string;
   turma: string;
   role: string;
+  tenant_role: string;
   plano: string;
   plano_cor: string;
   plano_icon: string;
@@ -133,6 +135,7 @@ const toRawUserVisualRow = (row: Row): RawUserVisualRow => ({
   foto: asString(row.foto).trim(),
   turma: asString(row.turma).trim(),
   role: asString(row.role).trim(),
+  tenant_role: asString(row.tenant_role).trim(),
   plano: asString(row.plano).trim(),
   plano_cor: asString(row.plano_cor).trim(),
   plano_icon: asString(row.plano_icon).trim(),
@@ -252,7 +255,7 @@ const fetchUsersByIds = async (userIds: string[]): Promise<void> => {
     const { data, error } = await supabase
       .from("users")
       .select(
-        "uid,nome,apelido,foto,turma,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,xp"
+        "uid,nome,apelido,foto,turma,role,tenant_role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,xp"
       )
       .in("uid", idsChunk);
 
@@ -367,6 +370,7 @@ const toCanonicalVisual = (
     foto: raw.foto,
     turma: raw.turma,
     role: raw.role,
+    tenant_role: raw.tenant_role,
     plano: planVisual.planName,
     plano_cor: planVisual.planColor,
     plano_icon: planVisual.planIcon,

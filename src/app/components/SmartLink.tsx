@@ -5,8 +5,13 @@ import Link from "next/link";
 import { Lock } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import { COMING_SOON_PATHS } from "@/lib/appRoutes";
+import {
+  buildPermissionMatrixStorageKey,
+  clearLegacyPermissionMatrixStorage,
+} from "@/lib/permissionCache";
 import {
   ADMIN_PANEL_FALLBACK_ROLES,
   getAccessRoleCandidates,
@@ -14,6 +19,7 @@ import {
   isPlatformMaster,
   resolveEffectiveAccessRole,
 } from "@/lib/roles";
+import { parseTenantScopedPath } from "@/lib/tenantRouting";
 
 interface SmartLinkProps {
   href: string;
@@ -54,6 +60,7 @@ export default function SmartLink({
   showLockIcon = false,
 }: SmartLinkProps) {
   const { user } = useAuth();
+  const { tenantId: activeTenantId } = useTenantTheme();
   const { addToast } = useToast();
 
   const checkAccess = () => {
@@ -61,23 +68,30 @@ export default function SmartLink({
     if (!user) return false;
 
     const path = href.toString().split("?")[0];
+    const cleanPath = parseTenantScopedPath(path).scopedPath;
     const userRole = resolveEffectiveAccessRole(user);
     const roleCandidates = getAccessRoleCandidates(user);
+    const permissionStorageKey = cleanPath.startsWith("/master")
+      ? buildPermissionMatrixStorageKey(undefined, "platform")
+      : cleanPath.startsWith("/admin")
+        ? buildPermissionMatrixStorageKey(activeTenantId, "effective")
+        : buildPermissionMatrixStorageKey(activeTenantId);
 
     const isComingSoon = COMING_SOON_PATHS.some(
-      (comingPath) => path === comingPath || path.startsWith(`${comingPath}/`)
+      (comingPath) =>
+        cleanPath === comingPath || cleanPath.startsWith(`${comingPath}/`)
     );
     if (isComingSoon) return false;
 
-    if (isMasterOnlyAdminPath(path)) {
+    if (isMasterOnlyAdminPath(cleanPath)) {
       return isPlatformMaster(user);
     }
 
     if (isPlatformMaster(user)) return true;
 
-    const cachedRules = localStorage.getItem("shark_permissions");
+    const cachedRules = localStorage.getItem(permissionStorageKey);
     if (!cachedRules) {
-      if (path.startsWith("/admin")) {
+      if (cleanPath.startsWith("/admin")) {
         return roleCandidates.some((role) =>
           ADMIN_PANEL_FALLBACK_ROLES.has(role)
         );
@@ -88,7 +102,8 @@ export default function SmartLink({
     try {
       const permissionMatrix = parsePermissionMatrix(cachedRules);
       if (!permissionMatrix) {
-        if (path.startsWith("/admin")) {
+        clearLegacyPermissionMatrixStorage();
+        if (cleanPath.startsWith("/admin")) {
           return roleCandidates.some((role) =>
             ADMIN_PANEL_FALLBACK_ROLES.has(role)
           );
@@ -98,7 +113,8 @@ export default function SmartLink({
 
       const matchedPath = Object.keys(permissionMatrix)
         .filter(
-          (rulePath) => path === rulePath || path.startsWith(`${rulePath}/`)
+          (rulePath) =>
+            cleanPath === rulePath || cleanPath.startsWith(`${rulePath}/`)
         )
         .sort((a, b) => b.length - a.length)[0];
 
@@ -112,14 +128,14 @@ export default function SmartLink({
         );
       }
 
-      if (path.startsWith("/admin")) {
+      if (cleanPath.startsWith("/admin")) {
         return roleCandidates.some((role) =>
           ADMIN_PANEL_FALLBACK_ROLES.has(role)
         );
       }
     } catch (error: unknown) {
       console.error("Erro ao verificar permissao no SmartLink", error);
-      if (path.startsWith("/admin")) {
+      if (cleanPath.startsWith("/admin")) {
         return roleCandidates.some((role) =>
           ADMIN_PANEL_FALLBACK_ROLES.has(role)
         );

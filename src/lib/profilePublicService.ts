@@ -11,7 +11,7 @@ const MAX_LIGA_RESULTS = 8;
 const MAX_FOLLOW_RESULTS = 260;
 const MAX_FOLLOW_SCAN_RESULTS = 5000;
 const PROFILE_USER_SELECT_COLUMNS =
-  "uid,nome,apelido,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,status,whatsappPublico,idadePublica,relacionamentoPublico,esportes,pets,statusRelacionamento,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,tier,level,xp,stats";
+  "uid,nome,apelido,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,tenant_role,status,whatsappPublico,idadePublica,relacionamentoPublico,esportes,pets,statusRelacionamento,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,tier,level,xp,stats";
 
 const publicBundleCache = new Map<string, CacheEntry<PublicProfileBundle | null>>();
 const followListCache = new Map<string, CacheEntry<FollowListItem[]>>();

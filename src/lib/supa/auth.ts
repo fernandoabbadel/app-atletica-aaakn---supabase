@@ -168,7 +168,7 @@ export async function signInWithPopup(
   const supabase = getSupabaseClient();
 
   const redirectTo = typeof window !== "undefined"
-    ? `${window.location.origin}/dashboard`
+    ? `${window.location.origin}/visitante`
     : undefined;
 
   const { error } = await supabase.auth.signInWithOAuth({

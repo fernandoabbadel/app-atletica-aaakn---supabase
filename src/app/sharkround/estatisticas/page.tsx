@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, BarChart3, CheckCircle2, Building2, XCircle } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 interface SharkroundStats {
   clinicas: number;
@@ -17,7 +19,11 @@ const SHARKROUND_ALLOWED_ROLES = new Set(["master", "admin_geral", "admin_gestor
 
 export default function SharkroundEstatisticasPage() {
   const { user, loading } = useAuth();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const router = useRouter();
+  const sharkroundStatsStorageKey = `${SHARKROUND_STATS_STORAGE_KEY}:${tenantId || tenantSlug || "default"}`;
+  const sharkroundHref = tenantSlug ? withTenantSlug(tenantSlug, "/sharkround") : "/sharkround";
+  const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
   const userRole =
     typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
   const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
@@ -25,8 +31,8 @@ export default function SharkroundEstatisticasPage() {
   useEffect(() => {
     if (loading) return;
     if (canAccessSharkround) return;
-    router.replace("/em-breve");
-  }, [loading, canAccessSharkround, router]);
+    router.replace(emBreveHref);
+  }, [loading, canAccessSharkround, emBreveHref, router]);
 
   const [stats, setStats] = useState<SharkroundStats>({
     clinicas: 0,
@@ -38,7 +44,7 @@ export default function SharkroundEstatisticasPage() {
     if (loading || !canAccessSharkround) return;
     if (!user?.uid) return;
     const raw = window.localStorage.getItem(
-      `${SHARKROUND_STATS_STORAGE_KEY}:${user.uid}`
+      `${sharkroundStatsStorageKey}:${user.uid}`
     );
     if (!raw) return;
 
@@ -54,7 +60,7 @@ export default function SharkroundEstatisticasPage() {
     } catch {
       setStats({ clinicas: 0, acertos: 0, erros: 0 });
     }
-  }, [user?.uid, loading, canAccessSharkround]);
+  }, [user?.uid, loading, canAccessSharkround, sharkroundStatsStorageKey]);
 
   const precision = useMemo(() => {
     const total = stats.acertos + stats.erros;
@@ -75,7 +81,7 @@ export default function SharkroundEstatisticasPage() {
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center gap-3">
           <Link
-            href="/sharkround"
+            href={sharkroundHref}
             className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
           >
             <ArrowLeft size={18} className="text-zinc-300" />

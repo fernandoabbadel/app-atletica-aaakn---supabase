@@ -20,8 +20,8 @@ import { getTurmaImage } from "../../constants/turmaImages";
 import { buildLoginPath } from "@/lib/authRedirect";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import {
-  fetchTenantPlatformConfig,
   fetchPendingMembershipStatusForCurrentUser,
+  requestJoinManual,
   requestJoinWithInvite,
 } from "../../lib/tenantService";
 import {
@@ -370,8 +370,7 @@ export default function CadastroPage() {
     try {
       // 1. Atualiza dados do usuário
       const isGuestRole = String(user?.role || "").trim().toLowerCase() === "guest";
-      const platformConfig = isGuestRole ? await fetchTenantPlatformConfig() : null;
-      const tokenizationActive = platformConfig?.tokenizationActive ?? false;
+      let inviteJoinFailedMessage = "";
 
       await updateUser({
         ...formData,
@@ -407,8 +406,8 @@ export default function CadastroPage() {
         try {
           await requestJoinWithInvite(effectiveInviteToken);
         } catch (joinError: unknown) {
-          const joinMessage = extractErrorMessage(joinError);
-          const normalizedJoinMessage = joinMessage.toLowerCase();
+          inviteJoinFailedMessage = extractErrorMessage(joinError);
+          const normalizedJoinMessage = inviteJoinFailedMessage.toLowerCase();
           const shouldClearInviteToken =
             normalizedJoinMessage.includes("token invalido") ||
             normalizedJoinMessage.includes("token expirado") ||
@@ -417,13 +416,7 @@ export default function CadastroPage() {
           if (shouldClearInviteToken) {
             clearStoredInviteToken();
           }
-          if (!tokenizationActive) {
-            addToast("Cadastro salvo, mas o convite foi ignorado.", "info");
-          } else {
-            setError(`Cadastro salvo, mas o convite falhou: ${joinMessage}`);
-            addToast("Cadastro salvo, mas o convite nao foi aplicado.", "error");
-            return;
-          }
+          addToast("Convite nao foi aplicado. Vou seguir pela regra da atletica.", "info");
         }
       } else if (hasInviteToken && (currentTenantStatus === "pending" || currentTenantStatus === "approved")) {
         clearStoredInviteToken();
@@ -454,7 +447,7 @@ export default function CadastroPage() {
         }
         if (membership?.status === "approved") {
           clearStoredInviteToken();
-          addToast("Perfil atualizado! Bem-vindo ao cardume. \uD83E\uDD88", "success");
+          addToast("Perfil atualizado com sucesso.", "success");
           router.push(profilePath);
           return;
         }
@@ -463,19 +456,75 @@ export default function CadastroPage() {
       }
 
       if (isGuestRole) {
-        if (!tokenizationActive) {
-          await updateUser({ role: "user" });
-        } else {
+        if (!activeTenantId) {
           setError(
-            "Ficha salva, mas o lancamento exige um convite valido antes de liberar seu acesso."
+            inviteJoinFailedMessage || "Escolha uma atletica antes de concluir o cadastro."
           );
-          addToast("Ficha salva, mas falta um convite valido para liberar a entrada.", "info");
+          addToast("Escolha a atletica correta para concluir a entrada.", "info");
           return;
         }
+
+        try {
+          await requestJoinManual(activeTenantId);
+          const manualMembership = await fetchPendingMembershipStatusForCurrentUser();
+          if (manualMembership) {
+            const membershipPatch: Parameters<typeof updateUser>[0] = {
+              tenant_id: manualMembership.tenantId,
+              tenant_role: manualMembership.role,
+              tenant_status: manualMembership.status,
+            };
+            await updateUser(membershipPatch);
+
+            if (manualMembership.status === "pending") {
+              clearStoredInviteToken();
+              addToast(
+                inviteJoinFailedMessage
+                  ? "Convite ignorado. Cadastro enviado para aprovacao da atletica."
+                  : "Cadastro concluido. Aguarde aprovacao da atletica.",
+                "info"
+              );
+              router.push(pendingPath);
+              return;
+            }
+
+            if (false) {
+              await updateUser({ role: "user" });
+              clearStoredInviteToken();
+              addToast("Perfil atualizado com sucesso.", "success");
+              router.push(profilePath);
+              return;
+            }
+
+            if (manualMembership.status === "approved") {
+              await updateUser({ role: "user" });
+              clearStoredInviteToken();
+              addToast("Perfil atualizado com sucesso.", "success");
+              router.push(profilePath);
+              return;
+            }
+          }
+        } catch (manualJoinError: unknown) {
+          const manualMessage = extractErrorMessage(manualJoinError);
+          if (manualMessage.toLowerCase().includes("cadastro publico")) {
+            setError("Esta atletica exige convite para novos cadastros.");
+            addToast("Esta atletica exige convite para novos cadastros.", "info");
+          } else {
+            setError(inviteJoinFailedMessage || manualMessage);
+            addToast(manualMessage, "error");
+          }
+          return;
+        }
+
+        setError(
+          inviteJoinFailedMessage ||
+            "Ficha salva, mas ainda nao consegui vincular voce a uma atletica."
+        );
+        addToast("Ficha salva, mas ainda nao consegui concluir o vinculo com a atletica.", "info");
+        return;
       }
 
       clearStoredInviteToken();
-      addToast("Perfil atualizado! Bem-vindo ao cardume. \uD83E\uDD88", "success");
+      addToast("Perfil atualizado com sucesso.", "success");
       router.push(profilePath); 
     } catch (err: unknown) {
       const errLog =
@@ -576,7 +625,7 @@ export default function CadastroPage() {
                     </label>
                 </div>
 
-                <h1 className="text-3xl font-black uppercase italic tracking-tighter">Ficha do <span className="text-emerald-500">Tubarao</span></h1>
+                <h1 className="text-3xl font-black uppercase italic tracking-tighter">Perfil do <span className="text-emerald-500">Atleta</span></h1>
                 {hasInviteToken && (
                     <div className="mt-3 bg-cyan-500/10 border border-cyan-500/20 p-3 rounded-xl max-w-xl mx-auto">
                         <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wide">
@@ -712,7 +761,7 @@ export default function CadastroPage() {
                         </div>
                         <div className="relative group">
                             <Instagram className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-pink-500 transition" size={18} />
-                            <input type="text" placeholder="Insta (sem @)" className="input-field pl-14" value={formData.instagram} onChange={e => setFormData({...formData, instagram: e.target.value})} />
+                            <input type="text" maxLength={120} placeholder="Insta (sem @)" className="input-field pl-14" value={formData.instagram} onChange={e => setFormData({...formData, instagram: e.target.value.slice(0, 120)})} />
                         </div>
                     </div>
                 </div>
@@ -772,7 +821,7 @@ export default function CadastroPage() {
 
                 {/* BLOCO 4: TURMA */}
                 <div className="space-y-3">
-                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Selecione seu Cardume</label>
+                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Selecione sua turma</label>
                     <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
                         {loadingTurmas ? (
                             <div className="rounded-2xl border border-zinc-800 bg-black/40 px-4 py-6 text-sm font-semibold text-zinc-400 flex items-center gap-3">

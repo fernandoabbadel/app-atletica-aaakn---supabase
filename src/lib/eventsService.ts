@@ -1,5 +1,11 @@
 import { getSupabaseClient } from "./supabase";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import {
+  normalizeAvailabilityStatus,
+  normalizePaymentConfig,
+  normalizePlanPriceEntries,
+  resolvePlanScopedPrice,
+} from "./commerceCatalog";
 import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
@@ -7,7 +13,8 @@ type Row = Record<string, unknown>;
 
 const FINANCEIRO_CACHE_TTL_MS = 90_000;
 const FINANCEIRO_DOC_ID = "financeiro";
-const EVENT_CHECKOUT_SELECT_COLUMNS = "id,titulo,imagem,lotes,status,data,hora,local";
+const EVENT_CHECKOUT_SELECT_COLUMNS =
+  "id,titulo,imagem,lotes,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,data,hora,local";
 const TICKET_REQUEST_INSERT_SELECT_COLUMNS = "id";
 
 const financeiroCache = new Map<string, CacheEntry<Row | null>>();
@@ -51,7 +58,7 @@ const resolveFinanceiroTenantId = (tenantId?: string | null): string =>
 const resolveFinanceiroDocIds = (tenantId?: string | null): string[] => {
   const scopedTenantId = resolveFinanceiroTenantId(tenantId);
   if (!scopedTenantId) return [FINANCEIRO_DOC_ID];
-  return [buildTenantScopedRowId(scopedTenantId, FINANCEIRO_DOC_ID), FINANCEIRO_DOC_ID];
+  return [buildTenantScopedRowId(scopedTenantId, FINANCEIRO_DOC_ID)];
 };
 
 const pickFinanceiroRow = (
@@ -64,6 +71,33 @@ const pickFinanceiroRow = (
     if (match) return match;
   }
   return null;
+};
+
+const resolveEventPaymentConfig = (
+  evento: Row | null,
+  tenantFinanceiro: Row | null
+): Row | null => {
+  const eventPaymentConfig = normalizePaymentConfig(evento?.payment_config);
+  if (eventPaymentConfig) {
+    return { ...eventPaymentConfig };
+  }
+
+  const legacyEventPayment = normalizePaymentConfig({
+    chave: evento?.pixChave,
+    banco: evento?.pixBanco,
+    titular: evento?.pixTitular,
+    whatsapp: evento?.contatoComprovante,
+  });
+  if (legacyEventPayment) {
+    return { ...legacyEventPayment };
+  }
+
+  const tenantPayment = normalizePaymentConfig(tenantFinanceiro);
+  if (tenantPayment) {
+    return { ...tenantPayment };
+  }
+
+  return tenantFinanceiro ? { ...tenantFinanceiro } : null;
 };
 
 export async function fetchFinanceiroConfig(options?: {
@@ -106,6 +140,7 @@ export async function saveFinanceiroConfig(payload: {
   const scopedTenantId = resolveFinanceiroTenantId(options?.tenantId);
   const writePayload = {
     id: buildTenantScopedRowId(scopedTenantId, FINANCEIRO_DOC_ID) || FINANCEIRO_DOC_ID,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     chave: payload.chave.trim(),
     banco: payload.banco.trim(),
     titular: payload.titular.trim(),
@@ -126,6 +161,8 @@ export async function fetchEventCheckoutData(options: {
   loteId: string;
   forceRefresh?: boolean;
   tenantId?: string | null;
+  userPlanNames?: Array<string | null | undefined>;
+  userPlanIds?: Array<string | null | undefined>;
 }): Promise<{ evento: Row | null; lote: Row | null; financeiro: Row | null }> {
   const eventId = options.eventId.trim();
   const loteId = options.loteId.trim();
@@ -134,11 +171,15 @@ export async function fetchEventCheckoutData(options: {
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("eventos")
     .select(EVENT_CHECKOUT_SELECT_COLUMNS)
-    .eq("id", eventId)
-    .maybeSingle();
+    .eq("id", eventId);
+  const scopedTenantId = resolveFinanceiroTenantId(options.tenantId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) throwSupabaseError(error);
 
   const evento = data ? (data as Row) : null;
@@ -150,12 +191,34 @@ export async function fetchEventCheckoutData(options: {
       return asString(obj.id).trim() === loteId;
     }) as Row | undefined) ?? null;
 
-  const financeiro = await fetchFinanceiroConfig({
+  const tenantFinanceiro = await fetchFinanceiroConfig({
     forceRefresh: options.forceRefresh ?? false,
     tenantId: options.tenantId,
   });
+  const userPlanIds = (options.userPlanIds ?? []).filter(
+    (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+  );
+  const userPlanNames = (options.userPlanNames ?? []).filter(
+    (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+  );
+  const resolvedLote = lote
+    ? {
+        ...lote,
+        preco: String(
+          resolvePlanScopedPrice({
+            basePrice:
+              Number.parseFloat(asString(lote.preco).replace(",", ".")) || 0,
+            entries: normalizePlanPriceEntries(lote.planPrices ?? lote.plan_prices),
+            userPlanIds,
+            userPlanNames,
+          })
+        ).replace(".", ","),
+        status: normalizeAvailabilityStatus(lote.status, "ativo"),
+      }
+    : null;
+  const financeiro = resolveEventPaymentConfig(evento, tenantFinanceiro);
 
-  return { evento, lote, financeiro };
+  return { evento, lote: resolvedLote, financeiro };
 }
 
 export async function createEventTicketRequest(payload: {
@@ -171,7 +234,11 @@ export async function createEventTicketRequest(payload: {
   valorUnitario: string;
   valorTotal: string;
   metodo?: string;
+  tenantId?: string | null;
+  paymentConfig?: Record<string, unknown> | null;
 }): Promise<{ id: string }> {
+  const scopedTenantId = resolveFinanceiroTenantId(payload.tenantId);
+  const paymentConfig = normalizePaymentConfig(payload.paymentConfig);
   const requestPayload = {
     userId: payload.userId.trim(),
     userName: payload.userName.trim() || "Aluno",
@@ -187,6 +254,8 @@ export async function createEventTicketRequest(payload: {
     metodo: payload.metodo?.trim() || "whatsapp",
     status: "pendente",
     dataSolicitacao: nowIso(),
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+    ...(paymentConfig ? { payment_config: paymentConfig } : {}),
   };
 
   const supabase = getSupabaseClient();

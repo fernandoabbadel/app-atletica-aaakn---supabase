@@ -3,7 +3,7 @@
 
 import Image from "next/image";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff, LogIn, Waves } from "lucide-react";
 import { useToast } from "@/context/ToastContext";
@@ -60,6 +60,35 @@ export default function LoginPage() {
       ? requestedReturnTo
       : storedReturnToHint;
   const redirectCommittedRef = useRef(false);
+  const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
+
+  const resolveRedirectTarget = useCallback((): string => {
+    if (!user) return "/visitante";
+
+    const fallbackTarget = user.isAnonymous
+      ? "/visitante"
+      : normalizedActiveTenantSlug
+        ? withTenantSlug(normalizedActiveTenantSlug, "/dashboard")
+        : "/visitante";
+
+    const candidateTargets = [
+      inviteAwareReturnTo,
+      readStoredLoginReturnTo() ?? "",
+    ].filter((candidate) => candidate && candidate !== "/dashboard");
+
+    for (const candidate of candidateTargets) {
+      const { tenantSlug } = parseTenantScopedPath(candidate);
+      if (!tenantSlug) {
+        return candidate;
+      }
+
+      if (!user.isAnonymous && tenantSlug === normalizedActiveTenantSlug) {
+        return candidate;
+      }
+    }
+
+    return fallbackTarget;
+  }, [inviteAwareReturnTo, normalizedActiveTenantSlug, user]);
 
   useEffect(() => {
     const nextInviteToken = inviteTokenFromUrl || readStoredInviteToken();
@@ -83,22 +112,11 @@ export default function LoginPage() {
       router.replace("/banned");
       return;
     }
-    const storedReturnTo = readStoredLoginReturnTo();
-    const fallbackTarget = user.isAnonymous
-      ? "/visitante"
-      : activeTenantSlug.trim()
-        ? withTenantSlug(activeTenantSlug, "/dashboard")
-        : "/dashboard";
-    const redirectTarget =
-      inviteAwareReturnTo && inviteAwareReturnTo !== "/dashboard"
-        ? inviteAwareReturnTo
-      : storedReturnTo && storedReturnTo !== "/dashboard"
-          ? storedReturnTo
-          : fallbackTarget;
+    const redirectTarget = resolveRedirectTarget();
     redirectCommittedRef.current = true;
     clearStoredLoginReturnTo();
     router.replace(redirectTarget);
-  }, [activeTenantSlug, inviteAwareReturnTo, loading, router, tenantThemeLoading, user]);
+  }, [loading, resolveRedirectTarget, router, tenantThemeLoading, user]);
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -246,7 +264,7 @@ export default function LoginPage() {
               ) : (
                 <>
                   <LogIn className="w-4 h-4" />
-                  Entrar no Cardume
+                  Entrar na plataforma
                 </>
               )}
             </button>

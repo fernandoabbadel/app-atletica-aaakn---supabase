@@ -1,6 +1,7 @@
 export type TenantScopedRole =
   | "visitante"
   | "user"
+  | "mini_vendor"
   | "treinador"
   | "empresa"
   | "admin_treino"
@@ -22,6 +23,7 @@ export interface RoleUserLike {
 const TENANT_ROLE_SET = new Set<TenantScopedRole>([
   "visitante",
   "user",
+  "mini_vendor",
   "treinador",
   "empresa",
   "admin_treino",

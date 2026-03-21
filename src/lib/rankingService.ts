@@ -8,7 +8,7 @@ type CacheEntry<T> = {
 
 type RawRow = Record<string, unknown>;
 
-const TTL_MS = 25_000;
+const TTL_MS = 300_000;
 const MAX_RANKING_USERS = 250;
 
 const rankingCache = new Map<string, CacheEntry<RankingUserRecord[]>>();

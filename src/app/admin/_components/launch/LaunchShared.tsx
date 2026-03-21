@@ -275,12 +275,24 @@ export function LaunchPageShell({
 interface LaunchTenantSelectorCardProps {
   workspace: LaunchWorkspaceState;
   helperText: string;
+  statusTitle?: string;
+  statusValue?: string;
+  statusHelper?: string;
+  statusAction?: ReactNode;
+  selectable?: boolean;
 }
 
 export function LaunchTenantSelectorCard({
   workspace,
   helperText,
+  statusTitle,
+  statusValue,
+  statusHelper,
+  statusAction,
+  selectable = true,
 }: LaunchTenantSelectorCardProps) {
+  const shouldRenderSelect = selectable && workspace.tenants.length > 1;
+
   return (
     <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
@@ -288,28 +300,39 @@ export function LaunchTenantSelectorCard({
           <label className="text-[11px] font-bold uppercase text-zinc-400">
             Atletica selecionada
           </label>
-          <select
-            value={workspace.selectedTenantId}
-            onChange={(event) => workspace.setSelectedTenantId(event.target.value)}
-            className="mt-1 w-full rounded-xl border border-zinc-700 bg-black px-3 py-2 text-sm"
-          >
-            {workspace.tenants.map((tenant) => (
-              <option key={tenant.id} value={tenant.id}>
-                {tenant.sigla} - {tenant.nome}
-              </option>
-            ))}
-          </select>
+          {shouldRenderSelect ? (
+            <select
+              value={workspace.selectedTenantId}
+              onChange={(event) => workspace.setSelectedTenantId(event.target.value)}
+              className="mt-1 w-full rounded-xl border border-zinc-700 bg-black px-3 py-2 text-sm"
+            >
+              {workspace.tenants.map((tenant) => (
+                <option key={tenant.id} value={tenant.id}>
+                  {tenant.sigla} - {tenant.nome}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="mt-1 rounded-xl border border-zinc-700 bg-black px-3 py-2 text-sm font-black uppercase text-white">
+              {workspace.selectedTenant
+                ? `${workspace.selectedTenant.sigla} - ${workspace.selectedTenant.nome}`
+                : "Sem atletica"}
+            </div>
+          )}
           <p className="mt-2 text-[11px] font-medium text-zinc-500">{helperText}</p>
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4">
-          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Status</p>
+          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+            {statusTitle || "Status"}
+          </p>
           <p className="mt-2 text-sm font-black uppercase text-white">
-            {workspace.selectedTenant?.status || "Sem tenant"}
+            {statusValue || workspace.selectedTenant?.status || "Sem atletica"}
           </p>
           <p className="mt-1 text-[11px] text-zinc-500">
-            {workspace.selectedTenant?.curso || "Curso nao informado"}
+            {statusHelper || workspace.selectedTenant?.curso || "Curso nao informado"}
           </p>
+          {statusAction ? <div className="mt-4">{statusAction}</div> : null}
         </div>
       </div>
 

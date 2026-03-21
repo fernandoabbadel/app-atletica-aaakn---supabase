@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -17,11 +17,14 @@ import {
   Search,
   ShieldAlert,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 
+import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useToast } from "@/context/ToastContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   deleteCommunityPost,
   fetchCommunityAdminPosts,
@@ -31,6 +34,7 @@ import {
   setCommunityPostPatch,
 } from "@/lib/communityService";
 import type { DateLike } from "@/lib/supabaseData";
+import { uploadImage } from "@/lib/upload";
 import {
   DEFAULT_COMMUNITY_CATEGORIES,
   normalizeCommunityCategories,
@@ -112,7 +116,7 @@ const formatDateTime = (value: DateLike): string => {
 
 export default function AdminComunidadePage() {
   const { addToast } = useToast();
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const [activeTab, setActiveTab] = useState<"config" | "posts" | "denuncias">("config");
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -121,6 +125,7 @@ export default function AdminComunidadePage() {
   const [posts, setPosts] = useState<PostData[]>([]);
   const [viewCommentsId, setViewCommentsId] = useState<string | null>(null);
   const [adminComments, setAdminComments] = useState<CommentData[]>([]);
+  const [uploadingCover, setUploadingCover] = useState(false);
 
   const coverPreviewSrc = toSafeImageSrc(config.capaUrl, "/carteirinha-bg.jpg");
 
@@ -176,6 +181,7 @@ export default function AdminComunidadePage() {
         const rows = await fetchCommunityComments(viewCommentsId, {
           order: "desc",
           maxResults: 60,
+          tenantId: activeTenantId || undefined,
         });
         if (!mounted) return;
         setAdminComments(
@@ -197,7 +203,7 @@ export default function AdminComunidadePage() {
     return () => {
       mounted = false;
     };
-  }, [addToast, viewCommentsId]);
+  }, [addToast, viewCommentsId, activeTenantId]);
 
   const filteredPosts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -229,10 +235,57 @@ export default function AdminComunidadePage() {
         tenantId: activeTenantId || undefined,
       });
       setConfig(nextConfig);
-      addToast("Configuracoes da Resenha salvas!", "success");
+      addToast("Configuracoes da comunidade salvas!", "success");
     } catch (error: unknown) {
       console.error(error);
       addToast("Erro ao salvar configuracoes.", "error");
+    }
+  };
+
+  const handleCoverUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || uploadingCover) {
+      input.value = "";
+      return;
+    }
+
+    try {
+      setUploadingCover(true);
+      const { url, error } = await uploadImage(
+        file,
+        `community/${activeTenantId || "global"}/covers`,
+        {
+          scopeKey: "admin:community:cover",
+          maxBytes: 3 * 1024 * 1024,
+          maxWidth: 2400,
+          maxHeight: 1800,
+          maxPixels: 3_600_000,
+          compressionMaxWidth: 1800,
+          compressionMaxHeight: 1200,
+          compressionMaxBytes: 220 * 1024,
+          fileName: "community-cover",
+          upsert: true,
+          appendVersionQuery: true,
+        }
+      );
+
+      if (error || !url) {
+        addToast(`Capa invalida: ${error || "Falha no upload."}`, "error");
+        return;
+      }
+
+      setConfig((previous) => ({ ...previous, capaUrl: url }));
+      addToast(
+        "Capa enviada com sucesso. O arquivo foi reduzido para economizar storage e egress.",
+        "success"
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao enviar capa da comunidade.", "error");
+    } finally {
+      setUploadingCover(false);
+      input.value = "";
     }
   };
 
@@ -278,7 +331,9 @@ export default function AdminComunidadePage() {
   const toggleBlockPost = async (id: string, currentStatus: boolean) => {
     try {
       const nextStatus = !currentStatus;
-      await setCommunityPostPatch(id, { blocked: nextStatus });
+      await setCommunityPostPatch(id, { blocked: nextStatus }, {
+        tenantId: activeTenantId || undefined,
+      });
       setPosts((prev) =>
         prev.map((post) => (post.id === id ? { ...post, blocked: nextStatus } : post))
       );
@@ -295,7 +350,9 @@ export default function AdminComunidadePage() {
   const toggleCommentsLock = async (id: string, currentStatus: boolean) => {
     try {
       const nextStatus = !currentStatus;
-      await setCommunityPostPatch(id, { commentsDisabled: nextStatus });
+      await setCommunityPostPatch(id, { commentsDisabled: nextStatus }, {
+        tenantId: activeTenantId || undefined,
+      });
       setPosts((prev) =>
         prev.map((post) =>
           post.id === id ? { ...post, commentsDisabled: nextStatus } : post
@@ -311,7 +368,9 @@ export default function AdminComunidadePage() {
   const togglePin = async (id: string, currentStatus: boolean) => {
     try {
       const nextStatus = !currentStatus;
-      await setCommunityPostPatch(id, { fixado: nextStatus });
+      await setCommunityPostPatch(id, { fixado: nextStatus }, {
+        tenantId: activeTenantId || undefined,
+      });
       setPosts((prev) =>
         prev.map((post) => (post.id === id ? { ...post, fixado: nextStatus } : post))
       );
@@ -326,7 +385,9 @@ export default function AdminComunidadePage() {
     if (!confirm("Tem certeza que deseja excluir permanentemente esta postagem?")) return;
 
     try {
-      await deleteCommunityPost(id);
+      await deleteCommunityPost(id, {
+        tenantId: activeTenantId || undefined,
+      });
       setPosts((prev) => prev.filter((post) => post.id !== id));
       addToast("Post removido.", "info");
     } catch (error: unknown) {
@@ -341,14 +402,14 @@ export default function AdminComunidadePage() {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Link
-              href="/admin"
+              href={tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin"}
               className="rounded-full border border-zinc-800 bg-zinc-900 p-3 transition hover:bg-zinc-800"
             >
               <ArrowLeft size={20} className="text-zinc-400" />
             </Link>
             <div>
               <h1 className="text-2xl font-black uppercase italic tracking-tighter">
-                CMS Resenha
+                CMS Comunidade
               </h1>
               <p className="text-[10px] font-bold uppercase text-zinc-500">
                 Gestao de comunidade
@@ -447,18 +508,36 @@ export default function AdminComunidadePage() {
                         }
                       />
                     </div>
-                    <div>
-                      <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-500">
-                        URL da capa
+                    <div className="space-y-3 rounded-2xl border border-zinc-800 bg-black/35 p-4">
+                      <label className="block text-[10px] font-bold uppercase text-zinc-500">
+                        Capa da comunidade
                       </label>
-                      <input
-                        type="text"
-                        className="input-admin"
-                        value={config.capaUrl}
-                        onChange={(event) =>
-                          setConfig((prev) => ({ ...prev, capaUrl: event.target.value }))
-                        }
-                      />
+                      <div className="relative h-40 w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
+                        <Image
+                          src={coverPreviewSrc}
+                          alt="Preview da capa da comunidade"
+                          fill
+                          sizes="100vw"
+                          className="object-cover"
+                          unoptimized={coverPreviewSrc.startsWith("http")}
+                        />
+                      </div>
+                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-brand/40 bg-brand-primary/10 px-4 py-2 text-[11px] font-black uppercase tracking-wide text-brand transition hover:bg-brand-primary/15">
+                        <Upload size={14} />
+                        {uploadingCover ? "Enviando..." : "Adicionar capa"}
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          disabled={uploadingCover}
+                          onChange={(event) => void handleCoverUpload(event)}
+                        />
+                      </label>
+                      <ImageResizeHelpLink label="Diminuir a capa no favicon.io/favicon-converter" />
+                      <p className="text-[11px] text-zinc-500">
+                        PNG, JPG ou WEBP at&eacute; 3MB. A imagem &eacute; comprimida para ajudar
+                        no plano free do Supabase.
+                      </p>
                     </div>
 
                     <div className="mt-4 flex items-center justify-between rounded-2xl border border-zinc-800 bg-black p-4">
@@ -568,10 +647,10 @@ export default function AdminComunidadePage() {
                       />
                     </div>
                     <h4 className="mt-6 text-3xl font-black italic uppercase tracking-tighter text-white">
-                      {config.titulo || "Resenha Tubarao"}
+                      {config.titulo || "Comunidade"}
                     </h4>
                     <p className="mt-2 text-xs font-bold uppercase tracking-widest text-zinc-400">
-                      {config.subtitulo || "Onde o cardume se encontra"}
+                      {config.subtitulo || "Espaco oficial da atletica"}
                     </p>
                   </div>
                 </div>

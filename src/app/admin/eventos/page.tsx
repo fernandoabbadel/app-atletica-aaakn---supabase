@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useRef, useEffect, useMemo } from "react";
-import { 
+import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, 
   Image as ImageIcon, X, Tag, Users, 
   CheckCircle, Download, BarChart3, Lock, MoveVertical,
@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; 
+import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import { uploadImage } from "../../../lib/upload";
@@ -21,6 +22,7 @@ import {
   fetchAdminEventParticipants,
   fetchAdminEventPolls,
   fetchEventsFeed,
+  setAdminEventSaleStatus,
   incrementEventPurchaseUserStats,
   setAdminEventLowStock,
   setAdminEventStatus,
@@ -29,11 +31,25 @@ import {
   upsertAdminEvent,
   type DateLike,
 } from "../../../lib/eventsNativeService";
+import { fetchPlanCatalog, type PlanRecord } from "../../../lib/plansPublicService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const EVENT_DASHBOARD_GRACE_MS = 24 * 60 * 60 * 1000;
+const EVENT_TITLE_MAX_LENGTH = 120;
+const EVENT_LOCATION_MAX_LENGTH = 140;
+const EVENT_TYPE_MAX_LENGTH = 40;
+const EVENT_DESCRIPTION_MAX_LENGTH = 1200;
+const EVENT_PIX_FIELD_MAX_LENGTH = 140;
+const EVENT_LOTE_NAME_MAX_LENGTH = 80;
 
 // --- TIPAGEM ---
-type StatusLote = "ativo" | "encerrado" | "agendado";
+type EventSaleStatus = "ativo" | "em_breve" | "esgotado";
+type StatusLote = EventSaleStatus;
+type LotePlanPrice = {
+  planId: string;
+  planName: string;
+  price: string;
+};
 
 interface Lote {
   id: number;
@@ -41,6 +57,7 @@ interface Lote {
   preco: string;
   status: StatusLote;
   dataVirada?: string;
+  planPrices?: LotePlanPrice[];
 }
 
 interface PollOption {
@@ -90,6 +107,7 @@ interface Evento {
   lotes: Lote[];
   descricao: string;
   status: "ativo" | "encerrado";
+  saleStatus?: EventSaleStatus;
   isLowStock?: boolean; 
   stats?: { confirmados: number; talvez: number; likes: number; };
   vendasTotais?: { vendidos: number; total: number; receita?: number; };
@@ -99,6 +117,12 @@ interface Evento {
   pixBanco?: string;
   pixTitular?: string;
   contatoComprovante?: string;
+  paymentConfig?: {
+    chave?: string;
+    banco?: string;
+    titular?: string;
+    whatsapp?: string;
+  } | null;
 }
 
 // LÓGICA DO CONTADOR COOL
@@ -128,13 +152,34 @@ const formatTimestamp = (timestamp: DateLike | Date | null | undefined, type: 'd
     return "-";
 };
 
+const buildLotePlanPrices = (
+  plans: PlanRecord[],
+  current?: LotePlanPrice[]
+): LotePlanPrice[] => {
+  const currentMap = new Map(
+    (current ?? []).map((entry) => [
+      (entry.planId || entry.planName).trim().toLowerCase(),
+      entry.price,
+    ])
+  );
+
+  return plans.map((plan) => ({
+    planId: plan.id,
+    planName: plan.nome,
+    price: currentMap.get((plan.id || plan.nome).trim().toLowerCase()) || "",
+  }));
+};
+
 export default function AdminEventosPage() {
   const { addToast } = useToast();
   const { user: currentUser } = useAuth(); 
+  const { tenantId: activeTenantId } = useTenantTheme();
   const [eventos, setEventos] = useState<Evento[]>([]);
+  const [planCatalog, setPlanCatalog] = useState<PlanRecord[]>([]);
   
   // Modais e Estados
   const [showModal, setShowModal] = useState(false);
+  const [showLotePlanModal, setShowLotePlanModal] = useState<number | null>(null);
   const [showGestaoModal, setShowGestaoModal] = useState<Evento | null>(null);
   const [showPollModal, setShowPollModal] = useState<Evento | null>(null); 
   const [participantesReais, setParticipantesReais] = useState<Participante[]>([]);
@@ -151,7 +196,7 @@ export default function AdminEventosPage() {
     titulo: "", data: "", hora: "", local: "", tipo: "Festa", destaque: "", mapsUrl: "", imagem: "", descricao: "", lotes: [],
     imagePositionY: 50,
     // 🦈 Inicialização dos novos campos
-    pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: ""
+    pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", paymentConfig: null
   });
   const [novoLote, setNovoLote] = useState<{ nome: string; preco: string; status: StatusLote }>({ nome: "", preco: "", status: "ativo" });
   
@@ -169,7 +214,21 @@ export default function AdminEventosPage() {
       imagem: String(raw.imagem || ""),
       descricao: String(raw.descricao || ""),
       status: (String(raw.status || "ativo") as "ativo" | "encerrado"),
-      lotes: (Array.isArray(raw.lotes) ? raw.lotes : []) as Lote[],
+      saleStatus: (String(raw.sale_status || "ativo") as EventSaleStatus),
+      lotes: (Array.isArray(raw.lotes) ? raw.lotes : []).map((entry) => {
+        const lote = (entry || {}) as Record<string, unknown>;
+        return {
+          id: Number(lote.id || Date.now()),
+          nome: String(lote.nome || "Lote"),
+          preco: String(lote.preco || "0"),
+          status: (String(lote.status || "ativo") as StatusLote),
+          planPrices: Array.isArray(lote.planPrices)
+            ? (lote.planPrices as LotePlanPrice[])
+            : Array.isArray(lote.plan_prices)
+            ? (lote.plan_prices as LotePlanPrice[])
+            : [],
+        };
+      }),
       imagePositionY: typeof raw.imagePositionY === "number" ? raw.imagePositionY : 50,
       stats: (raw.stats as Evento["stats"]) || { confirmados: 0, talvez: 0, likes: 0 },
       vendasTotais: (raw.vendasTotais as Evento["vendasTotais"]) || { vendidos: 0, total: 500, receita: 0 },
@@ -178,6 +237,10 @@ export default function AdminEventosPage() {
       pixBanco: String(raw.pixBanco || ""),
       pixTitular: String(raw.pixTitular || ""),
       contatoComprovante: String(raw.contatoComprovante || ""),
+      paymentConfig:
+        raw.payment_config && typeof raw.payment_config === "object"
+          ? (raw.payment_config as Evento["paymentConfig"])
+          : null,
   });
 
   const loadEventos = useCallback(async (forceRefresh = true) => {
@@ -187,13 +250,27 @@ export default function AdminEventosPage() {
               forceRefresh,
               includeInactive: true,
               includePast: true,
+              tenantId: activeTenantId || undefined,
           });
           setEventos(rows.map((row) => mapEventRow(row)));
       } catch (error: unknown) {
           console.error(error);
           addToast("Erro ao carregar eventos.", "error");
       }
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
+
+  const loadPlanCatalog = useCallback(async (forceRefresh = true) => {
+      try {
+          const rows = await fetchPlanCatalog({
+              tenantId: activeTenantId || undefined,
+              forceRefresh,
+              maxResults: 40,
+          });
+          setPlanCatalog(rows);
+      } catch (error: unknown) {
+          console.error(error);
+      }
+  }, [activeTenantId]);
 
   const mapParticipantsFromRows = (
       rsvpsRows: Record<string, unknown>[],
@@ -296,8 +373,8 @@ export default function AdminEventosPage() {
   }, [showPollModal, addToast]);
 
   useEffect(() => {
-      void loadEventos(true);
-  }, [loadEventos]);
+      void Promise.all([loadEventos(true), loadPlanCatalog(true)]);
+  }, [loadEventos, loadPlanCatalog]);
 
   useEffect(() => {
       if (!showGestaoModal) return;
@@ -337,7 +414,7 @@ export default function AdminEventosPage() {
   const handleOpenCreate = () => {
       setNovoEvento({ 
           titulo: "", data: "", hora: "", local: "", tipo: "Festa", destaque: "", mapsUrl: "", imagem: "", descricao: "", lotes: [], imagePositionY: 50,
-          pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: ""
+          pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", paymentConfig: null
       });
       setEditingId(null);
       setIsEditing(false);
@@ -355,7 +432,9 @@ export default function AdminEventosPage() {
           pixChave: evento.pixChave || "",
           pixBanco: evento.pixBanco || "",
           pixTitular: evento.pixTitular || "",
-          contatoComprovante: evento.contatoComprovante || ""
+          contatoComprovante: evento.contatoComprovante || "",
+          saleStatus: evento.saleStatus || "ativo",
+          paymentConfig: evento.paymentConfig || null,
       });
       if (!isValidDate || !isValidTime) addToast("Formato de data antigo. Por favor, atualize.", "info");
       setEditingId(evento.id);
@@ -369,14 +448,40 @@ export default function AdminEventosPage() {
 
     const eventoPayload: Record<string, unknown> = {
         ...novoEvento,
-        lotes: novoEvento.lotes || [],
+        titulo: String(novoEvento.titulo || "").trim().slice(0, EVENT_TITLE_MAX_LENGTH),
+        local: String(novoEvento.local || "").trim().slice(0, EVENT_LOCATION_MAX_LENGTH),
+        tipo: String(novoEvento.tipo || "Festa").trim().slice(0, EVENT_TYPE_MAX_LENGTH),
+        destaque: String(novoEvento.destaque || "").trim().slice(0, 180),
+        mapsUrl: String(novoEvento.mapsUrl || "").trim().slice(0, 400),
+        descricao: String(novoEvento.descricao || "").trim().slice(0, EVENT_DESCRIPTION_MAX_LENGTH),
+        pixChave: String(novoEvento.pixChave || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+        pixBanco: String(novoEvento.pixBanco || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+        pixTitular: String(novoEvento.pixTitular || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+        contatoComprovante: String(novoEvento.contatoComprovante || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+        lotes: (novoEvento.lotes || []).map((lote) => ({
+          ...lote,
+          nome: String(lote.nome || "").trim().slice(0, EVENT_LOTE_NAME_MAX_LENGTH),
+          preco: String(lote.preco || "").trim().slice(0, 40),
+          status: lote.status || "ativo",
+          planPrices: buildLotePlanPrices(planCatalog, lote.planPrices),
+        })),
         status: novoEvento.status || "ativo",
+        sale_status: novoEvento.saleStatus || "ativo",
+        payment_config:
+          novoEvento.pixChave || novoEvento.pixBanco || novoEvento.pixTitular || novoEvento.contatoComprovante
+            ? {
+                chave: String(novoEvento.pixChave || "").trim(),
+                banco: String(novoEvento.pixBanco || "").trim(),
+                titular: String(novoEvento.pixTitular || "").trim(),
+                whatsapp: String(novoEvento.contatoComprovante || "").trim(),
+              }
+            : null,
         updatedAt: new Date().toISOString(),
     };
 
     try {
         if (isEditing && editingId) {
-            await upsertAdminEvent({ eventId: editingId, data: eventoPayload });
+            await upsertAdminEvent({ eventId: editingId, data: eventoPayload, tenantId: activeTenantId || undefined });
             addToast("Evento atualizado!", "success");
         } else {
             await upsertAdminEvent({
@@ -385,6 +490,7 @@ export default function AdminEventosPage() {
                     stats: { confirmados: 0, talvez: 0, likes: 0 },
                     vendasTotais: { vendidos: 0, total: 500, receita: 0 },
                 },
+                tenantId: activeTenantId || undefined,
             });
             if (currentUser?.uid) {
                 await logActivity(
@@ -432,8 +538,22 @@ export default function AdminEventosPage() {
   const handleAddLote = () => {
       if(!novoLote.nome || !novoLote.preco) return;
       const lotes = novoEvento.lotes || [];
-      setNovoEvento({ ...novoEvento, lotes: [...lotes, { id: Date.now(), ...novoLote }] });
+      const loteId = Date.now();
+      setNovoEvento({
+        ...novoEvento,
+        lotes: [
+          ...lotes,
+          {
+            id: loteId,
+            ...novoLote,
+            nome: novoLote.nome.trim().slice(0, EVENT_LOTE_NAME_MAX_LENGTH),
+            preco: novoLote.preco.trim().slice(0, 40),
+            planPrices: buildLotePlanPrices(planCatalog),
+          },
+        ],
+      });
       setNovoLote({ nome: "", preco: "", status: "ativo" });
+      setShowLotePlanModal(loteId);
   };
 
   const toggleLoteStatus = (loteId: number, status: StatusLote) => {
@@ -445,6 +565,22 @@ export default function AdminEventosPage() {
       const updated = novoEvento.lotes?.filter(l => l.id !== loteId);
       setNovoEvento({ ...novoEvento, lotes: updated });
   }
+
+  const updateLotePlanPrice = (loteId: number, planId: string, value: string) => {
+      setNovoEvento((prev) => ({
+          ...prev,
+          lotes: prev.lotes?.map((lote) =>
+              lote.id !== loteId
+                  ? lote
+                  : {
+                        ...lote,
+                        planPrices: (lote.planPrices || buildLotePlanPrices(planCatalog)).map((entry) =>
+                            entry.planId === planId ? { ...entry, price: value } : entry
+                        ),
+                    }
+          ),
+      }));
+  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -500,12 +636,27 @@ export default function AdminEventosPage() {
   const toggleEventoStatus = async (evento: Evento) => {
       const newStatus = evento.status === "ativo" ? "encerrado" : "ativo";
       try {
-          await setAdminEventStatus({ eventId: evento.id, status: newStatus });
+          await setAdminEventStatus({ eventId: evento.id, status: newStatus, tenantId: activeTenantId || undefined });
           addToast(`Evento marcado como ${newStatus}.`, "info");
           await loadEventos(true);
       } catch (error: unknown) {
           console.error(error);
           addToast("Erro ao atualizar status.", "error");
+      }
+  };
+
+  const handleSetEventoSaleStatus = async (evento: Evento, saleStatus: EventSaleStatus) => {
+      try {
+          await setAdminEventSaleStatus({
+              eventId: evento.id,
+              saleStatus,
+              tenantId: activeTenantId || undefined,
+          });
+          addToast("Status de venda atualizado.", "success");
+          await loadEventos(true);
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Erro ao atualizar status de venda.", "error");
       }
   };
 
@@ -587,6 +738,7 @@ export default function AdminEventosPage() {
               eventId: showPollModal.id,
               question: novaEnquete.question,
               allowUserOptions: novaEnquete.allowUserOptions,
+              tenantId: activeTenantId || undefined,
           });
           setNovaEnquete({ question: "", allowUserOptions: true });
           addToast("Enquete criada!", "success");
@@ -601,7 +753,11 @@ export default function AdminEventosPage() {
       if (!showPollModal) return;
       if (!confirm("Excluir enquete?")) return;
       try {
-          await deleteAdminEventPoll({ eventId: showPollModal.id, pollId });
+          await deleteAdminEventPoll({
+            eventId: showPollModal.id,
+            pollId,
+            tenantId: activeTenantId || undefined,
+          });
           addToast("Enquete excluida.", "info");
           await loadPolls();
       } catch (error: unknown) {
@@ -622,6 +778,7 @@ export default function AdminEventosPage() {
               eventId: showPollModal.id,
               pollId: poll.id,
               options: newOptions,
+              tenantId: activeTenantId || undefined,
           });
           addToast("Opcao removida.", "info");
           await loadPolls();
@@ -669,13 +826,44 @@ export default function AdminEventosPage() {
                 <div key={evento.id} className={`rounded-2xl border overflow-hidden group hover:border-emerald-500/30 transition flex flex-col h-full ${evento.status === 'encerrado' ? 'bg-zinc-950 border-zinc-900 grayscale opacity-70' : 'bg-zinc-900 border-zinc-800'}`}>
                     <div className="h-32 bg-black/50 relative overflow-hidden">
                         <Image src={evento.imagem} alt={evento.titulo} fill sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" className="object-cover opacity-80 group-hover:opacity-100 transition" style={{ objectPosition: `50% ${evento.imagePositionY || 50}%` }}/>
-                        <div className="absolute top-2 left-2 flex gap-1 z-10"><span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-black/60 text-white backdrop-blur-sm border border-white/10">{evento.tipo}</span></div>
+                        <div className="absolute top-2 left-2 flex gap-1 z-10">
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-black/60 text-white backdrop-blur-sm border border-white/10">{evento.tipo}</span>
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border backdrop-blur-sm ${
+                            evento.saleStatus === "em_breve"
+                              ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                              : evento.saleStatus === "esgotado"
+                              ? "border-red-500/30 bg-red-500/10 text-red-300"
+                              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                          }`}>
+                            {evento.saleStatus === "em_breve" ? "Em-breve" : evento.saleStatus === "esgotado" ? "Esgotado" : "Ativo"}
+                          </span>
+                        </div>
                         <div className="absolute bottom-2 right-2 bg-black/80 backdrop-blur-md px-2 py-1 rounded text-[10px] font-mono font-bold text-emerald-400 border border-emerald-500/30 z-10">{calculateTimeLeft(evento.data, evento.hora)}</div>
                         <button onClick={(e) => { e.stopPropagation(); toggleLowStock(evento); }} className={`absolute top-2 right-2 p-1.5 rounded-lg border transition shadow-lg z-10 ${evento.isLowStock ? 'bg-yellow-500 text-black border-yellow-400' : 'bg-black/50 text-zinc-400 border-zinc-700 hover:text-white'}`} title="Alternar 'Últimas Vagas'"><Star size={14} className={evento.isLowStock ? 'fill-black' : ''}/></button>
                     </div>
                     <div className="p-4 flex-1 flex flex-col">
                         <h3 className="font-bold text-white text-lg leading-tight mb-1">{evento.titulo}</h3>
                         <div className="flex items-center gap-2 text-xs text-zinc-400 mb-4"><Calendar size={12} className="text-emerald-500"/> {evento.data} <Users size={12} className="text-blue-500"/> {evento.stats?.confirmados || 0} confirmados</div>
+                        <div className="mb-4 grid grid-cols-3 gap-2">
+                            {(["ativo", "em_breve", "esgotado"] as EventSaleStatus[]).map((status) => (
+                                <button
+                                    key={`${evento.id}-${status}`}
+                                    type="button"
+                                    onClick={() => void handleSetEventoSaleStatus(evento, status)}
+                                    className={`rounded-lg border px-2 py-2 text-[10px] font-black uppercase transition ${
+                                        (evento.saleStatus || "ativo") === status
+                                            ? status === "ativo"
+                                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                                : status === "em_breve"
+                                                ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                                                : "border-red-500/30 bg-red-500/10 text-red-300"
+                                            : "border-zinc-700 bg-black/20 text-zinc-500 hover:text-zinc-300"
+                                    }`}
+                                >
+                                    {status === "ativo" ? "Ativar" : status === "em_breve" ? "Em-breve" : "Esgotado"}
+                                </button>
+                            ))}
+                        </div>
                         <div className="flex gap-2 pt-3 border-t border-white/5 mt-auto">
                             <Link href={`/admin/eventos/lista/${evento.id}`} className="flex-1 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-black transition flex justify-center items-center gap-2 text-xs font-bold uppercase"><Users size={14}/> Lista</Link>
                             <button onClick={() => setShowPollModal(evento)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-purple-400 transition" title="Enquetes"><MessageCircle size={16}/></button>
@@ -809,6 +997,7 @@ export default function AdminEventosPage() {
                         ) : <div className="text-center text-zinc-500"><ImageIcon className="mx-auto mb-1"/><span className="text-xs font-bold uppercase">Capa</span></div>}
                         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition"><span className="text-xs font-bold text-white uppercase bg-black px-3 py-1 rounded-full">Trocar Imagem</span></div>
                     </div>
+                    <ImageResizeHelpLink label="Diminuir a imagem do evento no favicon.io/favicon-converter" />
                     {novoEvento.imagem && (
                         <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
                             <div className="flex justify-between text-[10px] text-zinc-400 uppercase font-bold mb-1"><span className="flex items-center gap-1"><MoveVertical size={12}/> Ajuste Fino</span><span>{novoEvento.imagePositionY}%</span></div>
@@ -817,7 +1006,7 @@ export default function AdminEventosPage() {
                     )}
                 </div>
 
-                <input type="text" placeholder="Nome do Evento" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white focus:border-emerald-500 outline-none" value={novoEvento.titulo} onChange={(e) => setNovoEvento({ ...novoEvento, titulo: e.target.value })} />
+                <input type="text" maxLength={EVENT_TITLE_MAX_LENGTH} placeholder="Nome do Evento" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white focus:border-emerald-500 outline-none" value={novoEvento.titulo} onChange={(e) => setNovoEvento({ ...novoEvento, titulo: e.target.value.slice(0, EVENT_TITLE_MAX_LENGTH) })} />
                 
                 <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -831,10 +1020,10 @@ export default function AdminEventosPage() {
                 </div>
 
                 <div className="flex gap-2">
-                    <select className="flex-1 bg-black border border-zinc-700 rounded-xl p-3 text-sm text-zinc-400" value={novoEvento.tipo} onChange={(e) => setNovoEvento({ ...novoEvento, tipo: e.target.value })}>
+                    <select className="flex-1 bg-black border border-zinc-700 rounded-xl p-3 text-sm text-zinc-400" value={novoEvento.tipo} onChange={(e) => setNovoEvento({ ...novoEvento, tipo: e.target.value.slice(0, EVENT_TYPE_MAX_LENGTH) })}>
                         <option value="Festa">Festa</option><option value="Esporte">Esporte</option><option value="Outro">Outro...</option>
                     </select>
-                    <input type="text" placeholder="Local" className="flex-1 bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={novoEvento.local} onChange={(e) => setNovoEvento({ ...novoEvento, local: e.target.value })} />
+                    <input type="text" maxLength={EVENT_LOCATION_MAX_LENGTH} placeholder="Local" className="flex-1 bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={novoEvento.local} onChange={(e) => setNovoEvento({ ...novoEvento, local: e.target.value.slice(0, EVENT_LOCATION_MAX_LENGTH) })} />
                 </div>
 
                 {/* 🦈 NOVO: SEÇÃO FINANCEIRA (PIX) */}
@@ -846,20 +1035,47 @@ export default function AdminEventosPage() {
                     <p className="text-[10px] text-zinc-500 -mt-2 mb-2">Preencha para substituir a conta global neste evento.</p>
                     
                     <div className="grid grid-cols-1 gap-2">
-                        <input type="text" placeholder="Chave PIX (ex: CNPJ, Email)" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixChave} onChange={e => setNovoEvento({...novoEvento, pixChave: e.target.value})} />
+                        <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Chave PIX (ex: CNPJ, Email)" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixChave} onChange={e => setNovoEvento({...novoEvento, pixChave: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                        <input type="text" placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixBanco} onChange={e => setNovoEvento({...novoEvento, pixBanco: e.target.value})} />
-                        <input type="text" placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixTitular} onChange={e => setNovoEvento({...novoEvento, pixTitular: e.target.value})} />
+                        <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixBanco} onChange={e => setNovoEvento({...novoEvento, pixBanco: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
+                        <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixTitular} onChange={e => setNovoEvento({...novoEvento, pixTitular: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                     </div>
-                    <input type="text" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.contatoComprovante} onChange={e => setNovoEvento({...novoEvento, contatoComprovante: e.target.value})} />
+                    <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.contatoComprovante} onChange={e => setNovoEvento({...novoEvento, contatoComprovante: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                 </div>
                 
                 {/* Gestão de Lotes */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+                    <div>
+                        <span className="text-xs font-bold text-zinc-300 uppercase">Status de Venda</span>
+                        <p className="text-[10px] text-zinc-500">Controla se o evento esta ativo, em breve ou esgotado.</p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                        {(["ativo", "em_breve", "esgotado"] as EventSaleStatus[]).map((status) => (
+                            <button
+                                key={status}
+                                type="button"
+                                onClick={() => setNovoEvento({ ...novoEvento, saleStatus: status })}
+                                className={`rounded-lg border px-3 py-2 text-[11px] font-black uppercase ${
+                                    (novoEvento.saleStatus || "ativo") === status
+                                        ? status === "ativo"
+                                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                            : status === "em_breve"
+                                            ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                                            : "border-red-500/30 bg-red-500/10 text-red-300"
+                                        : "border-zinc-700 bg-black text-zinc-400"
+                                }`}
+                            >
+                                {status === "ativo" ? "Ativar" : status === "em_breve" ? "Em-breve" : "Esgotado"}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
                 <div className="bg-black/40 border border-zinc-800 rounded-xl p-4">
                     <label className="text-xs text-zinc-500 font-bold uppercase mb-3 block border-b border-zinc-800 pb-2">Configurar Lotes</label>
                     <div className="grid grid-cols-2 gap-2 mb-2">
-                        <input type="text" placeholder="Nome (ex: Lote 1)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.nome} onChange={e => setNovoLote({...novoLote, nome: e.target.value})} />
+                        <input type="text" maxLength={EVENT_LOTE_NAME_MAX_LENGTH} placeholder="Nome (ex: Lote 1)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.nome} onChange={e => setNovoLote({...novoLote, nome: e.target.value.slice(0, EVENT_LOTE_NAME_MAX_LENGTH)})} />
                         <input type="text" placeholder="Preço (R$)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.preco} onChange={e => setNovoLote({...novoLote, preco: e.target.value})} />
                     </div>
                     <button onClick={handleAddLote} className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold text-xs uppercase hover:bg-emerald-500">Adicionar Lote</button>
@@ -869,8 +1085,9 @@ export default function AdminEventosPage() {
                                 <span className="text-white font-bold">{l.nome} - {l.preco}</span>
                                 <div className="flex gap-1">
                                     <button onClick={() => toggleLoteStatus(l.id, "ativo")} className={`px-2 rounded ${l.status === 'ativo' ? 'bg-emerald-500 ring-2 ring-emerald-500/50' : 'bg-zinc-700'}`} title="Ativar"></button>
-                                    <button onClick={() => toggleLoteStatus(l.id, "agendado")} className={`px-2 rounded ${l.status === 'agendado' ? 'bg-yellow-600 ring-2 ring-yellow-500/50' : 'bg-zinc-700'}`} title="Em Breve"></button>
-                                    <button onClick={() => toggleLoteStatus(l.id, "encerrado")} className={`px-2 rounded ${l.status === 'encerrado' ? 'bg-red-500 ring-2 ring-red-500/50' : 'bg-zinc-700'}`} title="Esgotado"></button>
+                                    <button onClick={() => toggleLoteStatus(l.id, "em_breve")} className={`px-2 rounded ${l.status === 'em_breve' ? 'bg-yellow-600 ring-2 ring-yellow-500/50' : 'bg-zinc-700'}`} title="Em Breve"></button>
+                                    <button onClick={() => toggleLoteStatus(l.id, "esgotado")} className={`px-2 rounded ${l.status === 'esgotado' ? 'bg-red-500 ring-2 ring-red-500/50' : 'bg-zinc-700'}`} title="Esgotado"></button>
+                                    <button onClick={() => setShowLotePlanModal(l.id)} className="rounded border border-zinc-700 bg-black/30 px-2 py-1 text-[10px] font-black uppercase text-zinc-300 hover:border-emerald-500/30 hover:text-emerald-300">Planos</button>
                                     <button onClick={() => removeLote(l.id)} className="text-zinc-500 hover:text-red-500 ml-1"><X size={12}/></button>
                                 </div>
                             </div>
@@ -879,11 +1096,47 @@ export default function AdminEventosPage() {
                 </div>
             </div>
 
-            <div><label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Descrição Completa</label><textarea className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" value={novoEvento.descricao} onChange={(e) => setNovoEvento({ ...novoEvento, descricao: e.target.value })}></textarea></div>
+            <div><label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Descrição Completa</label><textarea maxLength={EVENT_DESCRIPTION_MAX_LENGTH} className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" value={novoEvento.descricao} onChange={(e) => setNovoEvento({ ...novoEvento, descricao: e.target.value.slice(0, EVENT_DESCRIPTION_MAX_LENGTH) })}></textarea></div>
 
             <div className="flex gap-3 pt-2 border-t border-zinc-800">
               <button onClick={() => setShowModal(false)} className="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-400 font-bold text-xs uppercase hover:bg-zinc-800 transition">Cancelar</button>
               <button onClick={handleSave} className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold text-xs uppercase hover:bg-emerald-500 shadow-lg shadow-emerald-900/20 transition">{isEditing ? "Atualizar Evento" : "Criar Evento"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLotePlanModal !== null && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black uppercase text-white">Preco do Lote por Plano</h3>
+                <p className="text-[11px] text-zinc-500">
+                  Todo plano novo aparece automaticamente aqui.
+                </p>
+              </div>
+              <button onClick={() => setShowLotePlanModal(null)} className="rounded-lg border border-zinc-700 bg-zinc-900 p-2 hover:bg-zinc-800">
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+              {(novoEvento.lotes?.find((l) => l.id === showLotePlanModal)?.planPrices || buildLotePlanPrices(planCatalog)).map((entry) => (
+                <div key={entry.planId} className="grid grid-cols-1 md:grid-cols-[1.2fr_1fr] gap-3 rounded-xl border border-zinc-800 bg-black/30 p-3">
+                  <div>
+                    <p className="text-sm font-bold text-white">{entry.planName}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-zinc-500">{entry.planId}</p>
+                  </div>
+                  <input
+                    value={entry.price}
+                    onChange={(e) => updateLotePlanPrice(showLotePlanModal, entry.planId, e.target.value)}
+                    placeholder={`Preco ${entry.planName}`}
+                    inputMode="decimal"
+                    className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+              ))}
             </div>
           </div>
         </div>

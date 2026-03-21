@@ -9,9 +9,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
+import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { uploadImage } from "../../../lib/upload";
 import { isPermissionError } from "@/lib/backendErrors";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
     addUserToChamada,
     createRecurringTreinos,
@@ -96,6 +99,11 @@ const toModalidadeKey = (value: string): string =>
 
 export default function AdminTreinosPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+  const oldTreinosHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/treinos/antigos")
+    : "/admin/treinos/antigos";
   const [activeTab, setActiveTab] = useState<'dashboard' | 'grade'>('dashboard');
 
   // Dados
@@ -165,7 +173,11 @@ export default function AdminTreinosPage() {
 
   const loadTreinos = useCallback(async (forceRefresh = false) => {
       try {
-          const lista = await fetchTreinosAdminList({ maxResults: 220, forceRefresh });
+          const lista = await fetchTreinosAdminList({
+              maxResults: 220,
+              forceRefresh,
+              tenantId: activeTenantId || undefined,
+          });
           setTreinos(lista);
       } catch (error: unknown) {
           if (!isPermissionError(error)) {
@@ -177,7 +189,11 @@ export default function AdminTreinosPage() {
 
   const loadUsers = useCallback(async (forceRefresh = false) => {
       try {
-          const users = await fetchUserDirectory({ maxResults: 420, forceRefresh });
+          const users = await fetchUserDirectory({
+              maxResults: 420,
+              forceRefresh,
+              tenantId: activeTenantId || undefined,
+          });
           setAllUsers(users);
       } catch (error: unknown) {
           if (!isPermissionError(error)) {
@@ -189,8 +205,16 @@ export default function AdminTreinosPage() {
 
   const loadExpandedData = useCallback(async (treinoId: string, forceRefresh = false) => {
       const [chamada, rsvps] = await Promise.all([
-          fetchTreinoChamada(treinoId, { maxResults: 220, forceRefresh }),
-          fetchTreinoRsvps(treinoId, { maxResults: 220, forceRefresh }),
+          fetchTreinoChamada(treinoId, {
+              maxResults: 220,
+              forceRefresh,
+              tenantId: activeTenantId || undefined,
+          }),
+          fetchTreinoRsvps(treinoId, {
+              maxResults: 220,
+              forceRefresh,
+              tenantId: activeTenantId || undefined,
+          }),
       ]);
       setChamadaReal(chamada as AlunoChamada[]);
       setRsvpsAtuais(rsvps as RSVP[]);
@@ -200,7 +224,9 @@ export default function AdminTreinosPage() {
   useEffect(() => {
       const fetchMods = async () => {
           try {
-              const settings: TreinoSettingsRecord = await fetchTreinoSettings();
+              const settings: TreinoSettingsRecord = await fetchTreinoSettings({
+                  tenantId: activeTenantId || undefined,
+              });
               const mods = settings.modalidades;
               const imagens = settings.modalidadeImagens;
               const modalidadePadrao = mods[0] || "Futsal";
@@ -294,7 +320,8 @@ export default function AdminTreinosPage() {
                   treinos,
                   maxRankingTreinos: 20,
                   maxGhostTreinos: 5,
-                  formatDate: (d: string) => d ? d.split('-').reverse().join('/') : "-"
+                  formatDate: (d: string) => d ? d.split('-').reverse().join('/') : "-",
+                  tenantId: activeTenantId || undefined,
               });
               setRankings(metrics.rankings as Record<string, RankingItem[]>);
               setListaVergonha(metrics.listaVergonha as VergonhaItem[]);
@@ -377,7 +404,7 @@ export default function AdminTreinosPage() {
           await saveTreinoSettings({
               modalidades: novas,
               modalidadeImagens: imagensAtualizadas
-          });
+          }, { tenantId: activeTenantId || undefined });
           setModalidades(novas);
           setModalidadeImagens(imagensAtualizadas);
           setNovaModalidadeNome("");
@@ -431,7 +458,7 @@ export default function AdminTreinosPage() {
           await saveTreinoSettings({
               modalidades,
               modalidadeImagens: imagensAtualizadas
-          });
+          }, { tenantId: activeTenantId || undefined });
           setModalidadeImagens(imagensAtualizadas);
           setNovoTreino((prev) =>
               toModalidadeKey(prev.modalidade || "") === key ? { ...prev, imagem: url } : prev
@@ -454,7 +481,7 @@ export default function AdminTreinosPage() {
           await saveTreinoSettings({
               modalidades,
               modalidadeImagens: imagensAtualizadas
-          });
+          }, { tenantId: activeTenantId || undefined });
           setModalidadeImagens(imagensAtualizadas);
           setNovoTreino((prev) =>
               toModalidadeKey(prev.modalidade || "") === key ? { ...prev, imagem: "" } : prev
@@ -526,7 +553,11 @@ export default function AdminTreinosPage() {
     const basePayload = { ...novoTreino, modalidade, dia, imagem: imagemModalidade, diaSemana: diaSemanaConfig.label, ordemDia: diaSemanaConfig.val };
     try {
         if (isEditing && editingId) {
-            await upsertTreino({ id: editingId, data: basePayload });
+            await upsertTreino({
+                id: editingId,
+                data: basePayload,
+                tenantId: activeTenantId || undefined,
+            });
             addToast("Atualizado!", "success");
         } else {
             if (recurrenceDate) {
@@ -534,13 +565,14 @@ export default function AdminTreinosPage() {
                     data: basePayload,
                     startDate: dia,
                     endDate: recurrenceDate,
+                    tenantId: activeTenantId || undefined,
                 });
                 if (result.count === 0) {
                     return addToast("Nenhum treino criado. Revise o intervalo de repetição.", "error");
                 }
                 addToast(`${result.count} treinos criados!`, "success");
             } else {
-                await upsertTreino({ data: basePayload });
+                await upsertTreino({ data: basePayload, tenantId: activeTenantId || undefined });
                 addToast("Criado!", "success");
             }
         }
@@ -563,14 +595,16 @@ export default function AdminTreinosPage() {
                   turma: aluno.turma,
                   avatar: aluno.avatar,
                   origem: "app",
-                  status: "presente"
+                  status: "presente",
+                  tenantId: activeTenantId || undefined,
               });
           } else {
               const novoStatus = aluno.status === "presente" ? "falta" : "presente";
               await updateChamadaStatus({
                   treinoId: expandedRow,
                   chamadaId: aluno.id,
-                  status: novoStatus
+                  status: novoStatus,
+                  tenantId: activeTenantId || undefined,
               });
           }
           await loadExpandedData(expandedRow, true);
@@ -584,7 +618,11 @@ export default function AdminTreinosPage() {
       if(!expandedRow) return;
       if (chamadaReal.some(a => a.userId === user.uid)) return addToast("Já na lista.", "info");
       try {
-          await addUserToChamada({ treinoId: expandedRow, user });
+          await addUserToChamada({
+              treinoId: expandedRow,
+              user,
+              tenantId: activeTenantId || undefined,
+          });
           await loadExpandedData(expandedRow, true);
           addToast("Adicionado!", "success"); setBuscaAluno(""); setResultadoBusca([]);
       } catch (error: unknown) {
@@ -597,7 +635,11 @@ export default function AdminTreinosPage() {
       if(!expandedRow) return;
       if(confirm("Remover da lista oficial?")) {
           try {
-              await deleteChamadaEntry({ treinoId: expandedRow, chamadaId: alunoId });
+              await deleteChamadaEntry({
+                  treinoId: expandedRow,
+                  chamadaId: alunoId,
+                  tenantId: activeTenantId || undefined,
+              });
               await loadExpandedData(expandedRow, true);
           } catch (error: unknown) {
               console.error(error);
@@ -609,7 +651,11 @@ export default function AdminTreinosPage() {
   const handleToggleStatusTreino = async (treino: Treino) => {
       const novo = treino.status === 'ativo' ? 'cancelado' : 'ativo';
       try {
-          await toggleTreinoStatus({ treinoId: treino.id, status: novo });
+          await toggleTreinoStatus({
+              treinoId: treino.id,
+              status: novo,
+              tenantId: activeTenantId || undefined,
+          });
           await loadTreinos(true);
       } catch (error: unknown) {
           console.error(error);
@@ -620,7 +666,7 @@ export default function AdminTreinosPage() {
   const handleDeleteTreino = async (id: string) => {
       if(confirm("Apagar tudo?")) {
           try {
-              await deleteTreino(id);
+              await deleteTreino(id, { tenantId: activeTenantId || undefined });
               if (expandedRow === id) {
                   setExpandedRow(null);
                   setChamadaReal([]);
@@ -654,11 +700,11 @@ export default function AdminTreinosPage() {
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-32">
       <header className="p-6 sticky top-0 z-30 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 flex justify-between items-center">
         <div className="flex items-center gap-3">
-            <Link href="/admin" className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400" /></Link>
+            <Link href={adminHomeHref} className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400" /></Link>
             <h1 className="text-lg font-black uppercase tracking-tighter">Gestão Treinos</h1>
         </div>
         <div className="flex gap-2">
-            <Link href="/admin/treinos/antigos" className="bg-zinc-900 text-zinc-200 px-4 py-2 rounded-xl text-xs font-bold uppercase hover:bg-zinc-800 flex items-center gap-2 border border-zinc-700">
+            <Link href={oldTreinosHref} className="bg-zinc-900 text-zinc-200 px-4 py-2 rounded-xl text-xs font-bold uppercase hover:bg-zinc-800 flex items-center gap-2 border border-zinc-700">
                 <CalendarRange size={14}/> Treinos Antigos
             </Link>
             {activeTab === 'grade' && (
@@ -1013,6 +1059,9 @@ export default function AdminTreinosPage() {
                           {uploadingNovaModalidadeImagem ? <Loader2 size={14} className="animate-spin"/> : <ImageIcon size={14}/>} 
                           {novaModalidadeImagem ? "Trocar imagem da categoria" : "Adicionar imagem da categoria"}
                       </button>
+                      <div className="mt-2">
+                        <ImageResizeHelpLink label="Diminuir a imagem da categoria no favicon.io/favicon-converter" />
+                      </div>
                       {novaModalidadeImagem && (
                           <div className="mt-3 relative w-full h-28 rounded-xl overflow-hidden border border-zinc-700">
                               <Image src={novaModalidadeImagem} alt="Preview categoria" fill sizes="320px" className="object-cover" />
@@ -1053,6 +1102,7 @@ export default function AdminTreinosPage() {
                                               {uploading ? "Enviando..." : "Trocar imagem"}
                                               <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingCategoriaEdicao !== null} onChange={(e) => void handleEditarImagemCategoria(modalidade, e)} />
                                           </label>
+                                          <ImageResizeHelpLink label="Diminuir a imagem no favicon.io/favicon-converter" />
                                           {imagem && (
                                               <button onClick={() => void handleRemoverImagemCategoria(modalidade)} className="px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 text-xs font-bold uppercase hover:text-white hover:border-zinc-500">
                                                   Remover

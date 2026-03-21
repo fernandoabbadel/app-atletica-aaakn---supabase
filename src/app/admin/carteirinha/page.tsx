@@ -26,6 +26,7 @@ import {
   getDefaultTurmas,
   type TurmaConfig,
 } from "../../../lib/turmasService";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const DEFAULT_CONFIG: CarteirinhaConfig = {
   validade: "DEZ/2026",
@@ -35,7 +36,7 @@ const DEFAULT_CONFIG: CarteirinhaConfig = {
 
 export default function AdminCarteirinhaPage() {
   const { addToast } = useToast();
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,7 +50,7 @@ export default function AdminCarteirinhaPage() {
     const loadConfig = async () => {
       try {
         const [loadedConfig, loadedTurmas] = await Promise.all([
-          fetchCarteirinhaConfig(),
+          fetchCarteirinhaConfig({ tenantId: activeTenantId || undefined }),
           fetchTurmasConfig({ tenantId: activeTenantId || undefined }),
         ]);
         if (!mounted) return;
@@ -74,7 +75,9 @@ export default function AdminCarteirinhaPage() {
   const handleImageUpload = async (turma: string, file: File) => {
     setUploadingTurma(turma);
     try {
-      const url = await uploadCarteirinhaBackground(turma, file);
+      const url = await uploadCarteirinhaBackground(turma, file, {
+        tenantId: activeTenantId || undefined,
+      });
 
       setConfig((prev) => ({
         ...prev,
@@ -100,7 +103,7 @@ export default function AdminCarteirinhaPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await saveCarteirinhaConfig(config);
+      await saveCarteirinhaConfig(config, { tenantId: activeTenantId || undefined });
       addToast("Configuracoes salvas!", "success");
     } catch (error: unknown) {
       console.error("Erro ao salvar:", error);
@@ -123,7 +126,7 @@ export default function AdminCarteirinhaPage() {
       <header className="p-6 sticky top-0 z-30 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 flex justify-between items-center">
         <div className="flex items-center gap-4">
           <Link
-            href="/admin"
+            href={tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin"}
             className="bg-zinc-900 p-3 rounded-full hover:bg-zinc-800 border border-zinc-800"
           >
             <ArrowLeft size={20} className="text-zinc-400" />

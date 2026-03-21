@@ -34,23 +34,103 @@ const DEFAULT_VALUES = {
   },
 };
 
+const REPAIR_USER_BASE_COLUMNS = [
+  "uid",
+  "email",
+  "xp",
+  "xpMultiplier",
+  "level",
+  "sharkCoins",
+  "selos",
+  "patente",
+  "tier",
+  "plano",
+  "plano_status",
+  "plano_badge",
+  "plano_cor",
+  "plano_icon",
+  "data_adesao",
+  "stats",
+];
+
+const REPAIR_USER_OPTIONAL_COLUMNS = ["desconto_loja", "nivel_prioridade"];
+
+const extractMissingUsersColumn = (error: unknown): string | null => {
+  if (typeof error !== "object" || error === null) return null;
+
+  const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+  const combined = [raw.message, raw.details, raw.hint]
+    .filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+    .join(" ");
+
+  const match = combined.match(/'([^']+)' column of 'users'/i);
+  if (match?.[1]) return match[1].trim();
+
+  const fallbackMatch = combined.match(/column\s+["']?([^"'\s]+)["']?\s+does not exist/i);
+  return fallbackMatch?.[1]?.trim() || null;
+};
+
+type RepairUserRow = {
+  uid?: string;
+  email?: string;
+  xp?: number;
+  xpMultiplier?: number;
+  level?: number;
+  sharkCoins?: number;
+  selos?: number;
+  patente?: string;
+  tier?: string;
+  plano?: string;
+  plano_status?: string;
+  plano_badge?: string;
+  plano_cor?: string;
+  plano_icon?: string;
+  desconto_loja?: number;
+  nivel_prioridade?: number;
+  data_adesao?: string;
+  stats?: unknown;
+};
+
+const fetchRepairUserRow = async (
+  uid: string
+): Promise<{ row: RepairUserRow | null; selectedColumns: Set<string> }> => {
+  const supabase = getSupabaseClient();
+  let columns = [...REPAIR_USER_BASE_COLUMNS, ...REPAIR_USER_OPTIONAL_COLUMNS];
+
+  while (columns.length > 0) {
+    const { data, error } = await supabase
+      .from("users")
+      .select(columns.join(","))
+      .eq("uid", uid)
+      .maybeSingle();
+
+    if (!error) {
+      return {
+        row: (data as RepairUserRow | null) ?? null,
+        selectedColumns: new Set(columns.map((column) => column.toLowerCase())),
+      };
+    }
+
+    const missingColumn = extractMissingUsersColumn(error);
+    if (!missingColumn) throw error;
+
+    const nextColumns = columns.filter(
+      (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+    );
+    if (nextColumns.length === columns.length) throw error;
+    columns = nextColumns;
+  }
+
+  return { row: null, selectedColumns: new Set() };
+};
+
 export const repairUserProfile = async (uid: string) => {
   const cleanUid = uid.trim();
   if (!cleanUid) return false;
 
   try {
     const supabase = getSupabaseClient();
-    const { data: currentData, error: selectError } = await supabase
-      .from("users")
-      .select(
-        "uid,email,xp,xpMultiplier,level,sharkCoins,selos,patente,tier,plano,plano_status,plano_badge,plano_cor,plano_icon,desconto_loja,nivel_prioridade,data_adesao,stats"
-      )
-      .eq("uid", cleanUid)
-      .maybeSingle();
-
-    if (selectError) {
-      throw selectError;
-    }
+    const { row: currentData, selectedColumns } = await fetchRepairUserRow(cleanUid);
 
     if (!currentData) {
       console.log(`Perfil ${cleanUid} nao encontrado.`);
@@ -78,8 +158,16 @@ export const repairUserProfile = async (uid: string) => {
     if (!currentData.plano_badge) updates.plano_badge = DEFAULT_VALUES.plano_badge;
     if (!currentData.plano_cor) updates.plano_cor = DEFAULT_VALUES.plano_cor;
     if (!currentData.plano_icon) updates.plano_icon = DEFAULT_VALUES.plano_icon;
-    if (currentData.desconto_loja === undefined) updates.desconto_loja = DEFAULT_VALUES.desconto_loja;
-    if (currentData.nivel_prioridade === undefined) {
+    if (
+      selectedColumns.has("desconto_loja") &&
+      currentData.desconto_loja === undefined
+    ) {
+      updates.desconto_loja = DEFAULT_VALUES.desconto_loja;
+    }
+    if (
+      selectedColumns.has("nivel_prioridade") &&
+      currentData.nivel_prioridade === undefined
+    ) {
       updates.nivel_prioridade = DEFAULT_VALUES.nivel_prioridade;
     }
 

@@ -3,24 +3,29 @@
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
 
+import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const LOADING_FRASES = [
-  "Afiando o bisturi... e os dentes.",
-  "Os tubaroes estao revisando Anatomia...",
-  "Procurando a veia certa... aguarde.",
-  "Estudando Fisiologia antes do proximo sprint.",
-  "Calibrando o ambiente para o proximo evento.",
-  "Mergulhando em um mar de apostilas.",
-  "Oxigenando as branqueas para o plantao.",
-  "Esperando o R1 passar a visita.",
-  "Consultando o Harrison... um momento.",
-  "Nadando contra a corrente (e o sono).",
+  "Preparando o ambiente para voce.",
+  "Carregando dados da pagina.",
+  "Conferindo seu acesso atual.",
+  "Sincronizando informacoes da atletica.",
+  "Montando a proxima tela.",
+  "Buscando os dados mais recentes.",
+  "Organizando os modulos do app.",
+  "Quase tudo pronto por aqui.",
+  "Aplicando a identidade visual.",
+  "Abrindo seu painel com seguranca.",
 ];
 
 export default function Loading() {
   const { tenantLogoUrl, tenantName } = useTenantTheme();
   const [frase, setFrase] = useState("Carregando...");
+  const resolvedLogo =
+    !tenantName || tenantName.trim().toUpperCase() === "USC"
+      ? PLATFORM_LOGO_URL
+      : tenantLogoUrl || PLATFORM_LOGO_URL;
 
   useEffect(() => {
     const randomIndex = Math.floor(Math.random() * LOADING_FRASES.length);
@@ -42,8 +47,8 @@ export default function Loading() {
       >
         <div className="relative z-20 w-20 h-20 flex items-center justify-center">
           <Image
-            src={tenantLogoUrl || "/logo.png"}
-            alt={`Loading ${tenantName || "Tenant"}`}
+            src={resolvedLogo}
+            alt={`Loading ${tenantName || "Plataforma"}`}
             fill
             sizes="80px"
             className="object-contain drop-shadow-2xl animate-pulse-slow"
@@ -55,6 +60,7 @@ export default function Loading() {
               span.style.color = "var(--tenant-primary)";
               e.currentTarget.parentElement?.appendChild(span);
             }}
+            unoptimized={resolvedLogo.startsWith("http")}
           />
         </div>
 

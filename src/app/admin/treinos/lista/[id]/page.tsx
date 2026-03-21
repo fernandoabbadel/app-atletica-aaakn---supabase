@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
   addUserToChamada,
   deleteChamadaEntry,
@@ -32,6 +33,7 @@ import {
   updateChamadaStatus,
 } from "@/lib/treinosNativeService";
 import { isPermissionError } from "@/lib/backendErrors";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 10;
 
@@ -58,6 +60,8 @@ export default function AdminTreinoListaPage() {
   const treinoId = params?.id?.trim() || "";
 
   const { addToast } = useToast();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const backHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/treinos") : "/admin/treinos";
 
   const [titulo, setTitulo] = useState("Treino");
   const [subtitulo, setSubtitulo] = useState("-");
@@ -88,14 +92,19 @@ export default function AdminTreinoListaPage() {
 
     try {
       const [treino, chamadaPage, rsvpPage] = await Promise.all([
-        fetchTreinoById(treinoId, { forceRefresh: false }),
+        fetchTreinoById(treinoId, {
+          forceRefresh: false,
+          tenantId: activeTenantId || undefined,
+        }),
         fetchTreinoChamadaPage(treinoId, {
           pageSize: PAGE_SIZE,
           forceRefresh: false,
+          tenantId: activeTenantId || undefined,
         }),
         fetchTreinoRsvpsPage(treinoId, {
           pageSize: PAGE_SIZE,
           forceRefresh: false,
+          tenantId: activeTenantId || undefined,
         }),
       ]);
 
@@ -143,6 +152,7 @@ export default function AdminTreinoListaPage() {
         pageSize: PAGE_SIZE,
         cursorId: chamadaCursor,
         forceRefresh: false,
+        tenantId: activeTenantId || undefined,
       });
       setChamadaRows((prev) => mergeUniqueById(prev, page.rows));
       setChamadaCursor(page.nextCursor);
@@ -163,6 +173,7 @@ export default function AdminTreinoListaPage() {
         pageSize: PAGE_SIZE,
         cursorId: rsvpCursor,
         forceRefresh: false,
+        tenantId: activeTenantId || undefined,
       });
       setRsvpRows((prev) => mergeUniqueById(prev, page.rows));
       setRsvpCursor(page.nextCursor);
@@ -185,6 +196,7 @@ export default function AdminTreinoListaPage() {
         treinoId,
         chamadaId: row.id,
         status: nextStatus,
+        tenantId: activeTenantId || undefined,
       });
 
       setChamadaRows((prev) =>
@@ -208,7 +220,11 @@ export default function AdminTreinoListaPage() {
 
     setDeletingId(row.id);
     try {
-      await deleteChamadaEntry({ treinoId, chamadaId: row.id });
+      await deleteChamadaEntry({
+        treinoId,
+        chamadaId: row.id,
+        tenantId: activeTenantId || undefined,
+      });
       setChamadaRows((prev) => prev.filter((entry) => entry.id !== row.id));
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
@@ -231,6 +247,7 @@ export default function AdminTreinoListaPage() {
         avatar: row.userAvatar,
         origem: "app",
         status: "presente",
+        tenantId: activeTenantId || undefined,
       });
 
       setChamadaRows((prev) =>
@@ -259,7 +276,11 @@ export default function AdminTreinoListaPage() {
 
     setLoadingUsers(true);
     try {
-      const users = await fetchUserDirectory({ maxResults: 80, forceRefresh: false });
+      const users = await fetchUserDirectory({
+        maxResults: 80,
+        forceRefresh: false,
+        tenantId: activeTenantId || undefined,
+      });
       setUserPool(users);
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
@@ -274,7 +295,11 @@ export default function AdminTreinoListaPage() {
 
     setUpdatingId(user.uid);
     try {
-      await addUserToChamada({ treinoId, user });
+      await addUserToChamada({
+        treinoId,
+        user,
+        tenantId: activeTenantId || undefined,
+      });
       setChamadaRows((prev) =>
         mergeUniqueById(prev, [
           {
@@ -322,7 +347,7 @@ export default function AdminTreinoListaPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Link
-              href="/admin/treinos"
+              href={backHref}
               className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
             >
               <ArrowLeft size={18} className="text-zinc-300" />
@@ -572,4 +597,3 @@ export default function AdminTreinoListaPage() {
     </div>
   );
 }
-

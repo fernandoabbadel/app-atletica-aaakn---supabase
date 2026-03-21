@@ -9,6 +9,8 @@ import {
   CreditCard,
   Lock,
   LogOut,
+  Mail,
+  PanelLeft,
   PanelLeftClose,
   PanelLeftOpen,
   Rocket,
@@ -21,6 +23,7 @@ import { isPlatformMaster } from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
 const TENANT_BRAND_SNAPSHOT_STORAGE_KEY = "usc_active_tenant_brand";
+const SIDEBAR_STORAGE_KEY = "master_sidebar_collapsed";
 
 type TenantBrandSnapshot = {
   tenantId?: string;
@@ -34,15 +37,13 @@ type MasterNavItem = {
   disabled?: boolean;
 };
 
-const SIDEBAR_STORAGE_KEY = "master_sidebar_collapsed";
-
 export default function MasterLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   const pathname = usePathname() || "/master";
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { tenantId, tenantName, tenantSlug, isOverrideActive } = useTenantTheme();
   const [collapsed, setCollapsed] = useState(false);
   const [resolvedTenantSlug, setResolvedTenantSlug] = useState("");
@@ -108,13 +109,19 @@ export default function MasterLayout({
   const tenantAdminPath = resolvedTenantSlug
     ? withTenantSlug(resolvedTenantSlug, "/admin")
     : "";
+  const appDashboardPath = resolvedTenantSlug
+    ? withTenantSlug(resolvedTenantSlug, "/dashboard")
+    : "/visitante";
+
   const navItems: MasterNavItem[] = [
     { name: "Dashboard Master", path: "/master", icon: <Building2 size={18} /> },
     { name: "Landing USC", path: "/master/landing", icon: <Rocket size={18} /> },
+    { name: "Contato USC", path: "/master/contato", icon: <Mail size={18} /> },
     { name: "Permissoes Globais", path: "/master/permissoes", icon: <Lock size={18} /> },
+    { name: "Perfis do Admin", path: "/master/permissoes/perfis-admin", icon: <PanelLeft size={18} /> },
     { name: "Solicitacoes", path: "/master/solicitacoes", icon: <CreditCard size={18} /> },
     {
-      name: "Painel do Tenant",
+      name: "Painel da Atletica",
       path: tenantAdminPath,
       icon: <Waypoints size={18} />,
       disabled: tenantAdminPath.length === 0,
@@ -124,7 +131,7 @@ export default function MasterLayout({
   return (
     <div className="flex min-h-screen bg-[#050505]">
       <aside
-        className={`fixed top-16 z-40 flex h-[calc(100vh-4rem)] flex-col justify-between overflow-y-auto border-r border-red-500/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] backdrop-blur-xl transition-all duration-300 ${
+        className={`fixed top-16 z-40 flex h-[calc(100vh-4rem)] flex-col overflow-hidden border-r border-red-500/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] backdrop-blur-xl transition-all duration-300 ${
           collapsed ? "w-[92px]" : "w-[280px]"
         }`}
       >
@@ -136,7 +143,7 @@ export default function MasterLayout({
           {collapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
         </button>
 
-        <div className="p-6">
+        <div className="flex min-h-0 flex-1 flex-col p-6">
           <div className={`mb-6 flex items-center ${collapsed ? "justify-center" : "gap-3"}`}>
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-300 shadow-[0_0_24px_rgba(239,68,68,0.18)]">
               <Building2 size={22} />
@@ -184,34 +191,52 @@ export default function MasterLayout({
                 Contexto atual
               </p>
               <p className="mt-2 text-xs font-bold text-white">
-                {isOverrideActive ? tenantName || "Tenant selecionado" : "Plataforma USC"}
+                {isOverrideActive ? tenantName || "Atletica selecionada" : "Plataforma USC"}
               </p>
               <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
-                {isOverrideActive ? "navegando com contexto forçado" : "modo global ativo"}
+                {isOverrideActive ? "navegando com contexto forcado" : "modo global ativo"}
               </p>
             </div>
           )}
 
-          <nav className="space-y-1">
-            {navItems.map((item) => {
-              const itemKey = `${item.name}:${item.path || "disabled"}`;
-              const isActive =
-                !item.disabled &&
-                (currentPath === item.path || currentPath.startsWith(`${item.path}/`));
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+            <nav className="space-y-1">
+              {navItems.map((item) => {
+                const itemKey = `${item.name}:${item.path || "disabled"}`;
+                const isActive =
+                  !item.disabled &&
+                  (currentPath === item.path || currentPath.startsWith(`${item.path}/`));
 
-              const itemClassName = `group flex items-center rounded-xl px-3 py-3 transition ${
-                item.disabled
-                  ? "cursor-not-allowed text-zinc-600 opacity-60"
-                  : isActive
-                    ? "bg-red-500/15 text-red-100 shadow-[0_10px_30px_rgba(239,68,68,0.1)]"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
-              } ${collapsed ? "justify-center" : "gap-3"}`;
+                const itemClassName = `group flex items-center rounded-xl px-3 py-3 transition ${
+                  item.disabled
+                    ? "cursor-not-allowed text-zinc-600 opacity-60"
+                    : isActive
+                      ? "bg-red-500/15 text-red-100 shadow-[0_10px_30px_rgba(239,68,68,0.1)]"
+                      : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                } ${collapsed ? "justify-center" : "gap-3"}`;
 
-              if (item.disabled) {
+                if (item.disabled) {
+                  return (
+                    <div
+                      key={itemKey}
+                      title="Selecione uma atletica no topo antes de abrir o painel admin."
+                      className={itemClassName}
+                    >
+                      {item.icon}
+                      {!collapsed && (
+                        <span className="text-xs font-bold uppercase tracking-[0.12em]">
+                          {item.name}
+                        </span>
+                      )}
+                    </div>
+                  );
+                }
+
                 return (
-                  <div
+                  <Link
                     key={itemKey}
-                    title="Selecione um tenant no topo antes de abrir o painel da atletica."
+                    href={item.path}
+                    title={item.name}
                     className={itemClassName}
                   >
                     {item.icon}
@@ -220,39 +245,23 @@ export default function MasterLayout({
                         {item.name}
                       </span>
                     )}
-                  </div>
+                  </Link>
                 );
-              }
-
-              return (
-                <Link
-                  key={itemKey}
-                  href={item.path}
-                  title={item.name}
-                  className={itemClassName}
-                >
-                  {item.icon}
-                  {!collapsed && (
-                    <span className="text-xs font-bold uppercase tracking-[0.12em]">
-                      {item.name}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
+              })}
+            </nav>
+          </div>
         </div>
 
         <div className="border-t border-red-500/10 p-6">
-          <button
-            onClick={() => logout()}
+          <Link
+            href={appDashboardPath}
             className={`flex w-full items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-[10px] font-black uppercase tracking-[0.18em] text-red-300 transition hover:bg-red-500 hover:text-white ${
               collapsed ? "" : "gap-2"
             }`}
           >
             <LogOut size={15} />
-            {!collapsed && "Sair"}
-          </button>
+            {!collapsed && "Voltar ao App"}
+          </Link>
         </div>
       </aside>
 

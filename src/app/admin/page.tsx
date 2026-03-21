@@ -195,7 +195,7 @@ export default function AdminDashboardPage() {
           <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
               <div className="flex justify-between items-center mb-6">
                   <h3 className="font-bold text-white uppercase flex items-center gap-2">
-                      <ShieldAlert size={18} className="text-emerald-500"/> Novos Recrutas
+                      <ShieldAlert size={18} className="text-emerald-500"/> Novos cadastros
                   </h3>
                   <Link href="/admin/usuarios" className="text-[10px] font-bold text-zinc-500 hover:text-white uppercase flex items-center gap-1 transition">
                       Ver Todos <ArrowUpRight size={12}/>

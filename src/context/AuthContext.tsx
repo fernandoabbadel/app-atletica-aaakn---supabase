@@ -26,7 +26,18 @@ import {
 } from "@/lib/roles";
 
 // --- TIPAGEM ---
-export type UserRole = "guest" | "user" | "treinador" | "empresa" | "admin_treino" | "admin_geral" | "admin_gestor" | "master" | "vendas";
+export type UserRole =
+  | "guest"
+  | "visitante"
+  | "user"
+  | "mini_vendor"
+  | "treinador"
+  | "empresa"
+  | "admin_treino"
+  | "admin_geral"
+  | "admin_gestor"
+  | "master"
+  | "vendas";
 export type UserStatus = "ativo" | "inadimplente" | "banned" | "pendente" | "paused" | "bloqueado";
 
 interface PatenteConfig {
@@ -46,11 +57,11 @@ interface PlanoConfig {
 }
 
 const DEFAULT_PATENTES: PatenteConfig[] = [
-  { titulo: "Megalodon", minXp: 50000, iconName: "Crown", cor: "text-red-600" },
-  { titulo: "Tubarao Branco", minXp: 15000, iconName: "Fish", cor: "text-emerald-400" },
-  { titulo: "Barracuda", minXp: 2000, iconName: "Swords", cor: "text-blue-400" },
-  { titulo: "Peixe Palhaco", minXp: 500, iconName: "Fish", cor: "text-orange-400" },
-  { titulo: "Plancton", minXp: 0, iconName: "Fish", cor: "text-zinc-400" }
+  { titulo: "Lenda", minXp: 50000, iconName: "Crown", cor: "text-red-600" },
+  { titulo: "Elite", minXp: 15000, iconName: "Shield", cor: "text-emerald-400" },
+  { titulo: "Veterano", minXp: 2000, iconName: "Swords", cor: "text-blue-400" },
+  { titulo: "Membro", minXp: 500, iconName: "Star", cor: "text-orange-400" },
+  { titulo: "Iniciante", minXp: 0, iconName: "Medal", cor: "text-zinc-400" }
 ];
 
 export interface UserStats {
@@ -92,6 +103,7 @@ export interface User {
   tenant_role?:
     | "visitante"
     | "user"
+    | "mini_vendor"
     | "treinador"
     | "empresa"
     | "admin_treino"
@@ -335,6 +347,10 @@ const buildNewUserInsertPayload = (authUser: SupabaseAuthUser): Record<string, u
   role: "guest",
   status: "ativo",
   stats: { ...DEFAULT_STATS },
+  xpMultiplier: DEFAULT_USER_PROPS.xpMultiplier,
+  desconto_loja: DEFAULT_USER_PROPS.desconto_loja,
+  nivel_prioridade: DEFAULT_USER_PROPS.nivel_prioridade,
+  isAnonymous: false,
   ultimoLoginDiario: new Date().toLocaleDateString("pt-BR"),
   data_adesao: new Date().toISOString(),
 });
@@ -362,6 +378,10 @@ const getAuthAvatar = (authUser: SupabaseAuthUser): string => {
 const normalizeUserRow = (row: unknown, authUser?: SupabaseAuthUser | null): User => {
   const raw = asRecord(row) ?? {};
   const rawStats = asRecord(raw.stats) ?? {};
+  const authAnonymous = Boolean(
+    (authUser as (SupabaseAuthUser & { is_anonymous?: unknown }) | null | undefined)
+      ?.is_anonymous
+  );
 
   return {
     ...(raw as unknown as User),
@@ -371,7 +391,17 @@ const normalizeUserRow = (row: unknown, authUser?: SupabaseAuthUser | null): Use
     foto: asString(raw.foto, authUser ? getAuthAvatar(authUser) : "https://github.com/shadcn.png"),
     role: asString(raw.role, "guest"),
     status: asString(raw.status, "ativo") as UserStatus,
-    isAnonymous: Boolean(raw.isAnonymous ?? false),
+    level: asNumber(raw.level, DEFAULT_USER_PROPS.level),
+    xp: asNumber(raw.xp, DEFAULT_USER_PROPS.xp),
+    xpMultiplier: asNumber(raw.xpMultiplier, DEFAULT_USER_PROPS.xpMultiplier),
+    sharkCoins: asNumber(raw.sharkCoins, DEFAULT_USER_PROPS.sharkCoins),
+    selos: asNumber(raw.selos, DEFAULT_USER_PROPS.selos),
+    desconto_loja: asNumber(raw.desconto_loja, DEFAULT_USER_PROPS.desconto_loja),
+    nivel_prioridade: asNumber(
+      raw.nivel_prioridade,
+      DEFAULT_USER_PROPS.nivel_prioridade
+    ),
+    isAnonymous: authUser ? authAnonymous : Boolean(raw.isAnonymous ?? false),
     stats: rawStats as unknown as UserStats,
   };
 };
@@ -465,7 +495,7 @@ const buildUserPatchPayload = (
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const USER_SELECT_COLUMNS =
-  "uid,nome,email,foto,role,status,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,capa,estadoOrigem,extra,createdAt";
+  "uid,nome,email,foto,role,status,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,desconto_loja,nivel_prioridade,isAnonymous,capa,estadoOrigem,extra,createdAt";
 const USER_SELECT_COLUMNS_LIST = USER_SELECT_COLUMNS.split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);
@@ -601,7 +631,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (error: unknown) {
         setPatentesCache(DEFAULT_PATENTES);
-        if (!isPermissionError(error)) {
+        if (!isPermissionError(error) && !isSupabaseRetryableFetchError(error)) {
           console.error("Erro ao carregar patentes:", error);
         }
       }
@@ -626,7 +656,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
       } catch (error: unknown) {
-        if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
+        if (
+          !isPermissionError(error) &&
+          !isNavigatorLockTimeoutError(error) &&
+          !isSupabaseRetryableFetchError(error)
+        ) {
           console.error("Erro ao carregar planos:", error);
         }
       }
@@ -1259,8 +1293,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const guestUser: User = {
         ...DEFAULT_USER_PROPS,
         uid: "guest_virtual_" + Date.now(), // ID ÃƒÂºnico para a sessÃƒÂ£o
-        nome: "Visitante Tubarao",
-        email: "visitante@aaakn.com",
+        nome: "Visitante USC",
+        email: "visitante@usc.app",
         foto: "/logo.png",
         
         role: "guest",

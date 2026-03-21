@@ -11,7 +11,12 @@ import React, {
 
 import { useAuth } from "@/context/AuthContext";
 import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
-import { fetchTenantById, type TenantPaletteKey } from "@/lib/tenantService";
+import {
+  fetchTenantById,
+  type TenantPaletteKey,
+} from "@/lib/tenantService";
+import { fetchPublicTenantBySlugCached, fetchPublicTenantIdBySlugCached } from "@/lib/publicTenantLookup";
+import { isPlatformMaster } from "@/lib/roles";
 import {
   clearActiveTurmasSnapshot,
   fetchTurmasConfig,
@@ -60,34 +65,6 @@ const PALETTES: Record<TenantPaletteKey, TenantPalette> = {
 
 const DEFAULT_PALETTE = PALETTES.green;
 const TENANT_BRAND_SNAPSHOT_STORAGE_KEY = "usc_active_tenant_brand";
-
-const hexToRgbTriplet = (value: string): string => {
-  const clean = value.trim().replace("#", "");
-  if (!/^[\da-fA-F]{3}$|^[\da-fA-F]{6}$/.test(clean)) {
-    return DEFAULT_PALETTE.rgb;
-  }
-
-  const normalized =
-    clean.length === 3
-      ? clean
-          .split("")
-          .map((char) => `${char}${char}`)
-          .join("")
-      : clean;
-
-  const red = Number.parseInt(normalized.slice(0, 2), 16);
-  const green = Number.parseInt(normalized.slice(2, 4), 16);
-  const blue = Number.parseInt(normalized.slice(4, 6), 16);
-
-  return `${red} ${green} ${blue}`;
-};
-
-const buildPublicPalette = (primary: string, accent: string): TenantPalette => ({
-  key: DEFAULT_PALETTE.key,
-  primary: primary || DEFAULT_PALETTE.primary,
-  accent: accent || primary || DEFAULT_PALETTE.accent,
-  rgb: hexToRgbTriplet(primary || DEFAULT_PALETTE.primary),
-});
 
 const TenantThemeContext = createContext<TenantThemeContextValue>({
   palette: DEFAULT_PALETTE,
@@ -224,70 +201,53 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
             : "";
         const userTenantStatus =
           typeof user?.tenant_status === "string" ? user.tenant_status.trim().toLowerCase() : "";
-        const selectedTenantId = resolveEffectiveTenantId(
+        let selectedTenantId = resolveEffectiveTenantId(
           user,
           masterOverrideTenantId
         );
+        const isPlatformMasterUser = isPlatformMaster(user);
+
+        if (isPlatformMasterUser && routeTenantSlug) {
+          const routeTenantId = await fetchPublicTenantIdBySlugCached(routeTenantSlug);
+          if (routeTenantId) {
+            selectedTenantId = routeTenantId;
+            if (routeTenantId !== masterOverrideTenantId.trim()) {
+              setMasterTenantOverride(routeTenantId);
+            }
+          }
+        }
         const hasTenantContext =
           selectedTenantId.length > 0 &&
-          (hasMasterTenantOverride(user, masterOverrideTenantId) ||
+          (isPlatformMasterUser ||
+            hasMasterTenantOverride(user, masterOverrideTenantId) ||
             !userTenantStatus ||
             userTenantStatus === "approved");
 
         if (!hasTenantContext) {
           if (routeTenantSlug) {
             try {
-              const response = await fetch(
-                `/api/public/landing?tenant=${encodeURIComponent(routeTenantSlug)}`,
-                { cache: "no-store" }
-              );
-              if (!response.ok) {
-                throw new Error(`Falha ao carregar tenant publico: ${response.status}`);
-              }
-
-              const payload = (await response.json()) as {
-                tenantId?: string;
-                brand?: {
-                  sigla?: string;
-                  nome?: string;
-                  subtitle?: string;
-                  logoUrl?: string;
-                };
-                config?: {
-                  gradientEnd?: string;
-                  gradientStart?: string;
-                  taglineColor?: string;
-                };
-              };
-
-              const primary =
-                typeof payload.config?.gradientEnd === "string" && payload.config.gradientEnd.trim()
-                  ? payload.config.gradientEnd.trim()
-                  : DEFAULT_PALETTE.primary;
-              const accent =
-                typeof payload.config?.taglineColor === "string" && payload.config.taglineColor.trim()
-                  ? payload.config.taglineColor.trim()
-                  : typeof payload.config?.gradientStart === "string" &&
-                      payload.config.gradientStart.trim()
-                    ? payload.config.gradientStart.trim()
-                    : DEFAULT_PALETTE.accent;
-              const publicPalette = buildPublicPalette(primary, accent);
+              const publicTenant = await fetchPublicTenantBySlugCached(routeTenantSlug);
+              const publicPalette = resolvePalette(publicTenant?.paletteKey);
               const publicLogo =
-                typeof payload.brand?.logoUrl === "string" && payload.brand.logoUrl.trim()
-                  ? payload.brand.logoUrl.trim()
+                typeof publicTenant?.logoUrl === "string" && publicTenant.logoUrl.trim()
+                  ? publicTenant.logoUrl.trim()
                   : "/logo.png";
               const publicSigla =
-                typeof payload.brand?.sigla === "string" && payload.brand.sigla.trim()
-                  ? payload.brand.sigla.trim()
+                typeof publicTenant?.sigla === "string" && publicTenant.sigla.trim()
+                  ? publicTenant.sigla.trim()
                   : routeTenantSlug.toUpperCase();
               const publicName =
-                typeof payload.brand?.nome === "string" && payload.brand.nome.trim()
-                  ? payload.brand.nome.trim()
+                typeof publicTenant?.nome === "string" && publicTenant.nome.trim()
+                  ? publicTenant.nome.trim()
                   : publicSigla;
               const publicCourse =
-                typeof payload.brand?.subtitle === "string" ? payload.brand.subtitle.trim() : "";
+                typeof publicTenant?.curso === "string" && publicTenant.curso.trim()
+                  ? publicTenant.curso.trim()
+                  : typeof publicTenant?.faculdade === "string"
+                    ? publicTenant.faculdade.trim()
+                    : "";
               const publicTenantId =
-                typeof payload.tenantId === "string" ? payload.tenantId.trim() : "";
+                typeof publicTenant?.id === "string" ? publicTenant.id.trim() : "";
 
               if (!mounted) return;
               setTenantId(publicTenantId);

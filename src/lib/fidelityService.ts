@@ -4,6 +4,7 @@ import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { getSupabaseClient } from "./supabase";
 import { buildTenantScopedRowId } from "./tenantScopedCatalog";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import {
   fetchTenantMembershipDirectory,
   resolveTenantScopedXp,
@@ -146,6 +147,8 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
 };
 
 const nowIso = (): string => new Date().toISOString();
+const resolveFidelityTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
 
 async function callWithFallback<TReq, TRes>(
   callableName: string,
@@ -298,9 +301,9 @@ const pickTenantAwareRewards = (
       .map((row) => toFidelityReward(row));
   }
 
-  const tenantRows = rows.filter((row) => row.tenantId === cleanTenantId);
-  const visibleRows = tenantRows.length > 0 ? tenantRows : rows.filter((row) => !row.tenantId);
-  return visibleRows.map((row) => toFidelityReward(row));
+  return rows
+    .filter((row) => row.tenantId === cleanTenantId)
+    .map((row) => toFidelityReward(row));
 };
 
 export async function fetchFidelityConfig(options?: {
@@ -308,7 +311,7 @@ export async function fetchFidelityConfig(options?: {
   tenantId?: string | null;
 }): Promise<FidelityConfig> {
   const forceRefresh = options?.forceRefresh ?? false;
-  const tenantId = options?.tenantId?.trim() || "";
+  const tenantId = resolveFidelityTenantId(options?.tenantId);
   const cacheKey = tenantId || "global";
   const cached = configCache.get(cacheKey);
   if (!forceRefresh && cached && Date.now() - cached.cachedAt <= READ_CACHE_TTL_MS) {
@@ -316,10 +319,10 @@ export async function fetchFidelityConfig(options?: {
   }
 
   const supabase = getSupabaseClient();
-  let selectColumns = ["id", "xpPerStamp", "rules"];
+  let selectColumns = ["id", "xpPerStamp", "rules", "data"];
   let data: Record<string, unknown> | null = null;
   const configIds = tenantId
-    ? [buildTenantScopedRowId(tenantId, "fidelity"), "fidelity"]
+    ? [buildTenantScopedRowId(tenantId, "fidelity")]
     : ["fidelity"];
 
   for (const configId of configIds) {
@@ -350,9 +353,10 @@ export async function fetchFidelityConfig(options?: {
   }
 
   const row = data ?? {};
+  const rowData = asObject(row.data) ?? {};
   const config = {
-    xpPerStamp: Math.max(1, asNumber(row.xpPerStamp, 100)),
-    rules: normalizeRules(row.rules),
+    xpPerStamp: Math.max(1, asNumber(row.xpPerStamp ?? rowData.xpPerStamp, 100)),
+    rules: normalizeRules(row.rules ?? rowData.rules),
   } satisfies FidelityConfig;
 
   configCache.set(cacheKey, { cachedAt: Date.now(), value: config });
@@ -368,7 +372,7 @@ export async function fetchFidelityRewards(options?: {
   const activeOnly = options?.activeOnly ?? false;
   const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_REWARDS_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const tenantId = options?.tenantId?.trim() || "";
+  const tenantId = resolveFidelityTenantId(options?.tenantId);
   const cacheKey = `${activeOnly ? "active" : "all"}:${maxResults}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
@@ -433,7 +437,7 @@ export async function fetchFidelityTopUsers(options?: {
 }): Promise<FidelityTopUser[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 5, MAX_TOP_USERS_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const tenantId = options?.tenantId?.trim() || "";
+  const tenantId = resolveFidelityTenantId(options?.tenantId);
   const cacheKey = `${maxResults}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
@@ -498,7 +502,7 @@ export async function fetchFidelityHistory(
 
   const maxResults = boundedLimit(options?.maxResults ?? 20, MAX_HISTORY_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const tenantId = options?.tenantId?.trim() || "";
+  const tenantId = resolveFidelityTenantId(options?.tenantId);
   const cacheKey = `${cleanUserId}:${maxResults}:${tenantId || "global"}`;
 
   if (!forceRefresh) {
@@ -507,7 +511,7 @@ export async function fetchFidelityHistory(
   }
 
   const supabase = getSupabaseClient();
-  let selectColumns = ["id", "userId", "achievementTitle", "timestamp", "xp", "tipo", "data"];
+  let selectColumns = ["id", "userId", "achievementTitle", "timestamp", "xp", "tipo", "data", "tenant_id"];
   let primaryTenantId = "";
 
   if (tenantId) {
@@ -548,7 +552,8 @@ export async function fetchFidelityHistory(
   const rows = rawRows
     .map((row) => {
       const dataPayload = asObject(row.data);
-      const logTenantId = asString(dataPayload?.tenantId).trim();
+      const rowTenantId = asString(row.tenant_id).trim();
+      const logTenantId = rowTenantId || asString(dataPayload?.tenantId).trim();
 
       if (tenantId) {
         const belongsToTenant =
@@ -572,7 +577,7 @@ export async function saveFidelityConfig(
   config: FidelityConfig,
   options?: { tenantId?: string | null }
 ): Promise<void> {
-  const tenantId = options?.tenantId?.trim() || "";
+  const tenantId = resolveFidelityTenantId(options?.tenantId);
   const payload = {
     xpPerStamp: Math.max(1, Number.isFinite(config.xpPerStamp) ? config.xpPerStamp : 100),
     rules: normalizeRules(config.rules),
@@ -582,6 +587,8 @@ export async function saveFidelityConfig(
     const supabase = getSupabaseClient();
     const mutablePayload: Record<string, unknown> = {
       id: buildTenantScopedRowId(tenantId, "fidelity") || "fidelity",
+      ...(tenantId ? { tenant_id: tenantId } : {}),
+      data: payload,
       ...payload,
       updatedAt: nowIso(),
     };
@@ -607,9 +614,9 @@ export async function saveFidelityConfig(
   if (tenantId) {
     await saveLocally();
   } else {
-    await callWithFallback<typeof payload, { ok: boolean }>(
+    await callWithFallback<typeof payload & { tenantId?: string }, { ok: boolean }>(
       SAVE_CONFIG_CALLABLE,
-      payload,
+      { ...payload, tenantId: tenantId || undefined },
       saveLocally
     );
   }
@@ -623,7 +630,7 @@ export async function createFidelityReward(payload: {
   stock: number;
   image?: string;
 }, options?: { tenantId?: string | null }): Promise<{ id: string }> {
-  const tenantId = options?.tenantId?.trim() || "";
+  const tenantId = resolveFidelityTenantId(options?.tenantId);
   const safePayload = {
     title: payload.title.trim().slice(0, 120) || "Premio",
     cost: Math.max(0, Number.isFinite(payload.cost) ? payload.cost : 0),
@@ -685,7 +692,7 @@ export async function deleteFidelityReward(
 ): Promise<void> {
   const cleanId = id.trim();
   if (!cleanId) return;
-  const tenantId = options?.tenantId?.trim() || "";
+  const tenantId = resolveFidelityTenantId(options?.tenantId);
 
   const deleteLocally = async (): Promise<{ ok: boolean }> => {
     const supabase = getSupabaseClient();
@@ -744,7 +751,7 @@ export async function requestFidelityRedemption(payload: {
   if (!userId) {
     throw new Error("Usuario invalido para resgate.");
   }
-  const tenantId = payload.tenantId?.trim() || "";
+  const tenantId = resolveFidelityTenantId(payload.tenantId);
 
   const rewardId = payload.reward.id.trim();
   if (!rewardId) {
@@ -818,6 +825,7 @@ export async function requestFidelityRedemption(payload: {
         rewardId,
         rewardTitle: requestPayload.rewardTitle,
         cost: requestPayload.cost,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
         status: "pendente",
         data: tenantId ? { tenantId } : {},
         createdAt: now,
@@ -848,15 +856,40 @@ export async function requestFidelityRedemption(payload: {
       }
       if (redemptionError) throwSupabaseError(redemptionError);
 
-      const { error: notificationError } = await supabase.from("notifications").insert({
+      const notificationPayload: Record<string, unknown> = {
         userId,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
         title: "Resgate registrado",
         message: `Seu pedido de ${requestPayload.rewardTitle} foi enviado para a atletica.`,
         link: "/fidelidade",
         read: false,
         type: "fidelity_redemption",
         createdAt: now,
-      });
+        updatedAt: now,
+      };
+      let notificationError: { message: string; code?: string | null; name?: string | null } | null =
+        null;
+      while (Object.keys(notificationPayload).length > 0) {
+        const result = await supabase.from("notifications").insert(notificationPayload);
+        if (!result.error) {
+          notificationError = null;
+          break;
+        }
+
+        const missingColumn = asString(extractMissingSchemaColumn(result.error));
+        if (!missingColumn) {
+          notificationError = result.error;
+          break;
+        }
+        const removableKey = Object.keys(notificationPayload).find(
+          (key) => key.toLowerCase() === missingColumn.toLowerCase()
+        );
+        if (!removableKey) {
+          notificationError = result.error;
+          break;
+        }
+        delete notificationPayload[String(removableKey)];
+      }
       if (notificationError) throwSupabaseError(notificationError);
 
     return { ok: true };

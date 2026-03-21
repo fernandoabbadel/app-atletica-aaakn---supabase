@@ -291,7 +291,7 @@ export async function submitGymCheckin(payload: {
 
   const requestPayload = {
     userId,
-    userName: payload.userName.trim() || "Atleta AAAKN",
+    userName: payload.userName.trim() || "Atleta",
     userAvatar: payload.userAvatar?.trim() || "https://github.com/shadcn.png",
     selectedType: payload.selectedType.trim() || "Treino",
     title: payload.title.trim().slice(0, 80),

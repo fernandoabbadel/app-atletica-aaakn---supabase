@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 const DEFAULT_AVATAR_URL = "https://github.com/shadcn.png";
@@ -46,7 +47,8 @@ const asString = (value: unknown, fallback = ""): string =>
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
-const cleanTenantId = (value?: string): string => asString(value).trim();
+const cleanTenantId = (value?: string): string =>
+  resolveStoredTenantScopeId(asString(value).trim());
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -118,7 +120,7 @@ const buildTenantScopedCacheKey = (baseKey: string, tenantId?: string): string =
 const resolveScopedDocIds = (tenantId: string | undefined, baseId: string): string[] => {
   const cleanScopedTenantId = cleanTenantId(tenantId);
   if (!cleanScopedTenantId) return [baseId];
-  return [buildTenantScopedRowId(cleanScopedTenantId, baseId), baseId];
+  return [buildTenantScopedRowId(cleanScopedTenantId, baseId)];
 };
 
 export interface AlbumRankingEntry {
@@ -810,7 +812,12 @@ export async function saveAlbumConfig(
   const storageId = buildTenantScopedRowId(scopedTenantId, turmaCode) || turmaCode;
   const supabase = getSupabaseClient();
   const { error } = await supabase.from("album_config").upsert(
-    { id: storageId, ...config, updatedAt: nowIso() },
+    {
+      id: storageId,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+      ...config,
+      updatedAt: nowIso(),
+    },
     { onConflict: "id" }
   );
   if (error) throwSupabaseError(error);
@@ -875,6 +882,7 @@ export async function saveAlbumUiConfig(
   const { error } = await supabase.from(ALBUM_UI_DOC_COLLECTION).upsert(
     {
       id: buildTenantScopedRowId(scopedTenantId, ALBUM_UI_DOC_ID) || ALBUM_UI_DOC_ID,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       ...config,
       updatedAt: nowIso(),
     },
@@ -936,7 +944,7 @@ export async function registerAlbumCapture(payload: {
   const targetTurmaKey = normalizeTurmaCode(targetTurma);
   const collectorName = asString(
     payload.collector.nome || collectorData.nome,
-    "Tubarao"
+    "Integrante"
   );
   const collectorTurma = asString(
     payload.collector.turma || collectorData.turma,
@@ -954,6 +962,7 @@ export async function registerAlbumCapture(payload: {
       id: captureId,
       collectorUserId: collectorUid,
       targetUserId: targetId,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       nome: targetName,
       turma: targetTurmaKey,
       dataColada: nowIso(),
@@ -1008,10 +1017,14 @@ export async function registerAlbumCapture(payload: {
       albumCollected: asNumber(currentStats.albumCollected, 0) + 1,
     };
 
-    const { error } = await supabase
+    let query = supabase
       .from("users")
       .update({ stats: nextStats, updatedAt: nowIso() })
       .eq("uid", collectorUid);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { error } = await query;
     if (error) throwSupabaseError(error);
   };
 
@@ -1061,6 +1074,7 @@ export async function registerAlbumCapture(payload: {
     const { error } = await supabase.from("notifications").insert({
       id: crypto.randomUUID(),
       userId: collectorUid,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       title: "Nova captura no Album",
       message: `${targetName} entrou para sua colecao.`,
       link: "/album",

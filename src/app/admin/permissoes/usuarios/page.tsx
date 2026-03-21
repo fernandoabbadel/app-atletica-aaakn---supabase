@@ -36,6 +36,7 @@ const ROLES = [
   { id: "vendas", label: "Vendas" },
   { id: "treinador", label: "Coach" },
   { id: "empresa", label: "Empresa" },
+  { id: "mini_vendor", label: "Mini Vendor" },
   { id: "user", label: "Membro" },
   { id: "visitante", label: "Visitante" },
 ];

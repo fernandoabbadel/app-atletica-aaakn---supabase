@@ -23,6 +23,11 @@ import {
   updateAdminUser,
   type AdminUserProfileRecord,
 } from "@/lib/adminUsersService";
+import {
+  hasValidPhoneLength,
+  normalizePhoneInput,
+  PHONE_MAX_LENGTH,
+} from "@/utils/contactFields";
 
 type AdminStatus = "ativo" | "inadimplente" | "pendente" | "bloqueado";
 type AdminPlan = "lenda" | "atleta" | "cardume" | "bicho";
@@ -114,6 +119,10 @@ export default function AdminUsuarioDetalhePage() {
 
   const handleSave = async () => {
     if (!userId || !form) return;
+    if (form.telefone.trim() && !hasValidPhoneLength(form.telefone)) {
+      addToast("Informe um telefone valido com DDI e somente numeros.", "error");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -263,9 +272,13 @@ export default function AdminUsuarioDetalhePage() {
               </label>
               <input
                 value={form.telefone}
+                maxLength={PHONE_MAX_LENGTH}
+                inputMode="numeric"
                 onChange={(event) =>
                   setForm((prev) =>
-                    prev ? { ...prev, telefone: event.target.value } : prev
+                    prev
+                      ? { ...prev, telefone: normalizePhoneInput(event.target.value) }
+                      : prev
                   )
                 }
                 className="w-full rounded-xl border border-zinc-700 bg-black px-3 py-2.5 text-sm outline-none focus:border-emerald-500"

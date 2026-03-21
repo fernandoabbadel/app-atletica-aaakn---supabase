@@ -1,11 +1,11 @@
 ﻿"use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ArrowLeft, Bell, LogOut, ChevronRight,
   FileText, Smartphone,
   Trash2, Power, PowerOff, AlertTriangle, Loader2,
-  Crown, Shield, History, Sparkles, Copy, Check, UserPlus
+  Crown, Shield, History, Sparkles, Copy, Check, UserPlus, Store
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -18,9 +18,15 @@ import { deleteUser } from "@/lib/supa/auth";
 import { logActivity } from "../../lib/logger";
 import { softDeleteAccount, toggleAccountStatus } from "../../lib/settingsService";
 import { createMemberInvite } from "../../lib/tenantService";
+import { fetchCurrentMiniVendorProfile } from "@/lib/miniVendorService";
 import { getTurmaImage } from "../../constants/turmaImages";
 import { resolvePlanTheme, resolveUserPlanIcon } from "../../constants/planVisuals";
 import { buildLoginPath } from "@/lib/authRedirect";
+import {
+  createDefaultTenantAppModulesConfig,
+  fetchEffectiveTenantAppModulesConfig,
+  isTenantAppModuleVisible,
+} from "@/lib/tenantAppModulesService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 export default function SettingsPage() {
@@ -34,6 +40,11 @@ export default function SettingsPage() {
   const [inviteLink, setInviteLink] = useState("");
   const [inviteCopied, setInviteCopied] = useState(false);
   const [notificacoes, setNotificacoes] = useState(true);
+  const [miniVendorBadge, setMiniVendorBadge] = useState("");
+  const [modulesConfig, setModulesConfig] = useState(createDefaultTenantAppModulesConfig);
+  const effectiveTenantId =
+    tenantId.trim() ||
+    (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
 
   // --- AÇÃO 1: DESATIVAR / REATIVAR (Pausar) ---
   const handleToggleAccount = async () => {
@@ -111,6 +122,74 @@ export default function SettingsPage() {
     }
   };
 
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      if (!user?.uid || !tenantId.trim()) {
+        if (mounted) setMiniVendorBadge("");
+        return;
+      }
+
+      try {
+        const profile = await fetchCurrentMiniVendorProfile({
+          tenantId,
+          userId: user.uid,
+          forceRefresh: true,
+        });
+        if (!mounted) return;
+        if (!profile) {
+          setMiniVendorBadge("Novo");
+          return;
+        }
+        setMiniVendorBadge(
+          profile.status === "approved"
+            ? "Aprovado"
+            : profile.status === "rejected"
+            ? "Revisar"
+            : profile.status === "disabled"
+            ? "Bloqueado"
+            : "Pendente"
+        );
+      } catch {
+        if (mounted) setMiniVendorBadge("");
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId, user?.uid]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      if (!effectiveTenantId) {
+        if (mounted) setModulesConfig(createDefaultTenantAppModulesConfig());
+        return;
+      }
+
+      try {
+        const nextConfig = await fetchEffectiveTenantAppModulesConfig({
+          tenantId: effectiveTenantId,
+          tenantSlug,
+          forceRefresh: true,
+        });
+        if (mounted) setModulesConfig(nextConfig);
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) setModulesConfig(createDefaultTenantAppModulesConfig());
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [effectiveTenantId, tenantSlug]);
+
   if (!user) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>;
 
   const extra = typeof user.extra === "object" && user.extra !== null
@@ -127,9 +206,6 @@ export default function SettingsPage() {
     !isGuestRole && rawPlanLabel.toLowerCase() === "visitante"
       ? "Bicho Solto"
       : (rawPlanLabel || "Bicho Solto");
-  const effectiveTenantId =
-    tenantId.trim() ||
-    (typeof user.tenant_id === "string" ? user.tenant_id.trim() : "");
   const normalizedTenantStatus =
     typeof user.tenant_status === "string" ? user.tenant_status.trim().toLowerCase() : "";
   const canGenerateInvite =
@@ -148,6 +224,15 @@ export default function SettingsPage() {
     Crown
   );
   const perfilHref = tenantSlug ? withTenantSlug(tenantSlug, "/perfil") : "/perfil";
+  const dashboardHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/dashboard")
+    : "/dashboard";
+  const planosHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/planos")
+    : "/planos";
+  const carteirinhaHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/carteirinha")
+    : "/carteirinha";
   const pedidosHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/configuracoes/pedidos")
     : "/configuracoes/pedidos";
@@ -163,10 +248,14 @@ export default function SettingsPage() {
   const liderTurmaHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/configuracoes/lider-turma")
     : "/configuracoes/lider-turma";
+  const miniVendorHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor")
+    : "/configuracoes/mini-vendor";
+  const showMiniVendorMenu = isTenantAppModuleVisible(modulesConfig, "mini_vendor");
 
   const handleCreateInvite = async () => {
     if (!canGenerateInvite) {
-      addToast("Seu perfil ainda nao pode gerar convite neste tenant.", "error");
+      addToast("Seu perfil ainda nao pode gerar convite nesta atletica.", "error");
       return;
     }
 
@@ -211,7 +300,7 @@ export default function SettingsPage() {
       
       {/* HEADER */}
       <header className="p-4 sticky top-0 z-30 flex items-center gap-4 border-b border-white/5 bg-[#050505]/90 backdrop-blur-md">
-        <Link href="/dashboard" className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full transition hover:bg-zinc-900">
+        <Link href={dashboardHref} className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full transition hover:bg-zinc-900">
             <ArrowLeft size={24} />
         </Link>
         <h1 className="font-black text-xl italic uppercase tracking-tighter text-white">Central do Sócio</h1>
@@ -258,7 +347,7 @@ export default function SettingsPage() {
                         </span>
                     </div>
 
-                    <Link href="/carteirinha" className="inline-flex items-center gap-2 bg-white/5 hover:bg-white/10 transition px-3 py-1.5 rounded-lg border border-white/10 group">
+                    <Link href={carteirinhaHref} className="inline-flex items-center gap-2 bg-white/5 hover:bg-white/10 transition px-3 py-1.5 rounded-lg border border-white/10 group">
                         <Smartphone size={14} className="text-emerald-500" />
                         <span className="text-[10px] font-bold text-zinc-300 group-hover:text-white uppercase tracking-wider">Abrir Carteirinha</span>
                     </Link>
@@ -330,6 +419,10 @@ export default function SettingsPage() {
                 <h3 className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest px-2">Minha Conta</h3>
                 <div className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800">
                     <MenuItem href={perfilHref} icon={<FileText size={18} />} label="Dados Pessoais" desc="Atualizar cadastro" />
+                    <MenuItem href={planosHref} icon={<Crown size={18} />} label="Planos da Atletica" desc="Ver niveis e beneficios" />
+                    {showMiniVendorMenu ? (
+                      <MenuItem href={miniVendorHref} icon={<Store size={18} />} label="Mini Vendor" desc="Cadastrar ou editar sua lojinha" badge={miniVendorBadge || undefined} />
+                    ) : null}
                     {/* Link para nova página de pedidos (ID 16) */}
                     <MenuItem href={pedidosHref} icon={<History size={18} />} label="Meus Pedidos" desc="Acompanhar compras" badge="Novo" />
                     {isTurmaLeader && (
@@ -387,7 +480,7 @@ export default function SettingsPage() {
                 {actionLoading ? <Loader2 className="animate-spin" size={16}/> : <><Trash2 size={16} /> Excluir Permanentemente</>}
             </button>
             
-            <p className="text-center text-[10px] text-zinc-700 font-mono pt-4">AAAKN App v2.0 • ID: {user?.uid?.slice(0,8).toUpperCase()}</p>
+            <p className="text-center text-[10px] text-zinc-700 font-mono pt-4">{tenantName?.trim() || "Atletica"} • ID: {user?.uid?.slice(0,8).toUpperCase()}</p>
         </div>
 
       </main>

@@ -416,7 +416,7 @@ const buildSupportRecord = (id: string, raw: unknown): AdminReportRecord | null 
   return {
     id,
     autor: asString(obj.userName, "Usuario"),
-    alvo: "Suporte AAAKN",
+    alvo: "Suporte do app",
     categoria: "suporte",
     motivo: subject || `Chamado (${supportCategoryLabel(category)})`,
     descricao: asString(obj.message).slice(0, 5_000),
@@ -506,10 +506,12 @@ const buildGymModerationRecord = (
 };
 
 export async function fetchBannedAppeals(
-  maxResults = 200
+  maxResults = 200,
+  options?: { tenantId?: string | null }
 ): Promise<AdminReportRecord[]> {
   const safeLimit = boundedLimit(maxResults, MAX_ADMIN_REPORT_RESULTS);
-  const cacheKey = `banned:${safeLimit}`;
+  const tenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
+  const cacheKey = `banned:${safeLimit}:${tenantId || "all"}`;
   const cached = getCachedValue(adminReportsCache, cacheKey, ADMIN_REPORT_CACHE_TTL_MS);
   if (cached) return cached;
 
@@ -525,6 +527,7 @@ export async function fetchBannedAppeals(
           table: "banned_appeals",
           maxResults: safeLimit,
           orderField: "createdAt",
+          ...(tenantId ? { filters: [{ field: "tenant_id", value: tenantId }] } : {}),
           ignoreMissingTable: true,
         });
         return { reports };
@@ -541,10 +544,12 @@ export async function fetchBannedAppeals(
 }
 
 export async function fetchSupportReports(
-  maxResults = 200
+  maxResults = 200,
+  options?: { tenantId?: string | null }
 ): Promise<AdminReportRecord[]> {
   const safeLimit = boundedLimit(maxResults, MAX_ADMIN_REPORT_RESULTS);
-  const cacheKey = `support:${safeLimit}`;
+  const tenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
+  const cacheKey = `support:${safeLimit}:${tenantId || "all"}`;
   const cached = getCachedValue(adminReportsCache, cacheKey, ADMIN_REPORT_CACHE_TTL_MS);
   if (cached) return cached;
 
@@ -560,6 +565,7 @@ export async function fetchSupportReports(
           table: "support_requests",
           maxResults: safeLimit,
           orderField: "createdAt",
+          ...(tenantId ? { filters: [{ field: "tenant_id", value: tenantId }] } : {}),
           ignoreMissingTable: true,
         });
         return { reports };
@@ -609,10 +615,12 @@ export async function fetchCommunityModerationReports(
 }
 
 export async function fetchGymModerationReports(
-  maxResults = 200
+  maxResults = 200,
+  options?: { tenantId?: string | null }
 ): Promise<AdminModerationRecord[]> {
   const safeLimit = boundedLimit(maxResults, MAX_ADMIN_REPORT_RESULTS);
-  const cacheKey = `gym:${safeLimit}`;
+  const tenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
+  const cacheKey = `gym:${safeLimit}:${tenantId || "all"}`;
   const cached = getCachedValue(adminReportsCache, cacheKey, ADMIN_REPORT_CACHE_TTL_MS);
   if (cached) return cached as unknown as AdminModerationRecord[];
 
@@ -621,7 +629,10 @@ export async function fetchGymModerationReports(
       table: "support_requests",
       maxResults: safeLimit,
       orderField: "createdAt",
-      filters: [{ field: "category", value: "denuncia" }],
+      filters: [
+        { field: "category", value: "denuncia" },
+        ...(tenantId ? [{ field: "tenant_id", value: tenantId }] : []),
+      ],
       ignoreMissingTable: true,
     });
 
@@ -644,10 +655,12 @@ export async function resolveAdminReport(payload: {
   originCollection: AdminReportOrigin;
   response: string;
   reporterId?: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const reportId = payload.reportId.trim();
   const response = payload.response.trim().slice(0, 2_000);
   if (!reportId || !response) return;
+  const tenantId = resolveStoredTenantScopeId(asString(payload.tenantId).trim());
 
   const callableName =
     payload.originCollection === "banned_appeals"
@@ -658,6 +671,7 @@ export async function resolveAdminReport(payload: {
     reportId,
     response,
     reporterId: payload.reporterId?.trim() || "",
+    tenantId: tenantId || undefined,
   };
 
   await callWithFallback<typeof requestPayload, { ok: boolean }>(
@@ -666,7 +680,7 @@ export async function resolveAdminReport(payload: {
     async () => {
       const supabase = getSupabaseClient();
       const now = new Date().toISOString();
-      const { error: reportError } = await supabase
+      let reportQuery = supabase
         .from(payload.originCollection)
         .update({
           response,
@@ -676,6 +690,10 @@ export async function resolveAdminReport(payload: {
           updatedAt: now,
         })
         .eq("id", reportId);
+      if (tenantId) {
+        reportQuery = reportQuery.eq("tenant_id", tenantId);
+      }
+      const { error: reportError } = await reportQuery;
       if (reportError) {
         throwSupabaseError(reportError);
       }
@@ -683,6 +701,7 @@ export async function resolveAdminReport(payload: {
       if (payload.reporterId?.trim()) {
         const { error: notificationError } = await supabase.from("notifications").insert({
           userId: payload.reporterId.trim(),
+          ...(tenantId ? { tenant_id: tenantId } : {}),
           title:
             payload.originCollection === "banned_appeals"
               ? "Apelacao analisada"
@@ -717,24 +736,30 @@ export async function resolveAdminReport(payload: {
 export async function deleteAdminReport(payload: {
   reportId: string;
   originCollection: AdminReportOrigin;
+  tenantId?: string | null;
 }): Promise<void> {
   const reportId = payload.reportId.trim();
   if (!reportId) return;
+  const tenantId = resolveStoredTenantScopeId(asString(payload.tenantId).trim());
 
   const callableName =
     payload.originCollection === "banned_appeals"
       ? DELETE_BANNED_CALLABLE
       : DELETE_SUPPORT_CALLABLE;
 
-  await callWithFallback<{ reportId: string }, { ok: boolean }>(
+  await callWithFallback<{ reportId: string; tenantId?: string }, { ok: boolean }>(
     callableName,
-    { reportId },
+    { reportId, tenantId: tenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
+      let query = supabase
         .from(payload.originCollection)
         .delete()
         .eq("id", reportId);
+      if (tenantId) {
+        query = query.eq("tenant_id", tenantId);
+      }
+      const { error } = await query;
       if (error) {
         throwSupabaseError(error);
       }
@@ -764,7 +789,7 @@ export async function submitSupportRequest(payload: {
     userEmail: payload.userEmail?.trim().slice(0, 120) || "",
     category: normalizeSupportCategory(payload.category),
     subject: payload.subject.trim().slice(0, 50),
-    message: payload.message.trim().slice(0, 300),
+    message: payload.message.trim().slice(0, 800),
   };
 
   if (!requestPayload.subject || !requestPayload.message) {

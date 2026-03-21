@@ -122,6 +122,26 @@ const isIndexRequiredError = (error: unknown): boolean => {
   return false;
 };
 
+const isNetworkFetchFailure = (error: unknown): boolean => {
+  const raw = asObject(error);
+  const message = [
+    error instanceof Error ? error.message : "",
+    asString(raw?.message),
+    asString(raw?.details),
+    asString(raw?.hint),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("load failed") ||
+    message.includes("internet_disconnected")
+  );
+};
+
 async function callWithFallback<TReq, TRes>(
   callableName: string,
   payload: TReq,
@@ -155,6 +175,9 @@ async function fetchRowsWithFallback(payload: {
     if (error) throw error;
     return (data ?? []) as Record<string, unknown>[];
   } catch (error: unknown) {
+    if (isNetworkFetchFailure(error)) {
+      return [];
+    }
     if (!isIndexRequiredError(error)) {
       throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
     }
@@ -165,7 +188,12 @@ async function fetchRowsWithFallback(payload: {
     .select("id,userId,title,message,link,read,createdAt")
     .eq("userId", payload.userId)
     .limit(payload.maxResults);
-  if (fallbackError) throwSupabaseError(fallbackError);
+  if (fallbackError) {
+    if (isNetworkFetchFailure(fallbackError)) {
+      return [];
+    }
+    throwSupabaseError(fallbackError);
+  }
   return (fallbackData ?? []) as Record<string, unknown>[];
 }
 

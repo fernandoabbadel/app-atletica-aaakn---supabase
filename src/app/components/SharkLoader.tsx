@@ -3,21 +3,26 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 
+import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const FRASES = [
-  "Afiando o bisturi e os dentes.",
-  "Os tubaroes estao revisando Anatomia.",
-  "Procurando a veia certa. Aguarde.",
-  "Calibrando a mordida para o Intermed.",
-  "Mergulhando em um mar de apostilas.",
-  "Oxigenando as branqueas para o plantao.",
+  "Preparando o ambiente.",
+  "Carregando os dados da pagina.",
+  "Validando seu acesso atual.",
+  "Aplicando a identidade da atletica.",
+  "Sincronizando informacoes recentes.",
+  "Quase tudo pronto por aqui.",
 ];
 
 export default function SharkLoader() {
   const { tenantLogoUrl, tenantName } = useTenantTheme();
   const [frase, setFrase] = useState("Carregando...");
   const [imgError, setImgError] = useState(false);
+  const resolvedLogo =
+    !tenantName || tenantName.trim().toUpperCase() === "USC"
+      ? PLATFORM_LOGO_URL
+      : tenantLogoUrl || PLATFORM_LOGO_URL;
 
   useEffect(() => {
     setFrase(FRASES[Math.floor(Math.random() * FRASES.length)]);
@@ -39,13 +44,14 @@ export default function SharkLoader() {
           {!imgError ? (
             <div className="relative w-full h-full">
               <Image
-                src={tenantLogoUrl || "/logo.png"}
-                alt={`Loading ${tenantName || "Tenant"}`}
+                src={resolvedLogo}
+                alt={`Loading ${tenantName || "Plataforma"}`}
                 fill
                 sizes="80px"
                 priority
                 className="object-contain drop-shadow-2xl animate-pulse"
                 onError={() => setImgError(true)}
+                unoptimized={resolvedLogo.startsWith("http")}
               />
             </div>
           ) : (

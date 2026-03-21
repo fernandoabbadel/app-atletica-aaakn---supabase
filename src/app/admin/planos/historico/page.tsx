@@ -16,9 +16,12 @@ import {
 import { useToast } from "../../../../context/ToastContext";
 import { useAuth } from "../../../../context/AuthContext";
 import { logActivity } from "../../../../lib/logger";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { parseTenantScopedRowId } from "@/lib/tenantScopedCatalog";
 
 const PAGE_SIZE = 20;
-const normalizeToken = (value: string) => value.trim().toLowerCase();
+const normalizeToken = (value: string) =>
+  parseTenantScopedRowId(value).baseId.trim().toLowerCase();
 
 const resolveTier = (plan: PlanRecord): "lenda" | "atleta" | "cardume" | "bicho" => {
   const key = `${plan.id} ${plan.nome}`.toLowerCase();
@@ -31,6 +34,7 @@ const resolveTier = (plan: PlanRecord): "lenda" | "atleta" | "cardume" | "bicho"
 export default function AdminPlanosHistoricoPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
+  const { tenantId } = useTenantTheme();
   const [rows, setRows] = useState<PlanRequestRecord[]>([]);
   const [plans, setPlans] = useState<PlanRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,8 +43,8 @@ export default function AdminPlanosHistoricoPage() {
 
   const load = async () => {
     const [requests, catalog] = await Promise.all([
-      fetchPlanRequests({ maxResults: 400, forceRefresh: true }),
-      fetchPlanCatalog({ maxResults: 80, forceRefresh: true }),
+      fetchPlanRequests({ maxResults: 400, forceRefresh: true, tenantId }),
+      fetchPlanCatalog({ maxResults: 80, forceRefresh: true, tenantId }),
     ]);
     setRows(requests);
     setPlans(catalog);
@@ -51,8 +55,8 @@ export default function AdminPlanosHistoricoPage() {
     const run = async () => {
       try {
         const [requests, catalog] = await Promise.all([
-          fetchPlanRequests({ maxResults: 400, forceRefresh: true }),
-          fetchPlanCatalog({ maxResults: 80, forceRefresh: true }),
+          fetchPlanRequests({ maxResults: 400, forceRefresh: true, tenantId }),
+          fetchPlanCatalog({ maxResults: 80, forceRefresh: true, tenantId }),
         ]);
         if (!mounted) return;
         setRows(requests);
@@ -66,7 +70,7 @@ export default function AdminPlanosHistoricoPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [tenantId]);
 
   const findPlanForRequest = (row: PlanRequestRecord): PlanRecord | null => {
     const byId = plans.find((plan) => normalizeToken(plan.id) === normalizeToken(row.planoId));

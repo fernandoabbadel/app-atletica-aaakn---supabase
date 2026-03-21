@@ -3,25 +3,29 @@
 import React, { useMemo } from "react";
 import Link from "next/link";
 import { ShieldAlert, ArrowLeft } from "lucide-react";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const FRASES = [
-  "Sem CRM para realizar essa cirurgia, doutor(a).",
-  "Voce nadou fundo demais... volte para o raso.",
-  "Area de isolamento. Risco biologico (e de ban).",
-  "Acesso restrito apenas para Predadores Alfa.",
-  "Opa! Voce bateu num recife de corais. De meia volta.",
-  "Nem o Harrison explica o que voce ta fazendo aqui.",
-  "Sua carteirinha nao abre essa porta. Tente a Diretoria.",
-  "Calma, bixo! Voce ainda nao tem level para essa area.",
-  "Area esteril. Sua entrada contaminaria o ambiente.",
-  "Acesso negado. O tubarao esta de olho.",
+  "Seu perfil atual nao tem acesso a esta area.",
+  "Essa pagina exige uma permissao diferente.",
+  "O contexto atual nao libera esse modulo.",
+  "Acesso restrito para o perfil em uso.",
+  "Voce chegou numa area reservada do app.",
+  "Esse conteudo nao esta disponivel para o seu acesso.",
+  "Sua conta nao tem permissao para abrir esta pagina.",
+  "Tente voltar ao painel principal da atletica.",
 ];
 
 export default function SemPermissao() {
+  const { tenantSlug } = useTenantTheme();
   const frase = useMemo(() => {
     const randomIndex = Math.floor(Math.random() * FRASES.length);
     return FRASES[randomIndex];
   }, []);
+  const dashboardHref = tenantSlug.trim()
+    ? withTenantSlug(tenantSlug, "/dashboard")
+    : "/dashboard";
 
   return (
     <div className="fixed inset-0 z-[9999] bg-[#050505] flex flex-col items-center justify-center overflow-hidden">
@@ -50,11 +54,11 @@ export default function SemPermissao() {
 
         <div className="pt-6">
           <Link
-            href="/dashboard"
+            href={dashboardHref}
             className="group relative inline-flex items-center gap-3 px-8 py-3 bg-transparent border border-orange-600/50 rounded-full text-orange-500 font-bold uppercase tracking-widest hover:bg-orange-600 hover:text-white transition-all duration-300 hover:shadow-[0_0_20px_rgba(249,115,22,0.4)] hover:scale-105"
           >
             <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-            <span>Voltar pro Raso</span>
+            <span>Voltar ao painel</span>
           </Link>
         </div>
       </div>

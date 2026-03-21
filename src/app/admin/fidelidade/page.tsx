@@ -156,7 +156,7 @@ export default function AdminFidelidadePage() {
           </Link>
           <div>
             <h1 className="text-lg font-black text-white uppercase tracking-tighter flex items-center gap-2">Admin Fidelidade</h1>
-            <p className="text-[10px] text-zinc-500">Gestão do Shark Card</p>
+            <p className="text-[10px] text-zinc-500">Gestao do clube de fidelidade</p>
           </div>
         </div>
         {activeTab === "premios" && (

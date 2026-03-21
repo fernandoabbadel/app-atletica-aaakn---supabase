@@ -9,6 +9,8 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   createHistoricEvent,
   deleteHistoricEvent,
@@ -80,6 +82,8 @@ type PageConfig = HistoryPageConfig;
 
 export default function AdminHistoricoPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
   
   // Estados Globais
   const [activeTab, setActiveTab] = useState<"gerenciar" | "configurar">("gerenciar");
@@ -107,8 +111,16 @@ export default function AdminHistoricoPage() {
     setLoadingData(true);
     try {
       const [eventsData, configData] = await Promise.all([
-        fetchHistoricEvents({ order: "desc", maxResults: 200, forceRefresh }),
-        fetchHistoryPageConfig({ forceRefresh }),
+        fetchHistoricEvents({
+          order: "desc",
+          maxResults: 200,
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        }),
+        fetchHistoryPageConfig({
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        }),
       ]);
 
       setEvents(eventsData);
@@ -130,11 +142,13 @@ export default function AdminHistoricoPage() {
 
   // --- 🦈 FUNÇÃO DE RESGATE (SEED) ---
   const handleSeedDatabase = async () => {
-      if(!confirm("⚠️ Atenção Tubarão!\nIsso vai adicionar os 6 eventos OFICIAIS de 2025 ao banco de dados.\n\nCertifique-se que as fotos estão na pasta public/historico.\n\nDeseja confirmar?")) return;
+      if(!confirm("⚠️ Aten??o!\nIsso vai adicionar os 6 eventos OFICIAIS de 2025 ao banco de dados.\n\nCertifique-se que as fotos estão na pasta public/historico.\n\nDeseja confirmar?")) return;
       
       setIsSaving(true);
       try {
-          await seedHistoricEvents(MOCK_HISTORICO);
+          await seedHistoricEvents(MOCK_HISTORICO, {
+            tenantId: activeTenantId || undefined,
+          });
           await loadData(true);
           
           addToast("Histórico de 2025 restaurado com sucesso! 🦈", "success");
@@ -197,7 +211,9 @@ export default function AdminHistoricoPage() {
       };
 
       if (editingEvent.id) {
-        await updateHistoricEvent(editingEvent.id, dataToSave);
+        await updateHistoricEvent(editingEvent.id, dataToSave, {
+          tenantId: activeTenantId || undefined,
+        });
         setEvents((prev) =>
           prev
             .map((item) =>
@@ -207,7 +223,9 @@ export default function AdminHistoricoPage() {
         );
         addToast("Evento atualizado!", "success");
       } else {
-        const created = await createHistoricEvent(dataToSave);
+        const created = await createHistoricEvent(dataToSave, {
+          tenantId: activeTenantId || undefined,
+        });
         setEvents((prev) =>
           [{ id: created.id, ...dataToSave }, ...prev].sort((left, right) =>
             right.data.localeCompare(left.data)
@@ -227,7 +245,7 @@ export default function AdminHistoricoPage() {
   const handleDelete = async (id: string) => {
     if(confirm("Tem certeza que deseja apagar?")) {
       try {
-        await deleteHistoricEvent(id);
+        await deleteHistoricEvent(id, { tenantId: activeTenantId || undefined });
         setEvents((prev) => prev.filter((item) => item.id !== id));
         addToast("Evento removido.", "info");
       } catch (error: unknown) {
@@ -256,7 +274,9 @@ export default function AdminHistoricoPage() {
   const handleSaveConfig = async () => {
     setIsSaving(true);
     try {
-      await saveHistoryPageConfig(pageConfig);
+      await saveHistoryPageConfig(pageConfig, {
+        tenantId: activeTenantId || undefined,
+      });
       addToast("Configurações salvas!", "success");
     } catch (error: unknown) {
       console.error(error);
@@ -272,7 +292,7 @@ export default function AdminHistoricoPage() {
       {/* HEADER */}
       <header className="p-6 sticky top-0 z-30 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 flex justify-between items-center">
         <div className="flex items-center gap-4">
-          <Link href="/admin" className="bg-zinc-900 p-3 rounded-full hover:bg-zinc-800 border border-zinc-800"><ArrowLeft size={20} className="text-zinc-400" /></Link>
+          <Link href={adminHomeHref} className="bg-zinc-900 p-3 rounded-full hover:bg-zinc-800 border border-zinc-800"><ArrowLeft size={20} className="text-zinc-400" /></Link>
           <div>
             <h1 className="text-xl font-black uppercase flex items-center gap-2"><History className="text-emerald-500" /> Gestão História</h1>
             <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Construindo o Legado</p>
@@ -342,11 +362,11 @@ export default function AdminHistoricoPage() {
                           <div className="space-y-5">
                               <div>
                                   <label className="label-admin">Título da Página</label>
-                                  <input type="text" className="input-admin text-lg font-black" value={pageConfig.tituloPagina} onChange={e => setPageConfig({...pageConfig, tituloPagina: e.target.value})}/>
+                                  <input type="text" maxLength={120} className="input-admin text-lg font-black" value={pageConfig.tituloPagina} onChange={e => setPageConfig({...pageConfig, tituloPagina: e.target.value.slice(0, 120)})}/>
                               </div>
                               <div>
                                   <label className="label-admin">Subtítulo</label>
-                                  <textarea rows={2} className="input-admin" value={pageConfig.subtituloPagina} onChange={e => setPageConfig({...pageConfig, subtituloPagina: e.target.value})}/>
+                                  <textarea rows={2} maxLength={240} className="input-admin" value={pageConfig.subtituloPagina} onChange={e => setPageConfig({...pageConfig, subtituloPagina: e.target.value.slice(0, 240)})}/>
                               </div>
                               <div>
                                   <label className="label-admin">Capa</label>
@@ -413,13 +433,13 @@ export default function AdminHistoricoPage() {
                           {previewImage && <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none"><span className="text-white text-xs font-bold uppercase">Trocar Foto</span></div>}
                       </div>
 
-                      <div><label className="label-admin">Título</label><input type="text" className="input-admin" value={editingEvent.titulo} onChange={e => setEditingEvent({...editingEvent, titulo: e.target.value})}/></div>
+                      <div><label className="label-admin">Título</label><input type="text" maxLength={120} className="input-admin" value={editingEvent.titulo} onChange={e => setEditingEvent({...editingEvent, titulo: e.target.value.slice(0, 120)})}/></div>
                       <div className="grid grid-cols-2 gap-3">
                           <div><label className="label-admin">Data</label><input type="date" className="input-admin" value={editingEvent.data} onChange={e => setEditingEvent({...editingEvent, data: e.target.value})}/></div>
-                          <div><label className="label-admin">Ano</label><input type="text" className="input-admin" placeholder="Auto" value={editingEvent.ano} onChange={e => setEditingEvent({...editingEvent, ano: e.target.value})}/></div>
+                      <div><label className="label-admin">Ano</label><input type="text" maxLength={4} className="input-admin" placeholder="Auto" value={editingEvent.ano} onChange={e => setEditingEvent({...editingEvent, ano: e.target.value.slice(0, 4)})}/></div>
                       </div>
-                      <div><label className="label-admin">Descrição</label><textarea rows={3} className="input-admin" value={editingEvent.descricao} onChange={e => setEditingEvent({...editingEvent, descricao: e.target.value})}/></div>
-                      <div><label className="label-admin">Local</label><input type="text" className="input-admin" value={editingEvent.local} onChange={e => setEditingEvent({...editingEvent, local: e.target.value})}/></div>
+                      <div><label className="label-admin">Descrição</label><textarea rows={3} maxLength={1200} className="input-admin" value={editingEvent.descricao} onChange={e => setEditingEvent({...editingEvent, descricao: e.target.value.slice(0, 1200)})}/></div>
+                      <div><label className="label-admin">Local</label><input type="text" maxLength={140} className="input-admin" value={editingEvent.local} onChange={e => setEditingEvent({...editingEvent, local: e.target.value.slice(0, 140)})}/></div>
                   </div>
 
                   <div className="mt-6 flex justify-end gap-2">

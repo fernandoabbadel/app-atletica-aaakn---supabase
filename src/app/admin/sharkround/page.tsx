@@ -6,6 +6,8 @@ import Link from "next/link";
 import Image from "next/image";
 
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   fetchSharkroundLeagues,
   setSharkroundLeagueActive,
@@ -36,6 +38,8 @@ interface LigaConfig {
 
 export default function AdminSharkRound() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
 
   const [loadingLigas, setLoadingLigas] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -61,6 +65,7 @@ export default function AdminSharkRound() {
         const loaded = await fetchSharkroundLeagues({
           maxResults: 160,
           forceRefresh,
+          tenantId: activeTenantId || undefined,
         });
         setLigas(loaded as LigaConfig[]);
       } catch (error: unknown) {
@@ -77,7 +82,10 @@ export default function AdminSharkRound() {
     async (forceRefresh = false) => {
       setLoadingConfig(true);
       try {
-        const loadedConfig = await fetchSharkroundAppConfig({ forceRefresh });
+        const loadedConfig = await fetchSharkroundAppConfig({
+          forceRefresh,
+          tenantId: activeTenantId || undefined,
+        });
         setConfig(loadedConfig);
         setRulesText(loadedConfig.rules.join("\n"));
       } catch (error: unknown) {
@@ -111,7 +119,11 @@ export default function AdminSharkRound() {
     );
 
     try {
-      await setSharkroundLeagueActive({ leagueId: liga.id, ativa: novoStatus });
+      await setSharkroundLeagueActive({
+        leagueId: liga.id,
+        ativa: novoStatus,
+        tenantId: activeTenantId || undefined,
+      });
       addToast(
         novoStatus
           ? "Liga ativada no tabuleiro."
@@ -155,7 +167,9 @@ export default function AdminSharkRound() {
         rules: rules.length > 0 ? rules : getDefaultSharkroundAppConfig().rules,
       };
 
-      await saveSharkroundAppConfig(payload);
+      await saveSharkroundAppConfig(payload, {
+        tenantId: activeTenantId || undefined,
+      });
       setConfig(payload);
       setRulesText(payload.rules.join("\n"));
       addToast("Configuracoes salvas.", "success");
@@ -180,7 +194,7 @@ export default function AdminSharkRound() {
       <header className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-8 gap-4 border-b border-zinc-800 pb-6 sticky top-0 bg-zinc-950/95 backdrop-blur z-20 pt-4">
         <div className="flex items-center gap-4">
           <Link
-            href="/admin"
+            href={adminHomeHref}
             className="p-3 bg-zinc-900 rounded-full hover:bg-zinc-800 border border-zinc-700 transition"
           >
             <ArrowLeft size={20} />

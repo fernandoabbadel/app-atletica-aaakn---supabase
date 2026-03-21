@@ -9,10 +9,14 @@ import {
   type AdminModerationRecord,
 } from "../../../../lib/reportsService";
 import { isPermissionError } from "@/lib/backendErrors";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
 
 export default function AdminDenunciasComunidadePage() {
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const backHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/denuncias") : "/admin/denuncias";
   const [rows, setRows] = useState<AdminModerationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -21,7 +25,9 @@ export default function AdminDenunciasComunidadePage() {
     let mounted = true;
     const load = async () => {
       try {
-        const reports = await fetchCommunityModerationReports(240);
+        const reports = await fetchCommunityModerationReports(240, {
+          tenantId: activeTenantId || undefined,
+        });
         if (!mounted) return;
         setRows(reports);
       } catch (error: unknown) {
@@ -50,7 +56,7 @@ export default function AdminDenunciasComunidadePage() {
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center gap-3">
-          <Link href="/admin/denuncias" className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
+          <Link href={backHref} className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
             <ArrowLeft size={18} className="text-zinc-300" />
           </Link>
           <div>

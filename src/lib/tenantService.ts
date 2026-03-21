@@ -5,6 +5,7 @@ import {
   asString,
   throwSupabaseError,
 } from "./supabaseData";
+import { uploadImage } from "./upload";
 import { ACHIEVEMENTS_CATALOG } from "./achievements";
 import {
   normalizeTenantRole,
@@ -49,6 +50,7 @@ export interface TenantSummary {
   contatoTelefone: string;
   logoUrl: string;
   paletteKey: TenantPaletteKey;
+  visibleInDirectory: boolean;
   allowPublicSignup: boolean;
   status: "active" | "inactive" | "blocked";
   createdAt: string;
@@ -191,6 +193,8 @@ const TENANT_SELECT_COLUMNS_V1 =
   "id,nome,sigla,slug,faculdade,cidade,curso,area,logo_url,palette_key,allow_public_signup,status,created_at,updated_at";
 const TENANT_SELECT_COLUMNS_V2 =
   "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,contato_email,contato_telefone,logo_url,palette_key,allow_public_signup,status,created_at,updated_at";
+const TENANT_SELECT_COLUMNS_V3 =
+  "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,contato_email,contato_telefone,logo_url,palette_key,visible_in_directory,allow_public_signup,status,created_at,updated_at";
 const TENANT_INVITE_SELECT_COLUMNS =
   "id,tenant_id,token,role_to_assign,requires_approval,max_uses,uses_count,expires_at,is_active,created_by,created_at";
 const TENANT_JOIN_REQUEST_SELECT_COLUMNS =
@@ -299,6 +303,7 @@ const parseTenant = (row: unknown): TenantSummary | null => {
     contatoTelefone: asString(raw.contato_telefone).trim(),
     logoUrl: asString(raw.logo_url).trim(),
     paletteKey: parsePalette(raw.palette_key),
+    visibleInDirectory: asBoolean(raw.visible_in_directory, true),
     allowPublicSignup: asBoolean(raw.allow_public_signup, true),
     status: parseTenantStatus(raw.status),
     createdAt: asString(raw.created_at),
@@ -311,6 +316,7 @@ const parseInviteRole = (value: unknown): TenantInviteRole => {
   if (
     role === "visitante" ||
     role === "user" ||
+    role === "mini_vendor" ||
     role === "treinador" ||
     role === "empresa" ||
     role === "admin_treino" ||
@@ -611,9 +617,16 @@ export async function fetchManageableTenants(options?: {
   if (includeAll) {
     let { data, error } = await supabase
       .from("tenants")
-      .select(TENANT_SELECT_COLUMNS_V2)
+      .select(TENANT_SELECT_COLUMNS_V3)
       .order("nome", { ascending: true });
-    if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+    if (
+      error &&
+      shouldFallbackMissingColumns(error, [
+        "contato_email",
+        "contato_telefone",
+        "visible_in_directory",
+      ])
+    ) {
       const fallbackResult = await supabase
         .from("tenants")
         .select(TENANT_SELECT_COLUMNS_V1)
@@ -653,10 +666,17 @@ export async function fetchManageableTenants(options?: {
 
   let { data, error } = await supabase
     .from("tenants")
-    .select(TENANT_SELECT_COLUMNS_V2)
+    .select(TENANT_SELECT_COLUMNS_V3)
     .in("id", tenantIds)
     .order("nome", { ascending: true });
-  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+  if (
+    error &&
+    shouldFallbackMissingColumns(error, [
+      "contato_email",
+      "contato_telefone",
+      "visible_in_directory",
+    ])
+  ) {
     const fallbackResult = await supabase
       .from("tenants")
       .select(TENANT_SELECT_COLUMNS_V1)
@@ -680,11 +700,19 @@ export async function fetchPublicTenants(options?: {
 
   let { data, error } = await supabase
     .from("tenants")
-    .select(TENANT_SELECT_COLUMNS_V2)
+    .select(TENANT_SELECT_COLUMNS_V3)
     .eq("status", "active")
+    .eq("visible_in_directory", true)
     .order("nome", { ascending: true })
     .limit(limit);
-  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+  if (
+    error &&
+    shouldFallbackMissingColumns(error, [
+      "contato_email",
+      "contato_telefone",
+      "visible_in_directory",
+    ])
+  ) {
     const fallbackResult = await supabase
       .from("tenants")
       .select(TENANT_SELECT_COLUMNS_V1)
@@ -708,10 +736,17 @@ export async function fetchTenantById(tenantId: string): Promise<TenantSummary |
   const supabase = getSupabaseClient();
   let { data, error } = await supabase
     .from("tenants")
-    .select(TENANT_SELECT_COLUMNS_V2)
+    .select(TENANT_SELECT_COLUMNS_V3)
     .eq("id", cleanTenantId)
     .maybeSingle();
-  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+  if (
+    error &&
+    shouldFallbackMissingColumns(error, [
+      "contato_email",
+      "contato_telefone",
+      "visible_in_directory",
+    ])
+  ) {
     const fallbackResult = await supabase
       .from("tenants")
       .select(TENANT_SELECT_COLUMNS_V1)
@@ -732,10 +767,17 @@ export async function fetchTenantBySlug(tenantSlug: string): Promise<TenantSumma
   const supabase = getSupabaseClient();
   let { data, error } = await supabase
     .from("tenants")
-    .select(TENANT_SELECT_COLUMNS_V2)
+    .select(TENANT_SELECT_COLUMNS_V3)
     .ilike("slug", cleanTenantSlug)
     .maybeSingle();
-  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+  if (
+    error &&
+    shouldFallbackMissingColumns(error, [
+      "contato_email",
+      "contato_telefone",
+      "visible_in_directory",
+    ])
+  ) {
     const fallbackResult = await supabase
       .from("tenants")
       .select(TENANT_SELECT_COLUMNS_V1)
@@ -1406,23 +1448,60 @@ export async function fetchPendingMembershipStatusForCurrentUser(): Promise<{
   const userId = asString(authData.user?.id).trim();
   if (!userId) return null;
 
+  const { data: currentUserRow, error: currentUserError } = await supabase
+    .from("users")
+    .select("tenant_id,tenant_role,tenant_status")
+    .eq("uid", userId)
+    .maybeSingle();
+  if (currentUserError) throwSupabaseError(currentUserError);
+
+  const currentUser = asObject(currentUserRow);
+  const preferredTenantId = asString(currentUser?.tenant_id).trim();
+
   const { data, error } = await supabase
     .from("tenant_memberships")
     .select("tenant_id,role,status,updated_at")
     .eq("user_id", userId)
-    .maybeSingle();
+    .order("updated_at", { ascending: false });
   if (error) throwSupabaseError(error);
 
-  const row = asObject(data);
-  if (!row) return null;
+  const rows = (Array.isArray(data) ? data : [])
+    .map((entry) => asObject(entry))
+    .filter((entry): entry is Record<string, unknown> => entry !== null);
 
-  const tenantId = asString(row.tenant_id).trim();
+  const matchingPreferredMembership =
+    preferredTenantId.length > 0
+      ? rows.find((entry) => asString(entry.tenant_id).trim() === preferredTenantId)
+      : null;
+  const pendingMembership =
+    rows.find((entry) => parseMembershipStatus(entry.status, "pending") === "pending") || null;
+  const approvedMembership =
+    rows.find((entry) => parseMembershipStatus(entry.status, "pending") === "approved") || null;
+  const selectedMembership =
+    matchingPreferredMembership || pendingMembership || approvedMembership || rows[0] || null;
+
+  if (!selectedMembership) {
+    if (!preferredTenantId) return null;
+    return {
+      tenantId: preferredTenantId,
+      role: parseTenantRole(currentUser?.tenant_role, "visitante"),
+      status: parseMembershipStatus(currentUser?.tenant_status, "pending"),
+    };
+  }
+
+  const tenantId = asString(selectedMembership.tenant_id).trim();
   if (!tenantId) return null;
 
   return {
     tenantId,
-    role: parseTenantRole(row.role, "visitante"),
-    status: parseMembershipStatus(row.status, "pending"),
+    role: parseTenantRole(
+      selectedMembership.role,
+      parseTenantRole(currentUser?.tenant_role, "visitante")
+    ),
+    status: parseMembershipStatus(
+      selectedMembership.status,
+      parseMembershipStatus(currentUser?.tenant_status, "pending")
+    ),
   };
 }
 
@@ -1460,6 +1539,7 @@ export async function updateTenantProfile(payload: {
   contatoEmail?: string;
   contatoTelefone?: string;
   paletteKey?: TenantPaletteKey;
+  visibleInDirectory?: boolean;
   allowPublicSignup?: boolean;
   status?: "active" | "inactive" | "blocked";
 }): Promise<void> {
@@ -1487,6 +1567,9 @@ export async function updateTenantProfile(payload: {
   setTrimmed("contato_telefone", payload.contatoTelefone);
 
   if (payload.paletteKey) patch.palette_key = payload.paletteKey;
+  if (typeof payload.visibleInDirectory === "boolean") {
+    patch.visible_in_directory = payload.visibleInDirectory;
+  }
   if (typeof payload.allowPublicSignup === "boolean") {
     patch.allow_public_signup = payload.allowPublicSignup;
   }
@@ -1494,10 +1577,18 @@ export async function updateTenantProfile(payload: {
 
   const supabase = getSupabaseClient();
   let { error } = await supabase.from("tenants").update(patch).eq("id", tenantId);
-  if (error && shouldFallbackMissingColumns(error, ["contato_email", "contato_telefone"])) {
+  if (
+    error &&
+    shouldFallbackMissingColumns(error, [
+      "contato_email",
+      "contato_telefone",
+      "visible_in_directory",
+    ])
+  ) {
     const fallbackPatch = { ...patch };
     delete fallbackPatch.contato_email;
     delete fallbackPatch.contato_telefone;
+    delete fallbackPatch.visible_in_directory;
     const fallbackResult = await supabase
       .from("tenants")
       .update(fallbackPatch)
@@ -1707,27 +1798,56 @@ export async function uploadTenantLogo(payload: {
     throw new Error("Arquivo de logo invalido.");
   }
 
-  const fileName = payload.file.name || "logo.png";
-  const extension = fileName.includes(".")
-    ? fileName.split(".").pop()?.toLowerCase() || "png"
-    : "png";
-  const safeExt = /^[a-z0-9]+$/i.test(extension) ? extension : "png";
-  const objectPath = `tenants/${tenantId}/logo-${Date.now()}.${safeExt}`;
-  const bucket = (process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET || "uploads").trim() || "uploads";
-
-  const supabase = getSupabaseClient();
-  const upload = await supabase.storage.from(bucket).upload(objectPath, payload.file, {
-    cacheControl: "3600",
+  const { url, error } = await uploadImage(payload.file, `tenants/${tenantId}/branding`, {
+    scopeKey: `tenant:${tenantId}:logo`,
+    maxBytes: 2 * 1024 * 1024,
+    maxWidth: 1600,
+    maxHeight: 1600,
+    maxPixels: 2_560_000,
+    compressionMaxWidth: 1200,
+    compressionMaxHeight: 1200,
+    compressionMaxBytes: 140 * 1024,
+    fileName: `logo-${tenantId}`,
     upsert: true,
-    contentType: payload.file.type || undefined,
+    appendVersionQuery: true,
   });
-  if (upload.error) throwSupabaseError(upload.error);
-
-  const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
-  const publicUrl = asString(data?.publicUrl).trim();
-  if (!publicUrl) {
-    throw new Error("Upload da logo concluido, mas sem URL publica retornada.");
+  if (error || !url) {
+    throw new Error(error || "Upload da logo concluido, mas sem URL publica retornada.");
   }
 
-  return publicUrl;
+  return url;
+}
+
+export async function uploadTenantDraftLogo(payload: {
+  file: File;
+  scope?: "master" | "onboarding";
+}): Promise<string> {
+  if (!(payload.file instanceof File)) {
+    throw new Error("Arquivo de logo invalido.");
+  }
+
+  const draftScope = payload.scope === "master" ? "master" : "onboarding";
+  const { url, error } = await uploadImage(
+    payload.file,
+    `tenant-drafts/${draftScope}/logos`,
+    {
+      scopeKey: `tenant-draft:${draftScope}:logo`,
+      maxBytes: 2 * 1024 * 1024,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      maxPixels: 2_560_000,
+      compressionMaxWidth: 1200,
+      compressionMaxHeight: 1200,
+      compressionMaxBytes: 140 * 1024,
+      fileName: `logo-${Date.now()}`,
+      upsert: true,
+      appendVersionQuery: true,
+    }
+  );
+
+  if (error || !url) {
+    throw new Error(error || "Upload da logo concluido, mas sem URL publica retornada.");
+  }
+
+  return url;
 }

@@ -285,7 +285,7 @@ export default function EmpresaDashboard() {
           });
           setPartner(prev => prev ? ({...prev, ...editForm}) : null);
           setShowEditModal(false);
-          addToast("Aí sim! O Tubarão aprovou! 🦈 Perfil atualizado.", "success");
+          addToast("Perfil atualizado com sucesso.", "success");
           await logActivity(
             empresaId,
             partner.nome || "Parceiro",
@@ -319,7 +319,7 @@ export default function EmpresaDashboard() {
             partnerId: empresaId,
           });
           setEditForm((prev) => ({ ...prev, [field]: imageUrl }));
-          addToast("Aí sim! O Tubarão aprovou! 🦈 Imagem enviada.", "success");
+          addToast("Imagem enviada com sucesso.", "success");
           await logActivity(
             empresaId,
             partner.nome || "Parceiro",

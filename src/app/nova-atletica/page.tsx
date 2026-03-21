@@ -1,18 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Building2, CheckCircle2, Clock3, RefreshCw, Send, ShieldAlert } from "lucide-react";
+import { ArrowLeft, Building2, CheckCircle2, Clock3, RefreshCw, Send, ShieldAlert, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
+import { TENANT_AREA_OPTIONS } from "@/constants/tenantAreas";
 import {
   createTenantWithMaster,
+  fetchPendingMembershipStatusForCurrentUser,
   fetchMyTenantOnboardingRequests,
   submitTenantOnboardingRequest,
   type TenantOnboardingRequest,
   type TenantPaletteKey,
+  uploadTenantDraftLogo,
 } from "@/lib/tenantService";
 import { buildLoginPath } from "@/lib/authRedirect";
 import { isPlatformMaster } from "@/lib/roles";
@@ -27,13 +31,18 @@ const PALETTE_OPTIONS: Array<{ key: TenantPaletteKey; label: string }> = [
   { key: "pink", label: "Rosa" },
 ];
 
-const AREA_OPTIONS = [
-  { value: "", label: "Selecione a area" },
-  { value: "exatas", label: "Exatas" },
-  { value: "humanas", label: "Humanas" },
-  { value: "biologicas", label: "Biologicas" },
-  { value: "saude", label: "Saude" },
-];
+const PALETTE_PREVIEW: Record<
+  TenantPaletteKey,
+  { primary: string; accent: string; soft: string; dark: string }
+> = {
+  green: { primary: "#10b981", accent: "#34d399", soft: "#d1fae5", dark: "#05281f" },
+  yellow: { primary: "#f59e0b", accent: "#fbbf24", soft: "#fef3c7", dark: "#2d1904" },
+  red: { primary: "#ef4444", accent: "#f87171", soft: "#fee2e2", dark: "#320809" },
+  blue: { primary: "#3b82f6", accent: "#60a5fa", soft: "#dbeafe", dark: "#071a38" },
+  orange: { primary: "#f97316", accent: "#fb923c", soft: "#ffedd5", dark: "#351406" },
+  purple: { primary: "#8b5cf6", accent: "#a78bfa", soft: "#ede9fe", dark: "#1f113f" },
+  pink: { primary: "#ec4899", accent: "#f472b6", soft: "#fce7f3", dark: "#351023" },
+};
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message;
@@ -64,6 +73,9 @@ export default function NovaAtleticaPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [requests, setRequests] = useState<TenantOnboardingRequest[]>([]);
+  const [existingMembershipStatus, setExistingMembershipStatus] = useState<
+    "pending" | "approved" | "disabled" | "rejected" | ""
+  >("");
 
   const [nome, setNome] = useState("");
   const [sigla, setSigla] = useState("");
@@ -76,40 +88,86 @@ export default function NovaAtleticaPage() {
   const [contatoTelefone, setContatoTelefone] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [paletteKey, setPaletteKey] = useState<TenantPaletteKey>("green");
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   const latestRequest = requests[0] || null;
   const isPlatformMasterUser = isPlatformMaster(user);
   const backHref = isPlatformMasterUser ? "/master/solicitacoes" : "/";
+  const palettePreview = PALETTE_PREVIEW[paletteKey];
 
   const hasApprovedTenant = useMemo(() => {
     const status = String(user?.tenant_status || "").trim().toLowerCase();
     return status === "approved" && typeof user?.tenant_id === "string" && user.tenant_id.trim().length > 0;
   }, [user?.tenant_id, user?.tenant_status]);
 
+  const hasExistingTenantMembership =
+    !isPlatformMasterUser &&
+    (hasApprovedTenant ||
+      existingMembershipStatus === "pending" ||
+      existingMembershipStatus === "approved" ||
+      existingMembershipStatus === "disabled");
+
   const loadRequests = useCallback(async (mode: "initial" | "refresh"): Promise<void> => {
     if (mode === "initial") setLoading(true);
     if (mode === "refresh") setRefreshing(true);
     try {
-      const rows = await fetchMyTenantOnboardingRequests({ limit: 10 });
+      const [rows, membership] = await Promise.all([
+        fetchMyTenantOnboardingRequests({ limit: 10 }),
+        isPlatformMasterUser
+          ? Promise.resolve(null)
+          : fetchPendingMembershipStatusForCurrentUser(),
+      ]);
       setRequests(rows);
+      setExistingMembershipStatus(membership?.status || "");
     } catch (error: unknown) {
       addToast(`Erro ao carregar solicitacoes: ${extractErrorMessage(error)}`, "error");
     } finally {
       if (mode === "initial") setLoading(false);
       if (mode === "refresh") setRefreshing(false);
     }
-  }, [addToast]);
+  }, [addToast, isPlatformMasterUser]);
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user) {
+    if (!user || user.isAnonymous) {
       router.replace(buildLoginPath("/nova-atletica"));
       return;
     }
     void loadRequests("initial");
   }, [authLoading, loadRequests, router, user]);
 
+  const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || uploadingLogo) {
+      input.value = "";
+      return;
+    }
+
+    try {
+      setUploadingLogo(true);
+      const url = await uploadTenantDraftLogo({
+        file,
+        scope: isPlatformMasterUser ? "master" : "onboarding",
+      });
+      setLogoUrl(url);
+      addToast(
+        "Logo enviada. O app reduz automaticamente para economizar storage e egress.",
+        "success"
+      );
+    } catch (error: unknown) {
+      addToast(`Erro no upload da logo: ${extractErrorMessage(error)}`, "error");
+    } finally {
+      setUploadingLogo(false);
+      input.value = "";
+    }
+  };
+
   const handleSubmit = async () => {
+    if (hasExistingTenantMembership) {
+      addToast("Seu usuario ja esta vinculado a uma atletica. Nao e permitido criar outra.", "error");
+      return;
+    }
     if (!nome.trim()) {
       addToast("Informe o nome da atletica.", "error");
       return;
@@ -208,10 +266,13 @@ export default function NovaAtleticaPage() {
       </header>
 
       <main className="px-6 py-6 max-w-4xl mx-auto space-y-6">
-        {hasApprovedTenant && !isPlatformMasterUser && (
+        {hasExistingTenantMembership && (
           <section className="rounded-2xl border border-brand bg-brand-primary/10 p-5">
             <p className="text-sm text-brand-accent font-bold">
-              Seu usuario ja esta vinculado a uma atletica aprovada.
+              Seu usuario ja esta vinculado a uma atletica e nao pode criar outra pelo fluxo publico.
+            </p>
+            <p className="mt-2 text-xs text-zinc-300">
+              Status atual do vinculo: {existingMembershipStatus || "aprovado"}.
             </p>
           </section>
         )}
@@ -250,7 +311,7 @@ export default function NovaAtleticaPage() {
             <input
               value={sigla}
               onChange={(event) => setSigla(event.target.value)}
-              placeholder="Sigla (ex: AAAKN)"
+              placeholder="Sigla (ex: AAAECO)"
               className="brand-input px-3 py-2"
             />
             <input
@@ -276,8 +337,9 @@ export default function NovaAtleticaPage() {
               onChange={(event) => setArea(event.target.value)}
               className="brand-input px-3 py-2"
             >
-              {AREA_OPTIONS.map((option) => (
-                <option key={option.value || "default"} value={option.value}>
+              <option value="">Selecione a area</option>
+              {TENANT_AREA_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
@@ -301,16 +363,53 @@ export default function NovaAtleticaPage() {
               placeholder="Telefone de contato"
               className="brand-input px-3 py-2"
             />
-            <input
-              value={logoUrl}
-              onChange={(event) => setLogoUrl(event.target.value)}
-              placeholder="Logo URL (opcional)"
-              className="brand-input px-3 py-2"
-            />
+            <div className="md:col-span-2 rounded-2xl border border-zinc-800 bg-black/30 p-4">
+              <p className="text-[11px] font-black uppercase text-zinc-400">Logo da atletica</p>
+              <div className="mt-3 flex flex-wrap items-center gap-4">
+                <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950">
+                  <Image
+                    src={logoUrl || "/logo.png"}
+                    alt={`Logo ${sigla || nome || "atletica"}`}
+                    fill
+                    sizes="80px"
+                    className="object-cover"
+                    unoptimized={(logoUrl || "").startsWith("http")}
+                  />
+                </div>
+                <label
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-xl border px-4 py-2 text-[11px] font-black uppercase transition hover:brightness-110"
+                  style={{
+                    borderColor: `${palettePreview.accent}66`,
+                    backgroundColor: `${palettePreview.primary}26`,
+                    color: palettePreview.soft,
+                  }}
+                >
+                  <Upload size={14} />
+                  {uploadingLogo ? "Enviando..." : "Adicionar foto"}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    disabled={uploadingLogo}
+                    onChange={(event) => void handleLogoUpload(event)}
+                  />
+                </label>
+              </div>
+              <p className="mt-3 text-[11px] text-zinc-500">
+                PNG, JPG ou WEBP at&eacute; 2MB. A logo &eacute; comprimida automaticamente para
+                manter o app leve no Supabase.
+              </p>
+            </div>
           </div>
 
-          <div>
-            <label className="text-[11px] text-zinc-400 font-bold uppercase">Paleta principal</label>
+          <div className="space-y-3">
+            <label className="inline-flex items-center gap-3 text-[11px] font-bold uppercase text-zinc-400">
+              <span
+                className="h-3.5 w-3.5 rounded-full border border-white/20"
+                style={{ backgroundColor: palettePreview.primary }}
+              />
+              Paleta principal
+            </label>
             <select
               value={paletteKey}
               onChange={(event) => setPaletteKey(event.target.value as TenantPaletteKey)}
@@ -322,16 +421,55 @@ export default function NovaAtleticaPage() {
                 </option>
               ))}
             </select>
+
+            <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
+              <div
+                className="rounded-2xl border p-4"
+                style={{
+                  borderColor: `${palettePreview.accent}66`,
+                  background: `linear-gradient(135deg, ${palettePreview.primary}22, ${palettePreview.dark})`,
+                }}
+              >
+                <p className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: palettePreview.soft }}>
+                  Preview rapido
+                </p>
+                <div className="mt-4 flex items-center gap-3">
+                  <span
+                    className="inline-flex rounded-xl px-3 py-2 text-[10px] font-black uppercase"
+                    style={{ backgroundColor: `${palettePreview.primary}26`, color: palettePreview.soft }}
+                  >
+                    Botao suave
+                  </span>
+                  <span
+                    className="inline-flex rounded-xl px-3 py-2 text-[10px] font-black uppercase"
+                    style={{ backgroundColor: palettePreview.primary, color: palettePreview.dark }}
+                  >
+                    Botao forte
+                  </span>
+                </div>
+              </div>
+              <p className="text-[11px] text-zinc-500">
+                A bolinha e os botoes abaixo mudam na hora para ajudar a escolher a cor da atletica
+                antes de enviar a solicitacao.
+              </p>
+            </div>
           </div>
 
           <button
             onClick={() => void handleSubmit()}
-            disabled={submitting}
-            className="brand-button-solid px-4 py-2"
+            disabled={submitting || hasExistingTenantMembership}
+            className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 font-black uppercase tracking-wide transition disabled:cursor-not-allowed disabled:opacity-60"
+            style={{
+              background: `linear-gradient(135deg, ${palettePreview.accent}, ${palettePreview.primary})`,
+              color: palettePreview.dark,
+              boxShadow: `0 18px 45px ${palettePreview.primary}33`,
+            }}
           >
             <Send size={14} />
             {submitting
               ? "Enviando..."
+              : hasExistingTenantMembership
+                ? "Criacao bloqueada"
               : isPlatformMasterUser
                 ? "Criar Atletica Agora"
                 : "Enviar Solicitacao"}

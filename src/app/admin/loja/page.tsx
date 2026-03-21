@@ -5,10 +5,27 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, MessageSquare, Package, Plus, Save, ShoppingBag, Wallet } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { logActivity } from "@/lib/logger";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import { fetchFinanceiroConfig, saveFinanceiroConfig } from "@/lib/eventsService";
+import {
+  hasValidPhoneLength,
+  normalizePhoneInput,
+  PHONE_MAX_LENGTH,
+  PIX_BANK_MAX_LENGTH,
+  PIX_HOLDER_MAX_LENGTH,
+  PIX_KEY_MAX_LENGTH,
+} from "@/utils/contactFields";
 
 const menuItems = [
+  {
+    href: "/admin/loja/categorias",
+    title: "Categorias",
+    description: "Pagina propria para criar, editar e revisar as categorias",
+    icon: Plus,
+    color: "text-cyan-400 border-cyan-500/30 bg-cyan-500/10",
+  },
   {
     href: "/admin/loja/produtos",
     title: "Produtos",
@@ -35,6 +52,14 @@ const menuItems = [
 export default function AdminLojaMenuPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+  const categoryHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/loja/categorias")
+    : "/admin/loja/categorias";
+  const newProductHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/loja/produtos?action=new")
+    : "/admin/loja/produtos?action=new";
   const [loadingFinanceiro, setLoadingFinanceiro] = useState(true);
   const [savingFinanceiro, setSavingFinanceiro] = useState(false);
   const [financeiroForm, setFinanceiroForm] = useState({
@@ -48,7 +73,10 @@ export default function AdminLojaMenuPage() {
     let mounted = true;
     const run = async () => {
       try {
-        const row = await fetchFinanceiroConfig({ forceRefresh: true });
+        const row = await fetchFinanceiroConfig({
+          forceRefresh: true,
+          tenantId: activeTenantId || undefined,
+        });
         if (!mounted) return;
         setFinanceiroForm({
           chave: typeof row?.chave === "string" ? row.chave : "",
@@ -67,16 +95,21 @@ export default function AdminLojaMenuPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   const handleSaveFinanceiro = async () => {
     if (savingFinanceiro) return;
     const chave = financeiroForm.chave.trim();
     const banco = financeiroForm.banco.trim();
     const titular = financeiroForm.titular.trim();
+    const whatsapp = financeiroForm.whatsapp.trim();
 
     if (!chave || !banco || !titular) {
       addToast("Preencha chave PIX, banco e titular.", "error");
+      return;
+    }
+    if (whatsapp && !hasValidPhoneLength(whatsapp)) {
+      addToast("Informe um WhatsApp valido com DDI e somente numeros.", "error");
       return;
     }
 
@@ -86,8 +119,8 @@ export default function AdminLojaMenuPage() {
         chave,
         banco,
         titular,
-        whatsapp: financeiroForm.whatsapp.trim(),
-      });
+        whatsapp,
+      }, { tenantId: activeTenantId || undefined });
       if (user?.uid) {
         await logActivity(
           user.uid,
@@ -112,7 +145,7 @@ export default function AdminLojaMenuPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Link
-              href="/admin"
+              href={adminHomeHref}
               className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
             >
               <ArrowLeft size={18} className="text-zinc-300" />
@@ -125,14 +158,14 @@ export default function AdminLojaMenuPage() {
 
           <div className="flex items-center gap-2">
             <Link
-              href="/admin/loja/produtos?action=category"
+              href={categoryHref}
               className="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-blue-300 hover:bg-blue-500/20"
             >
               <Plus size={14} />
               Categoria
             </Link>
             <Link
-              href="/admin/loja/produtos?action=new"
+              href={newProductHref}
               className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20"
             >
               <Plus size={14} />
@@ -167,28 +200,53 @@ export default function AdminLojaMenuPage() {
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
             <input
               value={financeiroForm.chave}
-              onChange={(e) => setFinanceiroForm((prev) => ({ ...prev, chave: e.target.value }))}
+              maxLength={PIX_KEY_MAX_LENGTH}
+              onChange={(e) =>
+                setFinanceiroForm((prev) => ({
+                  ...prev,
+                  chave: e.target.value.slice(0, PIX_KEY_MAX_LENGTH),
+                }))
+              }
               placeholder="Chave PIX (email/CNPJ/telefone/aleatoria)"
               className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
               disabled={loadingFinanceiro}
             />
             <input
               value={financeiroForm.banco}
-              onChange={(e) => setFinanceiroForm((prev) => ({ ...prev, banco: e.target.value }))}
+              maxLength={PIX_BANK_MAX_LENGTH}
+              onChange={(e) =>
+                setFinanceiroForm((prev) => ({
+                  ...prev,
+                  banco: e.target.value.slice(0, PIX_BANK_MAX_LENGTH),
+                }))
+              }
               placeholder="Banco"
               className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
               disabled={loadingFinanceiro}
             />
             <input
               value={financeiroForm.titular}
-              onChange={(e) => setFinanceiroForm((prev) => ({ ...prev, titular: e.target.value }))}
+              maxLength={PIX_HOLDER_MAX_LENGTH}
+              onChange={(e) =>
+                setFinanceiroForm((prev) => ({
+                  ...prev,
+                  titular: e.target.value.slice(0, PIX_HOLDER_MAX_LENGTH),
+                }))
+              }
               placeholder="Nome do titular"
               className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
               disabled={loadingFinanceiro}
             />
             <input
               value={financeiroForm.whatsapp}
-              onChange={(e) => setFinanceiroForm((prev) => ({ ...prev, whatsapp: e.target.value }))}
+              maxLength={PHONE_MAX_LENGTH}
+              inputMode="numeric"
+              onChange={(e) =>
+                setFinanceiroForm((prev) => ({
+                  ...prev,
+                  whatsapp: normalizePhoneInput(e.target.value),
+                }))
+              }
               placeholder="WhatsApp para enviar comprovante (somente numero com DDI)"
               className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
               disabled={loadingFinanceiro}
@@ -202,7 +260,7 @@ export default function AdminLojaMenuPage() {
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={tenantSlug ? withTenantSlug(tenantSlug, item.href) : item.href}
                 className="block bg-zinc-900 border border-zinc-800 rounded-2xl p-5 hover:border-zinc-600 transition"
               >
                 <div className={`w-11 h-11 rounded-xl border flex items-center justify-center ${item.color}`}>

@@ -12,11 +12,13 @@ import {
   resolveAdminReport,
   type AdminReportRecord,
 } from "@/lib/reportsService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
 
 export default function AdminDenunciasBanidosPage() {
+  const { tenantId: activeTenantId } = useTenantTheme();
   const pathname = usePathname() || "/admin/denuncias/banidos";
   const pathInfo = parseTenantScopedPath(pathname);
   const backHref = pathInfo.tenantSlug
@@ -33,7 +35,9 @@ export default function AdminDenunciasBanidosPage() {
     let mounted = true;
     const load = async () => {
       try {
-        const reports = await fetchBannedAppeals(240);
+        const reports = await fetchBannedAppeals(240, {
+          tenantId: activeTenantId || undefined,
+        });
         if (!mounted) return;
         setRows(reports);
         setResponseById(
@@ -75,6 +79,7 @@ export default function AdminDenunciasBanidosPage() {
         originCollection: row.originCollection,
         response,
         reporterId: row.reporterId,
+        tenantId: activeTenantId || undefined,
       });
       setRows((prev) =>
         prev.map((entry) =>
@@ -94,6 +99,7 @@ export default function AdminDenunciasBanidosPage() {
       await deleteAdminReport({
         reportId: row.id,
         originCollection: row.originCollection,
+        tenantId: activeTenantId || undefined,
       });
       setRows((prev) => prev.filter((entry) => entry.id !== row.id));
     } finally {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 
@@ -9,7 +9,7 @@ import { useToast } from "../../../../context/ToastContext";
 import { logActivity } from "../../../../lib/logger";
 import {
   approveStoreOrder,
-  fetchAdminStoreBundle,
+  fetchPendingStoreOrdersPage,
   setStoreOrderStatus,
 } from "../../../../lib/storeService";
 
@@ -34,18 +34,19 @@ export default function AdminLojaPedidosPendentesPage() {
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
 
-  const load = async (forceRefresh = true) => {
-    const bundle = await fetchAdminStoreBundle({
-      ordersLimit: 300,
-      productsLimit: 1,
-      categoriesLimit: 1,
-      reviewsLimit: 1,
-      forceRefresh,
+  const load = async (targetPage: number) => {
+    const result = await fetchPendingStoreOrdersPage({
+      page: targetPage,
+      pageSize: PAGE_SIZE,
     });
-
-    const orders = (bundle.pedidos as OrderRow[]).sort((a, b) => String(b.id).localeCompare(String(a.id)));
-    setRows(orders);
+    if (targetPage > 1 && result.rows.length === 0) {
+      setPage((prev) => Math.max(1, prev - 1));
+      return;
+    }
+    setRows(result.rows as OrderRow[]);
+    setHasMore(result.hasMore);
   };
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export default function AdminLojaPedidosPendentesPage() {
 
     const run = async () => {
       try {
-        await load(true);
+        await load(page);
       } catch {
         if (mounted) addToast("Erro ao carregar pedidos.", "error");
       } finally {
@@ -65,15 +66,7 @@ export default function AdminLojaPedidosPendentesPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
-
-  const pending = useMemo(() => rows.filter((row) => row.status === "pendente"), [rows]);
-  const paged = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return pending.slice(start, start + PAGE_SIZE);
-  }, [pending, page]);
-
-  const totalPages = Math.max(1, Math.ceil(pending.length / PAGE_SIZE));
+  }, [addToast, page]);
 
   const handleApprove = async (row: OrderRow) => {
     try {
@@ -98,7 +91,7 @@ export default function AdminLojaPedidosPendentesPage() {
         ).catch(() => {});
       }
       addToast("Pedido aprovado.", "success");
-      await load(true);
+      await load(page);
     } catch (error: unknown) {
       console.error("Erro ao aprovar pedido (admin/loja):", error);
       addToast("Erro ao aprovar pedido.", "error");
@@ -118,7 +111,7 @@ export default function AdminLojaPedidosPendentesPage() {
         ).catch(() => {});
       }
       addToast("Pedido rejeitado.", "info");
-      await load(true);
+      await load(page);
     } catch (error: unknown) {
       console.error("Erro ao rejeitar pedido (admin/loja):", error);
       addToast("Erro ao rejeitar pedido.", "error");
@@ -142,10 +135,10 @@ export default function AdminLojaPedidosPendentesPage() {
       <main className="px-6 py-6 max-w-5xl mx-auto space-y-3">
         {loading ? (
           <div className="text-xs text-zinc-500 uppercase font-bold">Carregando...</div>
-        ) : paged.length === 0 ? (
+        ) : rows.length === 0 ? (
           <div className="text-sm text-zinc-500 border border-zinc-800 rounded-xl p-5">Sem pedidos pendentes.</div>
         ) : (
-          paged.map((row) => (
+          rows.map((row) => (
             <article key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-sm font-bold truncate">{row.productName || "Produto"}</p>
@@ -174,9 +167,9 @@ export default function AdminLojaPedidosPendentesPage() {
           ))
         )}
 
-        {pending.length > PAGE_SIZE && (
+        {(page > 1 || hasMore) && (
           <div className="pt-2 flex items-center justify-between text-xs text-zinc-500 font-bold uppercase">
-            <span>Pagina {page} de {totalPages}</span>
+            <span>Pagina {page}</span>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setPage((prev) => Math.max(1, prev - 1))}
@@ -186,8 +179,8 @@ export default function AdminLojaPedidosPendentesPage() {
                 Anterior
               </button>
               <button
-                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                disabled={page >= totalPages}
+                onClick={() => setPage((prev) => prev + 1)}
+                disabled={!hasMore}
                 className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40"
               >
                 Proxima

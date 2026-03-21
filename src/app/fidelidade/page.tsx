@@ -9,6 +9,7 @@ import Image from "next/image";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { useTenantTheme } from "../../context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   fetchFidelityConfig,
   fetchFidelityHistory,
@@ -31,7 +32,7 @@ type ConfigFidelidade = FidelityConfig;
 export default function FidelidadePage() {
   const { user } = useAuth();
   const { addToast } = useToast();
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const [activeTab, setActiveTab] = useState<"cartao" | "regras">("cartao");
   
   // Estados de Dados Reais
@@ -117,7 +118,7 @@ export default function FidelidadePage() {
 
   // AÇÃO: RESGATAR
   const handleResgatar = async (premio: Premio) => {
-    if (userXP < premio.cost) return addToast("XP insuficiente, marujo!", "error");
+    if (userXP < premio.cost) return addToast("XP insuficiente para esse resgate.", "error");
     if (premio.stock <= 0) return addToast("Estoque esgotado! 😢", "error");
 
     const confirm = window.confirm(`Deseja reservar o item "${premio.title}"? Vá à atlética para retirar.`);
@@ -137,7 +138,7 @@ export default function FidelidadePage() {
               : item
           )
         );
-        addToast("Resgate solicitado! Apresente seu ID na lojinha.", "success");
+        addToast("Resgate solicitado. Apresente seu ID na retirada.", "success");
     } catch (error: unknown) {
         console.error(error);
         addToast("Erro ao processar resgate.", "error");
@@ -149,11 +150,11 @@ export default function FidelidadePage() {
       
       {/* HEADER */}
       <header className="p-4 sticky top-0 z-30 flex items-center gap-4 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 shadow-lg">
-        <Link href="/dashboard" className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition">
+        <Link href={tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard"} className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition">
           <ArrowLeft size={24} />
         </Link>
         <div className="flex-1">
-          <h1 className="font-black text-lg italic uppercase tracking-tighter text-white leading-none">Shark Card</h1>
+          <h1 className="font-black text-lg italic uppercase tracking-tighter text-white leading-none">Clube de Fidelidade</h1>
           <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">Programa de Fidelidade</p>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full flex items-center gap-2 shadow-inner">
@@ -185,7 +186,7 @@ export default function FidelidadePage() {
                     {/* 🦈 Image otimizado */}
                     <Image src="/logo.png" width={40} height={40} className="object-contain drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]" alt="Logo Atlética" />
                     <div>
-                      <h2 className="text-base font-black italic uppercase tracking-tighter text-white leading-none">Shark Card</h2>
+                      <h2 className="text-base font-black italic uppercase tracking-tighter text-white leading-none">Clube de Fidelidade</h2>
                       <p className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest mt-0.5">Membro Oficial</p>
                     </div>
                   </div>
@@ -267,7 +268,7 @@ export default function FidelidadePage() {
                 <div><h3 className="font-bold text-white text-sm uppercase">Regras do Jogo</h3><p className="text-[10px] text-zinc-500">Entenda como turbinar seu card</p></div>
               </div>
               <ul className="space-y-3 pl-2">
-                <RegraItem texto={`A cada ${XP_POR_SELO} XP acumulados, você ganha 1 Selo do Tubarão automaticamente.`} />
+                <RegraItem texto={`A cada ${XP_POR_SELO} XP acumulados, você ganha 1 selo automaticamente.`} />
                 {config.rules.length > 0 ? config.rules.map((rule, i) => <RegraItem key={i} texto={rule.replace("{XP}", XP_POR_SELO.toString())} />) : <RegraItem texto="Acumule XP para trocar por prêmios na lojinha."/>}
               </ul>
             </section>

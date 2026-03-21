@@ -2,7 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Building2, CreditCard, Loader2, Pencil, Rocket, Shield, Waypoints } from "lucide-react";
+import {
+  Building2,
+  CreditCard,
+  Eye,
+  EyeOff,
+  Loader2,
+  Mail,
+  PanelLeft,
+  Pencil,
+  Rocket,
+  Shield,
+  Waypoints,
+} from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -10,6 +22,7 @@ import { useToast } from "@/context/ToastContext";
 import { isPlatformMaster } from "@/lib/roles";
 import {
   fetchManageableTenants,
+  updateTenantProfile,
   type TenantSummary,
 } from "@/lib/tenantService";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -22,7 +35,7 @@ const statusClass: Record<TenantSummary["status"], string> = {
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message;
-  return "Falha ao carregar tenants da plataforma.";
+  return "Falha ao carregar as atleticas da plataforma.";
 };
 
 export default function MasterPage() {
@@ -33,6 +46,7 @@ export default function MasterPage() {
 
   const [loading, setLoading] = useState(true);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
+  const [visibilityBusyTenantId, setVisibilityBusyTenantId] = useState("");
 
   const canAccess = isPlatformMaster(user);
 
@@ -64,6 +78,34 @@ export default function MasterPage() {
     addToast(`Contexto master definido para ${tenant.sigla}.`, "success");
   };
 
+  const handleToggleDirectoryVisibility = async (tenant: TenantSummary) => {
+    try {
+      setVisibilityBusyTenantId(tenant.id);
+      const nextValue = !tenant.visibleInDirectory;
+      await updateTenantProfile({
+        tenantId: tenant.id,
+        visibleInDirectory: nextValue,
+      });
+      setTenants((current) =>
+        current.map((entry) =>
+          entry.id === tenant.id
+            ? { ...entry, visibleInDirectory: nextValue }
+            : entry
+        )
+      );
+      addToast(
+        nextValue
+          ? `${tenant.sigla} voltou para a vitrine visitante.`
+          : `${tenant.sigla} foi ocultada da vitrine visitante.`,
+        "success"
+      );
+    } catch (error: unknown) {
+      addToast(extractErrorMessage(error), "error");
+    } finally {
+      setVisibilityBusyTenantId("");
+    }
+  };
+
   if (!canAccess) return null;
 
   if (loading) {
@@ -86,9 +128,9 @@ export default function MasterPage() {
               <Building2 className="text-red-300" /> Controle Global
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-300">
-              Aqui fica o painel do dono do app. O `master` escolhe o tenant que quer inspecionar,
-              troca a role de visualizacao na faixa vermelha e entra no admin do tenant sem misturar
-              isso com o painel da atletica.
+              Aqui fica o painel do dono do app. O `master` escolhe a atletica que quer inspecionar,
+              troca a role de visualizacao na faixa vermelha e entra no admin correto sem misturar
+              isso com o painel da propria atletica.
             </p>
           </div>
 
@@ -101,11 +143,25 @@ export default function MasterPage() {
               Landing USC
             </Link>
             <Link
+              href="/master/contato"
+              className="rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:border-red-500/25 hover:bg-zinc-900"
+            >
+              <Mail size={15} className="mb-2 text-red-300" />
+              Contato USC
+            </Link>
+            <Link
               href="/master/permissoes"
               className="rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:border-red-500/25 hover:bg-zinc-900"
             >
               <Shield size={15} className="mb-2 text-red-300" />
               Permissoes Globais
+            </Link>
+            <Link
+              href="/master/permissoes/perfis-admin"
+              className="rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:border-red-500/25 hover:bg-zinc-900"
+            >
+              <PanelLeft size={15} className="mb-2 text-red-300" />
+              Perfis do Admin
             </Link>
             <Link
               href="/master/solicitacoes"
@@ -121,7 +177,7 @@ export default function MasterPage() {
       <section className="mb-6 grid gap-4 md:grid-cols-3">
         <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5">
           <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
-            Tenants cadastrados
+            Atleticas cadastradas
           </p>
           <p className="mt-3 text-3xl font-black text-white">{sortedTenants.length}</p>
         </div>
@@ -144,9 +200,9 @@ export default function MasterPage() {
       <section className="rounded-[2rem] border border-zinc-800 bg-zinc-900/50 p-6">
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-black uppercase text-white">Tenants da plataforma</h2>
+            <h2 className="text-lg font-black uppercase text-white">Atleticas da plataforma</h2>
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
-              escolha o tenant e entre no painel correto
+              escolha a atletica e entre no painel correto
             </p>
           </div>
           <button
@@ -186,6 +242,11 @@ export default function MasterPage() {
                     <p className="mt-2 text-sm text-zinc-300">
                       slug <span className="font-mono text-zinc-100">/{tenant.slug}</span>
                     </p>
+                    <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
+                      {tenant.visibleInDirectory
+                        ? "Visivel na pagina visitante"
+                        : "Oculta da pagina visitante"}
+                    </p>
                   </div>
 
                   {isCurrent && (
@@ -202,11 +263,23 @@ export default function MasterPage() {
                   >
                     <Waypoints size={14} /> Usar contexto
                   </button>
+                  <button
+                    onClick={() => void handleToggleDirectoryVisibility(tenant)}
+                    disabled={visibilityBusyTenantId === tenant.id}
+                    className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-60"
+                  >
+                    {tenant.visibleInDirectory ? <EyeOff size={14} /> : <Eye size={14} />}
+                    {visibilityBusyTenantId === tenant.id
+                      ? "Salvando..."
+                      : tenant.visibleInDirectory
+                        ? "Ocultar da vitrine"
+                        : "Exibir na vitrine"}
+                  </button>
                   <Link
                     href={`/master/tenants/${tenant.id}`}
                     className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:bg-zinc-800"
                   >
-                    <Pencil size={14} /> Editar tenant
+                    <Pencil size={14} /> Editar atletica
                   </Link>
                   <Link
                     href={adminHref}

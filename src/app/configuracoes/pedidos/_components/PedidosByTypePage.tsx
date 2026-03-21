@@ -7,6 +7,11 @@ import { useAuth } from "../../../../context/AuthContext";
 import { fetchUserOrdersByTab } from "../../../../lib/settingsService";
 import { fetchFinanceiroConfig } from "../../../../lib/eventsService";
 import { useToast } from "../../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import {
+  buildTenantFinanceFallback,
+  resolveTenantBrandLabel,
+} from "../../../../lib/tenantBranding";
 
 interface PedidoUnificado {
   id: string;
@@ -39,13 +44,6 @@ type PedidoRaw = {
 };
 
 type TimestampLike = { toDate: () => Date };
-
-const FINANCE_DEFAULT = {
-  chave: "financeiro@aaakn.com.br",
-  banco: "Banco Inter",
-  titular: "Assoc. Atletica Acad. Knight",
-  whatsapp: "5512999999999",
-} as const;
 
 const parseCurrencyValue = (value: unknown): number => {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
@@ -126,6 +124,7 @@ interface PedidosByTypePageProps {
 export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { tenantId, tenantSigla, tenantName } = useTenantTheme();
   const [loading, setLoading] = useState(true);
   const [pedidos, setPedidos] = useState<PedidoUnificado[]>([]);
   const [selectedPedido, setSelectedPedido] = useState<PedidoUnificado | null>(null);
@@ -136,6 +135,18 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
     whatsapp: string;
   } | null>(null);
   const [loadingFinanceiro, setLoadingFinanceiro] = useState(false);
+  const financeFallback = useMemo(
+    () =>
+      buildTenantFinanceFallback({
+        tenantSigla,
+        tenantName,
+      }),
+    [tenantName, tenantSigla]
+  );
+  const brandLabel = useMemo(
+    () => resolveTenantBrandLabel(tenantSigla, tenantName),
+    [tenantName, tenantSigla]
+  );
 
   useEffect(() => {
     if (!user) {
@@ -149,7 +160,10 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
 
     const load = async () => {
       try {
-        const records = await fetchUserOrdersByTab(user.uid, tab, { maxResults: 90 });
+        const records = await fetchUserOrdersByTab(user.uid, tab, {
+          maxResults: 90,
+          tenantId: tenantId || undefined,
+        });
         const rawList = records.map((row) => ({ id: row.id, ...(row.data as Record<string, unknown>) })) as PedidoRaw[];
 
         const sorted = rawList
@@ -174,13 +188,16 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
     setLoadingFinanceiro(true);
     const loadFinanceiro = async () => {
       try {
-        const row = await fetchFinanceiroConfig({ forceRefresh: false });
+        const row = await fetchFinanceiroConfig({
+          forceRefresh: false,
+          tenantId: tenantId || undefined,
+        });
         if (!mounted) return;
         setFinanceiro({
-          chave: typeof row?.chave === "string" && row.chave.trim() ? row.chave.trim() : FINANCE_DEFAULT.chave,
-          banco: typeof row?.banco === "string" && row.banco.trim() ? row.banco.trim() : FINANCE_DEFAULT.banco,
-          titular: typeof row?.titular === "string" && row.titular.trim() ? row.titular.trim() : FINANCE_DEFAULT.titular,
-          whatsapp: typeof row?.whatsapp === "string" && row.whatsapp.trim() ? row.whatsapp.trim() : FINANCE_DEFAULT.whatsapp,
+          chave: typeof row?.chave === "string" && row.chave.trim() ? row.chave.trim() : financeFallback.chave,
+          banco: typeof row?.banco === "string" && row.banco.trim() ? row.banco.trim() : financeFallback.banco,
+          titular: typeof row?.titular === "string" && row.titular.trim() ? row.titular.trim() : financeFallback.titular,
+          whatsapp: typeof row?.whatsapp === "string" && row.whatsapp.trim() ? row.whatsapp.trim() : financeFallback.whatsapp,
         });
       } catch (error: unknown) {
         console.error(error);
@@ -192,7 +209,7 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
     return () => {
       mounted = false;
     };
-  }, [selectedPedido]);
+  }, [financeFallback, selectedPedido, tenantId]);
 
   const counts = useMemo(() => {
     return {
@@ -202,10 +219,10 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
     };
   }, [pedidos]);
 
-  const whatsappDigits = String(financeiro?.whatsapp || FINANCE_DEFAULT.whatsapp).replace(/\D/g, "");
+  const whatsappDigits = String(financeiro?.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
   const whatsappMessage = selectedPedido
     ? encodeURIComponent(
-        `Fala, equipe AAAKN! Segue comprovante do pedido #${selectedPedido.id.slice(0, 8).toUpperCase()} (${selectedPedido.titulo}).`
+        `Fala, equipe ${brandLabel}! Segue comprovante do pedido #${selectedPedido.id.slice(0, 8).toUpperCase()} (${selectedPedido.titulo}).`
       )
     : "";
   const whatsappUrl = whatsappDigits ? `https://wa.me/${whatsappDigits}?text=${whatsappMessage}` : "";
@@ -320,12 +337,12 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
                   <p className="text-[10px] text-zinc-500 font-bold uppercase">Chave PIX</p>
                   <div className="mt-1 flex items-center gap-2">
                     <p className="flex-1 rounded-lg border border-zinc-700 bg-black px-3 py-2 text-xs font-mono text-white truncate">
-                      {loadingFinanceiro ? "Carregando..." : (financeiro?.chave || FINANCE_DEFAULT.chave)}
+                      {loadingFinanceiro ? "Carregando..." : (financeiro?.chave || financeFallback.chave)}
                     </p>
                     <button
                       onClick={async () => {
                         try {
-                          await navigator.clipboard.writeText(financeiro?.chave || FINANCE_DEFAULT.chave);
+                          await navigator.clipboard.writeText(financeiro?.chave || financeFallback.chave);
                           addToast("Chave PIX copiada!", "success");
                         } catch (error: unknown) {
                           console.error(error);
@@ -341,16 +358,16 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <p className="text-zinc-500 font-bold uppercase text-[10px]">Banco</p>
-                    <p className="text-zinc-300 font-bold mt-1">{financeiro?.banco || FINANCE_DEFAULT.banco}</p>
+                    <p className="text-zinc-300 font-bold mt-1">{financeiro?.banco || financeFallback.banco}</p>
                   </div>
                   <div>
                     <p className="text-zinc-500 font-bold uppercase text-[10px]">Titular</p>
-                    <p className="text-zinc-300 font-bold mt-1 truncate">{financeiro?.titular || FINANCE_DEFAULT.titular}</p>
+                    <p className="text-zinc-300 font-bold mt-1 truncate">{financeiro?.titular || financeFallback.titular}</p>
                   </div>
                 </div>
                 <div className="rounded-lg border border-zinc-800 bg-black/50 p-3 space-y-1">
                   <p className="text-[10px] text-zinc-500 uppercase font-bold">WhatsApp p/ comprovante</p>
-                  <p className="text-zinc-300 text-xs font-mono">{financeiro?.whatsapp || FINANCE_DEFAULT.whatsapp}</p>
+                  <p className="text-zinc-300 text-xs font-mono">{financeiro?.whatsapp || financeFallback.whatsapp}</p>
                 </div>
                 <div className="rounded-lg border border-zinc-800 bg-black/50 p-3 flex items-start gap-2">
                   <MessageCircle size={14} className="text-emerald-400 mt-0.5" />

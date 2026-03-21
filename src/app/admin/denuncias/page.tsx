@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Dumbbell, LifeBuoy, MessageCircle } from "lucide-react";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const menuItems = [
   {
@@ -35,11 +37,13 @@ const menuItems = [
 ] as const;
 
 export default function AdminDenunciasMenuPage() {
+  const { tenantSlug } = useTenantTheme();
+  const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center gap-3">
-          <Link href="/admin" className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
+          <Link href={adminHomeHref} className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
             <ArrowLeft size={18} className="text-zinc-300" />
           </Link>
           <div>
@@ -54,7 +58,11 @@ export default function AdminDenunciasMenuPage() {
           {menuItems.map((item) => {
             const Icon = item.icon;
             return (
-              <Link key={item.href} href={item.href} className="block bg-zinc-900 border border-zinc-800 rounded-2xl p-5 hover:border-zinc-600 transition">
+              <Link
+                key={item.href}
+                href={tenantSlug ? withTenantSlug(tenantSlug, item.href) : item.href}
+                className="block bg-zinc-900 border border-zinc-800 rounded-2xl p-5 hover:border-zinc-600 transition"
+              >
                 <div className={`w-11 h-11 rounded-xl border flex items-center justify-center ${item.color}`}>
                   <Icon size={18} />
                 </div>

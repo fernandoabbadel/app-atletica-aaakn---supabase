@@ -8,6 +8,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   createLegalDoc,
   fetchLegalDocs,
@@ -72,6 +74,8 @@ const INITIAL_SECTIONS: ConfigSection[] = [
 
 export default function AdminConfiguracoesPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
   const [activeTab, setActiveTab] = useState<"app" | "legal">("app");
   
   // Estados do Menu
@@ -91,7 +95,7 @@ export default function AdminConfiguracoesPage() {
     let mounted = true;
     const loadMenu = async () => {
       try {
-        const menuSections = await fetchMenuConfig();
+        const menuSections = await fetchMenuConfig({ tenantId: activeTenantId || undefined });
         if (!mounted || !menuSections) return;
 
         if (menuSections.length > 0) {
@@ -117,6 +121,7 @@ export default function AdminConfiguracoesPage() {
         const rows = await fetchLegalDocs({
           includeInternal: true,
           maxResults: 80,
+          tenantId: activeTenantId || undefined,
         });
 
         const docs = rows.map((row) => {
@@ -153,7 +158,9 @@ export default function AdminConfiguracoesPage() {
   const handleSaveMenu = async (newSections: ConfigSection[]) => {
       setSavingMenu(true);
       try {
-          await saveMenuConfig(newSections as MenuConfigSection[]);
+          await saveMenuConfig(newSections as MenuConfigSection[], {
+            tenantId: activeTenantId || undefined,
+          });
           addToast("Menu do app atualizado para todos! 📲", "success");
           setSections(newSections);
           setIsModalOpen(false);
@@ -192,7 +199,7 @@ export default function AdminConfiguracoesPage() {
           conteudo: "Escreva aqui...",
           tipo: "publico",
           iconName: "FileText",
-      });
+      }, { tenantId: activeTenantId || undefined });
       setDocuments((prev) => {
           const next = [
               ...prev,
@@ -220,7 +227,7 @@ export default function AdminConfiguracoesPage() {
           await updateLegalDoc(selectedDocId, {
               titulo: docData.titulo,
               conteudo: docData.conteudo,
-          });
+          }, { tenantId: activeTenantId || undefined });
           addToast("Documento salvo e publicado! 📜", "success");
       } catch { addToast("Erro ao salvar.", "error"); }
       finally { setSavingDoc(false); }
@@ -229,7 +236,7 @@ export default function AdminConfiguracoesPage() {
   const handleDeleteDoc = async (id: string) => {
       if(!confirm("Apagar documento?")) return;
       try {
-          await removeLegalDoc(id);
+          await removeLegalDoc(id, { tenantId: activeTenantId || undefined });
           setDocuments((prev) => prev.filter((docItem) => docItem.id !== id));
           if (selectedDocId === id) setSelectedDocId("");
           addToast("Documento removido.", "info");
@@ -245,7 +252,7 @@ export default function AdminConfiguracoesPage() {
     <div className="min-h-screen bg-[#050505] text-white pb-20 font-sans">
       <header className="p-6 sticky top-0 z-30 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 flex justify-between items-center">
         <div className="flex items-center gap-4">
-          <Link href="/admin" className="bg-zinc-900 p-3 rounded-full hover:bg-zinc-800 border border-zinc-800">
+          <Link href={adminHomeHref} className="bg-zinc-900 p-3 rounded-full hover:bg-zinc-800 border border-zinc-800">
             <ArrowLeft size={20} className="text-zinc-400" />
           </Link>
           <h1 className="text-xl font-black uppercase flex items-center gap-2">
@@ -373,6 +380,4 @@ export default function AdminConfiguracoesPage() {
     </div>
   );
 }
-
-
 

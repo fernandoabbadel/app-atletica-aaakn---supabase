@@ -8,11 +8,19 @@ import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
+  createDefaultTenantAppModulesConfig,
+  fetchEffectiveTenantAppModulesConfig,
+  isTenantAppModulePathVisible,
+  resolveTenantAppModuleByPath,
+  type TenantAppModulesConfig,
+} from "@/lib/tenantAppModulesService";
+import {
   PUBLIC_PATHS,
   COMING_SOON_PATHS,
   GUEST_ALLOWED_PATHS,
 } from "@/lib/appRoutes";
 import {
+  fetchEffectivePermissionMatrix,
   fetchPermissionMatrix,
   type PermissionMatrix,
 } from "@/lib/adminSecurityService";
@@ -31,8 +39,17 @@ import {
   shouldAutoScopePath,
   withTenantSlug,
 } from "@/lib/tenantRouting";
-import { fetchTenantBySlug } from "@/lib/tenantService";
 import { buildLoginPath } from "@/lib/authRedirect";
+import {
+  buildPermissionMatrixStorageKey,
+  clearLegacyPermissionMatrixStorage,
+} from "@/lib/permissionCache";
+import { fetchPublicTenantIdBySlugCached } from "@/lib/publicTenantLookup";
+
+const resolvePermissionPath = (path: string): string =>
+  path === "/admin/atletica" || path.startsWith("/admin/atletica/")
+    ? "/admin/configuracoes"
+    : path;
 
 const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
   if (typeof raw !== "object" || raw === null) return null;
@@ -84,7 +101,12 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   const [routeTenantId, setRouteTenantId] = useState("");
   const [routeTenantLoading, setRouteTenantLoading] = useState(false);
   const [routeTenantResolved, setRouteTenantResolved] = useState(true);
+  const [modulesConfig, setModulesConfig] = useState<TenantAppModulesConfig>(
+    createDefaultTenantAppModulesConfig
+  );
+  const [modulesLoading, setModulesLoading] = useState(false);
   const loginToastPathRef = useRef("");
+  const tenantFallbackToastPathRef = useRef("");
   const lastPathRef = useRef("");
   const pendingRedirectRef = useRef("");
   const hasUser = !!user;
@@ -93,11 +115,68 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     () => resolveEffectiveAccessRole(user),
     [user]
   );
+  const normalizedActiveTenantId =
+    typeof activeTenantId === "string" ? activeTenantId.trim() : "";
+  const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
+  const authenticatedTenantId =
+    typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
   const roleCandidates = useMemo(
     () => getAccessRoleCandidates(user),
     [user]
   );
   const isPlatformMasterUser = isPlatformMaster(user);
+  const effectiveRouteTenantId = useMemo(() => {
+    const explicitRouteTenantId = routeTenantId.trim();
+    if (explicitRouteTenantId) return explicitRouteTenantId;
+
+    // Evita falso negativo no primeiro render apos redirecionar para /{slug}/...
+    if (
+      routeTenantSlug &&
+      normalizedActiveTenantSlug &&
+      routeTenantSlug === normalizedActiveTenantSlug
+    ) {
+      if (normalizedActiveTenantId) return normalizedActiveTenantId;
+      if (!isPlatformMasterUser && authenticatedTenantId) {
+        return authenticatedTenantId;
+      }
+    }
+
+    return "";
+  }, [
+    routeTenantId,
+    routeTenantSlug,
+    normalizedActiveTenantSlug,
+    normalizedActiveTenantId,
+    isPlatformMasterUser,
+    authenticatedTenantId,
+  ]);
+  const permissionTargetTenantId = useMemo(() => {
+    if (currentPath.startsWith("/master")) return "";
+    return (
+      effectiveRouteTenantId ||
+      normalizedActiveTenantId ||
+      authenticatedTenantId
+    );
+  }, [
+    authenticatedTenantId,
+    currentPath,
+    effectiveRouteTenantId,
+    normalizedActiveTenantId,
+  ]);
+  const managedTenantAppModule = useMemo(
+    () => resolveTenantAppModuleByPath(currentPath),
+    [currentPath]
+  );
+  const permissionStorageKey = useMemo(
+    () =>
+      currentPath.startsWith("/master")
+        ? buildPermissionMatrixStorageKey(undefined, "platform")
+        : buildPermissionMatrixStorageKey(
+            permissionTargetTenantId,
+            currentPath.startsWith("/admin") ? "effective" : "tenant"
+          ),
+    [currentPath, permissionTargetTenantId]
+  );
   const setAuthorizedSafe = useCallback((next: boolean) => {
     setAuthorized((previous) => (previous === next ? previous : next));
   }, []);
@@ -112,15 +191,12 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
     const userTenantId =
       typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
-    const resolvedActiveTenantId =
-      typeof activeTenantId === "string" ? activeTenantId.trim() : "";
-    const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
     if (
-      resolvedActiveTenantId &&
+      normalizedActiveTenantId &&
       normalizedActiveTenantSlug &&
       routeTenantSlug === normalizedActiveTenantSlug
     ) {
-      setRouteTenantId(resolvedActiveTenantId);
+      setRouteTenantId(normalizedActiveTenantId);
       setRouteTenantLoading(false);
       setRouteTenantResolved(true);
       return;
@@ -133,17 +209,17 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
     const resolveRouteTenant = async () => {
       try {
-        const tenant = await fetchTenantBySlug(routeTenantSlug);
+        const resolvedTenantId = await fetchPublicTenantIdBySlugCached(routeTenantSlug);
         if (!mounted) return;
-        setRouteTenantId(tenant?.id || "");
+        setRouteTenantId(resolvedTenantId);
       } catch {
         if (!mounted) return;
         if (
-          resolvedActiveTenantId &&
+          normalizedActiveTenantId &&
           normalizedActiveTenantSlug &&
           routeTenantSlug === normalizedActiveTenantSlug
         ) {
-          setRouteTenantId(resolvedActiveTenantId);
+          setRouteTenantId(normalizedActiveTenantId);
         } else if (
           userTenantId &&
           normalizedActiveTenantSlug &&
@@ -165,7 +241,13 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     return () => {
       mounted = false;
     };
-  }, [hasUser, routeTenantSlug, user?.tenant_id, activeTenantId, activeTenantSlug]);
+  }, [
+    hasUser,
+    routeTenantSlug,
+    user?.tenant_id,
+    normalizedActiveTenantId,
+    normalizedActiveTenantSlug,
+  ]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -189,7 +271,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     const fetchRules = async () => {
       let hasCachedRules = false;
 
-      const cachedRules = localStorage.getItem("shark_permissions");
+      const cachedRules = localStorage.getItem(permissionStorageKey);
       if (cachedRules) {
         try {
           const parsed = normalizePermissionMatrix(JSON.parse(cachedRules));
@@ -199,21 +281,36 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
             setRulesLoading(false);
           }
         } catch {
-          localStorage.removeItem("shark_permissions");
+          localStorage.removeItem(permissionStorageKey);
+          clearLegacyPermissionMatrixStorage();
         }
       }
 
       try {
-        const liveRules = await fetchPermissionMatrix({ forceRefresh: false });
+        const liveRules = currentPath.startsWith("/admin")
+          ? await fetchEffectivePermissionMatrix({
+              forceRefresh: false,
+              tenantId: permissionTargetTenantId || undefined,
+            })
+          : await fetchPermissionMatrix({
+              forceRefresh: false,
+              tenantId:
+                currentPath.startsWith("/master")
+                  ? undefined
+                  : permissionTargetTenantId || undefined,
+            });
         if (!isMounted) return;
 
         const resolvedRules = liveRules ?? {};
         setPermissionMatrix(resolvedRules);
 
         if (liveRules) {
-          localStorage.setItem("shark_permissions", JSON.stringify(liveRules));
+          localStorage.setItem(
+            permissionStorageKey,
+            JSON.stringify(liveRules)
+          );
         } else {
-          localStorage.removeItem("shark_permissions");
+          localStorage.removeItem(permissionStorageKey);
         }
       } catch (error: unknown) {
         if (!isPermissionError(error)) {
@@ -234,7 +331,53 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     return () => {
       isMounted = false;
     };
-  }, [authLoading, currentPath, hasUser, userIsAnonymous]);
+  }, [
+    authLoading,
+    currentPath,
+    hasUser,
+    permissionStorageKey,
+    permissionTargetTenantId,
+    userIsAnonymous,
+  ]);
+
+  useEffect(() => {
+    const shouldLoadModuleRules =
+      Boolean(managedTenantAppModule) &&
+      !currentPath.startsWith("/admin") &&
+      !currentPath.startsWith("/master") &&
+      permissionTargetTenantId.length > 0;
+
+    if (!shouldLoadModuleRules) {
+      setModulesConfig(createDefaultTenantAppModulesConfig());
+      setModulesLoading(false);
+      return;
+    }
+
+    let mounted = true;
+    setModulesLoading(true);
+
+    const loadModules = async () => {
+      try {
+        const nextConfig = await fetchEffectiveTenantAppModulesConfig({
+          tenantId: permissionTargetTenantId,
+          tenantSlug: routeTenantSlug || activeTenantSlug,
+          forceRefresh: false,
+        });
+        if (!mounted) return;
+        setModulesConfig(nextConfig);
+      } catch {
+        if (!mounted) return;
+        setModulesConfig(createDefaultTenantAppModulesConfig());
+      } finally {
+        if (mounted) setModulesLoading(false);
+      }
+    };
+
+    void loadModules();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantSlug, currentPath, managedTenantAppModule, permissionTargetTenantId, routeTenantSlug]);
 
   useEffect(() => {
     if (lastPathRef.current !== rawCurrentPath) {
@@ -256,6 +399,12 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       activeTenantSlug && activeTenantSlug.trim()
         ? withTenantSlug(activeTenantSlug, "/dashboard")
         : "/dashboard";
+    const semPermissaoPath =
+      routeTenantSlug && routeTenantSlug.trim()
+        ? withTenantSlug(routeTenantSlug, "/sem-permissao")
+        : activeTenantSlug && activeTenantSlug.trim()
+          ? withTenantSlug(activeTenantSlug, "/sem-permissao")
+          : "/sem-permissao";
 
     const isPublic =
       isTenantLandingRoot ||
@@ -264,6 +413,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       );
     if (isPublic) {
       loginToastPathRef.current = "";
+      tenantFallbackToastPathRef.current = "";
       pendingRedirectRef.current = "";
       setAuthorizedSafe(true);
       return;
@@ -272,9 +422,10 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     if (
       authLoading ||
       rulesLoading ||
+      modulesLoading ||
       tenantThemeLoading ||
       routeTenantLoading ||
-      (hasUser && !!routeTenantSlug && !routeTenantResolved)
+      (hasUser && !!routeTenantSlug && !routeTenantResolved && !effectiveRouteTenantId)
     ) {
       return;
     }
@@ -305,7 +456,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       setAuthorizedSafe(false);
       if (currentPath !== "/login") {
         if (loginToastPathRef.current !== rawCurrentPath) {
-          addToast("Opa! Faz login pra nadar com o cardume!", "info");
+          addToast("Faca login para continuar.", "info");
           loginToastPathRef.current = rawCurrentPath;
         }
         safeReplace(buildLoginPath(rawCurrentPath));
@@ -315,10 +466,21 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       return;
     }
 
+    if (
+      managedTenantAppModule &&
+      !isPlatformMasterUser &&
+      !isTenantAppModulePathVisible(modulesConfig, currentPath)
+    ) {
+      setAuthorizedSafe(false);
+      addToast("Esse modulo foi ocultado para esta atletica.", "error");
+      safeReplace(semPermissaoPath);
+      return;
+    }
+
     if (isMasterOnlyAdminPath(currentPath) && !isPlatformMasterUser) {
       setAuthorizedSafe(false);
       addToast("Area exclusiva do master da plataforma.", "error");
-      safeReplace("/sem-permissao");
+      safeReplace(semPermissaoPath);
       return;
     }
 
@@ -329,8 +491,20 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     }
 
     if (routeTenantSlug) {
-      if (!routeTenantId) {
+      if (!effectiveRouteTenantId) {
         setAuthorizedSafe(false);
+        const hasAuthenticatedTenantContext =
+          Boolean(user) &&
+          (authenticatedTenantId.length > 0 || activeTenantSlug.trim().length > 0);
+
+        if (hasAuthenticatedTenantContext) {
+          if (tenantFallbackToastPathRef.current !== rawCurrentPath) {
+            tenantFallbackToastPathRef.current = rawCurrentPath;
+          }
+          safeReplace(dashboardPath);
+          return;
+        }
+
         safeReplace(tenantNotFoundPath);
         return;
       }
@@ -347,9 +521,9 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
             userTenantStatus === "approved" ||
             userTenantStatus === "pending");
 
-        if (hasScopedTenantContext && userTenantId !== routeTenantId) {
+        if (hasScopedTenantContext && userTenantId !== effectiveRouteTenantId) {
           setAuthorizedSafe(false);
-          addToast("Esse tenant nao pertence ao seu acesso atual.", "error");
+          addToast("Essa atletica nao pertence ao seu acesso atual.", "error");
           safeReplace(dashboardPath);
           return;
         }
@@ -357,6 +531,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     }
 
     loginToastPathRef.current = "";
+    tenantFallbackToastPathRef.current = "";
     pendingRedirectRef.current = "";
 
     if (user.status === "banned" || user.status === "bloqueado") {
@@ -405,16 +580,17 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
     const hasPermissionRules =
       permissionMatrix !== null && Object.keys(permissionMatrix).length > 0;
+    const permissionCheckPath = resolvePermissionPath(currentPath);
 
     if (!hasPermissionRules && currentPath.startsWith("/admin")) {
-      const hasAdminFallback = currentRoleCandidates.some((role) =>
-        ADMIN_PANEL_FALLBACK_ROLES.has(role)
-      );
+        const hasAdminFallback = currentRoleCandidates.some((role) =>
+          ADMIN_PANEL_FALLBACK_ROLES.has(role)
+        );
 
       if (!hasAdminFallback && !hasAdminPanelAccess(user)) {
         setAuthorizedSafe(false);
         addToast("Opa! Area restrita da diretoria!", "error");
-        safeReplace("/sem-permissao");
+        safeReplace(semPermissaoPath);
         return;
       }
 
@@ -426,7 +602,8 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       const matchedRulePath = Object.keys(permissionMatrix)
         .filter(
           (rulePath) =>
-            currentPath === rulePath || currentPath.startsWith(`${rulePath}/`)
+            permissionCheckPath === rulePath ||
+            permissionCheckPath.startsWith(`${rulePath}/`)
         )
         .sort((a, b) => b.length - a.length)[0];
 
@@ -434,30 +611,23 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
         const allowedRoles = permissionMatrix[matchedRulePath].map((role) =>
           role.toLowerCase()
         );
-        const isTenantMasterCompatible =
-          !isMasterOnlyAdminPath(currentPath) &&
-          ((allowedRoles.includes("master") &&
-            currentRoleCandidates.includes("master_tenant")) ||
-            (allowedRoles.includes("master_tenant") &&
-              currentRoleCandidates.includes("master")));
-        const isRoleAllowed =
-          allowedRoles.includes(currentUserRole) ||
-          currentRoleCandidates.some((role) => allowedRoles.includes(role)) ||
-          isTenantMasterCompatible;
+          const isRoleAllowed =
+            allowedRoles.includes(currentUserRole) ||
+            currentRoleCandidates.some((role) => allowedRoles.includes(role));
 
         if (!isRoleAllowed) {
           setAuthorizedSafe(false);
           addToast("Eita! Voce nao tem permissao para essa area!", "error");
-          safeReplace(user.isAnonymous ? dashboardPath : "/sem-permissao");
+          safeReplace(user.isAnonymous ? dashboardPath : semPermissaoPath);
           return;
         }
-      } else if (isMasterOnlyAdminPath(currentPath) && isPlatformMasterUser) {
+      } else if (isMasterOnlyAdminPath(permissionCheckPath) && isPlatformMasterUser) {
         setAuthorizedSafe(true);
         return;
-      } else if (currentPath.startsWith("/admin") || currentPath.startsWith("/master")) {
+      } else if (permissionCheckPath.startsWith("/admin") || permissionCheckPath.startsWith("/master")) {
         setAuthorizedSafe(false);
         addToast("Opa! Area restrita da diretoria!", "error");
-        safeReplace("/sem-permissao");
+        safeReplace(semPermissaoPath);
         return;
       }
     }
@@ -470,8 +640,12 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     roleCandidates,
     effectiveAccessRole,
     isPlatformMasterUser,
+    effectiveRouteTenantId,
     authLoading,
     rulesLoading,
+    modulesConfig,
+    modulesLoading,
+    managedTenantAppModule,
     tenantThemeLoading,
     routeTenantId,
     routeTenantLoading,
@@ -481,6 +655,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     currentPath,
     isTenantLandingRoot,
     activeTenantSlug,
+    authenticatedTenantId,
     tenantNotFoundPath,
     router,
     permissionMatrix,
@@ -491,7 +666,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   const isPublicRenderCheck = isTenantLandingRoot || PUBLIC_PATHS.includes(currentPath);
 
   if (isPublicRenderCheck) return <>{children}</>;
-  if (authLoading || rulesLoading || tenantThemeLoading || routeTenantLoading) return <SharkLoader />;
+  if (authLoading || rulesLoading || modulesLoading || tenantThemeLoading || routeTenantLoading) return <SharkLoader />;
   if (!authorized) return <SharkLoader />;
 
   return <>{children}</>;

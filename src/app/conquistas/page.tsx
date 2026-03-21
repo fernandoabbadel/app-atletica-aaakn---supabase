@@ -73,8 +73,8 @@ const DEFAULT_BADGES: BadgeConfig[] = [
     { id: "p1", titulo: "Plâncton", minXp: 0, cor: "text-zinc-400", bg: "bg-zinc-500/10", border: "border-zinc-500/30", iconName: "Fish" },
     { id: "p2", titulo: "Peixe Palhaço", minXp: 500, cor: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/30", iconName: "Fish" },
     { id: "p3", titulo: "Barracuda", minXp: 2000, cor: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/30", iconName: "Swords" },
-    { id: "p4", titulo: "Tubarão Martelo", minXp: 5000, cor: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/30", iconName: "Fish" },
-    { id: "p5", titulo: "Tubarão Branco", minXp: 15000, cor: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30", iconName: "Fish" },
+    { id: "p4", titulo: "Elite Roxa", minXp: 5000, cor: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/30", iconName: "Fish" },
+    { id: "p5", titulo: "Elite Verde", minXp: 15000, cor: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30", iconName: "Fish" },
     { id: "p6", titulo: "MEGALODON", minXp: 50000, cor: "text-red-600", bg: "bg-red-500/10", border: "border-red-500/30", iconName: "Crown" },
 ];
 
@@ -367,7 +367,7 @@ Por favor, analise onde essas chaves deveriam ser atualizadas (ex: ao fazer logi
             <div className="bg-red-950/50 border border-red-500/50 p-4 rounded-xl flex items-center gap-3 animate-pulse">
                 <AlertTriangle size={24} className="text-red-500 shrink-0" />
                 <div className="flex-1">
-                    <h3 className="text-sm font-bold text-red-200">Atenção, Tubarão Dev!</h3>
+                    <h3 className="text-sm font-bold text-red-200">Aviso para desenvolvimento</h3>
                     <p className="text-xs text-red-400 mb-2">Existem <b>{calculatedAchievements.missingKeys.length}</b> chaves de banco ausentes.</p>
                     <button 
                         onClick={generateIAPrompt}

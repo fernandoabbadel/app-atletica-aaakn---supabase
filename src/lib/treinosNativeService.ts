@@ -34,7 +34,7 @@ const resolveTreinosTenantId = (tenantId?: string | null): string =>
 const resolveTreinosSettingsIds = (tenantId?: string | null): string[] => {
   const scopedTenantId = resolveTreinosTenantId(tenantId);
   if (!scopedTenantId) return ["treinos"];
-  return [buildTenantScopedRowId(scopedTenantId, "treinos"), "treinos"];
+  return [buildTenantScopedRowId(scopedTenantId, "treinos")];
 };
 
 const normalizeModalidades = (value: unknown): string[] => {
@@ -354,6 +354,7 @@ export async function saveTreinoSettings(payload: {
   const { error } = await supabase.from("settings").upsert(
     {
       id: settingsId,
+      ...(resolveTreinosTenantId(options?.tenantId) ? { tenant_id: resolveTreinosTenantId(options?.tenantId) } : {}),
       modalidades: normalized,
       data: nextSettingsData,
       updatedAt: nowIso(),

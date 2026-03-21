@@ -9,18 +9,20 @@ import {
   Crown, Medal, Star, ShieldCheck, Ghost, LogIn, Layout, Camera,
   Target, GraduationCap, Users, Lock, Bell, Fish, Swords, Sparkles, ScanLine // ðŸ¦ˆ Adicionado Sparkles
 } from "lucide-react";
+import { Store } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { isPermissionError } from "@/lib/backendErrors";
 import { OptimizedImage } from "@/app/components/shared/OptimizedImage";
 import { getTurmaImage } from "../../constants/turmaImages";
 import { resolvePlanTextClass, resolveUserPlanIcon } from "@/constants/planVisuals";
-import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
+import { parseTenantScopedPath, shouldAutoScopePath, withTenantSlug } from "@/lib/tenantRouting";
 import { usePermission } from "@/hooks/usePermission";
 import { buildLoginPath } from "@/lib/authRedirect";
+import { fetchCurrentMiniVendorProfile } from "@/lib/miniVendorService";
 import {
   createDefaultTenantAppModulesConfig,
-  fetchTenantAppModulesConfig,
+  fetchEffectiveTenantAppModulesConfig,
   isTenantAppModuleVisible,
   type TenantAppModuleKey,
 } from "@/lib/tenantAppModulesService";
@@ -59,7 +61,7 @@ interface NavItemProps {
     moduleKey?: TenantAppModuleKey;
 }
 interface BannerProps {
-    tier: string; closeMenu: () => void; router: ReturnType<typeof useRouter>;
+    tier: string; closeMenu: () => void; router: ReturnType<typeof useRouter>; tenantSlug: string;
 }
 
 // --- CONFIGURAÃ‡Ã•ES VISUAIS ---
@@ -76,9 +78,11 @@ const resolveTurmaSlug = (turmaRaw?: string): string => {
 const UserBadges = ({
     userData,
     showAdminBadge,
+    showMiniVendorBadge,
 }: {
     userData: UserData;
     showAdminBadge: boolean;
+    showMiniVendorBadge: boolean;
 }) => {
     const planColorClass = resolvePlanTextClass(userData?.plano_cor || "zinc");
     const PlanIcon = resolveUserPlanIcon(userData?.plano_icon, userData?.plano, Ghost);
@@ -86,6 +90,7 @@ const UserBadges = ({
     return (
         <div className="flex items-center gap-1.5">
             {showAdminBadge && <span className="flex items-center bg-red-500/10 p-0.5 rounded border border-red-500/20"><ShieldCheck size={12} className="text-red-500" /></span>}
+            {!showAdminBadge && showMiniVendorBadge && <span className="flex items-center bg-blue-500/10 p-0.5 rounded border border-blue-500/20"><Store size={12} className="text-blue-400" /></span>}
             <span className={cn("flex items-center opacity-80", planColorClass)}><PlanIcon size={14} /></span>
         </div>
     );
@@ -98,15 +103,16 @@ const LevelIcon = ({ level }: { level: number }) => {
     return <Fish className="text-zinc-500" size={12} />;
 };
 
-const SocioGrowthBanner = ({ tier, closeMenu, router }: BannerProps) => {
+const SocioGrowthBanner = ({ tier, closeMenu, router, tenantSlug }: BannerProps) => {
     if (tier === 'lenda') return null;
+    const plansPath = tenantSlug.trim() ? withTenantSlug(tenantSlug, "/planos") : "/planos";
     return (
-        <button onClick={() => { closeMenu(); router.push('/planos'); }} className="w-full group relative overflow-hidden rounded-2xl mb-4 transition-all duration-300 transform hover:scale-[1.02] active:scale-95 shadow-xl border border-yellow-400/30">
+        <button onClick={() => { closeMenu(); router.push(plansPath); }} className="w-full group relative overflow-hidden rounded-2xl mb-4 transition-all duration-300 transform hover:scale-[1.02] active:scale-95 shadow-xl border border-yellow-400/30">
             <div className="absolute inset-0 bg-gradient-to-r from-yellow-900/40 via-amber-700/40 to-yellow-900/40 bg-[length:200%_200%] animate-[gradient_3s_ease_infinite]"></div>
             <div className="relative p-3 flex items-center justify-between z-10">
                 <div className="flex items-center gap-3">
                     <div className="p-1.5 rounded-full bg-yellow-500/20 border border-yellow-500/50"><Crown size={16} className="text-yellow-400" /></div>
-                    <div className="text-left"><h4 className="text-xs font-black italic uppercase text-white">VIRE SOCIO LENDA</h4><p className="text-[9px] font-medium text-zinc-300">Domine o Oceano</p></div>
+                    <div className="text-left"><h4 className="text-xs font-black italic uppercase text-white">VER PLANOS</h4><p className="text-[9px] font-medium text-zinc-300">Confira niveis e beneficios</p></div>
                 </div>
                 <ChevronRight size={16} className="text-yellow-500/50 group-hover:text-yellow-400 transition-colors" />
             </div>
@@ -153,13 +159,53 @@ export default function BottomNavbar() {
     : "/sem-permissao";
   const canAccessAdminDashboard = canAccess("/admin");
   const canAccessBannedAppeals = canAccess("/admin/denuncias/banidos");
+  const [hasApprovedMiniVendor, setHasApprovedMiniVendor] = useState(false);
   const isModuleVisible = useCallback(
     (key?: TenantAppModuleKey): boolean =>
       key ? isTenantAppModuleVisible(modulesConfig, key) : true,
     [modulesConfig]
   );
+  const resolveScopedPath = useCallback(
+    (path: string): string => {
+      const cleanPath = path.trim();
+      if (!cleanPath) return cleanPath;
+      if (!cleanPath.startsWith("/")) return cleanPath;
+      if (!scopedTenantSlug) return cleanPath;
+      if (parseTenantScopedPath(cleanPath).isTenantScoped) return cleanPath;
+      if (!shouldAutoScopePath(cleanPath)) return cleanPath;
+      return withTenantSlug(scopedTenantSlug, cleanPath);
+    },
+    [scopedTenantSlug]
+  );
 
   // --- LÃ“GICA DE EFEITOS E DADOS (Mantida 100%) ---
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      if (!user?.uid || !activeTenantId.trim()) {
+        if (mounted) setHasApprovedMiniVendor(false);
+        return;
+      }
+
+      try {
+        const profile = await fetchCurrentMiniVendorProfile({
+          tenantId: activeTenantId,
+          userId: user.uid,
+          forceRefresh: false,
+        });
+        if (mounted) setHasApprovedMiniVendor(profile?.status === "approved");
+      } catch {
+        if (mounted) setHasApprovedMiniVendor(false);
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantId, user?.uid]);
+
   useEffect(() => {
     const handleScroll = () => {
         const currentScrollY = window.scrollY;
@@ -174,8 +220,9 @@ export default function BottomNavbar() {
     let mounted = true;
     const loadModulesConfig = async () => {
       try {
-        const nextConfig = await fetchTenantAppModulesConfig({
+        const nextConfig = await fetchEffectiveTenantAppModulesConfig({
           tenantId: activeTenantId || user?.tenant_id || undefined,
+          tenantSlug: scopedTenantSlug,
         });
         if (mounted) setModulesConfig(nextConfig);
       } catch {
@@ -187,7 +234,7 @@ export default function BottomNavbar() {
     return () => {
       mounted = false;
     };
-  }, [activeTenantId, user?.tenant_id]);
+  }, [activeTenantId, scopedTenantSlug, user?.tenant_id]);
 
   const loadNotifications = useCallback(async (forceRefresh = false) => {
       if (!canLoadNotifications) {
@@ -312,7 +359,7 @@ export default function BottomNavbar() {
           }
         }
       }
-      if (notif.link) { router.push(notif.link); setShowNotifications(false); setIsSidebarOpen(false); }
+      if (notif.link) { router.push(resolveScopedPath(notif.link)); setShowNotifications(false); setIsSidebarOpen(false); }
   };
 
   const formatTimeAgo = (ts: unknown) => {
@@ -332,13 +379,12 @@ export default function BottomNavbar() {
   const handleNavigation = (path: string, isBlocked?: boolean, blockedTarget?: string) => { 
       setIsSidebarOpen(false);
       if (isBlocked) {
-        router.push(blockedTarget || semPermissaoPath);
+        router.push(resolveScopedPath(blockedTarget || semPermissaoPath));
         return;
       }
-      router.push(path); 
+      router.push(resolveScopedPath(path)); 
   };
   const handleLogout = () => { if (logout) logout(); setIsSidebarOpen(false); router.push("/"); };
-
   const isHiddenRoute =
     ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao", "/visitante"].includes(normalizedPathname) ||
     normalizedPathname.startsWith("/empresa") ||
@@ -369,7 +415,7 @@ export default function BottomNavbar() {
       { id: 'arena', label: 'Arena Games', icon: <Gamepad2 size={18} />, path: '/arena-games', badge: "Vem ai", isComingSoon: true, moduleKey: 'arena_games' },
       { id: 'shark_round', label: 'Shark Round', icon: <Target size={18} />, path: '/sharkround', isComingSoon: true, moduleKey: 'sharkround' },
       { id: 'ranking', label: 'Ranking', icon: <Trophy size={18} />, path: '/ranking', badge: "Vem ai", isComingSoon: true, moduleKey: 'ranking' },
-      { id: 'gym_side', label: 'Treinando com Tubarao', icon: <Dumbbell size={18} />, path: '/gym-rats', badge: "Vem ai", isComingSoon: true },
+      { id: 'gym_side', label: 'Treinos Avancados', icon: <Dumbbell size={18} />, path: '/gym-rats', badge: "Vem ai", isComingSoon: true, moduleKey: 'gym_rats' },
   ];
 
   const sidebarItemsInfoBase: NavItemProps[] = [
@@ -377,8 +423,8 @@ export default function BottomNavbar() {
       { id: 'avaliacao', label: 'Avaliacao Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true, moduleKey: 'avaliacao' },
       { id: 'conquistas', label: 'Conquistas', icon: <Medal size={18} />, path: '/conquistas', isComingSoon: true, moduleKey: 'conquistas' },
       { id: 'fidelidade', label: 'Fidelidade', icon: <Star size={18} />, path: '/fidelidade', isComingSoon: true, moduleKey: 'fidelidade' },
-      { id: 'guia', label: 'Guia', icon: <HelpCircle size={18} />, path: '/guia' },
-      { id: 'historico', label: 'Nossa Historia', icon: <Clock size={18} />, path: '/historico' },
+      { id: 'guia', label: 'Guia', icon: <HelpCircle size={18} />, path: '/guia', moduleKey: 'guia' },
+      { id: 'historico', label: 'Nossa Historia', icon: <Clock size={18} />, path: '/historico', moduleKey: 'historico' },
   ];
 
   const lockGuestItem = (item: NavItemProps): NavItemProps =>
@@ -387,9 +433,9 @@ export default function BottomNavbar() {
     .filter((item) => isModuleVisible(item.moduleKey))
     .map((item) =>
       isGuestRestricted && item.id !== "home" && item.id !== "menu"
-          ? { ...item, isLocked: true, badge: undefined }
-          : item
-    );
+            ? { ...item, isLocked: true, badge: undefined }
+            : item
+      );
   const sidebarItemsGeneral = sidebarItemsGeneralBase
     .filter((item) => isModuleVisible(item.moduleKey))
     .map(lockGuestItem);
@@ -475,7 +521,7 @@ export default function BottomNavbar() {
                                     <span className="text-[9px] font-mono text-zinc-400">Nv.{currentUser.level || 1}</span>
                                 </div>
                                 <div className="flex items-center h-5 bg-black/40 rounded border border-white/5 px-1.5">
-                                    <UserBadges userData={currentUser} showAdminBadge={canAccessAdminDashboard} />
+                                    <UserBadges userData={currentUser} showAdminBadge={canAccessAdminDashboard} showMiniVendorBadge={hasApprovedMiniVendor} />
                                 </div>
                             </div>
                         </div>
@@ -483,7 +529,7 @@ export default function BottomNavbar() {
                     </div>
                 )}
 
-                {!isGuestRestricted && <SocioGrowthBanner tier={currentUser?.tier || 'bicho'} closeMenu={() => setIsSidebarOpen(false)} router={router} />}
+                {!isGuestRestricted && <SocioGrowthBanner tier={currentUser?.tier || 'bicho'} closeMenu={() => setIsSidebarOpen(false)} router={router} tenantSlug={scopedTenantSlug} />}
 
                 {/* MENU PRINCIPAL */}
                 <div className="px-2 pt-2 pb-2"><h3 className="text-[10px] font-black text-zinc-500 uppercase flex items-center gap-2"><Layout size={10}/> Menu Principal</h3></div>

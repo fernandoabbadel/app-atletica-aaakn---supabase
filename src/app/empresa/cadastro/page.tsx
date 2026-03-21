@@ -11,6 +11,8 @@ import { useRouter } from "next/navigation";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import { createPartnerLead } from "../../../lib/partnersService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PLANOS = [
     { id: 'ouro', nome: 'Ouro', valor: 'R$ 500', icon: Crown, color: 'text-yellow-500', border: 'border-yellow-500/50', bg: 'bg-yellow-500/10' },
@@ -62,6 +64,7 @@ export default function CompanyRegisterPage() {
   const router = useRouter();
   const { addToast } = useToast();
   const { user } = useAuth(); // ID 56: Verifica login
+  const { tenantId, tenantLogoUrl, tenantName, tenantSlug } = useTenantTheme();
   
   // 1: Planos, 2: Dados, 3: Perfil
   const [step, setStep] = useState(1);
@@ -94,19 +97,19 @@ export default function CompanyRegisterPage() {
   useEffect(() => {
       if (user && user.role === 'partner') {
           addToast("Você já está logado!", "info");
-          router.push("/empresa");
+          router.push(tenantSlug ? withTenantSlug(tenantSlug, "/empresa") : "/empresa");
       }
-  }, [user, addToast, router]); // 🦈 Dependências adicionadas
+  }, [user, addToast, router, tenantSlug]); // 🦈 Dependências adicionadas
 
   // ID 79: Lógica do Botão Voltar
   const handleBack = (e: React.MouseEvent) => {
       e.preventDefault();
       if (user) {
           // Se está logado (Aluno ou Admin), volta para a lista de parceiros
-          router.push("/parceiros");
+          router.push(tenantSlug ? withTenantSlug(tenantSlug, "/parceiros") : "/parceiros");
       } else {
           // Se não está logado, volta para a Home pública
-          router.push("/");
+          router.push(tenantSlug ? `/${tenantSlug}` : "/");
       }
   };
 
@@ -168,10 +171,14 @@ export default function CompanyRegisterPage() {
               endereco: formData.endereco,
               horario: formData.horario,
               tier: selectedPlan,
+              tenantId: tenantId || undefined,
           });
 
           addToast("Cadastro enviado para aprovação!", "success");
-          setTimeout(() => router.push("/empresa"), 1500);
+          setTimeout(
+            () => router.push(tenantSlug ? withTenantSlug(tenantSlug, "/empresa") : "/empresa"),
+            1500
+          );
           
       } catch (err: unknown) {
           console.error(err); // 🦈 Log do erro
@@ -198,14 +205,14 @@ export default function CompanyRegisterPage() {
                 <div className="relative w-24 h-24 mx-auto mb-4 group animate-float-slow">
                     <div className="absolute inset-0 bg-emerald-500/30 blur-xl rounded-full group-hover:bg-emerald-500/50 transition duration-500"></div>
                     <Image 
-                        src="/logo.png" 
-                        alt="AAAKN" 
+                        src={tenantLogoUrl || "/logo.png"} 
+                        alt={tenantName ? `Logo ${tenantName}` : "Logo da atletica"} 
                         fill
                         className="object-contain relative z-10 drop-shadow-2xl transition transform group-hover:scale-105" 
-                        
+                        unoptimized={Boolean(tenantLogoUrl && tenantLogoUrl.startsWith("http"))}
                     />
                 </div>
-                <h1 className="text-2xl font-black text-white uppercase tracking-tighter">Parceria Tubarão</h1>
+                <h1 className="text-2xl font-black text-white uppercase tracking-tighter">Parceria oficial</h1>
                 
                 <div className="flex items-center justify-center gap-2 mt-4 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
                     <span className={step >= 1 ? "text-emerald-500" : ""}>1. Planos</span>

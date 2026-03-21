@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Shield, Scale, Cookie, Lock, FileText, CheckCircle } from "lucide-react";
 import { fetchLegalDocs } from "../../../lib/settingsService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 
 // --- TIPAGEM ---
 type DocTipo = "publico" | "interno";
@@ -40,6 +41,7 @@ function clampStr(s: string, max: number) {
 }
 
 export default function TermosLegaisPage() {
+  const { tenantName } = useTenantTheme();
   const [docs, setDocs] = useState<TermDoc[]>([]);
   const [activeDocId, setActiveDocId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -170,7 +172,7 @@ export default function TermosLegaisPage() {
               </div>
               <div>
                 <h2 className="text-xl font-black uppercase leading-none">{activeDoc.title}</h2>
-                <p className="text-[10px] text-zinc-500 font-bold mt-1 uppercase">Fonte: App AAAKN (Oficial)</p>
+                <p className="text-[10px] text-zinc-500 font-bold mt-1 uppercase">Fonte: {tenantName?.trim() || "Atletica"} (Oficial)</p>
               </div>
             </div>
 

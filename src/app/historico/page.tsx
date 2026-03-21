@@ -45,7 +45,7 @@ export default function HistoricoPage() {
   const routeTenantSlug = pathInfo.tenantSlug;
   const backHref = routeTenantSlug ? withTenantSlug(routeTenantSlug, "/") : "/";
 
-  const { tenantLogoUrl, tenantSigla } = useTenantTheme();
+  const { tenantId, tenantLogoUrl, tenantSigla } = useTenantTheme();
   const [events, setEvents] = useState<HistoricEvent[]>([]);
   const [config, setConfig] = useState<PageConfig>(INITIAL_CONFIG);
   const [loading, setLoading] = useState(true);
@@ -59,8 +59,12 @@ export default function HistoricoPage() {
       setLoading(true);
       try {
         const [configData, eventsData] = await Promise.all([
-          fetchHistoryPageConfig(),
-          fetchHistoricEvents({ order: "asc", maxResults: 200 }),
+          fetchHistoryPageConfig({ tenantId: tenantId || undefined }),
+          fetchHistoricEvents({
+            order: "asc",
+            maxResults: 200,
+            tenantId: tenantId || undefined,
+          }),
         ]);
 
         if (!mounted) return;
@@ -79,7 +83,7 @@ export default function HistoricoPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [tenantId]);
 
   useEffect(() => {
     let mounted = true;

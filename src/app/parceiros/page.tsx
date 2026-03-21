@@ -14,6 +14,8 @@ import {
 
 import { fetchPublicPartners, type PartnerRecord } from "../../lib/partnersPublicService";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { resolveTenantBrandLabel } from "@/lib/tenantBranding";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 interface TierSection {
   id: "ouro" | "prata" | "standard";
@@ -34,10 +36,13 @@ const tierBadgeClass: Record<string, string> = {
 };
 
 export default function ParceirosPage() {
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSigla, tenantName, tenantSlug } = useTenantTheme();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<PartnerRecord[]>([]);
+  const brandLabel = resolveTenantBrandLabel(tenantSigla, tenantName);
+  const dashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
+  const empresaHref = tenantSlug ? withTenantSlug(tenantSlug, "/empresa") : "/empresa";
 
   useEffect(() => {
     let mounted = true;
@@ -88,19 +93,21 @@ export default function ParceirosPage() {
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
             <Link
-              href="/dashboard"
+              href={dashboardHref}
               className="bg-zinc-900 p-2.5 rounded-full hover:bg-zinc-800 border border-zinc-800"
             >
               <ArrowLeft size={18} className="text-zinc-400" />
             </Link>
             <div>
-              <h1 className="text-xl font-black uppercase tracking-tight">Parceiros AAAKN</h1>
+              <h1 className="text-xl font-black uppercase tracking-tight">
+                Parceiros {brandLabel}
+              </h1>
               <p className="text-[11px] text-zinc-500 font-bold">Beneficios por plano</p>
             </div>
           </div>
 
           <Link
-            href="/empresa"
+            href={empresaHref}
             className="px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-[11px] uppercase font-black text-zinc-300 hover:bg-zinc-800"
           >
             Area Empresa
@@ -163,7 +170,7 @@ export default function ParceirosPage() {
                       {sectionRows.map((row) => (
                         <Link
                           key={row.id}
-                          href={`/parceiros/${row.id}`}
+                          href={tenantSlug ? withTenantSlug(tenantSlug, `/parceiros/${row.id}`) : `/parceiros/${row.id}`}
                           className="group bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-emerald-500/40 transition"
                         >
                           <div className="relative h-40 bg-black">

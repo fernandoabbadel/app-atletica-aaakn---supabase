@@ -116,7 +116,7 @@ export default function AguardandoAprovacaoPage() {
               Aguardando Aprovacao
             </h1>
             <p className="text-sm text-zinc-400 mt-1">
-              Seu cadastro foi enviado e precisa de liberacao do responsavel da atletica.
+              Essa tela aparece quando o seu pedido de entrada em uma atletica ainda depende da aprovacao da diretoria.
             </p>
           </div>
           <button

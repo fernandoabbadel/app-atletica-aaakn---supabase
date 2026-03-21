@@ -12,13 +12,14 @@ import Image from "next/image";
 import { useToast } from "../../context/ToastContext";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { logActivity } from "../../lib/logger"; 
 import {
   createEventPoll,
   deleteEventPoll,
   fetchEventPolls,
   fetchLeagueById,
-  fetchLeagues,
+  fetchLeagueSummaries,
   fetchLeagueUsers,
   uploadLeagueImageToStorage,
   updateEventPollOptions,
@@ -125,9 +126,11 @@ interface LigaEditorDraftSnapshot {
 
 const LIGA_EDITOR_DRAFT_VERSION = 1;
 const LIGA_EDITOR_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const LIGA_EDITOR_LAST_SELECTED_KEY = "aaakn:ligas:last-selected";
+const buildLigaEditorLastSelectedKey = (tenantScopeId?: string | null): string =>
+    `usc:ligas:${tenantScopeId?.trim() || "default"}:last-selected`;
 
-const getLigaEditorDraftKey = (ligaId: string): string => `aaakn:ligas:draft:${ligaId}`;
+const getLigaEditorDraftKey = (ligaId: string, tenantScopeId?: string | null): string =>
+    `usc:ligas:${tenantScopeId?.trim() || "default"}:draft:${ligaId}`;
 
 const isLigaAdminTab = (value: unknown): value is LigaAdminTab => (
     value === "visual" || value === "members" || value === "events" || value === "shark"
@@ -160,8 +163,8 @@ const removeSessionStorageValue = (key: string): void => {
     }
 };
 
-const readLigaEditorDraft = (ligaId: string): LigaEditorDraftSnapshot | null => {
-    const raw = readSessionStorageValue(getLigaEditorDraftKey(ligaId));
+const readLigaEditorDraft = (ligaId: string, tenantScopeId?: string | null): LigaEditorDraftSnapshot | null => {
+    const raw = readSessionStorageValue(getLigaEditorDraftKey(ligaId, tenantScopeId));
     if (!raw) return null;
 
     try {
@@ -201,12 +204,12 @@ const readLigaEditorDraft = (ligaId: string): LigaEditorDraftSnapshot | null => 
     }
 };
 
-const writeLigaEditorDraft = (ligaId: string, snapshot: LigaEditorDraftSnapshot): void => {
-    writeSessionStorageValue(getLigaEditorDraftKey(ligaId), JSON.stringify(snapshot));
+const writeLigaEditorDraft = (ligaId: string, snapshot: LigaEditorDraftSnapshot, tenantScopeId?: string | null): void => {
+    writeSessionStorageValue(getLigaEditorDraftKey(ligaId, tenantScopeId), JSON.stringify(snapshot));
 };
 
-const clearLigaEditorDraft = (ligaId: string): void => {
-    removeSessionStorageValue(getLigaEditorDraftKey(ligaId));
+const clearLigaEditorDraft = (ligaId: string, tenantScopeId?: string | null): void => {
+    removeSessionStorageValue(getLigaEditorDraftKey(ligaId, tenantScopeId));
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -278,7 +281,11 @@ const removeMissingColumnFromPayload = (
 
 export default function LigasAdminPage() {
   const { user } = useAuth();
+  const { tenantId } = useTenantTheme();
   const { addToast } = useToast();
+  const tenantScopeId =
+    tenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
+  const lastSelectedStorageKey = buildLigaEditorLastSelectedKey(tenantScopeId);
   
   // --- ESTADOS DE CONTROLE ---
   const [loading, setLoading] = useState(false);
@@ -316,19 +323,19 @@ export default function LigasAdminPage() {
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
 
   useEffect(() => {
-      const lastSelected = readSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY);
+      const lastSelected = readSessionStorageValue(lastSelectedStorageKey);
       if (lastSelected) {
           setSelectedLigaId(lastSelected);
       }
-  }, []);
+  }, [lastSelectedStorageKey]);
 
   useEffect(() => {
       if (isLoggingOutRef.current) return;
       if (isLoggedIn || ligaData) return;
 
-      const lastSelected = readSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY);
+      const lastSelected = readSessionStorageValue(lastSelectedStorageKey);
       if (!lastSelected) return;
-      const restoredDraft = readLigaEditorDraft(lastSelected);
+      const restoredDraft = readLigaEditorDraft(lastSelected, tenantScopeId);
       if (!restoredDraft || !restoredDraft.ligaSenha) return;
 
       setLigaData({
@@ -344,13 +351,13 @@ export default function LigasAdminPage() {
       setCurrentEvent(restoredDraft.currentEvent);
       setNovoLote(restoredDraft.novoLote);
       setIsLoggedIn(true);
-      addToast("Bizu do Tubarão... 📝 Sessão da liga restaurada.", "info");
-  }, [addToast, isLoggedIn, ligaData]);
+      addToast("Sessao da liga restaurada.", "info");
+  }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, tenantScopeId]);
 
   useEffect(() => {
       if (!selectedLigaId) return;
-      writeSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY, selectedLigaId);
-  }, [selectedLigaId]);
+      writeSessionStorageValue(lastSelectedStorageKey, selectedLigaId);
+  }, [lastSelectedStorageKey, selectedLigaId]);
 
   useEffect(() => {
       if (!isLoggedIn || !ligaData) return;
@@ -370,7 +377,7 @@ export default function LigasAdminPage() {
               editingEventIdx,
               currentEvent,
               novoLote,
-          });
+          }, tenantScopeId);
       };
 
       const timer = window.setTimeout(persist, 120);
@@ -395,10 +402,11 @@ export default function LigasAdminPage() {
       let mounted = true;
       const fetchData = async () => {
           try {
-              const leagues = await fetchLeagues({
+              const leagues = await fetchLeagueSummaries({
                   orderByField: "nome",
                   orderDirection: "asc",
                   maxResults: 40,
+                  tenantId: tenantScopeId || undefined,
               });
               if (!mounted) return;
               setLigasDisponiveis(leagues.map((league) => ({ id: league.id, nome: league.nome })));
@@ -413,7 +421,7 @@ export default function LigasAdminPage() {
       return () => {
           mounted = false;
       };
-  }, [addToast]);
+  }, [addToast, tenantScopeId]);
 
   // 2. BUSCA DE USUÁRIOS SOB DEMANDA
   useEffect(() => {
@@ -421,7 +429,7 @@ export default function LigasAdminPage() {
       let mounted = true;
       const loadUsers = async () => {
           try {
-              const users = await fetchLeagueUsers({ maxResults: 120 });
+              const users = await fetchLeagueUsers({ maxResults: 120, tenantId: tenantScopeId || undefined });
               if (!mounted) return;
               setAllUsers(users as UserSearch[]);
           } catch (error: unknown) {
@@ -433,7 +441,7 @@ export default function LigasAdminPage() {
       return () => {
           mounted = false;
       };
-  }, [searchUserModal, addToast]);
+  }, [searchUserModal, addToast, tenantScopeId]);
 
   // 3. ENQUETES (SEM LISTENER)
   useEffect(() => {
@@ -444,7 +452,7 @@ export default function LigasAdminPage() {
       let mounted = true;
       const loadPolls = async () => {
           try {
-              const data = await fetchEventPolls(pollModal, { maxResults: 40, forceRefresh: false });
+              const data = await fetchEventPolls(pollModal, { maxResults: 40, forceRefresh: false, tenantId: tenantScopeId || undefined });
               if (!mounted) return;
               setPolls(data as Poll[]);
           } catch (error: unknown) {
@@ -456,14 +464,14 @@ export default function LigasAdminPage() {
       return () => {
           mounted = false;
       };
-  }, [pollModal, addToast]);
+  }, [pollModal, addToast, tenantScopeId]);
 
   // 4. FUNÇÃO DE LOGIN
   const handleLogin = async () => {
       if (!selectedLigaId || !senhaInput) return addToast("Preencha todos os campos!", "error");
       setLoading(true);
       try {
-          const target = await fetchLeagueById(selectedLigaId, { forceRefresh: false });
+          const target = await fetchLeagueById(selectedLigaId, { forceRefresh: false, tenantId: tenantScopeId || undefined });
           
           if (target && target.senha === senhaInput) {
               const baseLigaData: LigaData = {
@@ -482,7 +490,7 @@ export default function LigasAdminPage() {
                   eventos: (target.eventos || []) as LeagueEvent[],
                   membrosIds: target.membrosIds,
               };
-              const restoredDraft = readLigaEditorDraft(target.id);
+              const restoredDraft = readLigaEditorDraft(target.id, tenantScopeId);
               const mergedLigaData: LigaData = restoredDraft
                   ? {
                       ...baseLigaData,
@@ -511,7 +519,7 @@ export default function LigasAdminPage() {
               setIsLoggedIn(true);
               addToast("Acesso autorizado!", "success");
               if (restoredDraft) {
-                  addToast("Bizu do Tubarão... 📝 Rascunho recuperado.", "info");
+                  addToast("Rascunho recuperado.", "info");
               }
               
               // LOG CORRIGIDO: ORDEM (ID, NOME, AÇÃO, RECURSO, DETALHES)
@@ -537,9 +545,9 @@ export default function LigasAdminPage() {
   const handleLeaguePanelLogout = () => {
       isLoggingOutRef.current = true;
       if (ligaData?.id) {
-          clearLigaEditorDraft(ligaData.id);
+          clearLigaEditorDraft(ligaData.id, tenantScopeId);
       }
-      removeSessionStorageValue(LIGA_EDITOR_LAST_SELECTED_KEY);
+      removeSessionStorageValue(lastSelectedStorageKey);
       setEventModal(false);
       setEditingEventIdx(null);
       setCurrentEvent({});
@@ -549,7 +557,7 @@ export default function LigasAdminPage() {
       setSelectedLigaId("");
       setLigaData(null);
       setIsLoggedIn(false);
-      addToast("Bizu do Tubarao... Sessao da liga encerrada.", "info");
+      addToast("Sessao da liga encerrada.", "info");
       window.setTimeout(() => {
           isLoggingOutRef.current = false;
       }, 0);
@@ -566,14 +574,14 @@ export default function LigasAdminPage() {
           normalized.includes("excede") &&
           (normalized.includes("mb") || normalized.includes("kb") || normalized.includes("byte"))
       ) {
-          return { message: "Bizu do Tubarao... " + message, type: "info" };
+          return { message: "Atualizacao informativa: " + message, type: "info" };
       }
       if (
           normalized.includes("resolucao maxima") ||
           normalized.includes("resolução máxima") ||
           normalized.includes("imagem muito grande")
       ) {
-          return { message: "Bizu do Tubarao... " + message, type: "info" };
+          return { message: "Atualizacao informativa: " + message, type: "info" };
       }
 
       return { message: "Deu ruim no plantao! " + message, type: "error" };
@@ -597,7 +605,7 @@ export default function LigasAdminPage() {
           });
 
           if (type === 'logo') {
-              setLigaData({ ...ligaData, logoUrl: imageUrl, logoBase64: imageUrl });
+              setLigaData({ ...ligaData, logoUrl: imageUrl, logoBase64: undefined });
           } else if (type === 'pergunta' && index !== undefined) {
               const novas = [...ligaData.perguntas];
               novas[index].imageUrl = imageUrl;
@@ -609,7 +617,7 @@ export default function LigasAdminPage() {
               setLigaData({ ...ligaData, membros: novos });
           }
 
-          addToast("Aí sim! O Tubarão aprovou! 🦈 Imagem enviada.", "success");
+          addToast("Imagem enviada com sucesso.", "success");
           await logActivity(
               ligaData.id,
               ligaData.nome,
@@ -644,7 +652,7 @@ export default function LigasAdminPage() {
               entityId: currentEvent.id || undefined,
           });
           setCurrentEvent(prev => ({ ...prev, imagem: imageUrl }));
-          addToast("Aí sim! O Tubarão aprovou! 🦈 Capa do evento enviada.", "success");
+          addToast("Capa do evento enviada com sucesso.", "success");
           await logActivity(
               ligaData.id,
               ligaData.nome,
@@ -750,8 +758,7 @@ export default function LigasAdminPage() {
               likes: Number.isFinite(Number(ligaData.likes)) ? Number(ligaData.likes) : 0,
               senha: ligaData.senha,
               logoUrl: ligaData.logoUrl || null,
-              logoBase64: ligaData.logoBase64 || null,
-              logo: ligaData.logoUrl || ligaData.logoBase64 || null,
+              logo: ligaData.logoUrl || null,
               ativa: Boolean(ligaData.ativa),
               perguntas: ligaData.perguntas,
               membros: ligaData.membros || [],
@@ -782,7 +789,7 @@ export default function LigasAdminPage() {
                       local: ev.local,
                       tipo: "Liga", 
                       destaque: ev.destaque,
-                      imagem: ev.imagem || ligaData.logoUrl || ligaData.logoBase64 || "",
+                      imagem: ev.imagem || ligaData.logoUrl || "",
                       imagePositionY: ev.imagePositionY,
                       lotes: ev.lotes,
                       descricao: ev.descricao, 
@@ -865,7 +872,7 @@ export default function LigasAdminPage() {
               const { error: notificationInsertError } = await supabase
                 .from("notifications")
                 .insert({
-                  title: `Novo Bizu da ${ligaData.sigla}!`,
+                  title: `Novo destaque da ${ligaData.sigla}!`,
                   message: ligaData.bizu,
                   link: "/ligas_unitau",
                   read: false,
@@ -997,13 +1004,13 @@ export default function LigasAdminPage() {
                   <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Descrição</label><textarea className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm h-24 focus:border-emerald-500 outline-none resize-none" value={ligaData.descricao} onChange={e => setLigaData({...ligaData, descricao: e.target.value})}/></div>
                   <div className="bg-yellow-900/10 border border-yellow-500/20 p-4 rounded-xl">
                       <div className="flex justify-between items-center mb-2">
-                          <label className="text-[10px] font-bold text-yellow-500 uppercase">Bizu da Semana</label>
+                          <label className="text-[10px] font-bold text-yellow-500 uppercase">Destaque da Semana</label>
                           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setSendNotification(!sendNotification)}>
                               <span className="text-[9px] text-zinc-400 uppercase font-bold">Enviar Notificação?</span>
                               <div className={`w-8 h-4 rounded-full transition-colors flex items-center px-0.5 ${sendNotification ? 'bg-emerald-500 justify-end' : 'bg-zinc-700 justify-start'}`}><div className="w-3 h-3 bg-white rounded-full shadow-sm"></div></div>
                           </div>
                       </div>
-                      <input type="text" className="w-full bg-black border border-yellow-900/50 rounded-lg p-3 text-sm outline-none focus:border-yellow-500" value={ligaData.bizu} onChange={e => setLigaData({...ligaData, bizu: e.target.value})} placeholder="Ex: Na ausculta cardíaca..."/>
+                      <input type="text" className="w-full bg-black border border-yellow-900/50 rounded-lg p-3 text-sm outline-none focus:border-yellow-500" value={ligaData.bizu} onChange={e => setLigaData({...ligaData, bizu: e.target.value})} placeholder="Ex: Encontro aberto para novos membros..."/>
                       {sendNotification && <p className="text-[9px] text-emerald-500 mt-2 flex items-center gap-1 animate-pulse"><Bell size={10}/> Uma notificação será enviada para todos ao salvar!</p>}
                   </div>
                   {/* Status no Jogo */}
@@ -1178,6 +1185,7 @@ export default function LigasAdminPage() {
                                       question: novaEnquete.question,
                                       allowUserOptions: novaEnquete.allowUserOptions,
                                       creatorId: ligaData?.id,
+                                      tenantId: tenantScopeId || undefined,
                                   });
                                   setPolls((prev) => [
                                       ...prev,
@@ -1212,7 +1220,7 @@ export default function LigasAdminPage() {
                                           </div>
                                           <button onClick={async () => {
                                               if(confirm("Excluir enquete?")) {
-                                                  await deleteEventPoll({ eventId: pollModal, pollId: poll.id });
+                                                  await deleteEventPoll({ eventId: pollModal, pollId: poll.id, tenantId: tenantScopeId || undefined });
                                                   setPolls((prev) => prev.filter((item) => item.id !== poll.id));
                                                   // LOG CORRIGIDO
                                                   await logActivity(
@@ -1249,6 +1257,7 @@ export default function LigasAdminPage() {
                                                           eventId: pollModal,
                                                           pollId: poll.id,
                                                           options: newOptions as PollOption[],
+                                                          tenantId: tenantScopeId || undefined,
                                                       });
                                                       setPolls((prev) =>
                                                           prev.map((item) =>

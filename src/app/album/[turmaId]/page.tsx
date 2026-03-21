@@ -367,7 +367,7 @@ export default function AlbumTurmaPage() {
         const result = await registerAlbumCapture({
           collector: {
             uid: user.uid,
-            nome: user.nome || "Tubarao",
+            nome: user.nome || "Atleta",
             turma: user.turma,
             foto: user.foto,
           },

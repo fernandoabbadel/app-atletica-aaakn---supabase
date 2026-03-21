@@ -5,9 +5,9 @@ type CacheEntry<T> = { cachedAt: number; value: T };
 
 type Row = Record<string, unknown>;
 
-const READ_CACHE_TTL_MS = 30_000;
+const READ_CACHE_TTL_MS = 300_000;
 const DASHBOARD_EVENTS_LIMIT = 5;
-const DASHBOARD_EVENTS_FETCH_LIMIT = 40;
+const DASHBOARD_EVENTS_FETCH_LIMIT = 12;
 const DASHBOARD_PRODUCTS_LIMIT = 8;
 const DASHBOARD_POSTS_LIMIT = 2;
 const DASHBOARD_TREINOS_LIMIT = 4;
@@ -27,7 +27,7 @@ const DASHBOARD_PRODUCTS_SELECT =
 const DASHBOARD_PARTNERS_SELECT =
   "id,nome,imgLogo,imgCapa,categoria,tier,status";
 const DASHBOARD_LIGAS_SELECT =
-  "id,nome,sigla,foto,logoUrl,logoBase64,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
+  "id,nome,sigla,foto,logoUrl,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
 const DASHBOARD_POSTS_SELECT =
   "id,userId,userName,avatar,createdAt,texto,likes,tenant_id";
 const DASHBOARD_TREINOS_SELECT = "id,imagem,tenant_id";
@@ -180,20 +180,22 @@ async function fetchRowsWithFallback(
         const { data, error } = await q;
         if (!error) return (data ?? []) as unknown as Row[];
 
-        const missingColumn = extractMissingSchemaColumn(error);
-        if (!missingColumn) throw error;
+      const missingColumn = extractMissingSchemaColumn(error);
+      if (!missingColumn) throw error;
+      const safeMissingColumn = missingColumn as string;
 
-        if (
-          mutableOrderBy &&
-          mutableOrderBy.column.toLowerCase() === missingColumn.toLowerCase()
-        ) {
-          mutableOrderBy = undefined;
-          continue;
-        }
+      if (
+        mutableOrderBy &&
+        mutableOrderBy.column.toLowerCase() === safeMissingColumn.toLowerCase()
+      ) {
+        mutableOrderBy = undefined;
+        continue;
+      }
 
-        const nextColumns = removeMissingColumn(mutableColumns, missingColumn);
-        if (!nextColumns || nextColumns.length === 0) throw error;
-        mutableColumns = nextColumns;
+      const nextColumns = removeMissingColumn(mutableColumns, safeMissingColumn);
+      if (!nextColumns || nextColumns.length === 0) throw error;
+      const safeNextColumns = nextColumns as string[];
+      mutableColumns = [...safeNextColumns];
       }
     } catch (error: unknown) {
       lastError = error;
@@ -203,6 +205,65 @@ async function fetchRowsWithFallback(
   if (lastError && typeof lastError === "object" && lastError !== null && "message" in lastError) {
     throwSupabaseError(lastError as { message: string; code?: string | null; name?: string | null });
   }
+  return [];
+}
+
+async function fetchDashboardEventRows(tenantId?: string): Promise<Row[]> {
+  const supabase = getSupabaseClient();
+  const scopedTenantId = asString(tenantId).trim();
+  const attempts: Array<{ orderBy?: { column: string; ascending: boolean } }> = [
+    { orderBy: { column: "data", ascending: true } },
+    { orderBy: { column: "createdAt", ascending: false } },
+    {},
+  ];
+
+  for (const attempt of attempts) {
+    let mutableColumns = splitSelectColumns(DASHBOARD_EVENTS_SELECT);
+    let mutableOrderBy = attempt.orderBy;
+
+    while (mutableColumns.length > 0) {
+      let query = supabase
+        .from("eventos")
+        .select(mutableColumns.join(","))
+        .or("status.is.null,status.not.in.(encerrado,cancelado,inativo)")
+        .limit(DASHBOARD_EVENTS_FETCH_LIMIT);
+
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+
+      if (mutableOrderBy) {
+        query = query.order(mutableOrderBy.column, { ascending: mutableOrderBy.ascending });
+      }
+
+      const { data, error } = await query;
+      if (!error) {
+        return (data ?? []) as unknown as Row[];
+      }
+
+      const missingColumn = extractMissingSchemaColumn(error);
+      if (typeof missingColumn !== "string" || missingColumn.length === 0) {
+        throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+      }
+      const safeMissingColumn = missingColumn as string;
+
+      if (
+        mutableOrderBy &&
+        mutableOrderBy.column.toLowerCase() === safeMissingColumn.toLowerCase()
+      ) {
+        mutableOrderBy = undefined;
+        continue;
+      }
+
+      const nextColumns = removeMissingColumn(mutableColumns, safeMissingColumn);
+      if (!nextColumns || nextColumns.length === 0) {
+        throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+      }
+      const safeNextColumns = nextColumns as string[];
+      mutableColumns = [...safeNextColumns];
+    }
+  }
+
   return [];
 }
 
@@ -295,7 +356,6 @@ const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
   const data = asObject(raw);
   if (!data) return null;
   const logoUrl = asString(data.logoUrl) || undefined;
-  const logoBase64 = asString(data.logoBase64) || undefined;
   const logoLegacy = asString(data.logo) || undefined;
   return {
     id,
@@ -303,8 +363,8 @@ const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
     sigla: asString(data.sigla),
     foto: asString(data.foto) || undefined,
     logoUrl,
-    logoBase64: logoBase64 || logoUrl || logoLegacy,
-    logo: logoLegacy || logoUrl || logoBase64,
+    logoBase64: logoUrl || logoLegacy,
+    logo: logoLegacy || logoUrl,
     descricao: asString(data.descricao) || undefined,
     bizu: asString(data.bizu) || undefined,
     ativa: asBoolean(data.ativa, false),
@@ -520,19 +580,7 @@ export async function fetchDashboardBundle(options?: {
 
   const [eventRows, productRows, partnerRows, ligaRows, postRows, treinoRows, totalAlunos, totalCaca] =
     await Promise.all([
-      fetchRowsWithFallback("eventos", DASHBOARD_EVENTS_SELECT, [
-        {
-          orderBy: { column: "data", ascending: true },
-          limit: DASHBOARD_EVENTS_FETCH_LIMIT,
-          ...(tenantFilter ? { eq: tenantFilter } : {}),
-        },
-        {
-          orderBy: { column: "createdAt", ascending: false },
-          limit: DASHBOARD_EVENTS_FETCH_LIMIT,
-          ...(tenantFilter ? { eq: tenantFilter } : {}),
-        },
-        { limit: DASHBOARD_EVENTS_FETCH_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
-      ]),
+      fetchDashboardEventRows(tenantId || undefined),
       fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [
         {
           limit: DASHBOARD_PRODUCTS_LIMIT,
@@ -544,10 +592,18 @@ export async function fetchDashboardBundle(options?: {
         },
       ]),
       fetchRowsWithFallback("parceiros", DASHBOARD_PARTNERS_SELECT, [
-        { eq: { status: "active" }, limit: DASHBOARD_PARTNERS_LIMIT },
-        { limit: DASHBOARD_PARTNERS_LIMIT },
+        {
+          eq: {
+            status: "active",
+            ...(tenantFilter ?? {}),
+          },
+          limit: DASHBOARD_PARTNERS_LIMIT,
+        },
+        { limit: DASHBOARD_PARTNERS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
       ]),
-      fetchRowsWithFallback("ligas_config", DASHBOARD_LIGAS_SELECT, [{ limit: DASHBOARD_LIGAS_LIMIT }]),
+      fetchRowsWithFallback("ligas_config", DASHBOARD_LIGAS_SELECT, [
+        { limit: DASHBOARD_LIGAS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
+      ]),
       fetchRowsWithFallback("posts", DASHBOARD_POSTS_SELECT, [
         {
           orderBy: { column: "createdAt", ascending: false },

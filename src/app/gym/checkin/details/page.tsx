@@ -35,7 +35,7 @@ export default function CheckinDetailsPage() {
     try {
         await submitGymCheckin({
             userId: user.uid,
-            userName: user.nome || "Atleta AAAKN",
+            userName: user.nome || "Atleta",
             userAvatar: user.foto || "https://github.com/shadcn.png",
             selectedType,
             title: customTitle,

@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "../../../context/TenantThemeContext";
 import {
   deleteLeagueConfig,
   fetchLeagueUsers,
@@ -58,6 +59,7 @@ type UserData = LeagueUserRecord;
 
 export default function AdminLigasPage() {
   const { addToast } = useToast();
+  const { tenantId } = useTenantTheme();
   const [ligas, setLigas] = useState<Liga[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -96,6 +98,7 @@ export default function AdminLigasPage() {
         orderDirection: "asc",
         maxResults: 40,
         forceRefresh,
+        tenantId: tenantId || undefined,
       });
       setLigas(data);
     } catch (error: unknown) {
@@ -104,7 +107,7 @@ export default function AdminLigasPage() {
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, tenantId]);
 
   // 1. BUSCAR LIGAS
   useEffect(() => {
@@ -117,7 +120,7 @@ export default function AdminLigasPage() {
     let mounted = true;
     const loadUsers = async () => {
       try {
-        const users = await fetchLeagueUsers({ maxResults: 120 });
+        const users = await fetchLeagueUsers({ maxResults: 120, tenantId: tenantId || undefined });
         if (!mounted) return;
         setAllUsers(users);
       } catch (error: unknown) {
@@ -129,7 +132,7 @@ export default function AdminLigasPage() {
     return () => {
       mounted = false;
     };
-  }, [searchUserModal, addToast]);
+  }, [addToast, searchUserModal, tenantId]);
 
   // --- AÇÕES ---
 
@@ -154,7 +157,7 @@ export default function AdminLigasPage() {
   const handleDelete = async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir esta Liga?")) return;
     try {
-      await deleteLeagueConfig(id);
+      await deleteLeagueConfig(id, { tenantId: tenantId || undefined });
       setLigas((prev) => prev.filter((item) => item.id !== id));
       addToast("Liga removida com sucesso.", "success");
     } catch (error: unknown) {
@@ -167,7 +170,11 @@ export default function AdminLigasPage() {
   const toggleVisibility = async (liga: Liga) => {
       const novoStatus = !liga.visivel;
       try {
-          await setLeagueVisibility({ id: liga.id, visivel: novoStatus });
+          await setLeagueVisibility({
+            id: liga.id,
+            visivel: novoStatus,
+            tenantId: tenantId || undefined,
+          });
           setLigas((prev) =>
             prev.map((item) =>
               item.id === liga.id ? { ...item, visivel: novoStatus } : item
@@ -188,6 +195,7 @@ export default function AdminLigasPage() {
       const result = await saveLeagueConfig({
         id: isEditing ? editingId || undefined : undefined,
         data: formData,
+        tenantId: tenantId || undefined,
       });
       await loadLigas(true);
       setShowModal(false);
@@ -220,8 +228,7 @@ export default function AdminLigasPage() {
         ...prev,
         foto: imageUrl,
         logoUrl: imageUrl,
-        // Compat legado enquanto telas antigas ainda leem logoBase64.
-        logoBase64: imageUrl,
+        logoBase64: undefined,
       }));
       addToast("Logo enviada com sucesso.", "success");
     } catch (error: unknown) {
@@ -446,7 +453,7 @@ export default function AdminLigasPage() {
                             <input type="text" placeholder="Senha de Acesso" className="w-full bg-zinc-900 border border-emerald-500/30 p-3 rounded-xl text-sm text-white outline-none" value={formData.senha} onChange={e => setFormData({...formData, senha: e.target.value})}/>
                         </div>
                         <textarea rows={3} placeholder="Descrição..." className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none resize-none" value={formData.descricao} onChange={e => setFormData({...formData, descricao: e.target.value})}/>
-                        <input type="text" placeholder="Bizu da Semana" className="w-full bg-zinc-900 border border-yellow-500/30 p-3 rounded-xl text-sm text-white outline-none" value={formData.bizu} onChange={e => setFormData({...formData, bizu: e.target.value})}/>
+                        <input type="text" placeholder="Destaque da Semana" className="w-full bg-zinc-900 border border-yellow-500/30 p-3 rounded-xl text-sm text-white outline-none" value={formData.bizu} onChange={e => setFormData({...formData, bizu: e.target.value})}/>
                     </div>
                 )}
 

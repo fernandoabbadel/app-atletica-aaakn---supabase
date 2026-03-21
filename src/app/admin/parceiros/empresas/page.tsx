@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 
+import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useToast } from "@/context/ToastContext";
 import {
   fetchAdminPartnersPage,
@@ -29,6 +30,14 @@ import {
   type PartnerTier,
 } from "@/lib/partnersService";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
+import {
+  EMAIL_MAX_LENGTH,
+  hasValidPhoneLength,
+  isValidEmail,
+  normalizeEmailInput,
+  normalizePhoneInput,
+  PHONE_MAX_LENGTH,
+} from "@/utils/contactFields";
 
 const PAGE_SIZE = 20;
 
@@ -245,8 +254,23 @@ export default function AdminParceirosEmpresasPage() {
     if (!createMode && !editingPartner) return;
 
     const nome = String(editForm.nome || "").trim();
+    const email = String(editForm.email || "").trim();
+    const telefone = String(editForm.telefone || "").trim();
+    const whats = String(editForm.whats || "").trim();
     if (!nome) {
       addToast("Nome do parceiro e obrigatorio.", "error");
+      return;
+    }
+    if (email && !isValidEmail(email)) {
+      addToast("Informe um email valido para o parceiro.", "error");
+      return;
+    }
+    if (telefone && !hasValidPhoneLength(telefone)) {
+      addToast("Informe um telefone valido para o parceiro.", "error");
+      return;
+    }
+    if (whats && !hasValidPhoneLength(whats)) {
+      addToast("Informe um WhatsApp valido para o parceiro.", "error");
       return;
     }
 
@@ -261,14 +285,14 @@ export default function AdminParceirosEmpresasPage() {
           status: String(editForm.status || editingPartner?.status || "active") as PartnerStatus,
           cnpj: String(editForm.cnpj || "").trim(),
           responsavel: String(editForm.responsavel || "").trim(),
-          email: String(editForm.email || "").trim(),
-          telefone: String(editForm.telefone || "").trim(),
+          email,
+          telefone,
           descricao: String(editForm.descricao || "").trim(),
           endereco: String(editForm.endereco || "").trim(),
           horario: String(editForm.horario || "").trim(),
           insta: String(editForm.insta || "").trim(),
           site: String(editForm.site || "").trim(),
-          whats: String(editForm.whats || "").trim(),
+          whats,
           imgLogo: String(editForm.imgLogo || "").trim(),
           imgCapa: String(editForm.imgCapa || "").trim(),
         },
@@ -533,6 +557,7 @@ export default function AdminParceirosEmpresasPage() {
                         accept="image/png,image/jpeg,image/webp"
                         onChange={(event) => void handleUploadImage(event, "imgLogo")}
                       />
+                      <ImageResizeHelpLink label="Diminuir a logo no favicon.io/favicon-converter" />
                     </div>
 
                     <div className="space-y-3">
@@ -574,6 +599,7 @@ export default function AdminParceirosEmpresasPage() {
                         accept="image/png,image/jpeg,image/webp"
                         onChange={(event) => void handleUploadImage(event, "imgCapa")}
                       />
+                      <ImageResizeHelpLink label="Diminuir a capa no favicon.io/favicon-converter" />
                     </div>
                   </div>
 
@@ -617,11 +643,11 @@ export default function AdminParceirosEmpresasPage() {
                 </label>
                 <label className="space-y-1">
                   <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">E-mail</span>
-                  <input value={String(editForm.email || "")} onChange={(event) => handleEditChange("email", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                  <input type="email" maxLength={EMAIL_MAX_LENGTH} value={String(editForm.email || "")} onChange={(event) => handleEditChange("email", normalizeEmailInput(event.target.value))} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
                 </label>
                 <label className="space-y-1">
                   <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Telefone</span>
-                  <input value={String(editForm.telefone || "")} onChange={(event) => handleEditChange("telefone", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                  <input maxLength={PHONE_MAX_LENGTH} inputMode="numeric" value={String(editForm.telefone || "")} onChange={(event) => handleEditChange("telefone", normalizePhoneInput(event.target.value))} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
                 </label>
                 <label className="space-y-1 md:col-span-2">
                   <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Descricao</span>
@@ -641,20 +667,15 @@ export default function AdminParceirosEmpresasPage() {
                 </label>
                 <label className="space-y-1">
                   <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">WhatsApp</span>
-                  <input value={String(editForm.whats || "")} onChange={(event) => handleEditChange("whats", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+                  <input maxLength={PHONE_MAX_LENGTH} inputMode="numeric" value={String(editForm.whats || "")} onChange={(event) => handleEditChange("whats", normalizePhoneInput(event.target.value))} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
                 </label>
                 <label className="space-y-1">
                   <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Site</span>
                   <input value={String(editForm.site || "")} onChange={(event) => handleEditChange("site", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
                 </label>
-                <label className="space-y-1">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Logo URL</span>
-                  <input value={String(editForm.imgLogo || "")} onChange={(event) => handleEditChange("imgLogo", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
-                </label>
-                <label className="space-y-1 md:col-span-2">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Capa URL</span>
-                  <input value={String(editForm.imgCapa || "")} onChange={(event) => handleEditChange("imgCapa", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
-                </label>
+                <div className="rounded-xl border border-zinc-800 bg-black/30 px-4 py-3 text-[11px] text-zinc-500 md:col-span-2">
+                  Logo e capa agora sao enviados pelo botao de upload acima para evitar erro manual de URL.
+                </div>
               </div>
 
               <div className="mt-6 flex justify-end gap-3">

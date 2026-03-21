@@ -10,6 +10,7 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
   fetchTreinoById,
   fetchTreinoChamada,
@@ -17,6 +18,7 @@ import {
   setTreinoRsvp
 } from "../../../lib/treinosNativeService";
 import { getTurmaImage } from "../../../constants/turmaImages";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGENS (O Escudo do Código) ---
 interface TreinoData {
@@ -77,6 +79,7 @@ export default function TreinoDetalhesPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { tenantId, tenantSlug } = useTenantTheme();
 
   const [treino, setTreino] = useState<TreinoData | null>(null);
   const [rsvps, setRsvps] = useState<RSVPData[]>([]);
@@ -100,19 +103,19 @@ export default function TreinoDetalhesPage() {
           setLoading(true);
           try {
               const [treinoDoc, listaRsvp, listaChamada] = await Promise.all([
-                  fetchTreinoById(treinoId, { forceRefresh: false }),
-                  fetchTreinoRsvps(treinoId, { maxResults: 220, forceRefresh: false }),
-                  fetchTreinoChamada(treinoId, { maxResults: 220, forceRefresh: false }),
+                  fetchTreinoById(treinoId, { forceRefresh: false, tenantId: tenantId || undefined }),
+                  fetchTreinoRsvps(treinoId, { maxResults: 220, forceRefresh: false, tenantId: tenantId || undefined }),
+                  fetchTreinoChamada(treinoId, { maxResults: 220, forceRefresh: false, tenantId: tenantId || undefined }),
               ]);
 
               if (!treinoDoc) {
                   addToast("Treino nao encontrado.", "error");
-                  router.push("/treinos");
+                  router.push(tenantSlug ? withTenantSlug(tenantSlug, "/treinos") : "/treinos");
                   return;
               }
               if (isTreinoPast(treinoDoc.dia) && !canAccessExpiredTreino) {
                   addToast("Treino encerrado. Consulte a agenda atual.", "info");
-                  router.replace("/treinos");
+                  router.replace(tenantSlug ? withTenantSlug(tenantSlug, "/treinos") : "/treinos");
                   return;
               }
 
@@ -140,7 +143,7 @@ export default function TreinoDetalhesPage() {
       };
 
       void loadData();
-  }, [treinoId, userId, canAccessExpiredTreino, router, addToast]);
+  }, [treinoId, userId, canAccessExpiredTreino, router, addToast, tenantId, tenantSlug]);
 
   // 2. FUSÃO INTELIGENTE DAS LISTAS (RSVP + ADMIN)
   const listaFinal = useMemo(() => {
@@ -207,12 +210,16 @@ export default function TreinoDetalhesPage() {
               userAvatar: user.foto || "",
               userTurma: user.turma || "Geral",
               status,
+              tenantId: tenantId || undefined,
           });
 
-          const treinoAtualizado = await fetchTreinoById(treino.id, { forceRefresh: false });
+          const treinoAtualizado = await fetchTreinoById(treino.id, {
+            forceRefresh: false,
+            tenantId: tenantId || undefined,
+          });
           const [listaRsvp, listaChamada] = await Promise.all([
-              fetchTreinoRsvps(treino.id, { maxResults: 220, forceRefresh: false }),
-              fetchTreinoChamada(treino.id, { maxResults: 220, forceRefresh: false }),
+              fetchTreinoRsvps(treino.id, { maxResults: 220, forceRefresh: false, tenantId: tenantId || undefined }),
+              fetchTreinoChamada(treino.id, { maxResults: 220, forceRefresh: false, tenantId: tenantId || undefined }),
           ]);
 
           if (treinoAtualizado) {
@@ -265,7 +272,7 @@ export default function TreinoDetalhesPage() {
         <div className="absolute inset-0 bg-black">
             {/* 🦈 Image Otimizado */}
             <Image 
-                src={treino.imagem || "https://placehold.co/800x600/111/333?text=AAAKN"} 
+                src={treino.imagem || "https://placehold.co/800x600/111/333?text=TREINO"} 
                 alt={treino.modalidade}
                 fill
                 className="object-cover opacity-60"
@@ -274,7 +281,7 @@ export default function TreinoDetalhesPage() {
             <div className={`absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/30 to-transparent z-10`}></div>
         </div>
 
-        <Link href="/treinos" className="absolute top-6 left-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 hover:bg-white hover:text-black transition">
+        <Link href={tenantSlug ? withTenantSlug(tenantSlug, "/treinos") : "/treinos"} className="absolute top-6 left-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 hover:bg-white hover:text-black transition">
             <ArrowLeft size={24} />
         </Link>
         <button className="absolute top-6 right-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 hover:bg-emerald-500 transition">
@@ -379,7 +386,7 @@ export default function TreinoDetalhesPage() {
                     </div>
                     <div>
                         <p className="text-[10px] font-black uppercase text-zinc-500 tracking-widest mb-1">Responsável</p>
-                        <p className="text-lg font-black text-white">{treino.treinador || "Tubarão"}</p>
+                        <p className="text-lg font-black text-white">{treino.treinador || "Equipe responsavel"}</p>
                         <span className={`text-xs font-bold ${theme.text} mt-1 block group-hover:underline`}>Ver Perfil</span>
                     </div>
                 </div>

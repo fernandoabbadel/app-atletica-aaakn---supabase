@@ -511,7 +511,8 @@ export default function AdminGuiaPage() {
                       type="text"
                       className="input-admin"
                       value={editingItem.titulo || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, titulo: event.target.value })}
+                      maxLength={120}
+                      onChange={(event) => setEditingItem({ ...editingItem, titulo: event.target.value.slice(0, 120) })}
                     />
                   </div>
                   <div>
@@ -520,7 +521,8 @@ export default function AdminGuiaPage() {
                       type="text"
                       className="input-admin"
                       value={editingItem.url || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, url: event.target.value })}
+                      maxLength={400}
+                      onChange={(event) => setEditingItem({ ...editingItem, url: event.target.value.slice(0, 400) })}
                     />
                   </div>
                 </>
@@ -534,7 +536,8 @@ export default function AdminGuiaPage() {
                       type="text"
                       className="input-admin"
                       value={editingItem.nome || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, nome: event.target.value })}
+                      maxLength={120}
+                      onChange={(event) => setEditingItem({ ...editingItem, nome: event.target.value.slice(0, 120) })}
                     />
                   </div>
                   <div>
@@ -543,7 +546,8 @@ export default function AdminGuiaPage() {
                       type="text"
                       className="input-admin"
                       value={editingItem.horario || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, horario: event.target.value })}
+                      maxLength={120}
+                      onChange={(event) => setEditingItem({ ...editingItem, horario: event.target.value.slice(0, 120) })}
                     />
                   </div>
                   <div>
@@ -552,7 +556,8 @@ export default function AdminGuiaPage() {
                       type="text"
                       className="input-admin"
                       value={editingItem.detalhe || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, detalhe: event.target.value })}
+                      maxLength={240}
+                      onChange={(event) => setEditingItem({ ...editingItem, detalhe: event.target.value.slice(0, 240) })}
                     />
                   </div>
                 </>
@@ -582,7 +587,8 @@ export default function AdminGuiaPage() {
                       type="text"
                       className="input-admin"
                       value={editingItem.nome || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, nome: event.target.value })}
+                      maxLength={120}
+                      onChange={(event) => setEditingItem({ ...editingItem, nome: event.target.value.slice(0, 120) })}
                     />
                   </div>
                   <div>
@@ -591,7 +597,8 @@ export default function AdminGuiaPage() {
                       rows={2}
                       className="input-admin"
                       value={editingItem.descricao || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, descricao: event.target.value })}
+                      maxLength={240}
+                      onChange={(event) => setEditingItem({ ...editingItem, descricao: event.target.value.slice(0, 240) })}
                     />
                   </div>
                 </>
@@ -605,7 +612,8 @@ export default function AdminGuiaPage() {
                       type="text"
                       className="input-admin"
                       value={editingItem.nome || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, nome: event.target.value })}
+                      maxLength={120}
+                      onChange={(event) => setEditingItem({ ...editingItem, nome: event.target.value.slice(0, 120) })}
                     />
                   </div>
                   <div>
@@ -614,7 +622,8 @@ export default function AdminGuiaPage() {
                       type="text"
                       className="input-admin text-2xl font-black text-white"
                       value={editingItem.numero || ""}
-                      onChange={(event) => setEditingItem({ ...editingItem, numero: event.target.value })}
+                      maxLength={24}
+                      onChange={(event) => setEditingItem({ ...editingItem, numero: event.target.value.slice(0, 24) })}
                     />
                   </div>
                   <div>

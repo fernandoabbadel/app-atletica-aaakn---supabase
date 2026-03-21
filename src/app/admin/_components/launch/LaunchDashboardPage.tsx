@@ -11,8 +11,7 @@ import {
   fetchTenantInvites,
   fetchTenantJoinRequests,
   fetchTenantOnboardingRequests,
-  fetchTenantPlatformConfig,
-  setTenantLaunchTokenizationActive,
+  updateTenantProfile,
   type TenantInvite,
   type TenantInviteActivationRankingEntry,
   type TenantInviteGenerationRankingEntry,
@@ -53,9 +52,9 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
   } = workspace;
   const [pageLoading, setPageLoading] = useState(true);
   const [pageRefreshing, setPageRefreshing] = useState(false);
-  const [savingTokenization, setSavingTokenization] = useState(false);
+  const [savingSignupMode, setSavingSignupMode] = useState(false);
   const [creatingInvite, setCreatingInvite] = useState(false);
-  const [tokenizationActive, setTokenizationActive] = useState(true);
+  const [publicSignupEnabled, setPublicSignupEnabled] = useState(false);
   const [origin, setOrigin] = useState("");
   const [inviteUses, setInviteUses] = useState(25);
   const [inviteHours, setInviteHours] = useState(72);
@@ -117,14 +116,12 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
           requestsRows,
           generationRows,
           activationRows,
-          platformConfig,
           onboardingRows,
         ] = await Promise.all([
           fetchTenantInvites(cleanTenantId, { limit: 30 }),
           fetchTenantJoinRequests(cleanTenantId, { status: "pending", limit: 80 }),
           fetchTenantInviteGenerationRanking(cleanTenantId, { limit: 8 }),
           fetchTenantInviteActivationRanking(cleanTenantId, { limit: 8 }),
-          isMasterScope ? fetchTenantPlatformConfig() : Promise.resolve(null),
           isMasterScope
             ? fetchTenantOnboardingRequests({ status: "pending", limit: 40 })
             : Promise.resolve([]),
@@ -134,7 +131,6 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
         setPendingRequests(requestsRows);
         setGenerationRanking(generationRows);
         setActivationRanking(activationRows);
-        setTokenizationActive(platformConfig?.tokenizationActive ?? true);
         setOnboardingRequests(onboardingRows);
       } catch (error: unknown) {
         addToast(
@@ -153,6 +149,10 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
     if (typeof window === "undefined") return;
     setOrigin(window.location.origin);
   }, []);
+
+  useEffect(() => {
+    setPublicSignupEnabled(Boolean(selectedTenant?.allowPublicSignup));
+  }, [selectedTenant?.allowPublicSignup, selectedTenant?.id]);
 
   useEffect(() => {
     if (workspaceLoading) return;
@@ -207,21 +207,33 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
     }
   };
 
-  const handleToggleTokenization = async () => {
-    if (!isMasterScope) return;
+  const handleToggleSignupMode = async () => {
+    if (!selectedTenant) {
+      addToast("Selecione uma atletica para alterar a estrategia de entrada.", "error");
+      return;
+    }
     try {
-      setSavingTokenization(true);
-      const nextValue = !tokenizationActive;
-      await setTenantLaunchTokenizationActive(nextValue);
-      setTokenizationActive(nextValue);
-      addToast("Tokenizacao global atualizada.", "success");
+      setSavingSignupMode(true);
+      const nextValue = !publicSignupEnabled;
+      await updateTenantProfile({
+        tenantId: selectedTenant.id,
+        allowPublicSignup: nextValue,
+      });
+      setPublicSignupEnabled(nextValue);
+      await refreshWorkspace();
+      addToast(
+        nextValue
+          ? "Cadastro sem convite liberado para esta atletica."
+          : "Entrada por convite ativada para esta atletica.",
+        "success"
+      );
     } catch (error: unknown) {
       addToast(
-        `Erro ao atualizar tokenizacao: ${extractErrorMessage(error)}`,
+        `Erro ao atualizar estrategia de entrada: ${extractErrorMessage(error)}`,
         "error"
       );
     } finally {
-      setSavingTokenization(false);
+      setSavingSignupMode(false);
     }
   };
 
@@ -235,6 +247,11 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
 
   if (!canAccess) return null;
 
+  const statusValue = publicSignupEnabled ? "Cadastro publico liberado" : "Somente por convite";
+  const statusHelper = publicSignupEnabled
+    ? "Qualquer usuario pode pedir entrada sem convite. A aprovacao do admin continua valendo."
+    : "Novos usuarios so entram no fluxo da atletica quando recebem um convite.";
+
   return (
     <LaunchPageShell
       scope={scope}
@@ -243,30 +260,10 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
       subtitle={
         isMasterScope
           ? "painel global do dono do app, separado do admin da atletica"
-          : "convites e aprovacoes do tenant no painel admin"
+          : "convites e aprovacoes da atletica no painel admin"
       }
       refreshing={workspaceRefreshing || pageRefreshing}
       onRefresh={() => void handleRefresh()}
-      actions={
-        isMasterScope ? (
-          <button
-            onClick={() => void handleToggleTokenization()}
-            disabled={savingTokenization}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[11px] font-black uppercase disabled:opacity-60 ${
-              tokenizationActive
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                : "border-amber-500/40 bg-amber-500/10 text-amber-200"
-            }`}
-          >
-            <ShieldCheck size={14} />
-            {savingTokenization
-              ? "Salvando..."
-              : tokenizationActive
-              ? "Tokenizacao ativa"
-              : "Tokenizacao pausada"}
-          </button>
-        ) : null
-      }
     >
       <LaunchQuickLinks
         items={[
@@ -296,7 +293,61 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
 
       <LaunchTenantSelectorCard
         workspace={workspace}
+        selectable={scope === "master" && workspace.tenants.length > 1}
         helperText={`Dados carregados para o ${getLaunchAudienceLabel(scope)} e filtrados pela atletica ativa.`}
+        statusTitle="Modo de entrada"
+        statusValue={statusValue}
+        statusHelper={statusHelper}
+        statusAction={
+          <button
+            type="button"
+            onClick={() => void handleToggleSignupMode()}
+            disabled={savingSignupMode || !selectedTenant}
+            className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
+              publicSignupEnabled
+                ? "border-emerald-500/30 bg-emerald-500/10"
+                : "border-amber-500/30 bg-amber-500/10"
+            } ${savingSignupMode || !selectedTenant ? "cursor-not-allowed opacity-60" : "hover:brightness-110"}`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                  Cadastro sem convite
+                </p>
+                <p
+                  className={`mt-1 text-xs font-black uppercase ${
+                    publicSignupEnabled ? "text-emerald-200" : "text-amber-200"
+                  }`}
+                >
+                  {publicSignupEnabled ? "Ligado" : "Desligado"}
+                </p>
+              </div>
+
+              <span
+                className={`relative inline-flex h-7 w-12 items-center rounded-full border transition ${
+                  publicSignupEnabled
+                    ? "border-emerald-400/50 bg-emerald-500/30"
+                    : "border-amber-400/40 bg-black/30"
+                }`}
+              >
+                <span
+                  className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition ${
+                    publicSignupEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </span>
+            </div>
+
+            <div className="mt-3 inline-flex items-center gap-2 text-[11px] font-bold text-zinc-300">
+              <ShieldCheck size={14} />
+              {savingSignupMode
+                ? "Salvando estrategia..."
+                : publicSignupEnabled
+                  ? "Clique para voltar ao modo por convite."
+                  : "Clique para liberar cadastro sem convite."}
+            </div>
+          </button>
+        }
       />
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
@@ -447,7 +498,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
                 </div>
               ))}
               {invites.length === 0 && (
-                <p className="text-sm text-zinc-400">Nenhum convite criado para este tenant.</p>
+                <p className="text-sm text-zinc-400">Nenhum convite criado para esta atletica.</p>
               )}
             </div>
           </div>
@@ -460,7 +511,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
             <div>
               <h2 className="text-sm font-black uppercase text-amber-300">Solicitacoes pendentes</h2>
               <p className="mt-1 text-[11px] font-medium text-zinc-500">
-                Ultimas entradas aguardando decisao no tenant.
+                Ultimas entradas aguardando decisao na atletica.
               </p>
             </div>
             <Link
@@ -482,7 +533,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
               </div>
             ))}
             {pendingRequests.length === 0 && (
-              <p className="text-sm text-zinc-400">Nenhuma solicitacao pendente para este tenant.</p>
+              <p className="text-sm text-zinc-400">Nenhuma solicitacao pendente para esta atletica.</p>
             )}
           </div>
         </div>
@@ -492,7 +543,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
             <div>
               <h2 className="text-sm font-black uppercase text-cyan-300">Ranking de convites</h2>
               <p className="mt-1 text-[11px] font-medium text-zinc-500">
-                Quem mais gerou links no tenant.
+                Quem mais gerou links na atletica.
               </p>
             </div>
             <Link

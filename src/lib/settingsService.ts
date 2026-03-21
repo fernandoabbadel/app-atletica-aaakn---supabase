@@ -82,7 +82,7 @@ const ORDER_CONFIG: Record<
     ],
   },
   loja: {
-    collectionName: "pedidos_loja",
+    collectionName: "orders",
     orderField: "createdAt",
     selectColumns: [
       "id",
@@ -227,7 +227,7 @@ const getMenuCacheKey = (tenantId?: string | null): string =>
 const resolveMenuDocIds = (tenantId?: string | null): string[] => {
   const scopedTenantId = resolveMenuTenantId(tenantId);
   if (!scopedTenantId) return ["menu"];
-  return [buildTenantScopedRowId(scopedTenantId, "menu"), "menu"];
+  return [buildTenantScopedRowId(scopedTenantId, "menu")];
 };
 
 const pickMenuRow = (
@@ -250,6 +250,7 @@ async function saveMenuConfigWithClient(
   const scopedTenantId = resolveMenuTenantId(tenantId);
   const mutablePayload: Record<string, unknown> = {
     id: buildTenantScopedRowId(scopedTenantId, "menu") || "menu",
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     sections,
     data: { sections },
     updatedAt: nowIso(),
@@ -480,6 +481,7 @@ export async function fetchLegalDocs(options?: {
   includeInternal?: boolean;
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<LegalDocRecord[]> {
   const includeInternal = options?.includeInternal ?? true;
   const maxResults = boundedLimit(
@@ -487,7 +489,8 @@ export async function fetchLegalDocs(options?: {
     MAX_LEGAL_DOC_RESULTS
   );
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${includeInternal ? "all" : "public"}:${maxResults}`;
+  const scopedTenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
+  const cacheKey = `${scopedTenantId || "global"}:${includeInternal ? "all" : "public"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCachedValue(legalDocsCache, cacheKey, LEGAL_DOCS_CACHE_TTL_MS);
@@ -495,11 +498,14 @@ export async function fetchLegalDocs(options?: {
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("legal_docs")
     .select("id,titulo,conteudo,tipo,iconName")
-    .order("titulo", { ascending: true })
-    .limit(maxResults);
+    .order("titulo", { ascending: true });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   const docs: LegalDocRecord[] = [];
@@ -519,7 +525,8 @@ export async function createLegalDoc(payload: {
   conteudo: string;
   tipo?: LegalDocType;
   iconName?: string;
-}): Promise<{ id: string }> {
+}, options?: { tenantId?: string | null }): Promise<{ id: string }> {
+  const scopedTenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
   const safePayload = {
     titulo: payload.titulo.trim().slice(0, 120) || "Novo Regulamento",
     conteudo: payload.conteudo.slice(0, 120_000) || "Escreva aqui...",
@@ -528,14 +535,18 @@ export async function createLegalDoc(payload: {
   };
 
   const result = await callWithFallback<
-    typeof safePayload,
+    typeof safePayload & { tenantId?: string },
     { id: string }
-  >(SETTINGS_CREATE_DOC_CALLABLE, safePayload, async () => {
+  >(
+    SETTINGS_CREATE_DOC_CALLABLE,
+    { ...safePayload, tenantId: scopedTenantId || undefined },
+    async () => {
     const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from("legal_docs")
       .insert({
         ...safePayload,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         createdAt: nowIso(),
         updatedAt: nowIso(),
       })
@@ -543,7 +554,8 @@ export async function createLegalDoc(payload: {
       .single();
     if (error) throwSupabaseError(error);
     return { id: asString((data as Record<string, unknown> | null)?.id) };
-  });
+    }
+  );
 
   legalDocsCache.clear();
   return result;
@@ -551,10 +563,12 @@ export async function createLegalDoc(payload: {
 
 export async function updateLegalDoc(
   id: string,
-  payload: { titulo: string; conteudo: string }
+  payload: { titulo: string; conteudo: string },
+  options?: { tenantId?: string | null }
 ): Promise<void> {
   const cleanId = id.trim();
   if (!cleanId) return;
+  const scopedTenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
 
   const safePayload = {
     id: cleanId,
@@ -562,12 +576,12 @@ export async function updateLegalDoc(
     conteudo: payload.conteudo.slice(0, 120_000),
   };
 
-  await callWithFallback<typeof safePayload, { ok: boolean }>(
+  await callWithFallback<typeof safePayload & { tenantId?: string }, { ok: boolean }>(
     SETTINGS_UPDATE_DOC_CALLABLE,
-    safePayload,
+    { ...safePayload, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
+      let query = supabase
         .from("legal_docs")
         .update({
           titulo: safePayload.titulo,
@@ -575,6 +589,10 @@ export async function updateLegalDoc(
           updatedAt: nowIso(),
         })
         .eq("id", cleanId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -583,16 +601,21 @@ export async function updateLegalDoc(
   legalDocsCache.clear();
 }
 
-export async function removeLegalDoc(id: string): Promise<void> {
+export async function removeLegalDoc(id: string, options?: { tenantId?: string | null }): Promise<void> {
   const cleanId = id.trim();
   if (!cleanId) return;
+  const scopedTenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
 
-  await callWithFallback<{ id: string }, { ok: boolean }>(
+  await callWithFallback<{ id: string; tenantId?: string }, { ok: boolean }>(
     SETTINGS_DELETE_DOC_CALLABLE,
-    { id: cleanId },
+    { id: cleanId, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase.from("legal_docs").delete().eq("id", cleanId);
+      let query = supabase.from("legal_docs").delete().eq("id", cleanId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -604,14 +627,15 @@ export async function removeLegalDoc(id: string): Promise<void> {
 export async function fetchUserOrdersByTab(
   userId: string,
   tab: OrdersTab,
-  options?: { maxResults?: number; forceRefresh?: boolean }
+  options?: { maxResults?: number; forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<UserOrderRecord[]> {
   const cleanUserId = userId.trim();
   if (!cleanUserId) return [];
 
   const maxResults = boundedLimit(options?.maxResults ?? 90, MAX_ORDER_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${cleanUserId}:${tab}:${maxResults}`;
+  const scopedTenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
+  const cacheKey = `${scopedTenantId || "global"}:${cleanUserId}:${tab}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCachedValue(userOrdersCache, cacheKey, USER_ORDERS_CACHE_TTL_MS);
@@ -629,6 +653,9 @@ export async function fetchUserOrdersByTab(
       .select(mutableColumns.join(","))
       .eq("userId", cleanUserId)
       .limit(maxResults);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
 
     if (mutableColumns.some((column) => column.toLowerCase() === orderField.toLowerCase())) {
       query = query.order(orderField, { ascending: false });
@@ -716,7 +743,7 @@ export async function softDeleteAccount(payload: {
     async () => {
       await updateUsersWithFallback(uid, {
         nome: "Usuario Excluido",
-        email: `deleted_${uid}@aaakn.com`,
+        email: `deleted_${uid}@usc.invalid`,
         foto: requestPayload.photoUrl || "https://github.com/shadcn.png",
         status: "deleted",
         role: "banned",

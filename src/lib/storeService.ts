@@ -1,17 +1,29 @@
 import { httpsCallable } from "@/lib/supa/functions";
 
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import {
+  normalizeAvailabilityStatus,
+  normalizePaymentConfig,
+  normalizePlanPriceEntries,
+  normalizePlanVisibilityEntries,
+  normalizeSellerSnapshot,
+} from "./commerceCatalog";
+import { clearStorePublicCaches } from "./storePublicService";
 import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 type Row = Record<string, unknown>;
 type QueryAttempt = {
   limit: number;
+  offset?: number;
+  selectColumns?: string[];
   orderByField?: string;
   orderAscending?: boolean;
   filters?: Array<{ field: string; value: unknown }>;
 };
+type MutationFilter = { field: string; value: unknown };
 
 const TTL_MS = 120_000;
 const MAX_PRODUCTS = 240;
@@ -19,12 +31,25 @@ const MAX_ORDERS = 1200;
 const MAX_REVIEWS = 600;
 const MAX_CATEGORIES = 300;
 const STORE_PRODUCT_SELECT_COLUMNS =
-  "id,nome,categoria,descricao,img,preco,precoAntigo,estoque,cores,variantes,caracteristicas,badge,active,aprovado,vendidos,likes,createdAt,updatedAt";
-const STORE_CATEGORY_SELECT_COLUMNS = "id,nome,createdAt,updatedAt";
+  "id,tenant_id,nome,categoria,descricao,img,preco,precoAntigo,estoque,cores,variantes,caracteristicas,badge,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,likes,createdAt,updatedAt";
+const STORE_CATEGORY_SELECT_COLUMNS =
+  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,createdAt,updatedAt";
 const STORE_ORDER_SELECT_COLUMNS =
-  "id,userId,userName,productId,productName,price,total,quantidade,itens,data,status,approvedBy,createdAt,updatedAt";
+  "id,tenant_id,userId,userName,productId,productName,price,total,quantidade,itens,data,status,approvedBy,seller_type,seller_id,seller_name,seller_logo_url,payment_config,createdAt,updatedAt";
 const STORE_REVIEW_SELECT_COLUMNS =
   "id,productId,userId,userName,userAvatar,rating,comment,status,createdAt,updatedAt";
+const STORE_PENDING_ORDER_LIST_SELECT_COLUMNS = [
+  "id",
+  "userId",
+  "userName",
+  "productId",
+  "productName",
+  "price",
+  "quantidade",
+  "itens",
+  "status",
+  "createdAt",
+];
 const STORE_SELECT_COLUMNS_BY_TABLE: Record<string, string[]> = {
   produtos: STORE_PRODUCT_SELECT_COLUMNS.split(","),
   categorias: STORE_CATEGORY_SELECT_COLUMNS.split(","),
@@ -107,7 +132,16 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
 const getStoreSelectColumns = (tableName: string): string[] =>
   [...(STORE_SELECT_COLUMNS_BY_TABLE[tableName] ?? ["id", "createdAt", "updatedAt"])];
 
+const omitRowColumnCaseInsensitive = (row: Row, columnName: string): Row =>
+  Object.fromEntries(
+    Object.entries(row).filter(
+      ([key]) => key.toLowerCase() !== columnName.toLowerCase()
+    )
+  );
+
 const nowIso = (): string => new Date().toISOString();
+const resolveStoreTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
 
 const shouldFallbackToClient = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
@@ -155,21 +189,33 @@ async function callWithFallback<TReq, TRes>(
 async function queryRows(path: string, attempts: QueryAttempt[]): Promise<Row[]> {
   const supabase = getSupabaseClient();
   const safeAttempts = attempts.filter((entry) => entry.limit > 0);
+  const scopedTenantId = resolveStoreTenantId();
   if (!safeAttempts.length) return [];
 
   for (const attempt of safeAttempts) {
-    let selectColumns = getStoreSelectColumns(path);
+    let selectColumns = attempt.selectColumns?.length
+      ? [...attempt.selectColumns]
+      : getStoreSelectColumns(path);
     let canOrder = Boolean(attempt.orderByField);
+    let canFilterByTenant = scopedTenantId.length > 0;
 
     while (selectColumns.length > 0) {
       let request = supabase
         .from(path)
-        .select(selectColumns.join(","))
-        .limit(attempt.limit);
+        .select(selectColumns.join(","));
+
+      if (typeof attempt.offset === "number" && Number.isFinite(attempt.offset)) {
+        request = request.range(attempt.offset, attempt.offset + attempt.limit - 1);
+      } else {
+        request = request.limit(attempt.limit);
+      }
 
       (attempt.filters ?? []).forEach((filter) => {
         request = request.eq(filter.field, filter.value);
       });
+      if (canFilterByTenant) {
+        request = request.eq("tenant_id", scopedTenantId);
+      }
 
       if (canOrder && attempt.orderByField) {
         request = request.order(attempt.orderByField, {
@@ -185,6 +231,10 @@ async function queryRows(path: string, attempts: QueryAttempt[]): Promise<Row[]>
 
       const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
       if (missingColumn) {
+        if (canFilterByTenant && missingColumn.toLowerCase() === "tenant_id") {
+          canFilterByTenant = false;
+          continue;
+        }
         if (
           canOrder &&
           attempt.orderByField &&
@@ -215,9 +265,113 @@ async function queryRows(path: string, attempts: QueryAttempt[]): Promise<Row[]>
   return [];
 }
 
+async function mutateStoreTableWithSchemaFallback(options: {
+  tableName: string;
+  operation: "insert" | "update";
+  payload: Row;
+  filters?: MutationFilter[];
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  let mutablePayload = { ...options.payload };
+  let activeFilters = [...(options.filters ?? [])];
+
+  while (true) {
+    if (options.operation === "update" && Object.keys(mutablePayload).length === 0) {
+      return;
+    }
+
+    let request =
+      options.operation === "insert"
+        ? supabase.from(options.tableName).insert(mutablePayload)
+        : supabase.from(options.tableName).update(mutablePayload);
+
+    activeFilters.forEach((filter) => {
+      request = request.eq(filter.field, filter.value);
+    });
+
+    const { error } = await request;
+    if (!error) {
+      return;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (missingColumn) {
+      const nextPayload = omitRowColumnCaseInsensitive(mutablePayload, missingColumn);
+      if (Object.keys(nextPayload).length < Object.keys(mutablePayload).length) {
+        mutablePayload = nextPayload;
+        continue;
+      }
+
+      if (
+        missingColumn.toLowerCase() === "tenant_id" ||
+        missingColumn.toLowerCase() === "seller_type" ||
+        missingColumn.toLowerCase() === "seller_id"
+      ) {
+        const nextFilters = activeFilters.filter(
+          (filter) => filter.field.toLowerCase() !== missingColumn.toLowerCase()
+        );
+        if (nextFilters.length < activeFilters.length) {
+          activeFilters = nextFilters;
+          continue;
+        }
+      }
+    }
+
+    throwSupabaseError(error);
+  }
+}
+
+const normalizeAdminStoreRow = (table: string, row: Row): Row => {
+  if (table === "produtos") {
+    const next: Row = { ...row };
+    next.status = normalizeAvailabilityStatus(row.status, row.active === false ? "esgotado" : "ativo");
+    next.plan_prices = normalizePlanPriceEntries(row.plan_prices);
+    next.plan_visibility = normalizePlanVisibilityEntries(row.plan_visibility);
+    next.payment_config = normalizePaymentConfig(row.payment_config);
+    next.seller = normalizeSellerSnapshot({
+      type: row.seller_type,
+      id: row.seller_id,
+      name: row.seller_name,
+      logoUrl: row.seller_logo_url,
+    });
+    return next;
+  }
+
+  if (table === "categorias") {
+    return {
+      ...row,
+      cover_img: asString(row.cover_img) || asString(row.logo_url),
+      button_color: asString(row.button_color),
+      logo_url: asString(row.logo_url),
+      seller: normalizeSellerSnapshot({
+        type: row.seller_type,
+        id: row.seller_id,
+        name: row.nome,
+        logoUrl: row.logo_url,
+      }),
+    };
+  }
+
+  if (table === "orders") {
+    return {
+      ...row,
+      payment_config: normalizePaymentConfig(row.payment_config),
+      seller: normalizeSellerSnapshot({
+        type: row.seller_type,
+        id: row.seller_id,
+        name: row.seller_name,
+        logoUrl: row.seller_logo_url,
+      }),
+    };
+  }
+
+  return { ...row };
+};
+
 const invalidateStoreCaches = (productId?: string): void => {
   adminBundleCache.clear();
   productsFeedCache.clear();
+  clearStorePublicCaches(productId);
 
   const cleanProductId = productId?.trim() || "";
   if (!cleanProductId) {
@@ -237,6 +391,11 @@ export interface StoreAdminBundle {
   categorias: Row[];
   pedidos: Row[];
   reviews: Row[];
+}
+
+export interface StorePendingOrdersPage {
+  rows: Row[];
+  hasMore: boolean;
 }
 
 export async function fetchAdminStoreBundle(options?: {
@@ -277,18 +436,56 @@ export async function fetchAdminStoreBundle(options?: {
     ]),
   ]);
 
-  const bundle = { produtos, categorias, pedidos, reviews };
+  const bundle = {
+    produtos: produtos.map((row) => normalizeAdminStoreRow("produtos", row)),
+    categorias: categorias.map((row) => normalizeAdminStoreRow("categorias", row)),
+    pedidos: pedidos.map((row) => normalizeAdminStoreRow("orders", row)),
+    reviews,
+  };
   setCache(adminBundleCache, cacheKey, bundle);
   return bundle;
+}
+
+export async function fetchPendingStoreOrdersPage(options?: {
+  page?: number;
+  pageSize?: number;
+}): Promise<StorePendingOrdersPage> {
+  const page = Math.max(1, Math.floor(options?.page ?? 1));
+  const pageSize = Math.min(50, Math.max(1, Math.floor(options?.pageSize ?? 20)));
+  const offset = (page - 1) * pageSize;
+
+  const rows = await queryRows("orders", [
+    {
+      filters: [{ field: "status", value: "pendente" }],
+      orderByField: "createdAt",
+      orderAscending: false,
+      limit: pageSize + 1,
+      offset,
+      selectColumns: STORE_PENDING_ORDER_LIST_SELECT_COLUMNS,
+    },
+    {
+      filters: [{ field: "status", value: "pendente" }],
+      limit: pageSize + 1,
+      offset,
+      selectColumns: STORE_PENDING_ORDER_LIST_SELECT_COLUMNS,
+    },
+  ]);
+
+  return {
+    rows: rows.slice(0, pageSize),
+    hasMore: rows.length > pageSize,
+  };
 }
 
 export async function fetchStoreProducts(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<Row[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_PRODUCTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveStoreTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "all"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(productsFeedCache, cacheKey);
@@ -299,8 +496,9 @@ export async function fetchStoreProducts(options?: {
     { orderByField: "nome", orderAscending: true, limit: maxResults },
     { limit: maxResults },
   ]);
-  setCache(productsFeedCache, cacheKey, rows);
-  return rows;
+  const normalizedRows = rows.map((row) => normalizeAdminStoreRow("produtos", row));
+  setCache(productsFeedCache, cacheKey, normalizedRows);
+  return normalizedRows;
 }
 
 export interface StoreProductDetailBundle {
@@ -315,15 +513,17 @@ export async function fetchStoreProductDetail(options: {
   reviewsLimit?: number;
   ordersLimit?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<StoreProductDetailBundle> {
   const productId = options.productId.trim();
   const userId = options.userId?.trim() || "";
   if (!productId) return { produto: null, reviews: [], userOrders: [] };
+  const scopedTenantId = resolveStoreTenantId(options.tenantId);
 
   const reviewsLimit = boundedLimit(options.reviewsLimit ?? 40, MAX_REVIEWS);
   const ordersLimit = boundedLimit(options.ordersLimit ?? 20, MAX_ORDERS);
   const forceRefresh = options.forceRefresh ?? false;
-  const cacheKey = `${productId}:${userId}:${reviewsLimit}:${ordersLimit}`;
+  const cacheKey = `${scopedTenantId || "all"}:${productId}:${userId}:${reviewsLimit}:${ordersLimit}`;
 
   if (!forceRefresh) {
     const cached = getCache(productDetailCache, cacheKey);
@@ -331,15 +531,18 @@ export async function fetchStoreProductDetail(options: {
   }
 
   const supabase = getSupabaseClient();
-  const { data: produtoData, error: produtoError } = await supabase
+  let productQuery = supabase
     .from("produtos")
     .select(STORE_PRODUCT_SELECT_COLUMNS)
-    .eq("id", productId)
-    .maybeSingle();
+    .eq("id", productId);
+  if (scopedTenantId) {
+    productQuery = productQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: produtoData, error: produtoError } = await productQuery.maybeSingle();
   if (produtoError) {
     throwSupabaseError(produtoError);
   }
-  const produto = (produtoData as Row | null) ?? null;
+  const produto = produtoData ? normalizeAdminStoreRow("produtos", produtoData as Row) : null;
 
   const reviewsPromise = queryRows("reviews", [
     {
@@ -377,7 +580,11 @@ export async function fetchStoreProductDetail(options: {
 
   const [reviews, userOrders] = await Promise.all([reviewsPromise, ordersPromise]);
 
-  const bundle = { produto, reviews, userOrders };
+  const bundle = {
+    produto,
+    reviews,
+    userOrders: userOrders.map((row) => normalizeAdminStoreRow("orders", row)),
+  };
   setCache(productDetailCache, cacheKey, bundle);
   return bundle;
 }
@@ -441,9 +648,9 @@ export async function createStoreOrder(payload: {
 }): Promise<{ id: string }> {
   const requestPayload = {
     userId: payload.userId.trim(),
-    userName: payload.userName.trim() || "Aluno",
+    userName: payload.userName.trim().slice(0, 120) || "Aluno",
     productId: payload.productId.trim(),
-    productName: payload.productName.trim() || "Produto",
+    productName: payload.productName.trim().slice(0, 160) || "Produto",
     price: Math.max(0, asNum(payload.price, 0)),
   };
 
@@ -520,10 +727,10 @@ export async function createStoreReview(payload: {
   const requestPayload = {
     productId: payload.productId.trim(),
     userId: payload.userId.trim(),
-    userName: payload.userName.trim() || "Aluno",
+    userName: payload.userName.trim().slice(0, 120) || "Aluno",
     userAvatar: payload.userAvatar?.trim() || "",
     rating: Math.min(5, Math.max(1, Math.floor(payload.rating))),
-    comment: payload.comment.trim(),
+    comment: payload.comment.trim().slice(0, 280),
   };
 
   const result = await callWithFallback<typeof requestPayload, { id: string }>(
@@ -767,11 +974,67 @@ export async function setStoreReviewStatus(payload: {
 export async function upsertStoreProduct(payload: {
   productId?: string;
   data: Row;
+  tenantId?: string | null;
 }): Promise<void> {
   const productId = payload.productId?.trim() || "";
+  const rawData = { ...payload.data };
+  const scopedTenantId = resolveStoreTenantId(payload.tenantId);
+  const sanitizedData: Row = {
+    ...rawData,
+    nome: asString(rawData.nome).trim().slice(0, 120),
+    categoria: asString(rawData.categoria).trim().slice(0, 80),
+    descricao: asString(rawData.descricao).trim().slice(0, 1200),
+    img: asString(rawData.img).trim().slice(0, 400),
+    lote: asString(rawData.lote).trim().slice(0, 80),
+    cores: asString(rawData.cores).trim().slice(0, 600),
+    tagLabel: asString(rawData.tagLabel).trim().slice(0, 30),
+    status: normalizeAvailabilityStatus(rawData.status, rawData.active === false ? "esgotado" : "ativo"),
+  };
+
+  const planPrices = normalizePlanPriceEntries(rawData.plan_prices);
+  const planVisibility = normalizePlanVisibilityEntries(rawData.plan_visibility);
+  const paymentConfig = normalizePaymentConfig(rawData.payment_config);
+  const seller = normalizeSellerSnapshot({
+    type: rawData.seller_type,
+    id: rawData.seller_id,
+    name: rawData.seller_name,
+    logoUrl: rawData.seller_logo_url,
+  });
+
+  sanitizedData.plan_prices = planPrices;
+  sanitizedData.plan_visibility = planVisibility;
+  sanitizedData.payment_config = paymentConfig;
+  sanitizedData.seller_type = seller?.type ?? "tenant";
+  sanitizedData.seller_id = seller?.id ?? "";
+  sanitizedData.seller_name = seller?.name ?? "";
+  sanitizedData.seller_logo_url = seller?.logoUrl ?? "";
+
+  if (Array.isArray(rawData.caracteristicas)) {
+    sanitizedData.caracteristicas = rawData.caracteristicas
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim().slice(0, 120))
+      .filter(Boolean)
+      .slice(0, 24);
+  }
+
+  if (Array.isArray(rawData.variantes)) {
+    sanitizedData.variantes = rawData.variantes
+      .map((entry) => {
+        const row = entry as Record<string, unknown>;
+        return {
+          ...row,
+          tamanho: asString(row.tamanho).trim().slice(0, 40),
+          cor: asString(row.cor).trim().slice(0, 40),
+          status: normalizeAvailabilityStatus(row.status),
+          planPrices: normalizePlanPriceEntries(row.planPrices ?? row.plan_prices),
+        };
+      })
+      .slice(0, 30);
+  }
+
   const requestPayload = {
     ...(productId ? { productId } : {}),
-    data: payload.data,
+    data: sanitizedData,
   };
 
   await callWithFallback<typeof requestPayload, { ok: boolean }>(
@@ -780,19 +1043,25 @@ export async function upsertStoreProduct(payload: {
     async () => {
       const supabase = getSupabaseClient();
       if (productId) {
-        const { error } = await supabase
+        let updateQuery = supabase
           .from("produtos")
           .update({
-            ...payload.data,
+            ...sanitizedData,
+            ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
             updatedAt: nowIso(),
           })
           .eq("id", productId);
+        if (scopedTenantId) {
+          updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+        }
+        const { error } = await updateQuery;
         if (error) {
           throwSupabaseError(error);
         }
       } else {
         const { error } = await supabase.from("produtos").insert({
-          ...payload.data,
+          ...sanitizedData,
+          ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
           createdAt: nowIso(),
           updatedAt: nowIso(),
           vendidos: 0,
@@ -811,6 +1080,7 @@ export async function upsertStoreProduct(payload: {
 
 export async function deleteStoreProduct(productId: string): Promise<void> {
   const cleanId = productId.trim();
+  const scopedTenantId = resolveStoreTenantId();
   if (!cleanId) return;
 
   await callWithFallback<{ productId: string }, { ok: boolean }>(
@@ -818,7 +1088,11 @@ export async function deleteStoreProduct(productId: string): Promise<void> {
     { productId: cleanId },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase.from("produtos").delete().eq("id", cleanId);
+      let query = supabase.from("produtos").delete().eq("id", cleanId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) {
         throwSupabaseError(error);
       }
@@ -829,26 +1103,137 @@ export async function deleteStoreProduct(productId: string): Promise<void> {
   invalidateStoreCaches(cleanId);
 }
 
-export async function createStoreCategory(nome: string): Promise<void> {
-  const cleanNome = nome.trim();
+export async function createStoreCategory(
+  payload:
+    | string
+    | {
+        nome: string;
+        coverImg?: string;
+        buttonColor?: string;
+        logoUrl?: string;
+        sellerType?: "tenant" | "mini_vendor";
+        sellerId?: string;
+        tenantId?: string | null;
+      }
+): Promise<void> {
+  const source = typeof payload === "string" ? { nome: payload } : payload;
+  await upsertStoreCategory({ data: source });
+}
+
+export async function upsertStoreCategory(payload: {
+  categoryId?: string;
+  data: {
+    nome: string;
+    coverImg?: string;
+    buttonColor?: string;
+    logoUrl?: string;
+    sellerType?: "tenant" | "mini_vendor";
+    sellerId?: string;
+    tenantId?: string | null;
+  };
+}): Promise<void> {
+  const categoryId = payload.categoryId?.trim() || "";
+  const source = payload.data;
+  const cleanNome = source.nome.trim().slice(0, 80);
+  const coverImg = asString(source.coverImg).trim().slice(0, 400);
+  const buttonColor = asString(source.buttonColor).trim().slice(0, 40);
+  const logoUrl = asString(source.logoUrl).trim().slice(0, 400);
+  const sellerType = source.sellerType === "mini_vendor" ? "mini_vendor" : "tenant";
+  const sellerId = asString(source.sellerId).trim().slice(0, 120);
+  const scopedTenantId = resolveStoreTenantId(source.tenantId);
   if (!cleanNome) return;
 
-  await callWithFallback<{ nome: string }, { ok: boolean }>(
+  const insertPayload: Row = {
+    nome: cleanNome,
+    cover_img: coverImg || null,
+    button_color: buttonColor || null,
+    logo_url: logoUrl || null,
+    seller_type: sellerType,
+    seller_id: sellerId || null,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+
+  const updatePayload: Row = {
+    nome: cleanNome,
+    cover_img: coverImg || null,
+    button_color: buttonColor || null,
+    logo_url: logoUrl || null,
+    seller_type: sellerType,
+    seller_id: sellerId || null,
+    updatedAt: nowIso(),
+  };
+
+  if (categoryId) {
+    await mutateStoreTableWithSchemaFallback({
+      tableName: "categorias",
+      operation: "update",
+      payload: updatePayload,
+      filters: [
+        { field: "id", value: categoryId },
+        ...(scopedTenantId ? [{ field: "tenant_id", value: scopedTenantId }] : []),
+      ],
+    });
+    invalidateStoreCaches();
+    return;
+  }
+
+  await callWithFallback<Record<string, unknown>, { ok: boolean }>(
     CALLABLE_CREATE_CATEGORY,
-    { nome: cleanNome },
+    {
+      nome: cleanNome,
+      cover_img: coverImg,
+      button_color: buttonColor,
+      logo_url: logoUrl,
+      seller_type: sellerType,
+      seller_id: sellerId,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+    },
     async () => {
-      const supabase = getSupabaseClient();
-      const { error } = await supabase.from("categorias").insert({
-        nome: cleanNome,
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
+      await mutateStoreTableWithSchemaFallback({
+        tableName: "categorias",
+        operation: "insert",
+        payload: insertPayload,
       });
-      if (error) {
-        throwSupabaseError(error);
-      }
       return { ok: true };
     }
   );
+
+  invalidateStoreCaches();
+}
+
+export async function renameStoreProductsCategory(payload: {
+  previousName: string;
+  nextName: string;
+  tenantId?: string | null;
+  sellerType?: "tenant" | "mini_vendor";
+  sellerId?: string;
+}): Promise<void> {
+  const previousName = payload.previousName.trim();
+  const nextName = payload.nextName.trim().slice(0, 80);
+  const scopedTenantId = resolveStoreTenantId(payload.tenantId);
+  const sellerType = payload.sellerType === "mini_vendor" ? "mini_vendor" : "tenant";
+  const sellerId = asString(payload.sellerId).trim().slice(0, 120);
+
+  if (!previousName || !nextName || previousName === nextName) {
+    return;
+  }
+
+  await mutateStoreTableWithSchemaFallback({
+    tableName: "produtos",
+    operation: "update",
+    payload: {
+      categoria: nextName,
+      updatedAt: nowIso(),
+    },
+    filters: [
+      { field: "categoria", value: previousName },
+      ...(scopedTenantId ? [{ field: "tenant_id", value: scopedTenantId }] : []),
+      { field: "seller_type", value: sellerType },
+      ...(sellerId ? [{ field: "seller_id", value: sellerId }] : []),
+    ],
+  });
 
   invalidateStoreCaches();
 }

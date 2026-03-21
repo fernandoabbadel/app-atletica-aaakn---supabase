@@ -24,6 +24,14 @@ import {
 import { logActivity } from "@/lib/logger"; 
 import { isPermissionError } from "@/lib/backendErrors";
 import { parseTenantScopedPath } from "@/lib/tenantRouting";
+import {
+  EMAIL_MAX_LENGTH,
+  hasValidPhoneLength,
+  isValidEmail,
+  normalizeEmailInput,
+  normalizePhoneInput,
+  PHONE_MAX_LENGTH,
+} from "@/utils/contactFields";
 
 // --- TYPES & INTERFACES (Clean Code) ---
 
@@ -47,20 +55,18 @@ const TENANT_INITIAL_CONFIG: LandingConfig = {
   taglineColor: "#10b981",
   heroTitle: "SEJA UM",
   heroSubtitle: "Centralize sua vida universitária. Carteirinha, Loja e Eventos.",
-  heroHighlight: "CARDUME TUBARÃO",
+  heroHighlight: "SUA ATLETICA",
   titleColor: "#ffffff",
   gradientStart: "#34d399", 
   gradientEnd: "#10b981",   
   statUsers: 120,
   statPosts: 340,
   statPartners: 12,
-  address: "Campus Medicina - Bloco C",
-  phone: "(12) 99999-9999",
-  whatsapp: "5512999999999",
-  email: "suporte@aaakn.com.br",
-  socialLinks: [
-    { id: "1", platform: "instagram", url: "https://instagram.com/aaakn" }
-  ],
+  address: "Campus principal",
+  phone: "",
+  whatsapp: "",
+  email: "",
+  socialLinks: [],
   reviews: []
 };
 
@@ -127,6 +133,15 @@ export default function AdminLandingPage() {
 
   // SALVAR DADOS
   const handleSave = async () => {
+    if (config.email.trim() && !isValidEmail(config.email)) {
+      addToast("Informe um email valido para a landing.", "error");
+      return;
+    }
+    if (config.whatsapp.trim() && !hasValidPhoneLength(config.whatsapp)) {
+      addToast("Informe um WhatsApp valido para a landing.", "error");
+      return;
+    }
+
     setSaving(true);
     try {
       await saveLandingConfig(config, { tenantId: targetTenantId });
@@ -303,7 +318,7 @@ export default function AdminLandingPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-emerald-500 uppercase mb-1">Destaque (Ex: Cardume)</label>
+              <label className="block text-xs font-bold text-emerald-500 uppercase mb-1">Destaque principal</label>
               <input 
                 value={config.heroHighlight}
                 onChange={(e) => setConfig({...config, heroHighlight: e.target.value})}
@@ -378,13 +393,13 @@ export default function AdminLandingPage() {
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">E-mail</label>
-                            <input value={config.email} onChange={(e) => setConfig({...config, email: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-emerald-500 outline-none" />
+                            <input type="email" maxLength={EMAIL_MAX_LENGTH} value={config.email} onChange={(e) => setConfig({...config, email: normalizeEmailInput(e.target.value)})} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-emerald-500 outline-none" />
                         </div>
                         <div>
                              <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">WhatsApp</label>
                              <div className="flex items-center gap-2">
                                 <Smartphone size={16} className="text-green-500"/>
-                                <input placeholder="55129..." value={config.whatsapp} onChange={(e) => setConfig({...config, whatsapp: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-emerald-500 outline-none" />
+                                <input placeholder="55129..." maxLength={PHONE_MAX_LENGTH} inputMode="numeric" value={config.whatsapp} onChange={(e) => setConfig({...config, whatsapp: normalizePhoneInput(e.target.value)})} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-emerald-500 outline-none" />
                              </div>
                         </div>
                     </div>

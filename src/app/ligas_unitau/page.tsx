@@ -9,10 +9,12 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "../../context/TenantThemeContext";
 import { logActivity } from "../../lib/logger"; 
 import {
   LEAGUE_QUIZ_PROFILES,
   type LeagueQuizProfile,
+  type LeagueQuizQuestionKey,
 } from "../../constants/leagueQuizProfiles";
 import {
   addLeagueQuizHistory,
@@ -21,6 +23,7 @@ import {
   fetchLeagueSummaries,
   type LeagueRecord,
 } from "../../lib/leaguesService";
+import { withTenantSlug } from "../../lib/tenantRouting";
 
 // --- 1. INTERFACES (Fim dos 'any') ---
 
@@ -28,6 +31,21 @@ interface League extends LeagueRecord {
     matchPercent?: number; 
     matchScore?: number;
 }
+
+interface QuizOption {
+    label: string;
+    keywords: string[];
+}
+
+interface QuizQuestion {
+    id: number;
+    key: LeagueQuizQuestionKey;
+    text: string;
+    options: QuizOption[];
+}
+
+type QuizAnswers = Partial<Record<LeagueQuizQuestionKey, string[]>>;
+const QUIZ_DIRECT_MATCH_WEIGHT = 3;
 
 const normalizeLeagueText = (value: string): string =>
   value
@@ -58,6 +76,13 @@ const KEYWORD_SYNONYMS: Record<string, string[]> = {
   urologia: ["rins", "nefro"],
   cirurgia: ["manual", "centro cirurgico", "laparoscopia", "robotica"],
   pediatria: ["neonatologia", "criancas"],
+  gastro: ["digestiva", "endoscopia"],
+  simulacao: ["treinamento", "cenario"],
+  militar: ["resgate", "estrategia"],
+  anatomia: ["disseccao", "morfologia"],
+  humanidades: ["social", "escuta"],
+  otorrino: ["vias aereas", "ouvido", "garganta"],
+  laparoscopia: ["robotica", "cirurgia"],
 };
 
 const expandLeagueKeyword = (keyword: string): string[] => {
@@ -94,16 +119,72 @@ const resolveLeagueProfile = (league: League): LeagueQuizProfile | null => {
   return null;
 };
 
-const QUESTIONS = [
-    { id: 1, text: "Qual cenário faz seus olhos brilharem?", options: [{ label: "Centro Cirúrgico", keywords: ["Trauma", "Cirurgia", "Plástica", "Ortopedia"] }, { label: "Emergência", keywords: ["Emergência", "Urgência", "Trauma", "Intensiva"] }, { label: "Consultório", keywords: ["Clínica", "Endocrino", "Dermato", "Gastro"] }, { label: "Comunidade", keywords: ["Família", "Comunidade", "Pediatria", "Gineco"] }, { label: "Laboratório", keywords: ["Patologia", "Radiologia", "Genética"] }] },
-    { id: 2, text: "Com qual público você tem mais afinidade?", options: [{ label: "Crianças", keywords: ["Pediatria", "Neonatologia"] }, { label: "Mulheres", keywords: ["Gineco", "Obstetrícia"] }, { label: "Adultos", keywords: ["Geriatria", "Clínica", "Cardio"] }, { label: "Graves", keywords: ["Intensiva", "Anestesiologia", "Trauma"] }, { label: "Atletas", keywords: ["Esportiva", "Ortopedia"] }] },
-    { id: 3, text: "Qual sistema te fascina?", options: [{ label: "Cérebro", keywords: ["Neuro", "Psiquiatria"] }, { label: "Coração", keywords: ["Cardio", "Pneumo"] }, { label: "Ossos", keywords: ["Ortopedia", "Plástica"] }, { label: "Hormônios", keywords: ["Gastro", "Endocrino"] }, { label: "Rins", keywords: ["Nefro", "Urologia"] }] },
-    { id: 4, text: "Estilo de prática?", options: [{ label: "Manual", keywords: ["Cirurgia", "Trauma"] }, { label: "Raciocínio", keywords: ["Clínica", "Infecto"] }, { label: "Prevenção", keywords: ["Família", "Pediatria"] }, { label: "Tecnologia", keywords: ["Radiologia", "Cardio"] }, { label: "Gestão", keywords: ["Legal", "Trabalho"] }] },
-    { id: 5, text: "Impacto desejado?", options: [{ label: "Salvar vidas", keywords: ["Emergência", "Trauma"] }, { label: "Paciência", keywords: ["Psiquiatria", "Geriatria"] }, { label: "Detalhe", keywords: ["Plástica", "Oftalmo"] }, { label: "Curiosidade", keywords: ["Genética", "Patologia"] }, { label: "Vínculo", keywords: ["Família", "Onco"] }] }
+const QUESTIONS: QuizQuestion[] = [
+    {
+        id: 1,
+        key: "scenario",
+        text: "Qual cenario faz seus olhos brilharem?",
+        options: [
+            { label: "Centro Cirurgico", keywords: ["trauma", "cirurgia", "laparoscopia", "robotica", "ortopedia"] },
+            { label: "Emergencia", keywords: ["emergencia", "urgencia", "trauma", "intensiva", "resgate"] },
+            { label: "Consultorio", keywords: ["clinica", "endocrino", "dermato", "gastro", "ambulatorio"] },
+            { label: "Comunidade", keywords: ["familia", "comunidade", "pediatria", "gineco", "humanidades"] },
+            { label: "Laboratorio", keywords: ["patologia", "radiologia", "genetica", "anatomia", "simulacao"] },
+        ],
+    },
+    {
+        id: 2,
+        key: "audience",
+        text: "Com qual publico voce tem mais afinidade?",
+        options: [
+            { label: "Criancas", keywords: ["pediatria", "neonatologia", "infancia"] },
+            { label: "Mulheres", keywords: ["gineco", "obstetricia", "saude da mulher"] },
+            { label: "Adultos", keywords: ["geriatria", "clinica", "cardio", "oncologia"] },
+            { label: "Graves", keywords: ["intensiva", "anestesiologia", "trauma", "urgencia"] },
+            { label: "Atletas", keywords: ["esportiva", "ortopedia", "performance"] },
+        ],
+    },
+    {
+        id: 3,
+        key: "system",
+        text: "Qual sistema te fascina?",
+        options: [
+            { label: "Cerebro", keywords: ["neuro", "psiquiatria", "neurologia"] },
+            { label: "Coracao", keywords: ["cardio", "coracao", "cardiovascular"] },
+            { label: "Ossos", keywords: ["ortopedia", "anatomia", "ossos"] },
+            { label: "Hormonios", keywords: ["gastro", "endocrino", "metabolismo", "obstetricia"] },
+            { label: "Rins", keywords: ["nefro", "urologia", "rins"] },
+        ],
+    },
+    {
+        id: 4,
+        key: "style",
+        text: "Qual e o seu estilo de pratica?",
+        options: [
+            { label: "Manual", keywords: ["cirurgia", "trauma", "procedimento", "tecnica"] },
+            { label: "Raciocinio", keywords: ["clinica", "diagnostico", "investigacao"] },
+            { label: "Prevencao", keywords: ["familia", "pediatria", "promocao", "saude coletiva"] },
+            { label: "Tecnologia", keywords: ["radiologia", "cardio", "robotica", "simulacao"] },
+            { label: "Gestao", keywords: ["legal", "trabalho", "militar", "organizacao"] },
+        ],
+    },
+    {
+        id: 5,
+        key: "impact",
+        text: "Qual impacto voce mais quer causar?",
+        options: [
+            { label: "Salvar vidas", keywords: ["emergencia", "trauma", "ressuscitacao", "uti"] },
+            { label: "Paciencia", keywords: ["psiquiatria", "oncologia", "seguimento"] },
+            { label: "Detalhe", keywords: ["oftalmo", "dermato", "microcirurgia", "precisao"] },
+            { label: "Curiosidade", keywords: ["genetica", "patologia", "anatomia", "simulacao"] },
+            { label: "Vinculo", keywords: ["familia", "onco", "comunidade", "acolhimento"] },
+        ],
+    },
 ];
 
 export default function LigasUnitauPage() {
   const { user } = useAuth();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const [leagues, setLeagues] = useState<League[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLeague, setSelectedLeague] = useState<League | null>(null);
@@ -115,8 +196,11 @@ export default function LigasUnitauPage() {
   const [quizStep, setQuizStep] = useState(0);
   const [showQuizResult, setShowQuizResult] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
-  const [allKeywords, setAllKeywords] = useState<string[]>([]);
+  const [quizAnswers, setQuizAnswers] = useState<QuizAnswers>({});
+  const [quizKeywords, setQuizKeywords] = useState<string[]>([]);
   const [topMatches, setTopMatches] = useState<League[]>([]);
+  const tenantPath = (path: string): string =>
+    tenantSlug.trim() ? withTenantSlug(tenantSlug, path) : path;
 
   useEffect(() => {
     let mounted = true;
@@ -127,6 +211,7 @@ export default function LigasUnitauPage() {
           orderByField: "likes",
           orderDirection: "desc",
           maxResults: 60,
+          tenantId: tenantId || undefined,
         });
         if (!mounted) return;
         setLeagues(data as League[]);
@@ -141,13 +226,16 @@ export default function LigasUnitauPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [tenantId]);
 
   const openLeagueDetails = async (league: League): Promise<void> => {
       setSelectedLeague(league);
       setLoadingSelectedLeague(true);
       try {
-          const fullLeague = await fetchLeagueById(league.id, { forceRefresh: true });
+          const fullLeague = await fetchLeagueById(league.id, {
+            forceRefresh: true,
+            tenantId: tenantId || undefined,
+          });
           if (fullLeague) {
               setSelectedLeague(fullLeague as League);
           }
@@ -179,6 +267,7 @@ export default function LigasUnitauPage() {
           id: leagueId,
           delta: isLiked ? -1 : 1,
           actorUserId: user.uid,
+          tenantId: tenantId || undefined,
         });
       } catch (error: unknown) {
         console.error(error);
@@ -196,26 +285,35 @@ export default function LigasUnitauPage() {
       }
   };
 
-  const toggleOption = (keywords: string[], label: string) => {
+  const toggleOption = (label: string) => {
       if (selectedOptions.includes(label)) setSelectedOptions(prev => prev.filter(o => o !== label));
       else if (selectedOptions.length < 3) setSelectedOptions(prev => [...prev, label]);
   };
 
   const handleNextStep = () => {
-      const stepKeywords: string[] = [];
-      QUESTIONS[quizStep].options.forEach(opt => { if (selectedOptions.includes(opt.label)) stepKeywords.push(...opt.keywords); });
-      const newKw = [...allKeywords, ...stepKeywords]; 
-      setAllKeywords(newKw); 
+      const currentQuestion = QUESTIONS[quizStep];
+      const selectedQuestionOptions = currentQuestion.options.filter((option) =>
+        selectedOptions.includes(option.label)
+      );
+      const stepKeywords = selectedQuestionOptions.flatMap((option) => option.keywords);
+      const nextAnswers: QuizAnswers = {
+        ...quizAnswers,
+        [currentQuestion.key]: selectedQuestionOptions.map((option) => option.label),
+      };
+      const nextKeywords = [...quizKeywords, ...stepKeywords];
+
+      setQuizAnswers(nextAnswers);
+      setQuizKeywords(nextKeywords);
       setSelectedOptions([]);
       
       if (quizStep < QUESTIONS.length - 1) {
           setQuizStep(prev => prev + 1); 
       } else {
-          calculateMatches(newKw);
+          void calculateMatches(nextAnswers, nextKeywords);
       }
   };
 
-  const calculateMatches = async (finalKeywords: string[]) => {
+  const calculateMatches = async (answers: QuizAnswers, finalKeywords: string[]) => {
       const keywordWeight = new Map<string, number>();
       finalKeywords.forEach((keyword) => {
           const normalized = normalizeLeagueText(keyword);
@@ -223,7 +321,12 @@ export default function LigasUnitauPage() {
           keywordWeight.set(normalized, (keywordWeight.get(normalized) ?? 0) + 1);
       });
 
-      const totalWeight = Array.from(keywordWeight.values()).reduce((sum, value) => sum + value, 0);
+      const keywordTotalWeight = Array.from(keywordWeight.values()).reduce((sum, value) => sum + value, 0);
+      const selectedAnswerCount = Object.values(answers).reduce(
+        (sum, selections) => sum + (selections?.length ?? 0),
+        0
+      );
+      const totalWeight = keywordTotalWeight + (selectedAnswerCount * QUIZ_DIRECT_MATCH_WEIGHT);
 
       const scored = leagues
         .map((league) => {
@@ -246,7 +349,27 @@ export default function LigasUnitauPage() {
           });
 
           const profileKeywordsArray = Array.from(profileKeywords);
-          let score = 0;
+          let keywordScore = 0;
+          let answerScore = 0;
+
+          if (profile) {
+            QUESTIONS.forEach((question) => {
+              const selectedAnswers = answers[question.key] ?? [];
+              const profileAnswers = profile.quizAnswers[question.key] ?? [];
+
+              selectedAnswers.forEach((selectedAnswer) => {
+                const normalizedSelectedAnswer = normalizeLeagueText(selectedAnswer);
+                const matched = profileAnswers.some(
+                  (profileAnswer) =>
+                    normalizeLeagueText(profileAnswer) === normalizedSelectedAnswer
+                );
+
+                if (matched) {
+                  answerScore += QUIZ_DIRECT_MATCH_WEIGHT;
+                }
+              });
+            });
+          }
 
           keywordWeight.forEach((weight, selectedKeyword) => {
             const expanded = expandLeagueKeyword(selectedKeyword);
@@ -261,10 +384,11 @@ export default function LigasUnitauPage() {
             const matchedByText = expanded.some((candidate) => leagueText.includes(candidate));
 
             if (matchedByProfile || matchedByText) {
-              score += weight;
+              keywordScore += weight;
             }
           });
 
+          const score = answerScore + keywordScore;
           const percent = totalWeight > 0 ? Math.round((score / totalWeight) * 100) : 0;
           return {
             ...league,
@@ -313,10 +437,10 @@ export default function LigasUnitauPage() {
     <div className="min-h-screen bg-[#050505] text-white p-6 font-sans pb-24">
       <header className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400"/></Link>
+            <Link href={tenantPath("/dashboard")} className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400"/></Link>
             <div><h1 className="text-2xl font-black uppercase flex items-center gap-2">Ligas <span className="text-emerald-500">Unitau</span></h1><p className="text-[10px] font-bold text-zinc-500 uppercase">Ecossistema Acadêmico</p></div>
         </div>
-        <Link href="/ligas" className="bg-zinc-900 border border-zinc-700 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase hover:bg-zinc-800 transition">Gerenciar</Link>
+        <Link href={tenantPath("/ligas")} className="bg-zinc-900 border border-zinc-700 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase hover:bg-zinc-800 transition">Gerenciar</Link>
       </header>
 
       {loading ? (
@@ -331,12 +455,12 @@ export default function LigasUnitauPage() {
             {!showQuizResult ? (
                 <>
                     <div className="mb-4"><span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1"><Brain size={12}/> Oráculo</span><h3 className="text-lg font-black italic">{QUESTIONS[quizStep].text}</h3><p className="text-[10px] text-zinc-500">Selecione até 3 opções:</p></div>
-                    <div className="space-y-2">{QUESTIONS[quizStep].options.map((opt, i) => (<button key={i} onClick={() => toggleOption(opt.keywords, opt.label)} className={`w-full text-left px-4 py-3 rounded-xl border text-xs font-bold transition flex justify-between ${selectedOptions.includes(opt.label) ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-900/50' : 'bg-black/40 border-zinc-800 text-zinc-400 hover:bg-zinc-800'}`}>{opt.label} {selectedOptions.includes(opt.label) && <CheckCircle2 size={14}/>}</button>))}</div>
+                    <div className="space-y-2">{QUESTIONS[quizStep].options.map((opt, i) => (<button key={i} onClick={() => toggleOption(opt.label)} className={`w-full text-left px-4 py-3 rounded-xl border text-xs font-bold transition flex justify-between ${selectedOptions.includes(opt.label) ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-900/50' : 'bg-black/40 border-zinc-800 text-zinc-400 hover:bg-zinc-800'}`}>{opt.label} {selectedOptions.includes(opt.label) && <CheckCircle2 size={14}/>}</button>))}</div>
                     <div className="mt-6 flex justify-between items-center"><div className="flex gap-1">{QUESTIONS.map((_, i) => <div key={i} className={`h-1 w-6 rounded-full transition-all ${i <= quizStep ? 'bg-indigo-500' : 'bg-zinc-800'}`}/>)}</div><button onClick={handleNextStep} disabled={selectedOptions.length === 0} className="bg-white hover:bg-zinc-200 text-indigo-900 px-6 py-2 rounded-xl text-xs font-black uppercase disabled:opacity-50 transition shadow-lg">Próxima</button></div>
                 </>
             ) : (
                 <div className="space-y-4 animate-in fade-in">
-                    <div className="flex justify-between items-center"><h2 className="text-xl font-black italic flex items-center gap-2"><Trophy className="text-yellow-500"/> Compatibilidade por Liga</h2><button onClick={() => {setQuizStep(0); setShowQuizResult(false); setSelectedOptions([]); setAllKeywords([]); setTopMatches([]);}} className="text-xs text-zinc-500 hover:text-white flex items-center gap-1"><RotateCcw size={12}/> Refazer</button></div>
+                    <div className="flex justify-between items-center"><h2 className="text-xl font-black italic flex items-center gap-2"><Trophy className="text-yellow-500"/> Compatibilidade por Liga</h2><button onClick={() => {setQuizStep(0); setShowQuizResult(false); setSelectedOptions([]); setQuizAnswers({}); setQuizKeywords([]); setTopMatches([]);}} className="text-xs text-zinc-500 hover:text-white flex items-center gap-1"><RotateCcw size={12}/> Refazer</button></div>
                     {topMatches.length > 0 && topMatches.every((league) => (league.matchPercent || 0) === 0) && (
                       <p className="text-xs text-zinc-500 italic">Nenhuma liga teve compatibilidade acima de 0% com este perfil.</p>
                     )}
@@ -372,7 +496,7 @@ export default function LigasUnitauPage() {
                       
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#050505] to-transparent"/>
-                    <div className="absolute bottom-2 left-4"><h2 className="text-3xl font-black italic uppercase tracking-tighter text-white drop-shadow-md">{l.sigla}</h2></div>
+                    <div className="absolute bottom-2 left-4"><h2 className="text-3xl font-black italic uppercase tracking-tighter text-white drop-shadow-md">{l.sigla || l.nome}</h2></div>
                 </div>
                 <div className="p-4 bg-[#050505] rounded-b-[20px] flex-1 flex flex-col justify-between">
                     <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed">{l.descricao || "Sem descrição disponível."}</p>
@@ -403,7 +527,7 @@ export default function LigasUnitauPage() {
                         
                       />
                       <div className="absolute bottom-4 left-6">
-                          <h1 className="text-4xl font-black italic text-white drop-shadow-lg">{selectedLeague.sigla}</h1>
+                          <h1 className="text-4xl font-black italic text-white drop-shadow-lg">{selectedLeague.sigla || selectedLeague.nome}</h1>
                           <p className="text-sm font-bold text-emerald-500 uppercase tracking-widest">{selectedLeague.nome}</p>
                       </div>
                   </div>
@@ -419,7 +543,7 @@ export default function LigasUnitauPage() {
                       {/* BIZU */}
                       {selectedLeague.bizu && (
                           <div className="bg-yellow-900/10 border-l-4 border-yellow-500 p-4 rounded-r-xl">
-                              <h3 className="text-xs font-black text-yellow-500 uppercase flex gap-2 mb-1"><Lightbulb size={14}/> Bizu da Liga</h3>
+                              <h3 className="text-xs font-black text-yellow-500 uppercase flex gap-2 mb-1"><Lightbulb size={14}/> Destaque da Liga</h3>
                               <p className="text-sm italic text-zinc-300">&quot;{selectedLeague.bizu}&quot;</p>
                           </div>
                       )}
@@ -433,7 +557,7 @@ export default function LigasUnitauPage() {
                               <h3 className="text-xs font-bold text-zinc-500 uppercase border-b border-zinc-800 pb-1 mb-3">Diretoria ({selectedLeague.membros.length})</h3>
                               <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar">
                                   {selectedLeague.membros.map((m, i) => (
-                                      <Link key={i} href={m.linkPerfil || "#"} className="flex flex-col items-center min-w-[80px] group">
+                                      <Link key={i} href={m.linkPerfil?.startsWith("/") ? tenantPath(m.linkPerfil) : (m.linkPerfil || "#")} className="flex flex-col items-center min-w-[80px] group">
                                           <div className="w-14 h-14 rounded-full border border-zinc-700 overflow-hidden group-hover:border-emerald-500 transition">
                                               <Image
                                                 src={m.foto || "https://github.com/shadcn.png"}
@@ -458,7 +582,7 @@ export default function LigasUnitauPage() {
                           {selectedLeague.eventos && selectedLeague.eventos.length > 0 ? (
                               <div className="space-y-2">
                                   {selectedLeague.eventos.map((ev, i) => (
-                                      <Link key={i} href={ev.linkEvento || "#"} className="bg-zinc-900 p-3 rounded-xl border border-zinc-800 flex items-center gap-4 hover:border-emerald-500 transition group">
+                                      <Link key={i} href={ev.linkEvento?.startsWith("/") ? tenantPath(ev.linkEvento) : (ev.linkEvento || "#")} className="bg-zinc-900 p-3 rounded-xl border border-zinc-800 flex items-center gap-4 hover:border-emerald-500 transition group">
                                           <div className="bg-emerald-900/30 text-emerald-500 p-2 rounded-lg group-hover:scale-110 transition"><Calendar size={20}/></div>
                                           <div><h4 className="font-bold text-sm text-white group-hover:text-emerald-400">{ev.titulo}</h4><p className="text-xs text-zinc-400">{ev.data} • {ev.local}</p></div>
                                       </Link>

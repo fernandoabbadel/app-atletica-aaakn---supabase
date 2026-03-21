@@ -4,7 +4,10 @@ import { getSupabaseClient } from "./supabase";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
-import { buildTenantScopedRowId } from "./tenantScopedCatalog";
+import {
+  buildTenantScopedRowId,
+  parseTenantScopedRowId,
+} from "./tenantScopedCatalog";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -107,13 +110,43 @@ const setMapCachedValue = <T>(
 const resolveConfigTenantId = (tenantId?: string | null): string =>
   resolveStoredTenantScopeId(asString(tenantId).trim());
 
+const resolvePlanTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const buildPlanIdCandidates = (
+  planId: string,
+  tenantId?: string | null
+): string[] => {
+  const cleanPlanId = planId.trim();
+  if (!cleanPlanId) return [];
+
+  const scopedTenantId = resolvePlanTenantId(tenantId);
+  const scopedId = buildTenantScopedRowId(scopedTenantId, cleanPlanId);
+  const baseId = parseTenantScopedRowId(cleanPlanId).baseId;
+
+  return Array.from(
+    new Set([scopedId, cleanPlanId, baseId].map((entry) => entry.trim()).filter(Boolean))
+  );
+};
+
+const slugifyPlanBaseId = (value: string): string => {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return normalized || `plano_${Date.now()}`;
+};
+
 const resolveConfigDocIds = (
   baseId: string,
   tenantId?: string | null
 ): string[] => {
   const scopedTenantId = resolveConfigTenantId(tenantId);
   if (!scopedTenantId) return [baseId];
-  return [buildTenantScopedRowId(scopedTenantId, baseId), baseId];
+  return [buildTenantScopedRowId(scopedTenantId, baseId)];
 };
 
 const pickConfigRow = (
@@ -403,15 +436,15 @@ type DefaultPlanSeedEntry = {
 };
 
 const DEFAULT_BANNER_CONFIG: BannerConfigRecord = {
-  titulo: "VIRE TUBARAO REI",
-  subtitulo: "Domine o Oceano",
+  titulo: "SEJA SOCIO DA ATLETICA",
+  subtitulo: "Beneficios oficiais para o seu ecossistema",
   cor: "dourado",
 };
 
 const DEFAULT_FINANCE_CONFIG: FinanceConfigRecord = {
-  chave: "financeiro@aaakn.com.br",
-  banco: "Banco Inter",
-  titular: "Assoc. Atletica Acad. Knight",
+  chave: "financeiro@atletica.com.br",
+  banco: "Banco da Atletica",
+  titular: "Atletica",
 };
 
 const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
@@ -422,7 +455,7 @@ const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
       preco: "0,00",
       precoVal: 0,
       parcelamento: "Acesso gratuito",
-      descricao: "Entrada no ecossistema AAAKN",
+      descricao: "Entrada no ecossistema da atletica",
       cor: "zinc",
       icon: "ghost",
       destaque: false,
@@ -640,10 +673,12 @@ const clearAdminPlanReadCaches = (): void => {
 export async function fetchPlanCatalog(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PlanRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 24, MAX_PLAN_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCachedValue(plansCache, cacheKey);
@@ -651,11 +686,14 @@ export async function fetchPlanCatalog(options?: {
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("planos")
     .select(PLANOS_SELECT_COLUMNS)
-    .order("precoVal", { ascending: true })
-    .limit(maxResults);
+    .order("precoVal", { ascending: true });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   const plans = (data ?? [])
@@ -668,50 +706,71 @@ export async function fetchPlanCatalog(options?: {
 
 export async function fetchPlanById(
   planId: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<PlanRecord | null> {
   const cleanId = planId.trim();
   if (!cleanId) return null;
 
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${cleanId}`;
   const forceRefresh = options?.forceRefresh ?? false;
   if (!forceRefresh) {
-    const cachedEntry = planByIdCache.get(cleanId);
+    const cachedEntry = planByIdCache.get(cacheKey);
     if (cachedEntry) {
       if (Date.now() - cachedEntry.cachedAt <= READ_CACHE_TTL_MS) {
         return cachedEntry.value;
       }
-      planByIdCache.delete(cleanId);
+      planByIdCache.delete(cacheKey);
     }
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("planos")
-    .select(PLANOS_SELECT_COLUMNS)
-    .eq("id", cleanId)
-    .maybeSingle();
-  if (error) throwSupabaseError(error);
-
-  if (!data) {
-    setMapCachedValue(planByIdCache, cleanId, null);
+  const candidateIds = buildPlanIdCandidates(cleanId, scopedTenantId);
+  if (candidateIds.length === 0) {
+    setMapCachedValue(planByIdCache, cacheKey, null);
     return null;
   }
 
-  const plan = normalizePlan(cleanId, data);
-  setMapCachedValue(planByIdCache, cleanId, plan);
+  let query = supabase
+    .from("planos")
+    .select(PLANOS_SELECT_COLUMNS)
+    .in("id", candidateIds);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(candidateIds.length);
+  if (error) throwSupabaseError(error);
+
+  const rows = Array.isArray(data) ? data : [];
+  if (rows.length === 0) {
+    setMapCachedValue(planByIdCache, cacheKey, null);
+    return null;
+  }
+
+  const selectedRow =
+    candidateIds
+      .map((candidateId) =>
+        rows.find((row) => asString((row as Record<string, unknown>).id).trim() === candidateId)
+      )
+      .find((row) => row !== undefined) ?? rows[0];
+
+  const plan = normalizePlan(asString((selectedRow as Record<string, unknown>).id), selectedRow);
+  setMapCachedValue(planByIdCache, cacheKey, plan);
   return plan;
 }
 
 export async function fetchPlanSubscriptions(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PlanSubscriptionRecord[]> {
   const maxResults = boundedLimit(
     options?.maxResults ?? 480,
     MAX_SUBSCRIPTION_RESULTS
   );
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCachedValue(subscriptionsCache, cacheKey);
@@ -719,11 +778,14 @@ export async function fetchPlanSubscriptions(options?: {
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("assinaturas")
     .select(ASSINATURAS_SELECT_COLUMNS)
-    .order("dataInicio", { ascending: false })
-    .limit(maxResults);
+    .order("dataInicio", { ascending: false });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   const rows = (data ?? [])
@@ -739,10 +801,12 @@ export async function fetchPlanSubscriptions(options?: {
 export async function fetchPlanRequests(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PlanRequestRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 260, MAX_REQUEST_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCachedValue(adminRequestsCache, cacheKey);
@@ -752,11 +816,14 @@ export async function fetchPlanRequests(options?: {
   let rows: PlanRequestRecord[] = [];
   const supabase = getSupabaseClient();
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from("solicitacoes_adesao")
       .select(SOLICITACOES_ADESAO_SELECT_COLUMNS)
-      .order("dataSolicitacao", { ascending: false })
-      .limit(maxResults);
+      .order("dataSolicitacao", { ascending: false });
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query.limit(maxResults);
     if (error) throw error;
 
     rows = (data ?? [])
@@ -769,10 +836,13 @@ export async function fetchPlanRequests(options?: {
       throw error;
     }
 
-    const { data: fallbackData, error: fallbackError } = await supabase
+    let fallbackQuery = supabase
       .from("solicitacoes_adesao")
-      .select(SOLICITACOES_ADESAO_SELECT_COLUMNS)
-      .limit(maxResults);
+      .select(SOLICITACOES_ADESAO_SELECT_COLUMNS);
+    if (scopedTenantId) {
+      fallbackQuery = fallbackQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { data: fallbackData, error: fallbackError } = await fallbackQuery.limit(maxResults);
     if (fallbackError) throwSupabaseError(fallbackError);
 
     rows = sortByDateDesc(
@@ -789,7 +859,7 @@ export async function fetchPlanRequests(options?: {
 
 export async function fetchUserPlanRequests(
   userId: string,
-  options?: { maxResults?: number; forceRefresh?: boolean }
+  options?: { maxResults?: number; forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<PlanRequestRecord[]> {
   const cleanUserId = userId.trim();
   if (!cleanUserId) return [];
@@ -799,7 +869,8 @@ export async function fetchUserPlanRequests(
     MAX_USER_REQUEST_RESULTS
   );
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${cleanUserId}:${maxResults}`;
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${cleanUserId}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCachedValue(userRequestsCache, cacheKey);
@@ -807,11 +878,14 @@ export async function fetchUserPlanRequests(
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("solicitacoes_adesao")
     .select(SOLICITACOES_ADESAO_SELECT_COLUMNS)
-    .eq("userId", cleanUserId)
-    .limit(maxResults);
+    .eq("userId", cleanUserId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   const rows = sortByDateDesc(
@@ -896,7 +970,9 @@ export async function createPlanRequest(payload: {
   planoId: string;
   planoNome: string;
   valor: number;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
+  const scopedTenantId = resolvePlanTenantId(payload.tenantId);
   const requestPayload = {
     userId: payload.userId.trim(),
     userName: payload.userName.trim().slice(0, 120) || "Aluno",
@@ -919,6 +995,7 @@ export async function createPlanRequest(payload: {
         .from("solicitacoes_adesao")
         .insert({
           ...requestPayload,
+          ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
           dataSolicitacao: nowIso(),
           status: "pendente",
           metodo: "whatsapp",
@@ -938,10 +1015,19 @@ export async function createPlanRequest(payload: {
 export async function upsertPlan(payload: {
   id?: string;
   data: Partial<PlanRecord>;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
   const id = payload.id?.trim() || "";
   const normalizedData = normalizePlanPayload(payload.data);
-  const requestPayload = { id, data: normalizedData };
+  const scopedTenantId = resolvePlanTenantId(payload.tenantId);
+  const scopedId =
+    buildTenantScopedRowId(
+      scopedTenantId,
+      id || slugifyPlanBaseId(normalizedData.nome)
+    ) ||
+    id ||
+    slugifyPlanBaseId(normalizedData.nome);
+  const requestPayload = { id: scopedId, data: normalizedData };
 
   const result = await callWithFallback<typeof requestPayload, { id: string }>(
     PLAN_UPSERT_CALLABLE,
@@ -951,15 +1037,25 @@ export async function upsertPlan(payload: {
       if (id) {
         const { error } = await supabase
           .from("planos")
-          .update(normalizedData)
-          .eq("id", id);
+          .update({
+            ...normalizedData,
+            tenant_id: scopedTenantId || null,
+            updatedAt: nowIso(),
+          })
+          .eq("id", scopedId);
         if (error) throwSupabaseError(error);
-        return { id };
+        return { id: scopedId };
       }
 
       const { data, error } = await supabase
         .from("planos")
-        .insert(normalizedData)
+        .insert({
+          id: scopedId,
+          ...normalizedData,
+          tenant_id: scopedTenantId || null,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        })
         .select("id")
         .single();
       if (error) throwSupabaseError(error);
@@ -971,16 +1067,25 @@ export async function upsertPlan(payload: {
   return result;
 }
 
-export async function deletePlan(planId: string): Promise<void> {
+export async function deletePlan(
+  planId: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const cleanId = planId.trim();
   if (!cleanId) return;
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
+  const candidateIds = buildPlanIdCandidates(cleanId, scopedTenantId);
 
   await callWithFallback<{ id: string }, { ok: boolean }>(
     PLAN_DELETE_CALLABLE,
-    { id: cleanId },
+    { id: candidateIds[0] || cleanId },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase.from("planos").delete().eq("id", cleanId);
+      let query = supabase.from("planos").delete().in("id", candidateIds);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -989,10 +1094,14 @@ export async function deletePlan(planId: string): Promise<void> {
   clearPlanReadCaches();
 }
 
-export async function seedDefaultPlans(entries: Partial<PlanRecord>[]): Promise<void> {
+export async function seedDefaultPlans(
+  entries: Partial<PlanRecord>[],
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const safeEntries = entries
     .slice(0, MAX_PLAN_RESULTS)
     .map((entry) => normalizePlanPayload(entry));
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
 
   await callWithFallback<{ plans: Omit<PlanRecord, "id">[] }, { ok: boolean }>(
     PLAN_SEED_CALLABLE,
@@ -1000,7 +1109,14 @@ export async function seedDefaultPlans(entries: Partial<PlanRecord>[]): Promise<
     async () => {
       if (safeEntries.length === 0) return { ok: true };
       const supabase = getSupabaseClient();
-      const { error } = await supabase.from("planos").insert(safeEntries);
+      const rows = safeEntries.map((entry) => ({
+        id: buildTenantScopedRowId(scopedTenantId, slugifyPlanBaseId(entry.nome)),
+        ...entry,
+        tenant_id: scopedTenantId || null,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      }));
+      const { error } = await supabase.from("planos").insert(rows);
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -1011,25 +1127,39 @@ export async function seedDefaultPlans(entries: Partial<PlanRecord>[]): Promise<
 
 export async function restoreDefaultPlanCatalog(options?: {
   overwriteExisting?: boolean;
+  tenantId?: string | null;
 }): Promise<{ restored: number; skipped: boolean }> {
   const overwriteExisting = options?.overwriteExisting ?? false;
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
 
   const existing = await fetchPlanCatalog({
     maxResults: MAX_PLAN_RESULTS,
     forceRefresh: true,
+    tenantId: scopedTenantId,
   });
-  if (existing.length > 0 && !overwriteExisting) {
+  const existingBaseIds = new Set(
+    existing
+      .map((plan) => parseTenantScopedRowId(plan.id).baseId.trim().toLowerCase())
+      .filter((value) => value.length > 0)
+  );
+  const entriesToRestore = overwriteExisting
+    ? [...DEFAULT_PLAN_CATALOG]
+    : DEFAULT_PLAN_CATALOG.filter(
+        (entry) => !existingBaseIds.has(entry.id.trim().toLowerCase())
+      );
+  if (entriesToRestore.length === 0) {
     return { restored: 0, skipped: true };
   }
 
   const supabase = getSupabaseClient();
-  const writes = DEFAULT_PLAN_CATALOG.map(async (entry) => {
+  const writes = entriesToRestore.map(async (entry) => {
     const { error } = await supabase
       .from("planos")
       .upsert(
         {
-          id: entry.id,
+          id: buildTenantScopedRowId(scopedTenantId, entry.id) || entry.id,
           ...entry.data,
+          tenant_id: scopedTenantId || null,
           createdAt: nowIso(),
           updatedAt: nowIso(),
         },
@@ -1039,7 +1169,7 @@ export async function restoreDefaultPlanCatalog(options?: {
   });
   await Promise.all(writes);
   clearPlanReadCaches();
-  return { restored: DEFAULT_PLAN_CATALOG.length, skipped: false };
+  return { restored: entriesToRestore.length, skipped: false };
 }
 
 export async function saveMarketingBannerConfig(
@@ -1060,6 +1190,7 @@ export async function saveMarketingBannerConfig(
       const { error } = await supabase.from("app_config").upsert(
         {
           id: buildTenantScopedRowId(scopedTenantId, "marketing_banner") || "marketing_banner",
+          ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
           ...normalized,
         },
         { onConflict: "id" }

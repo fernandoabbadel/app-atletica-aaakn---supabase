@@ -29,8 +29,12 @@ import {
   PLATFORM_LOGO_URL,
 } from "@/constants/platformBrand";
 import { type LandingConfig } from "@/lib/adminLandingService";
-import { type PublicLandingPayload } from "@/lib/publicLandingService";
+import {
+  fetchPublicLandingData,
+  type PublicLandingPayload,
+} from "@/lib/publicLandingService";
 import { hasAdminPanelAccess } from "@/lib/roles";
+import { fetchTenantBySlug } from "@/lib/tenantService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const DEFAULT_CONFIG: LandingConfig = {
@@ -169,7 +173,33 @@ const resolveFallbackBrand = (fallbackSlug: string): BrandState => {
     sigla: fallbackName,
     nome: fallbackName,
     subtitle: "Landing oficial da atletica.",
-    logoUrl: "/logo.png",
+    logoUrl: PLATFORM_LOGO_URL,
+  };
+};
+
+const loadLandingPayloadFallback = async (
+  tenantSlug: string
+): Promise<Partial<PublicLandingPayload>> => {
+  const tenant = tenantSlug ? await fetchTenantBySlug(tenantSlug) : null;
+  const tenantId = tenant?.id?.trim() || "";
+  const data = await fetchPublicLandingData({
+    forceRefresh: true,
+    tenantId,
+  });
+
+  return {
+    ...data,
+    tenantId,
+    brand: tenant
+      ? {
+          sigla: tenant.sigla || tenant.slug.toUpperCase() || "TENANT",
+          nome: tenant.nome || tenant.sigla || tenant.slug.toUpperCase() || "TENANT",
+          subtitle: tenant.curso || tenant.faculdade || "Landing oficial da atletica.",
+          logoUrl: tenant.logoUrl || PLATFORM_LOGO_URL,
+        }
+      : tenantSlug
+        ? resolveFallbackBrand(tenantSlug)
+        : DEFAULT_BRAND,
   };
 };
 
@@ -194,11 +224,11 @@ export default function PublicLandingPage({
   const [activeTab, setActiveTab] = useState<"aluno" | "empresa">("aluno");
 
   const dashboardPath = useMemo(() => {
-    if (user?.isAnonymous) {
-      return isTenantLanding ? withTenantSlug(tenantSlug, "/dashboard") : "/visitante";
+    if (!isTenantLanding) {
+      return "/visitante";
     }
-    return isTenantLanding ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
-  }, [isTenantLanding, tenantSlug, user?.isAnonymous]);
+    return withTenantSlug(tenantSlug, "/dashboard");
+  }, [isTenantLanding, tenantSlug]);
 
   const adminPath = useMemo(
     () => (isTenantLanding ? withTenantSlug(tenantSlug, "/admin") : "/admin"),
@@ -215,14 +245,30 @@ export default function PublicLandingPage({
         const search = tenantSlug
           ? `?tenant=${encodeURIComponent(tenantSlug)}`
           : "?scope=platform";
-        const response = await fetch(`/api/public/landing${search}`, {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          throw new Error(`Falha ao carregar landing: ${response.status}`);
+        let data: Partial<PublicLandingPayload>;
+
+        try {
+          const response = await fetch(`/api/public/landing${search}`, {
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            throw new Error(`Falha ao carregar landing: ${response.status}`);
+          }
+          data = (await response.json()) as Partial<PublicLandingPayload>;
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message.toLowerCase() : "";
+          const shouldUseClientFallback =
+            message.includes("404") ||
+            message.includes("failed to fetch") ||
+            message.includes("network");
+
+          if (!shouldUseClientFallback) {
+            throw error;
+          }
+
+          data = await loadLandingPayloadFallback(tenantSlug);
         }
 
-        const data = (await response.json()) as Partial<PublicLandingPayload>;
         const rawConfig =
           data.config && typeof data.config === "object"
             ? (data.config as LandingConfig)
@@ -364,21 +410,31 @@ export default function PublicLandingPage({
             </p>
           </div>
         </div>
-        {isTenantLanding ? (
-          <Link
-            href="/"
-            className="rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
-          >
-            USC Oficial
-          </Link>
-        ) : (
-          <Link
-            href="/nova-atletica"
-            className="rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
-          >
-            Cadastrar Atletica
-          </Link>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {isTenantLanding ? (
+            <Link
+              href="/"
+              className="rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
+            >
+              USC Oficial
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/contato-usc"
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-zinc-100 hover:bg-white/10"
+              >
+                Duvidas, contato e sugestoes
+              </Link>
+              <Link
+                href="/nova-atletica"
+                className="rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
+              >
+                Cadastrar Atletica
+              </Link>
+            </>
+          )}
+        </div>
       </header>
 
       <main className="relative z-10 container mx-auto px-4 pb-20 pt-8 lg:flex lg:items-center lg:gap-16 lg:pt-14">
@@ -472,7 +528,11 @@ export default function PublicLandingPage({
                   className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-black text-zinc-900 transition-all hover:bg-zinc-200"
                 >
                   <LayoutDashboard size={18} />
-                  {user.isAnonymous ? "Abrir como visitante" : "Abrir dashboard"}
+                  {isTenantLanding
+                    ? user.isAnonymous
+                      ? "Abrir como visitante"
+                      : "Abrir dashboard"
+                    : "Escolher atletica"}
                 </button>
                 {canOpenAdmin && (
                   <button
@@ -520,7 +580,7 @@ export default function PublicLandingPage({
         <div className="mb-8 flex items-center justify-center gap-2 lg:justify-start">
           <Star className="fill-brand-solid text-brand" />
           <h3 className="text-xl font-black uppercase tracking-tight text-white">
-            O Cardume Aprova
+            Quem Usa Aprova
           </h3>
         </div>
 

@@ -6,6 +6,7 @@ import { clearDashboardCaches as clearPublicDashboardCaches } from "./dashboardP
 import { getSupabaseClient } from "./supabase";
 import { incrementUserStats } from "./supabaseData";
 import { uploadImage } from "./upload";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -32,6 +33,8 @@ const leagueSummariesCache = new Map<string, CacheEntry<LeagueRecord[]>>();
 const usersCache = new Map<string, CacheEntry<LeagueUserRecord[]>>();
 const leagueByIdCache = new Map<string, CacheEntry<LeagueRecord | null>>();
 const pollsCache = new Map<string, CacheEntry<LeaguePollRecord[]>>();
+const resolveLeagueTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(typeof tenantId === "string" ? tenantId.trim() : "");
 
 const LEAGUES_SELECT_COLUMNS = [
   "id",
@@ -51,6 +54,23 @@ const LEAGUES_SELECT_COLUMNS = [
   "bizu",
   "likes",
   "membrosIds",
+  "status",
+  "createdAt",
+  "updatedAt",
+] as const;
+
+const LEAGUE_SUMMARY_SELECT_COLUMNS = [
+  "id",
+  "nome",
+  "sigla",
+  "descricao",
+  "foto",
+  "logoUrl",
+  "logo",
+  "visivel",
+  "ativa",
+  "bizu",
+  "likes",
   "status",
   "createdAt",
   "updatedAt",
@@ -494,7 +514,7 @@ const normalizeLeaguePayload = (
     descricao: asString(payload.descricao).slice(0, 4_000),
     senha: asString(payload.senha).slice(0, 120),
     foto: asString(payload.foto),
-    ...(logoUrl ? { logoUrl, logoBase64: logoUrl } : { logoUrl: undefined, logoBase64: undefined }),
+    ...(logoUrl ? { logoUrl, logo: logoUrl } : { logoUrl: undefined, logo: undefined }),
     visivel: Boolean(payload.visivel),
     ativa: Boolean(payload.ativa),
     membros: Array.isArray(payload.membros) ? payload.membros : [],
@@ -588,12 +608,14 @@ export async function fetchLeagues(options?: {
   orderDirection?: "asc" | "desc";
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<LeagueRecord[]> {
   const orderByField = options?.orderByField ?? "nome";
   const orderDirection = options?.orderDirection ?? "asc";
   const maxResults = boundedLimit(options?.maxResults ?? 40, MAX_LEAGUE_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${orderByField}:${orderDirection}:${maxResults}`;
+  const scopedTenantId = resolveLeagueTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${orderByField}:${orderDirection}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCacheValue(leaguesCache, cacheKey);
@@ -605,11 +627,15 @@ export async function fetchLeagues(options?: {
   let leagues: LeagueRecord[] = [];
 
   while (selectColumns.length > 0) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("ligas_config")
       .select(selectColumns.join(","))
       .order(orderByField, { ascending: orderDirection === "asc" })
       .limit(maxResults);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query;
     if (!error) {
       leagues = (data ?? [])
         .map((row) => normalizeLeague(rowIdFromUnknown(row), row))
@@ -633,24 +659,48 @@ export async function fetchLeagueSummaries(options?: {
   orderDirection?: "asc" | "desc";
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<LeagueRecord[]> {
   const orderByField = options?.orderByField ?? "nome";
   const orderDirection = options?.orderDirection ?? "asc";
   const maxResults = boundedLimit(options?.maxResults ?? 40, MAX_LEAGUE_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${orderByField}:${orderDirection}:${maxResults}`;
+  const scopedTenantId = resolveLeagueTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${orderByField}:${orderDirection}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCacheValue(leagueSummariesCache, cacheKey);
     if (cached) return cached;
   }
 
-  const leagues = await fetchLeagues({
-    orderByField,
-    orderDirection,
-    maxResults,
-    forceRefresh,
-  });
+  const supabase = getSupabaseClient();
+  let selectColumns: string[] = [...LEAGUE_SUMMARY_SELECT_COLUMNS];
+  let leagues: LeagueRecord[] = [];
+
+  while (selectColumns.length > 0) {
+    let query = supabase
+      .from("ligas_config")
+      .select(selectColumns.join(","))
+      .order(orderByField, { ascending: orderDirection === "asc" })
+      .limit(maxResults);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+
+    const { data, error } = await query;
+    if (!error) {
+      leagues = (data ?? [])
+        .map((row) => normalizeLeague(rowIdFromUnknown(row), row))
+        .filter((row): row is LeagueRecord => row !== null);
+      break;
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+    const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+    if (!nextColumns.length) throwSupabaseError(error);
+    selectColumns = nextColumns;
+  }
 
   setCacheValue(leagueSummariesCache, cacheKey, leagues);
   return leagues;
@@ -658,14 +708,16 @@ export async function fetchLeagueSummaries(options?: {
 
 export async function fetchLeagueById(
   leagueId: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<LeagueRecord | null> {
   const cleanId = leagueId.trim();
   if (!cleanId) return null;
 
   const forceRefresh = options?.forceRefresh ?? false;
+  const scopedTenantId = resolveLeagueTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${cleanId}`;
   if (!forceRefresh) {
-    const cached = getCacheValue(leagueByIdCache, cleanId);
+    const cached = getCacheValue(leagueByIdCache, cacheKey);
     if (cached !== null) return cached;
   }
 
@@ -674,14 +726,17 @@ export async function fetchLeagueById(
   let league: LeagueRecord | null = null;
 
   while (selectColumns.length > 0) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("ligas_config")
       .select(selectColumns.join(","))
-      .eq("id", cleanId)
-      .maybeSingle();
+      .eq("id", cleanId);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query.maybeSingle();
     if (!error) {
       if (!data) {
-        setCacheValue(leagueByIdCache, cleanId, null);
+        setCacheValue(leagueByIdCache, cacheKey, null);
         return null;
       }
       league = normalizeLeague(rowIdFromUnknown(data), data);
@@ -695,17 +750,19 @@ export async function fetchLeagueById(
     selectColumns = nextColumns;
   }
 
-  setCacheValue(leagueByIdCache, cleanId, league);
+  setCacheValue(leagueByIdCache, cacheKey, league);
   return league;
 }
 
 export async function fetchLeagueUsers(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<LeagueUserRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 120, MAX_USER_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveLeagueTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCacheValue(usersCache, cacheKey);
@@ -717,10 +774,14 @@ export async function fetchLeagueUsers(options?: {
   let users: LeagueUserRecord[] = [];
 
   while (selectColumns.length > 0) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("users")
       .select(selectColumns.join(","))
       .limit(maxResults);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query;
     if (!error) {
       users = (data ?? [])
         .map((row) =>
@@ -750,10 +811,16 @@ export async function fetchLeagueUsers(options?: {
 export async function saveLeagueConfig(payload: {
   id?: string;
   data: Partial<LeagueRecord>;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
   const normalizedData = normalizeLeaguePayload(payload.data);
   const id = payload.id?.trim() || "";
-  const requestPayload = { id, data: normalizedData };
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  const requestPayload = {
+    id,
+    data: normalizedData,
+    tenantId: scopedTenantId || undefined,
+  };
 
   const result = await callWithFallback<typeof requestPayload, { id: string }>(
     LEAGUE_SAVE_CALLABLE,
@@ -761,13 +828,17 @@ export async function saveLeagueConfig(payload: {
     async () => {
       const supabase = getSupabaseClient();
       if (id) {
-        const { error } = await supabase
+        let query = supabase
           .from("ligas_config")
           .update({
             ...normalizedData,
             updatedAt: nowIso(),
           })
           .eq("id", id);
+        if (scopedTenantId) {
+          query = query.eq("tenant_id", scopedTenantId);
+        }
+        const { error } = await query;
         if (error) throwSupabaseError(error);
 
         return { id };
@@ -777,6 +848,7 @@ export async function saveLeagueConfig(payload: {
         .from("ligas_config")
         .insert({
           ...normalizedData,
+          ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
           createdAt: nowIso(),
           updatedAt: nowIso(),
         })
@@ -791,16 +863,24 @@ export async function saveLeagueConfig(payload: {
   return result;
 }
 
-export async function deleteLeagueConfig(id: string): Promise<void> {
+export async function deleteLeagueConfig(
+  id: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const cleanId = id.trim();
   if (!cleanId) return;
+  const scopedTenantId = resolveLeagueTenantId(options?.tenantId);
 
-  await callWithFallback<{ id: string }, { ok: boolean }>(
+  await callWithFallback<{ id: string; tenantId?: string }, { ok: boolean }>(
     LEAGUE_DELETE_CALLABLE,
-    { id: cleanId },
+    { id: cleanId, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase.from("ligas_config").delete().eq("id", cleanId);
+      let query = supabase.from("ligas_config").delete().eq("id", cleanId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -812,23 +892,33 @@ export async function deleteLeagueConfig(id: string): Promise<void> {
 export async function setLeagueVisibility(payload: {
   id: string;
   visivel: boolean;
+  tenantId?: string | null;
 }): Promise<void> {
   const cleanId = payload.id.trim();
   if (!cleanId) return;
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
 
-  const requestPayload = { id: cleanId, visivel: payload.visivel };
+  const requestPayload = {
+    id: cleanId,
+    visivel: payload.visivel,
+    tenantId: scopedTenantId || undefined,
+  };
   await callWithFallback<typeof requestPayload, { ok: boolean }>(
     LEAGUE_VISIBILITY_CALLABLE,
     requestPayload,
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
+      let query = supabase
         .from("ligas_config")
         .update({
           visivel: payload.visivel,
           updatedAt: nowIso(),
         })
         .eq("id", cleanId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -841,31 +931,40 @@ export async function changeLeagueLikeCount(payload: {
   id: string;
   delta: 1 | -1;
   actorUserId?: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const cleanId = payload.id.trim();
   if (!cleanId) return;
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
 
   await callWithFallback<typeof payload, { ok: boolean }>(
     LEAGUE_LIKE_CALLABLE,
     payload,
     async () => {
       const supabase = getSupabaseClient();
-      const { data: leagueRow, error: selectError } = await supabase
+      let selectQuery = supabase
         .from("ligas_config")
         .select("likes")
-        .eq("id", cleanId)
-        .maybeSingle();
+        .eq("id", cleanId);
+      if (scopedTenantId) {
+        selectQuery = selectQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { data: leagueRow, error: selectError } = await selectQuery.maybeSingle();
       if (selectError) throwSupabaseError(selectError);
       const currentLikes = Math.max(0, asNumber(asObject(leagueRow)?.likes, 0));
       const nextLikes = Math.max(0, currentLikes + payload.delta);
 
-      const { error: updateError } = await supabase
+      let updateQuery = supabase
         .from("ligas_config")
         .update({
           likes: nextLikes,
           updatedAt: nowIso(),
         })
         .eq("id", cleanId);
+      if (scopedTenantId) {
+        updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { error: updateError } = await updateQuery;
       if (updateError) throwSupabaseError(updateError);
       return { ok: true };
     }
@@ -885,14 +984,15 @@ export async function changeLeagueLikeCount(payload: {
 
 export async function fetchEventPolls(
   eventId: string,
-  options?: { maxResults?: number; forceRefresh?: boolean }
+  options?: { maxResults?: number; forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<LeaguePollRecord[]> {
   const cleanEventId = eventId.trim();
   if (!cleanEventId) return [];
 
   const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_POLL_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${cleanEventId}:${maxResults}`;
+  const scopedTenantId = resolveLeagueTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${cleanEventId}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCacheValue(pollsCache, cacheKey);
@@ -904,11 +1004,15 @@ export async function fetchEventPolls(
   let polls: LeaguePollRecord[] = [];
 
   while (selectColumns.length > 0) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("eventos_enquetes")
       .select(selectColumns.join(","))
       .eq("eventoId", cleanEventId)
       .limit(maxResults);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query;
     if (!error) {
       polls = (data ?? [])
         .map((row) => normalizePoll(rowIdFromUnknown(row), row))
@@ -932,15 +1036,19 @@ export async function createEventPoll(payload: {
   question: string;
   allowUserOptions: boolean;
   creatorId?: string;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
   const eventId = payload.eventId.trim();
   if (!eventId) throw new Error("Evento inválido.");
+
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
 
   const requestPayload = {
     eventId,
     question: payload.question.trim().slice(0, 280),
     allowUserOptions: payload.allowUserOptions,
     creatorId: payload.creatorId?.trim() || "",
+    tenantId: scopedTenantId || undefined,
   };
 
   const result = await callWithFallback<typeof requestPayload, { id: string }>(
@@ -956,6 +1064,7 @@ export async function createEventPoll(payload: {
         voters: [],
         userVotes: {},
         creatorId: requestPayload.creatorId || null,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         isOfficial: true,
         createdAt: nowIso(),
         updatedAt: nowIso(),
@@ -990,21 +1099,27 @@ export async function createEventPoll(payload: {
 export async function deleteEventPoll(payload: {
   eventId: string;
   pollId: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const eventId = payload.eventId.trim();
   const pollId = payload.pollId.trim();
   if (!eventId || !pollId) return;
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
 
   await callWithFallback<typeof payload, { ok: boolean }>(
     LEAGUE_POLL_DELETE_CALLABLE,
     payload,
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
+      let query = supabase
         .from("eventos_enquetes")
         .delete()
         .eq("id", pollId)
         .eq("eventoId", eventId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -1017,10 +1132,12 @@ export async function updateEventPollOptions(payload: {
   eventId: string;
   pollId: string;
   options: LeaguePollOptionRecord[];
+  tenantId?: string | null;
 }): Promise<void> {
   const eventId = payload.eventId.trim();
   const pollId = payload.pollId.trim();
   if (!eventId || !pollId) return;
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
 
   const normalizedOptions = payload.options.slice(0, 80).map((option) => ({
     text: option.text.slice(0, 120),
@@ -1036,7 +1153,7 @@ export async function updateEventPollOptions(payload: {
     requestPayload,
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
+      let query = supabase
         .from("eventos_enquetes")
         .update({
           options: normalizedOptions,
@@ -1044,6 +1161,10 @@ export async function updateEventPollOptions(payload: {
         })
         .eq("id", pollId)
         .eq("eventoId", eventId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }

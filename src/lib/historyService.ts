@@ -2,9 +2,11 @@ import { httpsCallable } from "@/lib/supa/functions";
 import { getDownloadURL, ref, uploadBytes } from "@/lib/supa/storage";
 
 import { functions, storage } from "./backend";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { getBackendErrorCode } from "./backendErrors";
 import { throwSupabaseError } from "./supabaseData";
 import { getSupabaseClient } from "./supabase";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 import { validateImageFile } from "./upload";
 
 type CacheEntry<T> = {
@@ -20,10 +22,11 @@ const HISTORY_UPDATE_EVENT_CALLABLE = "historyUpdateEvent";
 const HISTORY_DELETE_EVENT_CALLABLE = "historyDeleteEvent";
 const HISTORY_SAVE_CONFIG_CALLABLE = "historySavePageConfig";
 const HISTORY_SEED_CALLABLE = "historySeedEvents";
+const HISTORY_CONFIG_DOC_ID = "historico";
 const nowIso = (): string => new Date().toISOString();
 
 const eventsCache = new Map<string, CacheEntry<HistoricEventRecord[]>>();
-let configCache: CacheEntry<HistoryPageConfig | null> | null = null;
+const configCache = new Map<string, CacheEntry<HistoryPageConfig | null>>();
 
 const asObject = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== "object" || value === null) return null;
@@ -73,6 +76,13 @@ const boundedLimit = (requested: number, maxAllowed: number): number => {
   return Math.floor(requested);
 };
 
+const resolveHistoryTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const resolveHistoryConfigDocId = (tenantId?: string | null): string =>
+  buildTenantScopedRowId(resolveHistoryTenantId(tenantId), HISTORY_CONFIG_DOC_ID) ||
+  HISTORY_CONFIG_DOC_ID;
+
 const getCacheValue = <T>(
   cache: Map<string, CacheEntry<T>>,
   key: string
@@ -96,7 +106,7 @@ const setCacheValue = <T>(
 
 const clearReadCaches = (): void => {
   eventsCache.clear();
-  configCache = null;
+  configCache.clear();
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
@@ -178,11 +188,13 @@ export async function fetchHistoricEvents(options?: {
   order?: "asc" | "desc";
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<HistoricEventRecord[]> {
   const order = options?.order ?? "desc";
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_HISTORY_EVENTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${order}:${maxResults}`;
+  const scopedTenantId = resolveHistoryTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${order}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCacheValue(eventsCache, cacheKey);
@@ -190,11 +202,14 @@ export async function fetchHistoricEvents(options?: {
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("historic_events")
     .select("id,titulo,data,ano,descricao,local,foto")
-    .order("data", { ascending: order === "asc" })
-    .limit(maxResults);
+    .order("data", { ascending: order === "asc" });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   const events = (data ?? [])
@@ -207,21 +222,26 @@ export async function fetchHistoricEvents(options?: {
 
 export async function fetchHistoryPageConfig(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<HistoryPageConfig | null> {
   const forceRefresh = options?.forceRefresh ?? false;
-  if (!forceRefresh && configCache && Date.now() - configCache.cachedAt <= READ_CACHE_TTL_MS) {
-    return configCache.value;
+  const scopedTenantId = resolveHistoryTenantId(options?.tenantId);
+  const cacheKey = scopedTenantId || "global";
+  const cached = configCache.get(cacheKey);
+  if (!forceRefresh && cached && Date.now() - cached.cachedAt <= READ_CACHE_TTL_MS) {
+    return cached.value;
   }
 
   const supabase = getSupabaseClient();
   let selectColumns = ["id", "tituloPagina", "subtituloPagina", "fotoCapa", "data"];
   let data: Record<string, unknown> | null = null;
+  const docId = resolveHistoryConfigDocId(scopedTenantId);
 
   while (selectColumns.length > 0) {
     const response = await supabase
       .from("app_config")
       .select(selectColumns.join(","))
-      .eq("id", "historico")
+      .eq("id", docId)
       .maybeSingle();
 
     if (!response.error) {
@@ -237,13 +257,13 @@ export async function fetchHistoryPageConfig(options?: {
   }
 
   if (!data) {
-    configCache = { cachedAt: Date.now(), value: null };
+    configCache.set(cacheKey, { cachedAt: Date.now(), value: null });
     return null;
   }
 
   const nestedData = asObject(data.data);
   const config = normalizePageConfig(nestedData ?? data);
-  configCache = { cachedAt: Date.now(), value: config };
+  configCache.set(cacheKey, { cachedAt: Date.now(), value: config });
   return config;
 }
 
@@ -265,23 +285,29 @@ export async function uploadHistoryImage(
 }
 
 export async function createHistoricEvent(
-  payload: Omit<HistoricEventRecord, "id">
+  payload: Omit<HistoricEventRecord, "id">,
+  options?: { tenantId?: string | null }
 ): Promise<{ id: string }> {
   const safePayload = normalizeHistoricEvent("temp", payload);
+  const scopedTenantId = resolveHistoryTenantId(options?.tenantId);
   if (!safePayload) throw new Error("Evento inválido.");
 
   const { id: _discardedId, ...requestPayload } = safePayload;
   void _discardedId;
 
   const result = await callWithFallback<
-    typeof requestPayload,
+    typeof requestPayload & { tenantId?: string },
     { id: string }
-  >(HISTORY_CREATE_EVENT_CALLABLE, requestPayload, async () => {
+  >(
+    HISTORY_CREATE_EVENT_CALLABLE,
+    { ...requestPayload, tenantId: scopedTenantId || undefined },
+    async () => {
     const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from("historic_events")
       .insert({
         ...requestPayload,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         updatedAt: nowIso(),
       })
       .select("id")
@@ -291,7 +317,8 @@ export async function createHistoricEvent(
     const id = asString((data as Record<string, unknown> | null)?.id);
     if (!id) throw new Error("Falha ao criar evento historico.");
     return { id };
-  });
+    }
+  );
 
   clearReadCaches();
   return result;
@@ -299,29 +326,35 @@ export async function createHistoricEvent(
 
 export async function updateHistoricEvent(
   id: string,
-  payload: Omit<HistoricEventRecord, "id">
+  payload: Omit<HistoricEventRecord, "id">,
+  options?: { tenantId?: string | null }
 ): Promise<void> {
   const cleanId = id.trim();
   if (!cleanId) return;
+  const scopedTenantId = resolveHistoryTenantId(options?.tenantId);
 
   const safePayload = normalizeHistoricEvent(cleanId, payload);
   if (!safePayload) throw new Error("Evento inválido.");
 
   const requestPayload = safePayload;
-  await callWithFallback<typeof requestPayload, { ok: boolean }>(
+  await callWithFallback<typeof requestPayload & { tenantId?: string }, { ok: boolean }>(
     HISTORY_UPDATE_EVENT_CALLABLE,
-    requestPayload,
+    { ...requestPayload, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
       const { id: payloadId, ...docPayload } = requestPayload;
       void payloadId;
-      const { error } = await supabase
+      let query = supabase
         .from("historic_events")
         .update({
           ...docPayload,
           updatedAt: nowIso(),
         })
         .eq("id", cleanId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -330,16 +363,24 @@ export async function updateHistoricEvent(
   clearReadCaches();
 }
 
-export async function deleteHistoricEvent(id: string): Promise<void> {
+export async function deleteHistoricEvent(
+  id: string,
+  options?: { tenantId?: string | null }
+): Promise<void> {
   const cleanId = id.trim();
   if (!cleanId) return;
+  const scopedTenantId = resolveHistoryTenantId(options?.tenantId);
 
-  await callWithFallback<{ id: string }, { ok: boolean }>(
+  await callWithFallback<{ id: string; tenantId?: string }, { ok: boolean }>(
     HISTORY_DELETE_EVENT_CALLABLE,
-    { id: cleanId },
+    { id: cleanId, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase.from("historic_events").delete().eq("id", cleanId);
+      let query = supabase.from("historic_events").delete().eq("id", cleanId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }
@@ -349,16 +390,20 @@ export async function deleteHistoricEvent(id: string): Promise<void> {
 }
 
 export async function saveHistoryPageConfig(
-  config: HistoryPageConfig
+  config: HistoryPageConfig,
+  options?: { tenantId?: string | null }
 ): Promise<void> {
   const payload = normalizePageConfig(config);
+  const scopedTenantId = resolveHistoryTenantId(options?.tenantId);
+  const docId = resolveHistoryConfigDocId(scopedTenantId);
   await callWithFallback<typeof payload, { ok: boolean }>(
     HISTORY_SAVE_CONFIG_CALLABLE,
     payload,
     async () => {
       const supabase = getSupabaseClient();
       const mutablePayload: Record<string, unknown> = {
-        id: "historico",
+        id: docId,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         ...payload,
         data: payload,
         updatedAt: nowIso(),
@@ -389,8 +434,10 @@ export async function saveHistoryPageConfig(
 }
 
 export async function seedHistoricEvents(
-  events: Omit<HistoricEventRecord, "id">[]
+  events: Omit<HistoricEventRecord, "id">[],
+  options?: { tenantId?: string | null }
 ): Promise<void> {
+  const scopedTenantId = resolveHistoryTenantId(options?.tenantId);
   const safeEvents = events
     .slice(0, MAX_HISTORY_EVENTS)
     .map((row) => normalizeHistoricEvent(String(Date.now()), row))
@@ -406,14 +453,23 @@ export async function seedHistoricEvents(
 
   if (!safeEvents.length) return;
 
-  await callWithFallback<{ events: Omit<HistoricEventRecord, "id">[] }, { ok: boolean }>(
+  await callWithFallback<
+    { events: Omit<HistoricEventRecord, "id">[]; tenantId?: string },
+    { ok: boolean }
+  >(
     HISTORY_SEED_CALLABLE,
-    { events: safeEvents },
+    { events: safeEvents, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
       const { error } = await supabase
         .from("historic_events")
-        .insert(safeEvents.map((eventData) => ({ ...eventData, updatedAt: nowIso() })));
+        .insert(
+          safeEvents.map((eventData) => ({
+            ...eventData,
+            ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+            updatedAt: nowIso(),
+          }))
+        );
       if (error) throwSupabaseError(error);
       return { ok: true };
     }

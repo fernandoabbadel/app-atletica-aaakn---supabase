@@ -221,7 +221,11 @@ begin
   end if;
 
   if v_tenant_id is null and v_row_id is not null then
-    v_tenant_id := public.mt_extract_tenant_id_from_scoped_text_id(v_row_id);
+    select t.id
+      into v_tenant_id
+      from public.tenants t
+     where t.id = public.mt_extract_tenant_id_from_scoped_text_id(v_row_id)
+     limit 1;
   end if;
 
   if v_tenant_id is null then
@@ -276,9 +280,14 @@ begin
   ] loop
     execute format(
       'update public.%I
-          set tenant_id = public.mt_extract_tenant_id_from_scoped_text_id(id)
+          set tenant_id = public.mt_extract_tenant_id_from_scoped_text_id(id::text)
         where tenant_id is null
-          and public.mt_extract_tenant_id_from_scoped_text_id(id) is not null',
+          and public.mt_extract_tenant_id_from_scoped_text_id(id::text) is not null
+          and exists (
+            select 1
+              from public.tenants t
+             where t.id = public.mt_extract_tenant_id_from_scoped_text_id(id::text)
+          )',
       table_name
     );
   end loop;
@@ -469,7 +478,7 @@ with reward_candidates as (
      and nullif(trim(coalesce(sr."rewardId", '')), '') is not null
 ),
 single_tenant_rewards as (
-  select reward_id, min(tenant_id) as tenant_id
+  select reward_id, min(tenant_id::text)::uuid as tenant_id
     from reward_candidates
    group by reward_id
   having count(distinct tenant_id) = 1
@@ -492,7 +501,7 @@ with plan_candidates as (
      and nullif(trim(coalesce(a."planoId", '')), '') is not null
 ),
 single_tenant_plans as (
-  select plan_id, min(tenant_id) as tenant_id
+  select plan_id, min(tenant_id::text)::uuid as tenant_id
     from plan_candidates
    group by plan_id
   having count(distinct tenant_id) = 1
@@ -510,7 +519,7 @@ with partner_candidates as (
      and nullif(trim(coalesce(s."empresaId", '')), '') is not null
 ),
 single_tenant_partners as (
-  select partner_id, min(tenant_id) as tenant_id
+  select partner_id, min(tenant_id::text)::uuid as tenant_id
     from partner_candidates
    group by partner_id
   having count(distinct tenant_id) = 1
@@ -537,7 +546,7 @@ with category_candidates as (
      and nullif(trim(coalesce(c.nome, '')), '') is not null
 ),
 single_tenant_categories as (
-  select category_id, min(tenant_id) as tenant_id
+  select category_id, min(tenant_id::text)::uuid as tenant_id
     from category_candidates
    group by category_id
   having count(distinct tenant_id) = 1
@@ -557,7 +566,7 @@ with league_candidates as (
    where u.tenant_id is not null
 ),
 single_tenant_leagues as (
-  select league_id, min(tenant_id) as tenant_id
+  select league_id, min(tenant_id::text)::uuid as tenant_id
     from league_candidates
    group by league_id
   having count(distinct tenant_id) = 1

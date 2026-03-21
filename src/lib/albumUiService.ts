@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 export interface AlbumUiConfig {
@@ -33,14 +34,14 @@ const throwSupabaseError = (error: { message: string; code?: string | null; name
 };
 
 const resolveAlbumUiCacheKey = (tenantId?: string): string => {
-  const cleanTenantId = asString(tenantId).trim();
+  const cleanTenantId = resolveStoredTenantScopeId(asString(tenantId).trim());
   return cleanTenantId || "default";
 };
 
 const resolveAlbumUiDocIds = (tenantId?: string): string[] => {
-  const cleanTenantId = asString(tenantId).trim();
+  const cleanTenantId = resolveStoredTenantScopeId(asString(tenantId).trim());
   if (!cleanTenantId) return [ALBUM_UI_DOC_ID];
-  return [buildTenantScopedRowId(cleanTenantId, ALBUM_UI_DOC_ID), ALBUM_UI_DOC_ID];
+  return [buildTenantScopedRowId(cleanTenantId, ALBUM_UI_DOC_ID)];
 };
 
 export async function fetchAlbumUiConfig(options?: {
@@ -91,11 +92,13 @@ export async function saveAlbumUiConfig(
 ): Promise<void> {
   const supabase = getSupabaseClient();
   const normalized = toAlbumUiConfig(config as unknown as Record<string, unknown>);
-  const docId = buildTenantScopedRowId(options?.tenantId, ALBUM_UI_DOC_ID) || ALBUM_UI_DOC_ID;
+  const scopedTenantId = resolveStoredTenantScopeId(asString(options?.tenantId).trim());
+  const docId = buildTenantScopedRowId(scopedTenantId, ALBUM_UI_DOC_ID) || ALBUM_UI_DOC_ID;
 
   const { error } = await supabase.from(ALBUM_UI_DOC_COLLECTION).upsert(
     {
       id: docId,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       capa: normalized.capa,
       titulo: normalized.titulo,
       subtitulo: normalized.subtitulo,

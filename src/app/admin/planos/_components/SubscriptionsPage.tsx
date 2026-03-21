@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
 import { fetchPlanSubscriptions, type PlanSubscriptionRecord } from "../../../../lib/plansService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const PAGE_SIZE = 20;
 
@@ -15,6 +16,7 @@ interface SubscriptionListPageProps {
 }
 
 export function SubscriptionListPage({ title, planMatcher }: SubscriptionListPageProps) {
+  const { tenantId } = useTenantTheme();
   const [rows, setRows] = useState<PlanSubscriptionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -23,7 +25,11 @@ export function SubscriptionListPage({ title, planMatcher }: SubscriptionListPag
     let mounted = true;
     const load = async () => {
       try {
-        const subscriptions = await fetchPlanSubscriptions({ maxResults: 600, forceRefresh: true });
+        const subscriptions = await fetchPlanSubscriptions({
+          maxResults: 600,
+          forceRefresh: true,
+          tenantId,
+        });
         if (!mounted) return;
         setRows(subscriptions.filter(planMatcher));
       } finally {
@@ -34,7 +40,7 @@ export function SubscriptionListPage({ title, planMatcher }: SubscriptionListPag
     return () => {
       mounted = false;
     };
-  }, [planMatcher]);
+  }, [planMatcher, tenantId]);
 
   const paged = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;

@@ -18,6 +18,8 @@ import {
   resolvePlanTheme,
 } from "../../../../constants/planVisuals";
 import { useToast } from "../../../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { parseTenantScopedRowId } from "@/lib/tenantScopedCatalog";
 
 type PlanFormState = {
   nome: string;
@@ -71,6 +73,7 @@ const parseNumber = (value: string, fallback: number): number => {
 
 export default function AdminPlanosEditarPage() {
   const { addToast } = useToast();
+  const { tenantId } = useTenantTheme();
   const [rows, setRows] = useState<PlanRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [restoring, setRestoring] = useState(false);
@@ -79,7 +82,7 @@ export default function AdminPlanosEditarPage() {
   const [form, setForm] = useState<PlanFormState>(EMPTY_FORM);
 
   const load = async (forceRefresh = true) => {
-    const plans = await fetchPlanCatalog({ maxResults: 40, forceRefresh });
+    const plans = await fetchPlanCatalog({ maxResults: 40, forceRefresh, tenantId });
     setRows(plans);
   };
 
@@ -126,6 +129,7 @@ export default function AdminPlanosEditarPage() {
     try {
       await upsertPlan({
         id: selectedPlanId,
+        tenantId,
         data: {
           nome: form.nome.trim(),
           preco: form.preco.trim() || "0,00",
@@ -157,7 +161,7 @@ export default function AdminPlanosEditarPage() {
   const handleDelete = async (id: string) => {
     if (!confirm("Remover plano?")) return;
     try {
-      await deletePlan(id);
+      await deletePlan(id, { tenantId });
       addToast("Plano removido.", "success");
       await load(true);
     } catch {
@@ -169,7 +173,7 @@ export default function AdminPlanosEditarPage() {
     if (!confirm("Restaurar planos padrao? Isso ira recriar o catalogo base.")) return;
     setRestoring(true);
     try {
-      const result = await restoreDefaultPlanCatalog();
+      const result = await restoreDefaultPlanCatalog({ tenantId });
       if (result.skipped) {
         addToast("Ja existem planos cadastrados. Nenhuma restauracao foi feita.", "info");
       } else {
@@ -271,7 +275,9 @@ export default function AdminPlanosEditarPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-black uppercase text-zinc-300">Editar Plano</p>
-                  <p className="text-[11px] text-zinc-500 font-bold">ID: {selectedPlanId || "--"}</p>
+                  <p className="text-[11px] text-zinc-500 font-bold">
+                    ID: {selectedPlanId ? parseTenantScopedRowId(selectedPlanId).baseId : "--"}
+                  </p>
                 </div>
                 <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold ${previewTheme.badgeClass}`}>
                   <PreviewIcon size={12} />

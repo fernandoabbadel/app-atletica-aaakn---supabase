@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { 
   ArrowLeft, Calendar, MapPin, 
   Loader2, ArrowRight, Heart, Clock, Zap, Users, Search
@@ -8,9 +8,13 @@ import {
 import Link from "next/link";
 import { OptimizedImage } from "@/app/components/shared/OptimizedImage";
 import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../context/ToastContext";
 import { fetchEventsFeed, toggleEventLike } from "../../lib/eventsNativeService";
 import { getTurmaImage } from "../../constants/turmaImages";
+import { resolvePlanScopedPrice } from "../../lib/commerceCatalog";
+import { withTenantSlug } from "@/lib/tenantRouting";
+import { collectUserPlanScope } from "@/lib/userPlanScope";
 // --- INTERFACES ---
 export interface Evento {
   id: string;
@@ -25,6 +29,8 @@ export interface Evento {
   destaque?: string;
   categoria?: string;
   status?: string;
+  saleStatus?: 'ativo' | 'esgotado' | 'em_breve';
+  sale_status?: 'ativo' | 'esgotado' | 'em_breve';
   isLowStock?: boolean;
   stats?: {
     confirmados: number;
@@ -35,11 +41,24 @@ export interface Evento {
     nome: string;
     preco: string;
     status: 'ativo' | 'esgotado' | 'em_breve';
+    planPrices?: Array<{ planId?: string; planName?: string; price?: string | number }>;
   }>;
   likesList?: string[];
   topTurmas?: string[];
   interessados?: string[]; // Array de UIDs para controle
 }
+
+const getSaleStatusLabel = (status?: Evento["saleStatus"]): string => {
+  if (status === "em_breve") return "Em-breve";
+  if (status === "esgotado") return "Esgotado";
+  return "Ativo";
+};
+
+const getSaleStatusClass = (status?: Evento["saleStatus"]): string => {
+  if (status === "em_breve") return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
+  if (status === "esgotado") return "border-red-500/30 bg-red-500/10 text-red-300";
+  return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+};
 
 interface EventosClientPageProps {
   initialEventos: Evento[];
@@ -134,7 +153,7 @@ function EventClassRanking({ event }: { event: Evento }) {
       )}
       <div className="flex flex-col">
         <span className="text-[9px] font-bold text-zinc-400 uppercase">Presenca</span>
-        <span className="text-xs font-black text-emerald-400">+{totalConfirmados} Tubaroes</span>
+        <span className="text-xs font-black text-emerald-400">+{totalConfirmados} confirmados</span>
       </div>
     </div>
   );
@@ -179,16 +198,25 @@ function EventCountdown({ targetDate, targetTime }: { targetDate: string, target
 function EventCard({
   ev,
   userId,
+  userPlanNames,
+  userPlanIds,
   onLikeError,
+  tenantId,
+  tenantSlug,
   imagePriority = false,
 }: {
   ev: Evento;
   userId?: string;
+  userPlanNames: string[];
+  userPlanIds: string[];
   onLikeError: (message: string) => void;
+  tenantId?: string;
+  tenantSlug?: string;
   imagePriority?: boolean;
 }) {
   const [liked, setLiked] = useState(Boolean(userId && ev.likesList?.includes(userId)));
   const [likesCount, setLikesCount] = useState(ev.stats?.likes || 0);
+  const saleStatus = ev.saleStatus || ev.sale_status || "ativo";
 
   useEffect(() => {
     setLiked(Boolean(userId && ev.likesList?.includes(userId)));
@@ -196,7 +224,23 @@ function EventCard({
   }, [userId, ev.likesList, ev.stats?.likes]);
 
   const loteAtivo = ev.lotes?.find((l) => l.status === 'ativo');
-  const precoDisplay = loteAtivo ? `R$ ${loteAtivo.preco}` : (ev.lotes && ev.lotes.length > 0 ? "Esgotado" : "Em breve");
+  const precoDisplay = loteAtivo
+    ? `R$ ${resolvePlanScopedPrice({
+        basePrice: Number.parseFloat(String(loteAtivo.preco || "0").replace(",", ".")) || 0,
+        entries: Array.isArray(loteAtivo.planPrices)
+          ? loteAtivo.planPrices.map((entry) => ({
+              planId: String(entry.planId || ""),
+              planName: String(entry.planName || ""),
+              price:
+                typeof entry.price === "number"
+                  ? entry.price
+                  : Number.parseFloat(String(entry.price || "0").replace(",", ".")) || 0,
+            }))
+          : [],
+        userPlanIds,
+        userPlanNames,
+      }).toFixed(2).replace(".", ",")}`
+    : (saleStatus === "em_breve" ? "Em breve" : ev.lotes && ev.lotes.length > 0 ? "Esgotado" : "Em breve");
 
   const handleLike = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -218,6 +262,7 @@ function EventCard({
         eventId: ev.id,
         userId,
         currentlyLiked: previousLiked,
+        tenantId,
       });
     } catch (error: unknown) {
       console.error(error);
@@ -228,7 +273,10 @@ function EventCard({
   };
 
   return (
-    <Link href={`/eventos/${ev.id}`} className="group h-full">
+    <Link
+      href={tenantSlug ? withTenantSlug(tenantSlug, `/eventos/${ev.id}`) : `/eventos/${ev.id}`}
+      className="group h-full"
+    >
       <div className="flex flex-col h-full w-full bg-zinc-900 border border-zinc-800 rounded-[24px] overflow-hidden hover:border-emerald-500/50 hover:shadow-2xl hover:shadow-emerald-900/20 transition-all duration-300">
         
         {/* 1. IMAGEM */}
@@ -248,6 +296,9 @@ function EventCard({
             <div className="absolute top-3 left-3 flex gap-2">
                 <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase backdrop-blur-md shadow-lg ${ev.tipo === 'Liga' ? 'bg-blue-600 text-white' : 'bg-emerald-500 text-black'}`}>
                     {ev.tipo}
+                </span>
+                <span className={`px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase backdrop-blur-md shadow-lg ${getSaleStatusClass(saleStatus)}`}>
+                    {getSaleStatusLabel(saleStatus)}
                 </span>
                 {ev.destaque && (
                     <span className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-yellow-500 text-black shadow-lg flex items-center gap-1">
@@ -315,11 +366,13 @@ function EventCard({
 // --- PAGINA PRINCIPAL ---
 export default function EventosClientPage({ initialEventos }: EventosClientPageProps) {
   const { user } = useAuth();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const [eventos, setEventos] = useState<Evento[]>(initialEventos);
   const [loading, setLoading] = useState(initialEventos.length === 0);
   const [filter, setFilter] = useState("Todos");
   const [searchTerm, setSearchTerm] = useState("");
+  const { userPlanNames, userPlanIds } = useMemo(() => collectUserPlanScope(user), [user]);
 
   useEffect(() => {
     if (initialEventos.length > 0) {
@@ -331,7 +384,11 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
 
     const loadEvents = async () => {
       try {
-        const rows = await fetchEventsFeed({ maxResults: 24, forceRefresh: false });
+        const rows = await fetchEventsFeed({
+          maxResults: 24,
+          forceRefresh: false,
+          tenantId: tenantId || undefined,
+        });
         if (!mounted) return;
         setEventos(rows as unknown as Evento[]);
       } catch (error: unknown) {
@@ -346,7 +403,7 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
     return () => {
       mounted = false;
     };
-  }, [addToast, initialEventos.length]);
+  }, [addToast, initialEventos.length, tenantId]);
 
   const activeEvents = eventos.filter((event) => {
     const status = String(event.status || "ativo").toLowerCase().trim();
@@ -392,11 +449,11 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
       {/* HEADER */}
       <header className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="bg-zinc-900 p-3 rounded-full hover:bg-zinc-800 transition border border-zinc-800">
+            <Link href={tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard"} className="bg-zinc-900 p-3 rounded-full hover:bg-zinc-800 transition border border-zinc-800">
                 <ArrowLeft size={20} className="text-zinc-400"/>
             </Link>
             <div>
-                <h1 className="text-3xl font-black uppercase tracking-tighter italic">Agenda<span className="text-emerald-500">Tubarao</span></h1>
+                <h1 className="text-3xl font-black uppercase tracking-tighter italic">Agenda<span className="text-emerald-500">Eventos</span></h1>
                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Proximos Eventos</p>
             </div>
         </div>
@@ -433,7 +490,11 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
                 key={ev.id}
                 ev={ev}
                 userId={user?.uid}
+                userPlanNames={userPlanNames}
+                userPlanIds={userPlanIds}
                 onLikeError={(message) => addToast(message, "error")}
+                tenantId={tenantId || undefined}
+                tenantSlug={tenantSlug || undefined}
                 imagePriority={index < 2}
               />
           ))}

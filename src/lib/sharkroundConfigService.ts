@@ -221,7 +221,7 @@ const getCacheKey = (tenantId?: string | null): string =>
 const resolveSharkroundDocIds = (tenantId?: string | null): string[] => {
   const scopedTenantId = resolveSharkroundTenantId(tenantId);
   if (!scopedTenantId) return [SHARKROUND_CONFIG_PATH[1]];
-  return [buildTenantScopedRowId(scopedTenantId, SHARKROUND_CONFIG_PATH[1]), SHARKROUND_CONFIG_PATH[1]];
+  return [buildTenantScopedRowId(scopedTenantId, SHARKROUND_CONFIG_PATH[1])];
 };
 
 const pickConfigRow = (
@@ -341,6 +341,7 @@ async function saveConfigWithClient(
 
   const mutablePayload: Record<string, unknown> = {
     id: buildTenantScopedRowId(scopedTenantId, SHARKROUND_CONFIG_PATH[1]) || SHARKROUND_CONFIG_PATH[1],
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     data: dataPayload,
     ...normalized,
     daily_rolls_limit: normalized.dailyRollsLimit,

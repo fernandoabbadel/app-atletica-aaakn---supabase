@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useToast } from "../../context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { loginPartnerByEmail } from "../../lib/partnersPublicService";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
@@ -13,6 +14,7 @@ export default function EmpresaLoginPage() {
   const router = useRouter();
   const pathname = usePathname() || "/empresa";
   const { addToast } = useToast();
+  const { tenantId, tenantLogoUrl, tenantName } = useTenantTheme();
   const pathInfo = parseTenantScopedPath(pathname);
   const companyBasePath = pathInfo.tenantSlug
     ? withTenantSlug(pathInfo.tenantSlug, "/empresa")
@@ -30,7 +32,11 @@ export default function EmpresaLoginPage() {
     setLoading(true);
 
     try {
-      const loginResult = await loginPartnerByEmail({ email, senha });
+      const loginResult = await loginPartnerByEmail({
+        email,
+        senha,
+        tenantId: tenantId || undefined,
+      });
       if (!loginResult) {
         addToast("E-mail não encontrado.", "error");
         setLoading(false);
@@ -74,11 +80,11 @@ export default function EmpresaLoginPage() {
                 <div className="relative w-24 h-24 mx-auto mb-4 group">
                    <div className="absolute inset-0 bg-emerald-500/30 blur-xl rounded-full group-hover:bg-emerald-500/50 transition duration-500"></div>
                    <Image 
-                     src="/logo.png" 
-                     alt="AAAKN" 
+                     src={tenantLogoUrl || "/logo.png"} 
+                     alt={tenantName ? `Logo ${tenantName}` : "Logo da atletica"} 
                      fill
                      className="object-contain relative z-10 drop-shadow-2xl" 
-                     
+                     unoptimized={Boolean(tenantLogoUrl && tenantLogoUrl.startsWith("http"))}
                    />
                 </div>
                 <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-1">Área do Parceiro</h1>

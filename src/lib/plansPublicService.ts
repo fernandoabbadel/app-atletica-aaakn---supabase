@@ -1,4 +1,5 @@
-﻿import { getSupabaseClient } from "./supabase";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { getSupabaseClient } from "./supabase";
 
 export interface PlanRecord {
   id: string;
@@ -21,7 +22,7 @@ const TTL_MS = 35_000;
 const MAX_PLAN_RESULTS = 60;
 const plansCache = new Map<string, CacheEntry<PlanRecord[]>>();
 const PLANOS_SELECT_COLUMNS =
-  "id,nome,preco,precoVal,parcelamento,descricao,cor,icon,destaque,beneficios,xpMultiplier,nivelPrioridade,descontoLoja";
+  "id,tenant_id,nome,preco,precoVal,parcelamento,descricao,cor,icon,destaque,beneficios,xpMultiplier,nivelPrioridade,descontoLoja";
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -29,13 +30,17 @@ const asString = (value: unknown, fallback = "") => (typeof value === "string" ?
 const asNumber = (value: unknown, fallback = 0) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const asBoolean = (value: unknown, fallback = false) => (typeof value === "boolean" ? value : fallback);
-const asStringArray = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 const boundedLimit = (requested: number, maxAllowed: number) => {
   if (!Number.isFinite(requested)) return maxAllowed;
   if (requested < 1) return 1;
   if (requested > maxAllowed) return maxAllowed;
   return Math.floor(requested);
 };
+
+const resolvePlanTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(typeof tenantId === "string" ? tenantId.trim() : "");
 
 const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
   const hit = cache.get(key);
@@ -46,6 +51,7 @@ const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null =
   }
   return hit.value;
 };
+
 const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void => {
   cache.set(key, { cachedAt: Date.now(), value });
 };
@@ -76,22 +82,29 @@ const normalizePlan = (raw: unknown): PlanRecord | null => {
 export async function fetchPlanCatalog(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PlanRecord[]> {
   const supabase = getSupabaseClient();
   const maxResults = boundedLimit(options?.maxResults ?? 30, MAX_PLAN_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolvePlanTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(plansCache, cacheKey);
     if (cached) return cached;
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("planos")
     .select(PLANOS_SELECT_COLUMNS)
-    .order("precoVal", { ascending: true })
-    .limit(maxResults);
+    .order("precoVal", { ascending: true });
+
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
+  const { data, error } = await query.limit(maxResults);
 
   if (error) {
     throw Object.assign(new Error(error.message), {

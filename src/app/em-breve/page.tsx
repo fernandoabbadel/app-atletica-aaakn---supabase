@@ -9,7 +9,7 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const FRASES_OBRA = [
   "Estamos ampliando o tanque dos tubaroes.",
-  "Afiando novas funcionalidades para o cardume.",
+  "Preparando novas funcionalidades para a plataforma.",
   "Codando forte para liberar essa rota.",
   "Montando algo gigante para sua atletica.",
   "Segura mais um pouco que vem novidade.",

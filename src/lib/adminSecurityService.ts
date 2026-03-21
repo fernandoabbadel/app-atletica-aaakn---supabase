@@ -4,7 +4,9 @@ import { isMasterOnlyAdminPath } from "@/lib/roles";
 import { clearAdminUsersCache } from "./adminUsersService";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { getSupabaseClient } from "./supabase";
+import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -23,7 +25,8 @@ const UPDATE_USER_ROLE_CALLABLE = "permissionsAdminUpdateUserRole";
 
 const activityLogsCache = new Map<string, CacheEntry<AdminActivityLogRecord[]>>();
 const permissionUsersCache = new Map<string, CacheEntry<PermissionUserRecord[]>>();
-let permissionMatrixCache: CacheEntry<PermissionMatrix | null> | null = null;
+const permissionMatrixCache = new Map<string, CacheEntry<PermissionMatrix | null>>();
+const effectivePermissionMatrixCache = new Map<string, CacheEntry<PermissionMatrix | null>>();
 
 const asObject = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== "object" || value === null) return null;
@@ -133,6 +136,12 @@ const toMillis = (value: unknown): number => {
   return 0;
 };
 
+const resolveAdminSecurityTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const resolvePermissionsDocId = (tenantId?: string | null): string =>
+  buildTenantScopedRowId(resolveAdminSecurityTenantId(tenantId), "permissions") || "permissions";
+
 const sanitizePermissionMatrix = (
   matrix: PermissionMatrix
 ): PermissionMatrix => {
@@ -221,13 +230,15 @@ const normalizePermissionUserRecord = (
 };
 
 const upsertSettingsPermissionsWithFallback = async (
-  matrix: PermissionMatrix
+  matrix: PermissionMatrix,
+  tenantId?: string | null
 ): Promise<void> => {
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveAdminSecurityTenantId(tenantId);
   const mutablePayload: Record<string, unknown> = {
-    id: "permissions",
+    id: resolvePermissionsDocId(scopedTenantId),
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     data: { permissionMatrix: matrix },
-    permissionMatrix: matrix,
     updatedAt: new Date().toISOString(),
   };
 
@@ -347,13 +358,15 @@ export async function fetchAdminActivityLogsPage(options?: {
 export async function fetchAdminActivityLogs(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AdminActivityLogRecord[]> {
   const maxResults = boundedLimit(
     options?.maxResults ?? 120,
     MAX_ACTIVITY_LOG_RESULTS
   );
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveAdminSecurityTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCacheValue(activityLogsCache, cacheKey);
@@ -366,6 +379,7 @@ export async function fetchAdminActivityLogs(options?: {
   const primary = await supabase
     .from("activity_logs")
     .select("id,userId,userName,action,resource,details,timestamp")
+    .eq("tenant_id", scopedTenantId || "")
     .order("timestamp", { ascending: false })
     .limit(maxResults);
 
@@ -374,12 +388,15 @@ export async function fetchAdminActivityLogs(options?: {
       .map((row) => normalizeActivityLogRow(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is AdminActivityLogRecord => row !== null);
   } else if (asString(extractMissingSchemaColumn(primary.error))) {
-    const fallback = await supabase
+    let fallback = supabase
       .from("activity_logs")
-      .select("id,userId,userName,action,resource,details,timestamp")
-      .limit(maxResults);
-    if (fallback.error) throwSupabaseError(fallback.error);
-    rowsResult = (fallback.data ?? [])
+      .select("id,userId,userName,action,resource,details,timestamp");
+    if (scopedTenantId) {
+      fallback = fallback.eq("tenant_id", scopedTenantId);
+    }
+    const fallbackResult = await fallback.limit(maxResults);
+    if (fallbackResult.error) throwSupabaseError(fallbackResult.error);
+    rowsResult = (fallbackResult.data ?? [])
       .map((row) => normalizeActivityLogRow(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is AdminActivityLogRecord => row !== null)
       .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
@@ -394,13 +411,15 @@ export async function fetchAdminActivityLogs(options?: {
 export async function fetchPermissionUsers(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PermissionUserRecord[]> {
   const maxResults = boundedLimit(
     options?.maxResults ?? 320,
     MAX_PERMISSION_USER_RESULTS
   );
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveAdminSecurityTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getMapCacheValue(permissionUsersCache, cacheKey);
@@ -408,17 +427,21 @@ export async function fetchPermissionUsers(options?: {
   }
 
   const response = await callWithFallback<
-    { maxResults: number },
+    { maxResults: number; tenantId?: string },
     { users: PermissionUserRecord[] }
   >(
     FETCH_PERMISSION_USERS_CALLABLE,
-    { maxResults },
+    { maxResults, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
-      const { data, error } = await supabase
+      let query = supabase
         .from("users")
         .select("uid,nome,email,foto,role")
         .limit(maxResults);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { data, error } = await query;
       if (error) throwSupabaseError(error);
       return {
         users: (data ?? [])
@@ -439,89 +462,128 @@ export async function fetchPermissionUsers(options?: {
 
 export async function fetchPermissionMatrix(options?: {
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<PermissionMatrix | null> {
   const forceRefresh = options?.forceRefresh ?? false;
+  const scopedTenantId = resolveAdminSecurityTenantId(options?.tenantId);
+  const cacheKey = scopedTenantId || "global";
 
   if (
     !forceRefresh &&
-    permissionMatrixCache &&
-    Date.now() - permissionMatrixCache.cachedAt <= READ_CACHE_TTL_MS
+    permissionMatrixCache.get(cacheKey) &&
+    Date.now() - (permissionMatrixCache.get(cacheKey)?.cachedAt ?? 0) <= READ_CACHE_TTL_MS
   ) {
-    return permissionMatrixCache.value;
+    return permissionMatrixCache.get(cacheKey)?.value ?? null;
   }
 
   const response = await callWithFallback<
-    { forceRefresh?: boolean },
+    { forceRefresh?: boolean; tenantId?: string },
     { matrix: unknown | null }
   >(
     FETCH_PERMISSION_MATRIX_CALLABLE,
-    { forceRefresh },
+    { forceRefresh, tenantId: scopedTenantId || undefined },
     async () => {
       const supabase = getSupabaseClient();
+      const permissionsId = resolvePermissionsDocId(scopedTenantId);
       const baseResult = await supabase
         .from("settings")
         .select("id,data")
-        .eq("id", "permissions")
+        .eq("id", permissionsId)
         .maybeSingle();
 
       if (!baseResult.error) {
-        if (!baseResult.data) return { matrix: null };
-
-        const extracted = extractPermissionMatrix(baseResult.data);
-        if (extracted) {
-          return { matrix: extracted };
-        }
-      } else {
-        const missingBaseColumn = asString(extractMissingSchemaColumn(baseResult.error));
-        if (!missingBaseColumn) throwSupabaseError(baseResult.error);
+        return { matrix: baseResult.data ? extractPermissionMatrix(baseResult.data) : null };
       }
 
-      let selectColumns = ["id", "permissionMatrix"];
-
-      while (selectColumns.length > 0) {
-        const { data, error } = await supabase
+      const missingBaseColumn = asString(extractMissingSchemaColumn(baseResult.error));
+      if (missingBaseColumn && missingBaseColumn.toLowerCase() === "data") {
+        const legacyResult = await supabase
           .from("settings")
-          .select(selectColumns.join(","))
-          .eq("id", "permissions")
+          .select("id,permissionMatrix")
+          .eq("id", permissionsId)
           .maybeSingle();
-
-        if (!error) {
-          if (!data) return { matrix: null };
-          return { matrix: extractPermissionMatrix(data) };
-        }
-
-        const missingColumn = asString(extractMissingSchemaColumn(error));
-        if (!missingColumn) throwSupabaseError(error);
-        selectColumns = selectColumns.filter(
-          (column) => column.toLowerCase() !== missingColumn.toLowerCase()
-        );
+        if (legacyResult.error) throwSupabaseError(legacyResult.error);
+        return { matrix: legacyResult.data ? extractPermissionMatrix(legacyResult.data) : null };
       }
 
+      throwSupabaseError(baseResult.error);
       return { matrix: null };
     }
   );
 
   const normalized = extractPermissionMatrix(response.matrix);
   const sanitized = normalized ? sanitizePermissionMatrix(normalized) : null;
-  permissionMatrixCache = { cachedAt: Date.now(), value: sanitized };
+  permissionMatrixCache.set(cacheKey, { cachedAt: Date.now(), value: sanitized });
   return sanitized;
 }
 
+export async function fetchEffectivePermissionMatrix(options?: {
+  forceRefresh?: boolean;
+  tenantId?: string | null;
+}): Promise<PermissionMatrix | null> {
+  const forceRefresh = options?.forceRefresh ?? false;
+  const scopedTenantId = resolveAdminSecurityTenantId(options?.tenantId);
+  const cacheKey = scopedTenantId || "global";
+
+  if (
+    !forceRefresh &&
+    effectivePermissionMatrixCache.get(cacheKey) &&
+    Date.now() - (effectivePermissionMatrixCache.get(cacheKey)?.cachedAt ?? 0) <= READ_CACHE_TTL_MS
+  ) {
+    return effectivePermissionMatrixCache.get(cacheKey)?.value ?? null;
+  }
+
+  const globalMatrix = await fetchPermissionMatrix({ forceRefresh, tenantId: undefined });
+  if (globalMatrix && Object.keys(globalMatrix).length > 0) {
+    effectivePermissionMatrixCache.set(cacheKey, {
+      cachedAt: Date.now(),
+      value: globalMatrix,
+    });
+    return globalMatrix;
+  }
+
+  if (!scopedTenantId) {
+    effectivePermissionMatrixCache.set(cacheKey, {
+      cachedAt: Date.now(),
+      value: globalMatrix,
+    });
+    return globalMatrix;
+  }
+
+  const tenantMatrix = await fetchPermissionMatrix({
+    forceRefresh,
+    tenantId: scopedTenantId,
+  });
+  effectivePermissionMatrixCache.set(cacheKey, {
+    cachedAt: Date.now(),
+    value: tenantMatrix,
+  });
+  return tenantMatrix;
+}
+
 export async function savePermissionMatrix(
-  matrix: PermissionMatrix
+  matrix: PermissionMatrix,
+  options?: { tenantId?: string | null }
 ): Promise<void> {
   const sanitized = sanitizePermissionMatrix(matrix);
+  const scopedTenantId = resolveAdminSecurityTenantId(options?.tenantId);
+  const cacheKey = scopedTenantId || "global";
 
-  await callWithFallback<{ matrix: PermissionMatrix }, { ok: boolean }>(
+  await callWithFallback<{ matrix: PermissionMatrix; tenantId?: string }, { ok: boolean }>(
     SAVE_PERMISSION_MATRIX_CALLABLE,
-    { matrix: sanitized },
+    { matrix: sanitized, tenantId: scopedTenantId || undefined },
     async () => {
-      await upsertSettingsPermissionsWithFallback(sanitized);
+      await upsertSettingsPermissionsWithFallback(sanitized, scopedTenantId);
       return { ok: true };
     }
   );
 
-  permissionMatrixCache = { cachedAt: Date.now(), value: sanitized };
+  permissionMatrixCache.set(cacheKey, { cachedAt: Date.now(), value: sanitized });
+  if (scopedTenantId) {
+    effectivePermissionMatrixCache.delete(scopedTenantId);
+  } else {
+    effectivePermissionMatrixCache.clear();
+  }
 }
 
 export async function updatePermissionUserRole(payload: {
@@ -551,6 +613,7 @@ export async function updatePermissionUserRole(payload: {
         if (
           normalized === "visitante" ||
           normalized === "user" ||
+          normalized === "mini_vendor" ||
           normalized === "vendas" ||
           normalized === "treinador" ||
           normalized === "empresa" ||
@@ -650,5 +713,6 @@ export async function updatePermissionUserRole(payload: {
 export function clearAdminSecurityCaches(): void {
   activityLogsCache.clear();
   permissionUsersCache.clear();
-  permissionMatrixCache = null;
+  permissionMatrixCache.clear();
+  effectivePermissionMatrixCache.clear();
 }

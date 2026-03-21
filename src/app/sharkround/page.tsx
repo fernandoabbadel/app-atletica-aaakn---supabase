@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Dice5, MapPin, Building2, AlertTriangle, XCircle, Lock, 
   TrendingUp, DollarSign, ArrowLeft, HelpCircle, 
@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from "../../context/ToastContext"; 
 import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { logActivity } from "../../lib/logger";
 import {
   fetchActiveSharkroundLeagues,
@@ -22,6 +23,7 @@ import {
   getDefaultSharkroundAppConfig,
   type SharkroundAppConfig,
 } from "../../lib/sharkroundConfigService";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGENS ---
 type TipoCasa = 'LIGA' | 'SORTE' | 'AZAR' | 'PRISAO' | 'INICIO';
@@ -96,7 +98,14 @@ const getErrorMessage = (error: unknown): string => {
 export default function SharkRoundPage() {
   const { addToast } = useToast(); 
   const { user, loading } = useAuth(); 
+  const { tenantId, tenantLogoUrl, tenantSlug } = useTenantTheme();
   const router = useRouter();
+  const sharkroundStatsStorageKey = useMemo(
+    () =>
+      `${SHARKROUND_STATS_STORAGE_KEY}:${tenantId || tenantSlug || "default"}`,
+    [tenantId, tenantSlug]
+  );
+  const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
   const userRole =
     typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
   const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
@@ -104,8 +113,8 @@ export default function SharkRoundPage() {
   useEffect(() => {
     if (loading) return;
     if (canAccessSharkround) return;
-    router.replace("/em-breve");
-  }, [canAccessSharkround, loading, router]);
+    router.replace(emBreveHref);
+  }, [canAccessSharkround, emBreveHref, loading, router]);
   // Configuração (Constantes agora, já que os setters não eram usados)
   const boardSide = 11;
   const boardSizeTotal = 40;
@@ -150,7 +159,10 @@ export default function SharkRoundPage() {
     const loadConfig = async () => {
       if (loading || !canAccessSharkround) return;
       try {
-        const config = await fetchSharkroundAppConfig({ forceRefresh: false });
+        const config = await fetchSharkroundAppConfig({
+          forceRefresh: false,
+          tenantId: tenantId || undefined,
+        });
         if (!mounted) return;
         setGameConfig(config);
       } catch (error: unknown) {
@@ -166,7 +178,7 @@ export default function SharkRoundPage() {
     return () => {
       mounted = false;
     };
-  }, [loading, canAccessSharkround]);
+  }, [loading, canAccessSharkround, tenantId]);
 
   useEffect(() => {
     setJogador((previous) => {
@@ -208,6 +220,7 @@ export default function SharkRoundPage() {
             const activeLeagues = await fetchActiveSharkroundLeagues({
               maxResults: 32,
               forceRefresh: false,
+              tenantId: tenantId || undefined,
             });
             activeLeagues.forEach((league) => {
               const data = league as unknown as LigaConfig;
@@ -265,6 +278,7 @@ export default function SharkRoundPage() {
             const playersPreview = await fetchSharkroundPlayersPreview({
               maxResults: 20,
               forceRefresh: false,
+              tenantId: tenantId || undefined,
             });
             const players = playersPreview.map((entry) => ({
                 id: entry.id,
@@ -290,7 +304,7 @@ export default function SharkRoundPage() {
         setJogador(prev => ({...prev, id: user.uid, nome: user.nome || "Atleta", avatar: user.foto || prev.avatar}));
         fetchRanking();
     }
-  }, [user, loading, boardSizeTotal, canAccessSharkround]);
+  }, [user, loading, boardSizeTotal, canAccessSharkround, tenantId]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -298,7 +312,7 @@ export default function SharkRoundPage() {
 
     try {
       const raw = window.localStorage.getItem(
-        `${SHARKROUND_STATS_STORAGE_KEY}:${user.uid}`
+        `${sharkroundStatsStorageKey}:${user.uid}`
       );
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<SharkroundStats>;
@@ -312,23 +326,24 @@ export default function SharkRoundPage() {
     } catch {
       setGameStats({ clinicas: 0, acertos: 0, erros: 0 });
     }
-  }, [user?.uid]);
+  }, [sharkroundStatsStorageKey, user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) return;
     if (typeof window === "undefined") return;
 
     window.localStorage.setItem(
-      `${SHARKROUND_STATS_STORAGE_KEY}:${user.uid}`,
+      `${sharkroundStatsStorageKey}:${user.uid}`,
       JSON.stringify(gameStats)
     );
-  }, [gameStats, user?.uid]);
+  }, [gameStats, sharkroundStatsStorageKey, user?.uid]);
 
   const fetchRanking = async () => {
       try {
           const ranking = await fetchSharkroundTubasRanking({
             maxResults: 10,
             forceRefresh: false,
+            tenantId: tenantId || undefined,
           });
           setRankingData(ranking.map((entry) => ({
             id: entry.id,
@@ -522,17 +537,21 @@ export default function SharkRoundPage() {
     );
   }
 
+  const dashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
+  const rankingHref = tenantSlug ? withTenantSlug(tenantSlug, "/sharkround/ranking") : "/sharkround/ranking";
+  const statsHref = tenantSlug ? withTenantSlug(tenantSlug, "/sharkround/estatisticas") : "/sharkround/estatisticas";
+
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-24 overflow-hidden selection:bg-emerald-500/30">
       
       {/* HEADER */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 p-4 flex justify-between items-center shadow-lg">
-         <div className="flex items-center gap-3"><Link href="/dashboard" className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition"><ArrowLeft size={24}/></Link><div><h1 className="font-black text-lg italic uppercase text-white">SharkRound</h1><p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">O Jogo da Atlética</p></div></div>
+         <div className="flex items-center gap-3"><Link href={dashboardHref} className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition"><ArrowLeft size={24}/></Link><div><h1 className="font-black text-lg italic uppercase text-white">SharkRound</h1><p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">O jogo da atletica</p></div></div>
          <div className="flex gap-3 items-center">
-              <Link href="/sharkround/ranking" className="p-2 bg-zinc-800 rounded-full border border-zinc-700 text-emerald-400 hover:bg-zinc-700 transition">
+              <Link href={rankingHref} className="p-2 bg-zinc-800 rounded-full border border-zinc-700 text-emerald-400 hover:bg-zinc-700 transition">
                 <Trophy size={18}/>
               </Link>
-              <Link href="/sharkround/estatisticas" className="p-2 bg-zinc-800 rounded-full border border-zinc-700 text-cyan-400 hover:bg-zinc-700 transition">
+              <Link href={statsHref} className="p-2 bg-zinc-800 rounded-full border border-zinc-700 text-cyan-400 hover:bg-zinc-700 transition">
                 <BarChart3 size={18}/>
               </Link>
               <button onClick={() => setModalRanking(true)} className="p-2 bg-zinc-800 rounded-full border border-zinc-700 text-yellow-500 hover:bg-zinc-700 transition"><Trophy size={18}/></button>
@@ -566,7 +585,7 @@ export default function SharkRoundPage() {
               {/* Logo Central */}
               <div className="col-start-3 col-end-10 row-start-3 row-end-10 flex flex-col items-center justify-center relative z-0">
                   <div className="absolute inset-0 bg-emerald-900/10 blur-3xl rounded-full animate-pulse"></div>
-                  <div className="w-40 h-40 md:w-64 md:h-64 relative mb-4 opacity-100 hover:scale-105 transition duration-500 animate-float"><Image src="/logo.png" alt="AAAKN" fill className="object-contain drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]" /></div>
+                  <div className="w-40 h-40 md:w-64 md:h-64 relative mb-4 opacity-100 hover:scale-105 transition duration-500 animate-float"><Image src={tenantLogoUrl || "/logo.png"} alt="Logo da atletica" fill className="object-contain drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]" unoptimized={Boolean(tenantLogoUrl && tenantLogoUrl.startsWith("http"))} /></div>
               </div>
 
               {tabuleiro.map((casa) => {

@@ -1,17 +1,22 @@
 // src/app/loja/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { 
   ArrowLeft, ShoppingBag, Search, 
-  Package, Zap, AlertCircle, ChevronDown
+  Package, Zap, AlertCircle, ChevronDown, Clock3
 } from "lucide-react";
 // addToast removido pois nao estava sendo usado, se precisar re-importe
 // import { useToast } from "../../context/ToastContext"; 
 import { fetchStoreCategories, fetchStoreProductsPage } from "../../lib/storePublicService";
+import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { useCart } from "@/context/CartContext";
+import { resolveTenantBrandLabel } from "@/lib/tenantBranding";
+import { withTenantSlug } from "@/lib/tenantRouting";
+import { collectUserPlanScope } from "@/lib/userPlanScope";
 // --- TIPAGEM EXATA DO SEU SUPABASE ---
 interface Variante {
   id: string;
@@ -39,7 +44,24 @@ export interface Produto {
   caracteristicas?: string[];
   cliques: number;
   createdAt?: unknown;
+  status?: "ativo" | "em_breve" | "esgotado";
+  seller?: {
+    type: "tenant" | "mini_vendor";
+    id: string;
+    name: string;
+    logoUrl: string;
+  } | null;
 }
+
+type StoreCategory = {
+  id: string;
+  nome: string;
+  cover_img?: string;
+  button_color?: string;
+  logo_url?: string;
+  seller_type?: "tenant" | "mini_vendor";
+  seller_id?: string;
+};
 
 const STORE_PAGE_SIZE = 20;
 
@@ -53,6 +75,22 @@ const getTagColorClass = (color?: string) => {
     case "blue": return "bg-blue-600 border-blue-500 text-white";
     default: return "bg-zinc-700 border-zinc-600 text-zinc-300";
   }
+};
+
+const getAvailabilityLabel = (status?: Produto["status"]): string => {
+  if (status === "em_breve") return "Em-breve";
+  if (status === "esgotado") return "Esgotado";
+  return "Ativo";
+};
+
+const getAvailabilityClass = (status?: Produto["status"]): string => {
+  if (status === "em_breve") {
+    return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
+  }
+  if (status === "esgotado") {
+    return "border-red-500/30 bg-red-500/10 text-red-300";
+  }
+  return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
 };
 
 const parseColorLines = (value: unknown): string[] => {
@@ -83,7 +121,7 @@ const getProductColorPreview = (produto: Produto): string[] => {
 
 interface LojaClientPageProps {
   initialProducts: Produto[];
-  initialCategories: string[];
+  initialCategories: StoreCategory[];
   initialHasMore: boolean;
   initialHydrated: boolean;
 }
@@ -94,9 +132,20 @@ export default function LojaClientPage({
   initialHasMore,
   initialHydrated,
 }: LojaClientPageProps) {
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { user } = useAuth();
+  const { tenantId: activeTenantId, tenantSigla, tenantName, tenantSlug, tenantLogoUrl, palette } = useTenantTheme();
+  const { itemCount: cartCount } = useCart();
   const skipInitialCategoryFetch = useRef(initialHydrated && initialCategories.length > 0);
   const skipInitialProductsFetch = useRef(initialHydrated);
+  const brandLabel = resolveTenantBrandLabel(tenantSigla, tenantName);
+  const { userPlanNames, userPlanIds } = useMemo(
+    () => collectUserPlanScope(user),
+    [user]
+  );
+  const dashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
+  const pedidosHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/pedidos")
+    : "/configuracoes/pedidos";
 
   // Estados
   const [produtos, setProdutos] = useState<Produto[]>(initialProducts);
@@ -104,32 +153,11 @@ export default function LojaClientPage({
   const [loadingMore, setLoadingMore] = useState(false);
   const [busca, setBusca] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState("Todos");
-  const [cartCount, setCartCount] = useState(0);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [currentPage, setCurrentPage] = useState(1);
-  const [categoriasCatalogo, setCategoriasCatalogo] = useState<string[]>(initialCategories);
+  const [categoriasCatalogo, setCategoriasCatalogo] = useState<StoreCategory[]>(initialCategories);
 
-  // 1. CONTADOR DO CARRINHO (LocalStorage)
-  useEffect(() => {
-    const updateCartCount = () => {
-        const raw = localStorage.getItem("cart");
-        if (raw) {
-            const cart = JSON.parse(raw) as Array<{ qtd?: number }>;
-            const total = cart.reduce((acc, item) => acc + (item.qtd || 1), 0);
-            setCartCount(total);
-        }
-    };
-    
-    updateCartCount();
-    // Pequeno hack para ouvir mudancas no storage se o usuario voltar do detalhe
-    window.addEventListener('storage', updateCartCount);
-    
-    return () => { 
-        window.removeEventListener('storage', updateCartCount);
-    };
-  }, []);
-
-  // 2. CARREGAR CATEGORIAS (leve)
+  // 1. CARREGAR CATEGORIAS (leve)
   useEffect(() => {
     if (skipInitialCategoryFetch.current) {
       skipInitialCategoryFetch.current = false;
@@ -146,10 +174,7 @@ export default function LojaClientPage({
           tenantId: activeTenantId || undefined,
         });
         if (!mounted) return;
-        const names = rows
-          .map((row) => (typeof (row as { nome?: unknown }).nome === "string" ? ((row as { nome: string }).nome || "").trim() : ""))
-          .filter((entry): entry is string => entry.length > 0);
-        setCategoriasCatalogo(Array.from(new Set(names)));
+        setCategoriasCatalogo(rows as StoreCategory[]);
       } catch (error: unknown) {
         console.error(error);
       }
@@ -161,7 +186,7 @@ export default function LojaClientPage({
     };
   }, [activeTenantId]);
 
-  // 3. CARREGAR PRODUTOS POR PAGINA/CATEGORIA (reduz over-fetch no plano free)
+  // 2. CARREGAR PRODUTOS POR PAGINA/CATEGORIA (reduz over-fetch no plano free)
   useEffect(() => {
     if (skipInitialProductsFetch.current && filtroCategoria === "Todos") {
       skipInitialProductsFetch.current = false;
@@ -179,6 +204,8 @@ export default function LojaClientPage({
           category: filtroCategoria,
           forceRefresh: false,
           tenantId: activeTenantId || undefined,
+          userPlanNames,
+          userPlanIds,
         });
         if (!mounted) return;
         setProdutos(page.products as unknown as Produto[]);
@@ -195,7 +222,7 @@ export default function LojaClientPage({
     return () => {
       mounted = false;
     };
-  }, [activeTenantId, filtroCategoria]);
+  }, [activeTenantId, filtroCategoria, userPlanIds, userPlanNames]);
 
   const handleLoadMore = async () => {
     if (loading || loadingMore || !hasMore) return;
@@ -209,6 +236,8 @@ export default function LojaClientPage({
         category: filtroCategoria,
         forceRefresh: false,
         tenantId: activeTenantId || undefined,
+        userPlanNames,
+        userPlanIds,
       });
 
       setProdutos((prev) => {
@@ -230,77 +259,261 @@ export default function LojaClientPage({
     }
   };
 
-  // 4. FILTRAGEM
+  // 3. FILTRAGEM
   const categoriasDisponiveis = useMemo(() => {
-      const cats = new Set<string>();
-      categoriasCatalogo.forEach((cat) => {
-        const clean = String(cat || "").trim();
-        if (clean) cats.add(clean);
+      const categoriesByName = new Map<string, StoreCategory>();
+      const tenantColor = palette.primary || "#10b981";
+      const tenantLogo = tenantLogoUrl || "/logo.png";
+
+      categoriasCatalogo.forEach((category) => {
+        const nome = String(category.nome || "").trim();
+        if (!nome) return;
+        const sellerType = category.seller_type === "mini_vendor" ? "mini_vendor" : "tenant";
+        const categoryLogo =
+          sellerType === "tenant"
+            ? tenantLogo
+            : category.logo_url && category.logo_url.trim()
+            ? category.logo_url
+            : tenantLogo;
+        const categoryCover =
+          category.cover_img && category.cover_img.trim()
+            ? category.cover_img
+            : categoryLogo;
+        categoriesByName.set(nome, {
+          ...category,
+          nome,
+          cover_img: categoryCover,
+          button_color:
+            category.button_color ||
+            (sellerType === "tenant" ? tenantColor : "#2563eb"),
+          logo_url: categoryLogo,
+        });
       });
-      produtos.forEach((p) => {
-        const clean = String(p.categoria || "").trim();
-        if (clean) cats.add(clean);
+
+      produtos.forEach((product) => {
+        const nome = String(product.categoria || "").trim();
+        if (!nome || categoriesByName.has(nome)) return;
+        const sellerType = product.seller?.type === "mini_vendor" ? "mini_vendor" : "tenant";
+        const vendorCategory =
+          sellerType === "mini_vendor"
+            ? categoriasCatalogo.find(
+                (category) =>
+                  category.seller_type === "mini_vendor" &&
+                  String(category.seller_id || "").trim() === String(product.seller?.id || "").trim()
+              )
+            : null;
+        const categoryLogo =
+          sellerType === "tenant"
+            ? tenantLogo
+            : (vendorCategory?.logo_url && vendorCategory.logo_url.trim()) ||
+              product.seller?.logoUrl ||
+              tenantLogo;
+        const categoryCover =
+          (vendorCategory?.cover_img && vendorCategory.cover_img.trim()) || categoryLogo;
+        const categoryColor =
+          (vendorCategory?.button_color && vendorCategory.button_color.trim()) ||
+          (sellerType === "tenant" ? tenantColor : "#2563eb");
+        categoriesByName.set(nome, {
+          id: nome,
+          nome,
+          cover_img: categoryCover,
+          button_color: categoryColor,
+          logo_url: categoryLogo,
+          seller_type: sellerType,
+          seller_id: product.seller?.id || "",
+        });
       });
-      return ["Todos", ...Array.from(cats)];
-  }, [categoriasCatalogo, produtos]);
+
+      return Array.from(categoriesByName.values()).sort((left, right) =>
+        left.nome.localeCompare(right.nome, "pt-BR")
+      );
+  }, [categoriasCatalogo, palette.primary, produtos, tenantLogoUrl]);
 
   const produtosFiltrados = produtos.filter(p => {
       const matchNome = p.nome.toLowerCase().includes(busca.toLowerCase());
       const matchCat = filtroCategoria === "Todos" || p.categoria === filtroCategoria;
       return matchNome && matchCat;
   });
+  const selectedCategory = useMemo(
+    () =>
+      filtroCategoria === "Todos"
+        ? null
+        : categoriasDisponiveis.find((category) => category.nome === filtroCategoria) || null,
+    [categoriasDisponiveis, filtroCategoria]
+  );
+  const featuredCategory = useMemo(
+    () =>
+      categoriasDisponiveis.find(
+        (category) => typeof category.cover_img === "string" && category.cover_img.trim()
+      ) || categoriasDisponiveis[0] || null,
+    [categoriasDisponiveis]
+  );
+  const featuredTenantCategory = useMemo(
+    () =>
+      categoriasDisponiveis.find(
+        (category) =>
+          category.seller_type !== "mini_vendor" &&
+          ((typeof category.cover_img === "string" && category.cover_img.trim()) ||
+            (typeof category.logo_url === "string" && category.logo_url.trim()))
+      ) || null,
+    [categoriasDisponiveis]
+  );
+  const storeHero = useMemo(() => {
+    const heroImage =
+      filtroCategoria === "Todos"
+        ? featuredTenantCategory?.cover_img ||
+          featuredTenantCategory?.logo_url ||
+          tenantLogoUrl ||
+          "/logo.png"
+        : selectedCategory?.cover_img ||
+          featuredCategory?.cover_img ||
+          featuredCategory?.logo_url ||
+          tenantLogoUrl ||
+          "/logo.png";
+
+    return {
+      image: heroImage,
+      eyebrow:
+        filtroCategoria === "Todos" ? "Loja oficial e mini vendors" : "Categoria em destaque",
+      title: filtroCategoria === "Todos" ? `Lojinha ${brandLabel}` : filtroCategoria,
+      description:
+        filtroCategoria === "Todos"
+          ? "Produtos da atletica e lojinhas aprovadas em um unico lugar."
+          : `Explore ${filtroCategoria.toLowerCase()} com a capa da categoria em destaque no topo.`,
+    };
+  }, [
+    brandLabel,
+    featuredCategory?.cover_img,
+    featuredCategory?.logo_url,
+    featuredTenantCategory?.cover_img,
+    featuredTenantCategory?.logo_url,
+    filtroCategoria,
+    selectedCategory?.cover_img,
+    tenantLogoUrl,
+  ]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-32 selection:bg-emerald-500/30">
-      
+      <section className="relative h-[240px] overflow-hidden border-b border-white/5 sm:h-[320px]">
+        <Image
+          src={storeHero.image}
+          alt={storeHero.title}
+          fill
+          sizes="100vw"
+          className="object-cover"
+          priority
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-black/35 to-[#050505]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.14),transparent_34%)]" />
+      </section>
+
       {/* --- HEADER --- */}
-      <header className="p-6 sticky top-0 z-30 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 space-y-4">
-        <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-                <Link href="/dashboard" className="bg-zinc-900 p-2.5 rounded-full hover:bg-zinc-800 transition border border-zinc-800">
-                    <ArrowLeft size={20} className="text-zinc-400" />
-                </Link>
-                <div>
-                    <h1 className="text-xl font-black text-white uppercase tracking-tighter italic">Lojinha AAAKN</h1>
-                    <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">Vista a camisa</p>
-                </div>
-            </div>
+      <header className="relative z-10 -mt-16 px-6 pb-6 space-y-4">
+        <div className="space-y-4 rounded-[2rem] border border-white/10 bg-[#050505]/92 p-5 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+          <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                  <Link href={dashboardHref} className="rounded-full border border-zinc-800 bg-zinc-900 p-2.5 transition hover:bg-zinc-800">
+                      <ArrowLeft size={20} className="text-zinc-400" />
+                  </Link>
+                  <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-emerald-400">
+                        {storeHero.eyebrow}
+                      </p>
+                      <h1 className="text-2xl font-black uppercase tracking-tighter italic text-white sm:text-3xl">
+                        {storeHero.title}
+                      </h1>
+                      <p className="mt-1 max-w-xl text-xs text-zinc-400 sm:text-sm">
+                        {storeHero.description}
+                      </p>
+                  </div>
+              </div>
 
-            <Link href="/configuracoes/pedidos" className="relative bg-zinc-900 p-2.5 rounded-full hover:bg-zinc-800 transition border border-zinc-800 group">
-                <ShoppingBag size={20} className="text-zinc-400 group-hover:text-emerald-500 transition"/>
-                {cartCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-emerald-500 text-black text-[10px] font-black flex items-center justify-center rounded-full shadow-lg shadow-emerald-500/20">
-                        {cartCount}
-                    </span>
-                )}
-            </Link>
-        </div>
+              <Link href={pedidosHref} className="group relative rounded-full border border-zinc-800 bg-zinc-900 p-2.5 transition hover:bg-zinc-800">
+                  <ShoppingBag size={20} className="text-zinc-400 transition group-hover:text-emerald-500"/>
+                  {cartCount > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-black text-black shadow-lg shadow-emerald-500/20">
+                          {cartCount}
+                      </span>
+                  )}
+              </Link>
+          </div>
 
-        {/* BARRA DE BUSCA */}
-        <div className="relative">
-            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500"/>
-            <input 
-                type="text" 
-                placeholder="O que voce procura?" 
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-3 pl-12 pr-4 text-sm text-white focus:border-emerald-500 outline-none transition placeholder:text-zinc-600"
-                value={busca}
-                onChange={e => setBusca(e.target.value)}
-            />
+          {/* BARRA DE BUSCA */}
+          <div className="relative">
+              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500"/>
+              <input 
+                  type="text" 
+                  placeholder="O que voce procura?" 
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-900 py-3 pl-12 pr-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-emerald-500"
+                  value={busca}
+                  onChange={e => setBusca(e.target.value)}
+              />
+          </div>
         </div>
 
         {/* CATEGORIAS (SCROLL HORIZONTAL) */}
-        <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-2">
-            {categoriasDisponiveis.map(cat => (
-                <button 
-                    key={cat}
-                    onClick={() => setFiltroCategoria(cat)}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition border ${
-                        filtroCategoria === cat 
-                        ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
-                        : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300"
+        <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2">
+            <button
+              onClick={() => setFiltroCategoria("Todos")}
+              className={`min-w-[148px] overflow-hidden rounded-2xl border text-left transition ${
+                filtroCategoria === "Todos"
+                  ? "border-emerald-500/40 bg-zinc-900 shadow-lg shadow-emerald-900/20"
+                  : "border-zinc-800 bg-zinc-950 hover:border-zinc-700"
+              }`}
+            >
+              <div className="relative h-20 bg-black">
+                <Image
+                  src={
+                    featuredTenantCategory?.cover_img ||
+                    featuredTenantCategory?.logo_url ||
+                    tenantLogoUrl ||
+                    "/logo.png"
+                  }
+                  alt={`Logo ${brandLabel}`}
+                  fill
+                  sizes="148px"
+                  className="object-cover opacity-50"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
+              </div>
+              <div className="p-3">
+                <span className="inline-flex rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-300">
+                  Todas
+                </span>
+              </div>
+            </button>
+
+            {categoriasDisponiveis.map((cat) => (
+                <button
+                    key={cat.id || cat.nome}
+                    onClick={() => setFiltroCategoria(cat.nome)}
+                    className={`min-w-[148px] overflow-hidden rounded-2xl border text-left transition ${
+                      filtroCategoria === cat.nome
+                        ? "border-white/15 bg-zinc-900 shadow-lg"
+                        : "border-zinc-800 bg-zinc-950 hover:border-zinc-700"
                     }`}
                 >
-                    {cat}
+                    <div className="relative h-20 bg-black">
+                      <Image
+                        src={cat.cover_img || cat.logo_url || tenantLogoUrl || "/logo.png"}
+                        alt={cat.nome}
+                        fill
+                        sizes="148px"
+                        className="object-cover opacity-80"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
+                    </div>
+                    <div className="p-3">
+                      <span
+                        className="inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white"
+                        style={{
+                          backgroundColor: cat.button_color || palette.primary || "#10b981",
+                          borderColor: cat.button_color || palette.primary || "#10b981",
+                        }}
+                      >
+                        {cat.nome}
+                      </span>
+                    </div>
                 </button>
             ))}
         </div>
@@ -328,12 +541,22 @@ export default function LojaClientPage({
                         : Number(prod.estoque);
                     const allColors = getProductColorPreview(prod);
                     const colorPreview = allColors.slice(0, 3);
+                    const status = prod.status || (estoqueTotal > 0 ? "ativo" : "esgotado");
+                    const sellerLogo = prod.seller?.logoUrl || tenantLogoUrl || "/logo.png";
+                    const sellerName = prod.seller?.name || brandLabel;
+                    const isDisabledSale = status !== "ativo";
+                    const productHref = tenantSlug ? withTenantSlug(tenantSlug, `/loja/${prod.id}`) : `/loja/${prod.id}`;
+                    const sellerHref =
+                      prod.seller?.type === "mini_vendor" && prod.seller.id
+                        ? tenantSlug
+                          ? withTenantSlug(tenantSlug, `/perfil/mini-vendor/${prod.seller.id}`)
+                          : `/perfil/mini-vendor/${prod.seller.id}`
+                        : "";
 
                     return (
-                        <Link 
-                            href={`/loja/${prod.id}`} 
+                        <article
                             key={prod.id}
-                            className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden group active:scale-95 transition hover:border-zinc-700 flex flex-col relative"
+                            className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden group transition hover:border-zinc-700 flex flex-col relative"
                         >
                             {/* TAG VISUAL */}
                             {prod.tagLabel && (
@@ -342,74 +565,130 @@ export default function LojaClientPage({
                                 </div>
                             )}
 
-                            {/* IMAGEM */}
-                            <div className="relative h-48 bg-black w-full overflow-hidden">
-                                {prod.img ? (
-                                    <Image
-                                        src={prod.img}
-                                        alt={prod.nome}
-                                        fill
-                                        sizes="100vw"
-                                        className="object-cover opacity-90 group-hover:opacity-100 group-hover:scale-105 transition duration-500"
-                                        
-                                    />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-zinc-700">
-                                        <ShoppingBag size={32}/>
-                                    </div>
-                                )}
-                                
-                                {/* BADGE DE ESTOQUE BAIXO */}
-                                {estoqueTotal > 0 && estoqueTotal < 5 && (
-                                    <div className="absolute bottom-2 right-2 bg-orange-500/90 text-white text-[8px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 shadow-lg backdrop-blur-sm">
-                                        <AlertCircle size={10}/> Poucas unidades
-                                    </div>
-                                )}
+                            <div className={`absolute right-3 top-3 z-10 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase shadow-xl backdrop-blur-md ${getAvailabilityClass(status)}`}>
+                              {getAvailabilityLabel(status)}
                             </div>
+
+                            {/* IMAGEM */}
+                            <Link href={productHref} className="block active:scale-[0.99] transition">
+                              <div className="relative h-48 bg-black w-full overflow-hidden">
+                                  {prod.img ? (
+                                      <Image
+                                          src={prod.img}
+                                          alt={prod.nome}
+                                          fill
+                                          sizes="100vw"
+                                          className="object-cover opacity-90 group-hover:opacity-100 group-hover:scale-105 transition duration-500"
+                                      />
+                                  ) : (
+                                      <div className="w-full h-full flex items-center justify-center text-zinc-700">
+                                          <ShoppingBag size={32}/>
+                                      </div>
+                                  )}
+                                  
+                                  {/* BADGE DE ESTOQUE BAIXO */}
+                                  {estoqueTotal > 0 && estoqueTotal < 5 && (
+                                      <div className="absolute bottom-2 right-2 bg-orange-500/90 text-white text-[8px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 shadow-lg backdrop-blur-sm">
+                                          <AlertCircle size={10}/> Poucas unidades
+                                      </div>
+                                  )}
+                              </div>
+                            </Link>
 
                             {/* INFO */}
                             <div className="p-4 flex flex-col gap-2 flex-1">
-                                <div className="flex justify-between items-start">
-                                    <h3 className="text-sm font-black text-white leading-tight line-clamp-2">{prod.nome}</h3>
-                                </div>
-                                {colorPreview.length > 0 && (
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {colorPreview.map((color) => (
-                                      <span
-                                        key={`${prod.id}-color-${color}`}
-                                        className="px-2 py-0.5 rounded-md border border-zinc-700 bg-zinc-950 text-[9px] font-bold uppercase text-zinc-300"
-                                      >
-                                        {color}
-                                      </span>
-                                    ))}
-                                    {allColors.length > colorPreview.length && (
-                                      <span className="px-2 py-0.5 rounded-md border border-zinc-700 bg-zinc-950 text-[9px] font-bold uppercase text-zinc-500">
-                                        +{allColors.length - colorPreview.length}
-                                      </span>
-                                    )}
+                                {sellerHref ? (
+                                  <Link
+                                    href={sellerHref}
+                                    className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-black/20 px-2.5 py-2 transition hover:border-blue-500/30 hover:bg-blue-500/10"
+                                  >
+                                    <div className="relative h-8 w-8 overflow-hidden rounded-full border border-zinc-700 bg-black">
+                                      <Image
+                                        src={sellerLogo}
+                                        alt={sellerName}
+                                        fill
+                                        sizes="32px"
+                                        className="object-cover"
+                                      />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="truncate text-[10px] font-black uppercase tracking-wide text-zinc-400">
+                                        Mini vendor
+                                      </p>
+                                      <p className="truncate text-[11px] font-bold text-zinc-200">{sellerName}</p>
+                                    </div>
+                                  </Link>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <div className="relative h-8 w-8 overflow-hidden rounded-full border border-zinc-700 bg-black">
+                                      <Image
+                                        src={sellerLogo}
+                                        alt={sellerName}
+                                        fill
+                                        sizes="32px"
+                                        className="object-cover"
+                                      />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="truncate text-[10px] font-black uppercase tracking-wide text-zinc-400">
+                                        Loja da atletica
+                                      </p>
+                                      <p className="truncate text-[11px] font-bold text-zinc-200">{sellerName}</p>
+                                    </div>
                                   </div>
                                 )}
-                                
-                                <div className="mt-auto pt-2 flex items-end justify-between">
-                                    <div>
-                                        {prod.precoAntigo && prod.precoAntigo > prod.preco && (
-                                            <p className="text-[10px] text-zinc-500 line-through font-bold">R$ {Number(prod.precoAntigo).toFixed(2)}</p>
-                                        )}
-                                        <p className="text-xl font-black text-emerald-400">R$ {Number(prod.preco).toFixed(2)}</p>
-                                    </div>
-                                    
-                                    {estoqueTotal > 0 ? (
-                                        <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-emerald-500 group-hover:bg-emerald-500 group-hover:text-black transition">
-                                            <ShoppingBag size={16}/>
-                                        </div>
-                                    ) : (
-                                        <span className="text-[10px] font-black uppercase text-red-500 border border-red-500/30 px-2 py-1 rounded bg-red-500/10">
-                                            Esgotado
+
+                                <Link href={productHref} className="flex flex-1 flex-col gap-2 active:scale-[0.99] transition">
+                                  <div className="flex justify-between items-start">
+                                      <h3 className="text-sm font-black text-white leading-tight line-clamp-2">{prod.nome}</h3>
+                                  </div>
+                                  {colorPreview.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {colorPreview.map((color) => (
+                                        <span
+                                          key={`${prod.id}-color-${color}`}
+                                          className="px-2 py-0.5 rounded-md border border-zinc-700 bg-zinc-950 text-[9px] font-bold uppercase text-zinc-300"
+                                        >
+                                          {color}
                                         </span>
-                                    )}
-                                </div>
+                                      ))}
+                                      {allColors.length > colorPreview.length && (
+                                        <span className="px-2 py-0.5 rounded-md border border-zinc-700 bg-zinc-950 text-[9px] font-bold uppercase text-zinc-500">
+                                          +{allColors.length - colorPreview.length}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  <div className="mt-auto pt-2 flex items-end justify-between">
+                                      <div>
+                                          {prod.precoAntigo && prod.precoAntigo > prod.preco && (
+                                              <p className="text-[10px] text-zinc-500 line-through font-bold">R$ {Number(prod.precoAntigo).toFixed(2)}</p>
+                                          )}
+                                          <p className="text-xl font-black text-emerald-400">R$ {Number(prod.preco).toFixed(2)}</p>
+                                          <p className="mt-1 text-[10px] font-bold uppercase text-zinc-500">
+                                            {status === "em_breve" ? "Liberacao antecipada por plano" : "Compra por pedido"}
+                                          </p>
+                                      </div>
+                                      
+                                      {!isDisabledSale && estoqueTotal > 0 ? (
+                                          <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-emerald-500 group-hover:bg-emerald-500 group-hover:text-black transition">
+                                              <ShoppingBag size={16}/>
+                                          </div>
+                                      ) : status === "em_breve" ? (
+                                          <span className="inline-flex items-center gap-1 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-2 py-1 text-[10px] font-black uppercase text-yellow-300">
+                                            <Clock3 size={10} />
+                                            Em breve
+                                          </span>
+                                      ) : (
+                                          <span className="text-[10px] font-black uppercase text-red-500 border border-red-500/30 px-2 py-1 rounded bg-red-500/10">
+                                              Esgotado
+                                          </span>
+                                      )}
+                                  </div>
+                                </Link>
                             </div>
-                        </Link>
+                        </article>
                     );
                 })}
             </div>
@@ -450,7 +729,7 @@ export default function LojaClientPage({
               <div className="bg-black/20 p-2 rounded-lg text-yellow-200"><Zap size={18}/></div>
               <div className="flex-1">
                   <p className="text-xs font-bold text-white uppercase">Ganhe XP em compras!</p>
-                  <p className="text-[10px] text-yellow-100">Cada R$ 1,00 = 10 XP no Shark Card.</p>
+                  <p className="text-[10px] text-yellow-100">Cada R$ 1,00 gera XP no clube de fidelidade.</p>
               </div>
           </div>
       </div>

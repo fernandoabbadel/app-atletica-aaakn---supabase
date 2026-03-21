@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useRouter } from "next/navigation";
 import { 
   Calendar, Loader2, Target, Users, Heart, 
   CheckCircle, ChevronRight, ChevronLeft, ShoppingBag, 
@@ -26,9 +27,10 @@ import {
 import { getTurmaImage } from "../../constants/turmaImages";
 import {
   createDefaultTenantAppModulesConfig,
-  fetchTenantAppModulesConfig,
+  fetchEffectiveTenantAppModulesConfig,
   isTenantAppModuleVisible,
 } from "@/lib/tenantAppModulesService";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- INTERFACES ESTRITAS ---
 
@@ -114,19 +116,22 @@ const EventCardItem = ({
   evt,
   userId,
   onToggleLike,
+  tenantSlug,
   imagePriority = false,
 }: {
   evt: Evento;
   userId: string;
   onToggleLike: (id: string, state: boolean) => void;
+  tenantSlug?: string;
   imagePriority?: boolean;
 }) => {
   const isLiked = evt.likesList?.includes(userId);
   const isGoing = evt.participantes?.includes(userId);
+  const eventHref = tenantSlug ? withTenantSlug(tenantSlug, `/eventos/${evt.id}`) : `/eventos/${evt.id}`;
 
   return (
     <div className="bg-zinc-900 min-w-full rounded-3xl overflow-hidden border border-zinc-800 flex flex-col snap-center relative h-[450px]">
-      <Link href={`/eventos/${evt.id}`} className="relative h-64 w-full bg-black block group">
+      <Link href={eventHref} className="relative h-64 w-full bg-black block group">
         {evt.imagem ? (
             <Image 
                 src={evt.imagem} 
@@ -160,7 +165,7 @@ const EventCardItem = ({
                 <Heart size={20} className={isLiked ? 'fill-current' : ''}/> {evt.likesList?.length || 0}
             </button>
             
-            <Link href={`/eventos/${evt.id}`} className={`px-6 py-3 rounded-xl font-black text-xs uppercase border transition flex items-center gap-2 shadow-lg ${isGoing ? 'bg-brand-solid text-black border-brand-strong shadow-brand' : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:border-brand-strong hover:text-white'}`}>
+            <Link href={eventHref} className={`px-6 py-3 rounded-xl font-black text-xs uppercase border transition flex items-center gap-2 shadow-lg ${isGoing ? 'bg-brand-solid text-black border-brand-strong shadow-brand' : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:border-brand-strong hover:text-white'}`}>
                 {isGoing && <CheckCircle size={14}/>} {isGoing ? 'Confirmado' : 'Ver Detalhes'}
             </Link>
         </div>
@@ -175,20 +180,23 @@ const ProductCard = ({
   userId,
   onToggleLike,
   turmaStats,
+  tenantSlug,
   imagePriority = false,
 }: {
   prod: Produto;
   userId: string;
   onToggleLike: (id: string, state: boolean) => void;
   turmaStats: DashboardTurmaStat[];
+  tenantSlug?: string;
   imagePriority?: boolean;
 }) => {
     const isLiked = prod.likes?.includes(userId);
     const likeCount = prod.likes?.length || 0;
+    const productHref = tenantSlug ? withTenantSlug(tenantSlug, `/loja/${prod.id}`) : `/loja/${prod.id}`;
 
     return (
         <div className="bg-zinc-900 min-w-full rounded-3xl overflow-hidden border border-zinc-800 flex flex-col h-[450px] snap-center group relative">
-            <Link href={`/loja/${prod.id}`} className="h-64 bg-black relative block overflow-hidden">
+            <Link href={productHref} className="h-64 bg-black relative block overflow-hidden">
                 <Image 
                     src={prod.img} 
                     alt={prod.nome}
@@ -222,7 +230,7 @@ const ProductCard = ({
                             </button>
                             <span className="text-xs font-bold text-zinc-500">{likeCount}</span>
                         </div>
-                        <Link href={`/loja/${prod.id}`} className="px-5 py-2.5 rounded-xl font-black text-xs uppercase border border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500 hover:text-white transition">
+                        <Link href={productHref} className="px-5 py-2.5 rounded-xl font-black text-xs uppercase border border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500 hover:text-white transition">
                             Comprar
                         </Link>
                     </div>
@@ -254,8 +262,9 @@ const ProductCard = ({
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { user, loading } = useAuth();
-  const { tenantId: activeTenantId, tenantLogoUrl } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug: activeTenantSlug, tenantLogoUrl } = useTenantTheme();
 
   const [events, setEvents] = useState<Evento[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -280,6 +289,12 @@ export default function DashboardPage() {
   const ligasScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    if (loading) return;
+    if (activeTenantId || activeTenantSlug.trim()) return;
+    router.replace("/visitante");
+  }, [activeTenantId, activeTenantSlug, loading, router]);
+
+  useEffect(() => {
     let active = true;
 
     const loadDashboard = async () => {
@@ -288,8 +303,9 @@ export default function DashboardPage() {
           fetchDashboardBundle({
             tenantId: activeTenantId || undefined,
           }),
-          fetchTenantAppModulesConfig({
+          fetchEffectiveTenantAppModulesConfig({
             tenantId: activeTenantId || user?.tenant_id || undefined,
+            tenantSlug: activeTenantSlug,
           }),
         ]);
         if (!active) return;
@@ -317,7 +333,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [activeTenantId, user?.tenant_id]);
+  }, [activeTenantId, activeTenantSlug, user?.tenant_id]);
 
   const scroll = (ref: React.RefObject<HTMLDivElement | null>, dir: 'left' | 'right') => { 
       if (ref.current) {
@@ -442,18 +458,22 @@ export default function DashboardPage() {
   const isModuleVisible = (key: Parameters<typeof isTenantAppModuleVisible>[1]): boolean =>
     isTenantAppModuleVisible(modulesConfig, key);
 
-  if (loading || loadingData) return <div className="h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-brand w-10 h-10" /></div>;
+  if (loading || loadingData || (!activeTenantId && !activeTenantSlug.trim())) {
+    return <div className="h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-brand w-10 h-10" /></div>;
+  }
 
   const userData = user as unknown as UserData; 
   const userRoleNormalized =
     typeof userData?.role === "string" ? userData.role.toLowerCase().trim() : "guest";
   const tenantLogoFallback = tenantLogoUrl || "/logo.png";
+  const tenantPath = (path: string): string =>
+    activeTenantSlug.trim() ? withTenantSlug(activeTenantSlug, path) : path;
   const sharkroundHref =
     userRoleNormalized === "master" ||
     userRoleNormalized === "admin_geral" ||
     userRoleNormalized === "admin_gestor"
-      ? "/sharkround"
-      : "/em-breve";
+      ? tenantPath("/sharkround")
+      : tenantPath("/em-breve");
 
   return (
     <div className="flex flex-col gap-8 p-5 pb-32 max-w-md mx-auto w-full bg-[#050505] min-h-screen text-white font-sans selection:bg-brand-primary/30">
@@ -465,7 +485,7 @@ export default function DashboardPage() {
           <p className="text-zinc-500 text-xs font-bold tracking-wide">Pronto para dominar?</p>
         </div>
         {isModuleVisible("perfil") ? (
-          <Link href="/perfil">
+          <Link href={tenantPath("/perfil")}>
               <div className="h-12 w-12 rounded-full bg-zinc-900 border-2 border-brand-strong p-0.5 overflow-hidden shadow-brand relative">
                   <Image 
                       src={userData?.foto || "https://github.com/shadcn.png"} 
@@ -483,13 +503,13 @@ export default function DashboardPage() {
       {/* 0. PARCEIROS PREMIUM (OURO/PRATA) */}
       {isModuleVisible("parceiros") && (parceirosOuro.length > 0 || parceirosPrata.length > 0) && (
         <div className="space-y-4">
-          <SectionHeader title="Parceiros Premium" icon={Crown} link="/parceiros" colorClass="text-yellow-500" />
+          <SectionHeader title="Parceiros Premium" icon={Crown} link={tenantPath("/parceiros")} colorClass="text-yellow-500" />
 
           {parceirosOuro.length > 0 && (
             <div className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-4 pb-2">
               {parceirosOuro.map((p, index) => (
                 <Link
-                  href={`/parceiros/${p.id}`}
+                  href={tenantPath(`/parceiros/${p.id}`)}
                   key={p.id}
                   className="min-w-full h-[450px] bg-zinc-900 rounded-3xl overflow-hidden border border-yellow-500/30 relative group snap-center active:scale-[0.99] transition"
                 >
@@ -539,7 +559,7 @@ export default function DashboardPage() {
               <div className="flex overflow-x-auto gap-4 scrollbar-hide snap-x pb-2">
                 {parceirosPrata.map((p, index) => (
                   <Link
-                    href={`/parceiros/${p.id}`}
+                    href={tenantPath(`/parceiros/${p.id}`)}
                     key={p.id}
                     className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-700 hover:border-zinc-500"
                   >
@@ -570,7 +590,7 @@ export default function DashboardPage() {
 
       {/* 1. CARTEIRINHA */}
       {isModuleVisible("carteirinha") && (
-      <Link href="/carteirinha" className="relative h-40 w-full overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 active:scale-95 transition group shadow-2xl block">
+      <Link href={tenantPath("/carteirinha")} className="relative h-40 w-full overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 active:scale-95 transition group shadow-2xl block">
           <Image 
             src={getTurmaImage(userData?.turma)} 
             alt="Carteira BG"
@@ -614,7 +634,7 @@ export default function DashboardPage() {
           )}
           
           {isModuleVisible("treinos") && (
-          <Link href="/treinos" className="bg-zinc-900 rounded-3xl h-44 overflow-hidden relative active:scale-95 transition border border-zinc-800 group shadow-lg">
+          <Link href={tenantPath("/treinos")} className="bg-zinc-900 rounded-3xl h-44 overflow-hidden relative active:scale-95 transition border border-zinc-800 group shadow-lg">
               <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 opacity-30 group-hover:opacity-50 transition">
                   {treinos.length > 0 ? treinos.map((img, i) => (
                     <div key={i} className="relative w-full h-full border-[0.5px] border-black">
@@ -638,7 +658,7 @@ export default function DashboardPage() {
 
       {/* 🦈 3. ID 01 & 02: CAÇA AOS CALOUROS (ATUALIZADO PARA X/Y) */}
       {isModuleVisible("album") && (
-      <Link href="/album" className="relative h-40 w-full overflow-hidden rounded-3xl bg-black border border-brand block group active:scale-95 transition-all shadow-brand">
+      <Link href={tenantPath("/album")} className="relative h-40 w-full overflow-hidden rounded-3xl bg-black border border-brand block group active:scale-95 transition-all shadow-brand">
             {/* Efeitos de Fundo (Sonar) */}
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-brand-primary/20 via-black to-black opacity-80"></div>
             
@@ -690,7 +710,7 @@ export default function DashboardPage() {
               <SectionHeader 
                   title="Eventos" 
                   icon={Calendar} 
-                  link="/eventos" 
+                  link={tenantPath("/eventos")} 
                   colorClass="text-brand"
                   onPrev={() => scroll(eventsScrollRef, 'left')} 
                   onNext={() => scroll(eventsScrollRef, 'right')} 
@@ -702,6 +722,7 @@ export default function DashboardPage() {
                       evt={evt}
                       userId={userData?.uid}
                       onToggleLike={handleEventLike}
+                      tenantSlug={activeTenantSlug}
                       imagePriority={index < 2}
                     />
                   ))}
@@ -715,7 +736,7 @@ export default function DashboardPage() {
                <SectionHeader 
                   title="Ligas Acadêmicas" 
                   icon={Users} 
-                  link="/ligas_unitau" 
+                  link={tenantPath("/ligas_unitau")} 
                   colorClass="text-yellow-500"
                   onPrev={() => scroll(ligasScrollRef, 'left')} 
                   onNext={() => scroll(ligasScrollRef, 'right')} 
@@ -727,7 +748,7 @@ export default function DashboardPage() {
                            const bizuAtivo = getLigaBizuAtivo(liga);
                            const textoCard = (bizuAtivo || liga.descricao || "Liga acadêmica em destaque.").trim();
                            return (
-                           <Link href={`/ligas_unitau`} key={liga.id} className="min-w-[160px] flex flex-col items-center gap-4 snap-start group cursor-pointer relative bg-gradient-to-b from-zinc-900 to-black p-5 rounded-[24px] border border-zinc-800 hover:border-yellow-500/50 transition-all shadow-xl active:scale-95">
+                           <Link href={tenantPath("/ligas_unitau")} key={liga.id} className="min-w-[160px] flex flex-col items-center gap-4 snap-start group cursor-pointer relative bg-gradient-to-b from-zinc-900 to-black p-5 rounded-[24px] border border-zinc-800 hover:border-yellow-500/50 transition-all shadow-xl active:scale-95">
                                
                                <div className="relative w-24 h-24">
                                    <div className="absolute inset-0 rounded-full border-2 border-dashed border-yellow-500/50 animate-spin-slow pointer-events-none"></div>
@@ -779,7 +800,7 @@ export default function DashboardPage() {
           <SectionHeader 
               title="Lojinha" 
               icon={ShoppingBag} 
-              link="/loja" 
+              link={tenantPath("/loja")} 
               colorClass="text-purple-500"
               onPrev={produtos.length > 0 ? () => scroll(productsScrollRef, 'left') : undefined} 
               onNext={produtos.length > 0 ? () => scroll(productsScrollRef, 'right') : undefined} 
@@ -793,13 +814,14 @@ export default function DashboardPage() {
                     userId={userData?.uid}
                     onToggleLike={handleProductLike}
                     turmaStats={productTurmaStats[p.id] || []}
+                    tenantSlug={activeTenantSlug}
                     imagePriority={index < 2}
                   />
                 ))}
             </div>
           ) : (
             <Link
-              href="/loja"
+              href={tenantPath("/loja")}
               className="block rounded-3xl border border-dashed border-zinc-700 bg-zinc-900/70 p-6 active:scale-[0.99] transition"
             >
               <div className="flex items-center justify-between gap-4">
@@ -819,10 +841,10 @@ export default function DashboardPage() {
       {/* 6. PARCEIROS STANDARD (Logo Aumentado) */}
       {isModuleVisible("parceiros") && parceirosStandard.length > 0 && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-6 relative overflow-hidden">
-               <SectionHeader title="Parceiros Standard" icon={Users} link="/parceiros" colorClass="text-zinc-500"/>
+               <SectionHeader title="Parceiros Standard" icon={Users} link={tenantPath("/parceiros")} colorClass="text-zinc-500"/>
                <div className="flex overflow-x-auto gap-4 scrollbar-hide snap-x relative z-10 pb-2">
                    {parceirosStandard.map((p) => (
-                       <Link href={`/parceiros/${p.id}`} key={p.id} className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-800 hover:border-zinc-600">
+                       <Link href={tenantPath(`/parceiros/${p.id}`)} key={p.id} className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-800 hover:border-zinc-600">
                            <div className="absolute inset-0">
                                <Image src={getPartnerCoverSrc(p, tenantLogoFallback)} alt="Capa" fill sizes="150px" className="object-cover opacity-30 group-hover:opacity-50 transition" />
                                <div className="absolute inset-0 bg-black/40"/>
@@ -842,12 +864,12 @@ export default function DashboardPage() {
       {/* 7. COMUNIDADE (Posts) */}
       {isModuleVisible("comunidade") && (
       <div className="space-y-4">
-          <SectionHeader title="Comunidade" icon={MessageCircle} link="/comunidade" colorClass="text-zinc-500"/>
+          <SectionHeader title="Comunidade" icon={MessageCircle} link={tenantPath("/comunidade")} colorClass="text-zinc-500"/>
           {mensagens.length > 0 ? mensagens.slice(0, 2).map((msg) => {
               const userLikedMsg = msg.likes?.includes(userData?.uid);
               return (
               <div key={msg.id} className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden relative group">
-                    <Link href="/comunidade" className="absolute inset-0 z-0"/>
+                    <Link href={tenantPath("/comunidade")} className="absolute inset-0 z-0"/>
                     
                     <div className="p-4 flex gap-4 items-start relative z-0">
                       <div className="w-10 h-10 rounded-full bg-black border border-zinc-700 relative overflow-hidden">

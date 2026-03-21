@@ -26,8 +26,12 @@ import {
 } from "../../../lib/eventsNativeService";
 import { getTurmaImage } from "../../../constants/turmaImages";
 import { useAuth } from "../../../context/AuthContext";
+import { useTenantTheme } from "../../../context/TenantThemeContext";
 import { useToast } from "../../../context/ToastContext";
 import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../../constants/planVisuals";
+import { resolvePlanScopedPrice } from "../../../lib/commerceCatalog";
+import { withTenantSlug } from "../../../lib/tenantRouting";
+import { collectUserPlanScope } from "../../../lib/userPlanScope";
 
 // --- INTERFACES ---
 interface Lote {
@@ -35,6 +39,7 @@ interface Lote {
   nome: string;
   preco: string;
   status: 'ativo' | 'esgotado' | 'em_breve';
+  planPrices?: Array<{ planId?: string; planName?: string; price?: string | number }>;
 }
 
 interface Evento {
@@ -47,6 +52,8 @@ interface Evento {
   imagem?: string;
   imagePositionY?: number;
   tipo: string;
+  saleStatus?: 'ativo' | 'esgotado' | 'em_breve';
+  sale_status?: 'ativo' | 'esgotado' | 'em_breve';
   isLowStock?: boolean;
   stats?: {
     confirmados: number;
@@ -126,8 +133,8 @@ const DEFAULT_PATENTES: PatenteConfig[] = [
     { titulo: "Plâncton", minXp: 0, cor: "text-zinc-400", iconName: "Fish" },
     { titulo: "Peixe Palhaço", minXp: 500, cor: "text-orange-400", iconName: "Fish" },
     { titulo: "Barracuda", minXp: 2000, cor: "text-blue-400", iconName: "Swords" },
-    { titulo: "Tubarão Martelo", minXp: 5000, cor: "text-purple-400", iconName: "Fish" },
-    { titulo: "Tubarão Branco", minXp: 15000, cor: "text-emerald-400", iconName: "Fish" },
+    { titulo: "Elite Roxa", minXp: 5000, cor: "text-purple-400", iconName: "Fish" },
+    { titulo: "Elite Verde", minXp: 15000, cor: "text-emerald-400", iconName: "Fish" },
     { titulo: "MEGALODON", minXp: 50000, cor: "text-red-600", iconName: "Crown" },
 ];
 
@@ -138,6 +145,18 @@ const EVENT_DETAILS_RSVPS_LIMIT = 200;
 const EVENT_DETAILS_COMMENTS_LIMIT = 100;
 const EVENT_DETAILS_POLLS_LIMIT = 20;
 const EVENT_DETAILS_PEDIDOS_LIMIT = 20;
+
+const getSaleStatusLabel = (status?: Evento["saleStatus"]): string => {
+  if (status === "em_breve") return "Em-breve";
+  if (status === "esgotado") return "Esgotado";
+  return "Ativo";
+};
+
+const getSaleStatusClass = (status?: Evento["saleStatus"]): string => {
+  if (status === "em_breve") return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
+  if (status === "esgotado") return "border-red-500/30 bg-red-500/10 text-red-300";
+  return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+};
 
 const parseEventDate = (dateStr: string, timeStr: string = "00:00") => {
     try {
@@ -251,7 +270,10 @@ const UserBadges = ({ data, patentesConfig }: { data: Comentario, patentesConfig
 export default function DetalhesEventoPage() {
   const params = useParams();
   const { user, isAdmin } = useAuth(); 
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
+  const tenantPath = (path: string): string =>
+    tenantSlug.trim() ? withTenantSlug(tenantSlug, path) : path;
   
   const [evento, setEvento] = useState<Evento | null>(null);
   const [rsvps, setRsvps] = useState<Rsvp[]>([]);
@@ -278,8 +300,31 @@ export default function DetalhesEventoPage() {
       if (typeof whatsapp === "string") return whatsapp;
       return undefined;
   })();
+  const { userPlanNames, userPlanIds } = useMemo(() => collectUserPlanScope(user), [user]);
 
-    const eventId = typeof params.id === "string" ? params.id : "";
+  const eventId = typeof params.id === "string" ? params.id : "";
+  const resolveLotePrice = useCallback(
+      (lote: Lote): string => {
+          const basePrice = Number.parseFloat(String(lote.preco || "0").replace(",", ".")) || 0;
+          const resolvedPrice = resolvePlanScopedPrice({
+              basePrice,
+              entries: Array.isArray(lote.planPrices)
+                  ? lote.planPrices.map((entry) => ({
+                        planId: String(entry.planId || ""),
+                        planName: String(entry.planName || ""),
+                        price:
+                            typeof entry.price === "number"
+                                ? entry.price
+                                : Number.parseFloat(String(entry.price || "0").replace(",", ".")) || 0,
+                    }))
+                  : [],
+              userPlanIds,
+              userPlanNames,
+          });
+          return resolvedPrice.toFixed(2).replace(".", ",");
+      },
+      [userPlanIds, userPlanNames]
+  );
 
   const refreshEventData = useCallback(
       async (withLoading = false) => {
@@ -298,6 +343,7 @@ export default function DetalhesEventoPage() {
                   pollsLimit: EVENT_DETAILS_POLLS_LIMIT,
                   pedidosLimit: EVENT_DETAILS_PEDIDOS_LIMIT,
                   forceRefresh: false,
+                  tenantId: activeTenantId || undefined,
               });
 
               setEvento(bundle.evento as Evento | null);
@@ -325,7 +371,7 @@ export default function DetalhesEventoPage() {
               setLoading(false);
           }
       },
-      [eventId, user, addToast]
+      [activeTenantId, eventId, user, addToast]
   );
 
   useEffect(() => {
@@ -536,7 +582,9 @@ export default function DetalhesEventoPage() {
   }, [rsvps]);
 
   if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500 w-10 h-10"/></div>;
-  if (!evento) return <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center gap-4"><XCircle size={40} className="text-red-500"/> <p>Evento nao encontrado.</p> <Link href="/eventos" className="text-emerald-500 underline">Voltar</Link></div>;
+  if (!evento) return <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center gap-4"><XCircle size={40} className="text-red-500"/> <p>Evento nao encontrado.</p> <Link href={tenantPath("/eventos")} className="text-emerald-500 underline">Voltar</Link></div>;
+  const eventoSaleStatus = evento.saleStatus || evento.sale_status || "ativo";
+  const firstActiveLote = evento.lotes?.find((lote) => lote.status === "ativo");
 
   return (
     <div className="min-h-screen bg-[#050505] text-white pb-32 font-sans">
@@ -556,7 +604,7 @@ export default function DetalhesEventoPage() {
                 <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/20 to-transparent"></div>
         
         <div className="absolute top-6 left-6 right-6 flex justify-between items-center z-20">
-            <Link href="/eventos" className="bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 text-white hover:bg-white hover:text-black transition">
+            <Link href={tenantPath("/eventos")} className="bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 text-white hover:bg-white hover:text-black transition">
                 <ArrowLeft size={20} />
             </Link>
             <button onClick={handleShare} className="bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 text-white hover:bg-emerald-500 hover:text-black transition">
@@ -584,7 +632,12 @@ export default function DetalhesEventoPage() {
         </div>
 
         <div className="absolute bottom-0 left-0 p-6 w-full z-20">
-            <span className="px-3 py-1 bg-emerald-500 text-black text-[10px] font-black uppercase rounded mb-2 inline-block">{evento.tipo}</span>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="px-3 py-1 bg-emerald-500 text-black text-[10px] font-black uppercase rounded inline-block">{evento.tipo}</span>
+                <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase backdrop-blur-md ${getSaleStatusClass(eventoSaleStatus)}`}>
+                    {getSaleStatusLabel(eventoSaleStatus)}
+                </span>
+            </div>
             <h1 className="text-3xl font-black italic uppercase leading-none text-white drop-shadow-xl mb-2">{evento.titulo}</h1>
             <div className="flex gap-4 text-xs font-bold text-zinc-300 uppercase">
                 <span className="flex items-center gap-1"><Calendar size={12} className="text-emerald-500"/> {evento.data}</span>
@@ -614,8 +667,8 @@ export default function DetalhesEventoPage() {
                         </div>
                     </div>
                     {/* Link para nova compra */}
-                    {evento.lotes && evento.lotes.length > 0 && evento.lotes[0].status === 'ativo' && (
-                          <Link href={`/eventos/compra?evento=${evento.id}&lote=${evento.lotes[0].id}`} className="bg-yellow-400 text-black font-black text-xs px-4 py-2 rounded-lg uppercase hover:bg-yellow-300">Garantir</Link>
+                    {firstActiveLote && eventoSaleStatus !== 'em_breve' && eventoSaleStatus !== 'esgotado' && (
+                          <Link href={tenantPath(`/eventos/compra?evento=${evento.id}&lote=${firstActiveLote.id}`)} className="bg-yellow-400 text-black font-black text-xs px-4 py-2 rounded-lg uppercase hover:bg-yellow-300">Garantir</Link>
                     )}
                 </div>
             </div>
@@ -640,22 +693,27 @@ export default function DetalhesEventoPage() {
         </div>
 
         <div className="space-y-3">
-            <h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2"><Ticket size={14} className="text-emerald-500"/> Ingressos</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2"><Ticket size={14} className="text-emerald-500"/> Ingressos</h3>
+                <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase ${getSaleStatusClass(eventoSaleStatus)}`}>
+                    {getSaleStatusLabel(eventoSaleStatus)}
+                </span>
+            </div>
             {evento.lotes?.map((l, i) => (
-                <div key={i} className={`flex justify-between items-center p-4 rounded-xl border ${l.status === 'ativo' ? 'bg-zinc-900 border-emerald-500/50' : 'bg-black border-zinc-800 opacity-50'}`}>
+                <div key={i} className={`flex justify-between items-center gap-3 p-4 rounded-xl border ${l.status === 'ativo' && eventoSaleStatus === 'ativo' ? 'bg-zinc-900 border-emerald-500/50' : 'bg-black border-zinc-800 opacity-70'}`}>
                     <div>
                         <p className="text-xs font-black text-white uppercase">{l.nome}</p>
-                        <p className="text-emerald-400 font-bold">R$ {l.preco}</p>
+                        <p className="text-emerald-400 font-bold">R$ {resolveLotePrice(l)}</p>
                     </div>
-                    {l.status === 'ativo' ? 
+                    {l.status === 'ativo' && eventoSaleStatus === 'ativo' ? 
                         // ID 4: Link atualizado para a nova pagina de compra com query params
                         <Link 
-                            href={`/eventos/compra?evento=${evento.id}&lote=${l.id}`} 
+                            href={tenantPath(`/eventos/compra?evento=${evento.id}&lote=${l.id}`)} 
                             className="bg-white text-black px-4 py-2 rounded-lg text-[10px] font-black uppercase hover:bg-emerald-400 transition shadow-[0_0_15px_rgba(255,255,255,0.1)] hover:shadow-[0_0_20px_rgba(16,185,129,0.4)]"
                         >
                             Comprar
                         </Link> 
-                        : <span className="text-[10px] font-bold text-zinc-600 uppercase border border-zinc-800 px-3 py-1 rounded-lg">{l.status}</span>}
+                        : <span className={`text-[10px] font-bold uppercase border px-3 py-1 rounded-lg ${getSaleStatusClass(l.status === 'ativo' ? eventoSaleStatus : l.status)}`}>{getSaleStatusLabel(l.status === 'ativo' ? eventoSaleStatus : l.status)}</span>}
                 </div>
             ))}
         </div>
@@ -795,7 +853,7 @@ export default function DetalhesEventoPage() {
 
                 return (!c.hidden || isAdmin) && (
             <div key={c.id} className={`flex gap-3 ${c.hidden ? 'opacity-50 grayscale' : ''}`}>
-                <Link href={`/perfil/${c.userId}`}>
+                <Link href={tenantPath(`/perfil/${c.userId}`)}>
                     <div className="relative group/avatar cursor-pointer">
                         <Image 
                             src={c.userAvatar || "https://github.com/shadcn.png"} 
@@ -913,7 +971,7 @@ export default function DetalhesEventoPage() {
                   </div>
         <div className="p-2 overflow-y-auto space-y-1 custom-scrollbar flex-1">
                       {modalUsers.map((u, i) => (
-                          <Link key={i} href={`/perfil/${u.userId}`} className="flex items-center gap-3 p-3 hover:bg-zinc-900 rounded-2xl transition group">
+                          <Link key={i} href={tenantPath(`/perfil/${u.userId}`)} className="flex items-center gap-3 p-3 hover:bg-zinc-900 rounded-2xl transition group">
                            <div className="relative">
             <Image 
                 src={u.userAvatar || "https://github.com/shadcn.png"} 

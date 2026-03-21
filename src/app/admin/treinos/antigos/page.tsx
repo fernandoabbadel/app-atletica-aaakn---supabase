@@ -5,6 +5,8 @@ import Link from "next/link";
 import { ArrowLeft, CalendarRange, MapPin, RefreshCw, Search } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   fetchTreinosAdminList,
   type TreinoRecord,
@@ -26,6 +28,8 @@ const formatDate = (isoDate: string): string => {
 
 export default function AdminTreinosAntigosPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const backHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/treinos") : "/admin/treinos";
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
@@ -39,6 +43,7 @@ export default function AdminTreinosAntigosPage() {
       const rows = await fetchTreinosAdminList({
         maxResults: 260,
         forceRefresh,
+        tenantId: activeTenantId || undefined,
       });
       setTreinos(rows);
     } catch (error: unknown) {
@@ -81,7 +86,7 @@ export default function AdminTreinosAntigosPage() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-6 py-4">
           <div className="flex items-center gap-3">
             <Link
-              href="/admin/treinos"
+              href={backHref}
               className="rounded-full bg-zinc-900 p-2 text-zinc-300 hover:bg-zinc-800"
             >
               <ArrowLeft size={18} />

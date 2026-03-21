@@ -16,6 +16,7 @@ import {
   PLATFORM_BRAND_SUBTITLE,
   PLATFORM_LOGO_URL,
 } from "@/constants/platformBrand";
+import { cleanupExpiredRateLimitBuckets, consumeRateLimit } from "@/lib/rateLimiter";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { TENANT_SLUG_COOKIE_NAME } from "@/lib/tenantRouting";
 import { cookies } from "next/headers";
@@ -54,8 +55,19 @@ const buildTenantFallbackBrand = (tenantSlug: string): PublicLandingBrand => {
     sigla: normalizedSlug || "TENANT",
     nome: normalizedSlug || "TENANT",
     subtitle: "Landing oficial da atletica.",
-    logoUrl: "/logo.png",
+    logoUrl: PLATFORM_LOGO_URL,
   };
+};
+
+const resolveRequestIp = (request: Request): string => {
+  const forwardedFor = request.headers.get("x-forwarded-for") || "";
+  const firstForwardedIp = forwardedFor.split(",")[0]?.trim();
+  if (firstForwardedIp) return firstForwardedIp;
+
+  const realIp = request.headers.get("x-real-ip") || "";
+  if (realIp.trim()) return realIp.trim();
+
+  return "unknown";
 };
 
 const resolveTenantPublicBrand = async (
@@ -92,7 +104,7 @@ const resolveTenantPublicBrand = async (
       sigla: sigla || slug.toUpperCase() || "TENANT",
       nome: nome || sigla || slug.toUpperCase() || "TENANT",
       subtitle: curso || faculdade || "Landing oficial da atletica.",
-      logoUrl: logoUrl || "/logo.png",
+      logoUrl: logoUrl || PLATFORM_LOGO_URL,
     },
   };
 };
@@ -137,6 +149,27 @@ export async function GET(request: Request) {
   const queryTenantSlug = (requestUrl.searchParams.get("tenant") || "")
     .trim()
     .toLowerCase();
+  const rateLimit = consumeRateLimit(resolveRequestIp(request), "/api/public/landing");
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded. Try again in 1 minute." },
+      {
+        status: 429,
+        headers: {
+          "Cache-Control": "no-store",
+          "Retry-After": String(
+            Math.max(1, Math.ceil((rateLimit.resetAt - Date.now()) / 1000))
+          ),
+          "X-RateLimit-Remaining": "0",
+        },
+      }
+    );
+  }
+
+  if (Math.random() < 0.02) {
+    cleanupExpiredRateLimitBuckets();
+  }
 
   try {
     const cookieStore = await cookies();
@@ -165,6 +198,7 @@ export async function GET(request: Request) {
       {
       headers: {
         "Cache-Control": "public, s-maxage=43200, stale-while-revalidate=86400",
+        "X-RateLimit-Remaining": String(rateLimit.remaining),
       },
       }
     );
@@ -176,6 +210,7 @@ export async function GET(request: Request) {
     return NextResponse.json(fallbackPayload(DEFAULT_LANDING_CONFIG, fallbackBrand), {
       headers: {
         "Cache-Control": "public, s-maxage=43200, stale-while-revalidate=86400",
+        "X-RateLimit-Remaining": String(rateLimit.remaining),
       },
     });
   }

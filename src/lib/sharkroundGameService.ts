@@ -1,3 +1,4 @@
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
@@ -26,6 +27,9 @@ const asString = (value: unknown, fallback = ""): string =>
 
 const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const resolveSharkroundGameTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
@@ -96,10 +100,12 @@ async function queryRows(options: {
   maxResults: number;
   eq?: { field: string; value: string | number | boolean };
   orderField?: string;
+  tenantId?: string | null;
 }): Promise<RawRow[]> {
   const supabase = getSupabaseClient();
   let mutableColumns = parseSelectColumns(options.selectColumns);
   let mutableOrderField = options.orderField;
+  const scopedTenantId = resolveSharkroundGameTenantId(options.tenantId);
 
   while (mutableColumns.length > 0) {
     let query = supabase
@@ -109,6 +115,9 @@ async function queryRows(options: {
 
     if (options.eq) {
       query = query.eq(options.eq.field, options.eq.value);
+    }
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
     }
     if (mutableOrderField) {
       query = query.order(mutableOrderField, { ascending: false });
@@ -120,6 +129,9 @@ async function queryRows(options: {
     }
 
     const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (scopedTenantId && missingColumn.toLowerCase() === "tenant_id") {
+      return [];
+    }
     if (!missingColumn) {
       // Fallback final: remove apenas a ordenacao e tenta novamente.
       if (mutableOrderField) {
@@ -218,10 +230,12 @@ const normalizeLeague = (raw: RawRow): SharkroundGameLeagueRecord => {
 export async function fetchActiveSharkroundLeagues(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<SharkroundGameLeagueRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 30, MAX_ACTIVE_LEAGUES);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveSharkroundGameTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(leaguesCache, cacheKey);
@@ -233,6 +247,7 @@ export async function fetchActiveSharkroundLeagues(options?: {
     selectColumns: "id,nome,sigla,logoBase64,ativa,perguntas",
     eq: { field: "ativa", value: true },
     maxResults,
+    tenantId: scopedTenantId,
   });
   const leagues = rows.map((row) => normalizeLeague(row));
   setCache(leaguesCache, cacheKey, leagues);
@@ -242,10 +257,12 @@ export async function fetchActiveSharkroundLeagues(options?: {
 export async function fetchSharkroundPlayersPreview(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<SharkroundPlayerPreview[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 20, MAX_PLAYERS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveSharkroundGameTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(playersCache, cacheKey);
@@ -257,6 +274,7 @@ export async function fetchSharkroundPlayersPreview(options?: {
     selectColumns: "id,uid,nome,foto,xp",
     orderField: "xp",
     maxResults,
+    tenantId: scopedTenantId,
   });
   const players = rows.map((row) => ({
     id: asString(row.id) || asString(row.uid),
@@ -271,10 +289,12 @@ export async function fetchSharkroundPlayersPreview(options?: {
 export async function fetchSharkroundTubasRanking(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<SharkroundTubasRankingRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 10, MAX_RANKING);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveSharkroundGameTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(rankingCache, cacheKey);
@@ -286,6 +306,7 @@ export async function fetchSharkroundTubasRanking(options?: {
     selectColumns: "id,uid,nome,foto,tubas",
     orderField: "tubas",
     maxResults,
+    tenantId: scopedTenantId,
   });
   const ranking = rows
     .map((row) => ({

@@ -8,13 +8,18 @@ import { useRouter } from "next/navigation";
 
 import { fetchSharkroundTubasRanking, type SharkroundTubasRankingRecord } from "../../../lib/sharkroundGameService";
 import { useAuth } from "../../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
 const SHARKROUND_ALLOWED_ROLES = new Set(["master", "admin_geral", "admin_gestor"]);
 
 export default function SharkroundRankingPage() {
   const { user, loading: authLoading } = useAuth();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const router = useRouter();
+  const baseHref = tenantSlug ? withTenantSlug(tenantSlug, "/sharkround") : "/sharkround";
+  const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
   const userRole =
     typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
   const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
@@ -26,8 +31,8 @@ export default function SharkroundRankingPage() {
   useEffect(() => {
     if (authLoading) return;
     if (canAccessSharkround) return;
-    router.replace("/em-breve");
-  }, [authLoading, canAccessSharkround, router]);
+    router.replace(emBreveHref);
+  }, [authLoading, canAccessSharkround, emBreveHref, router]);
 
   useEffect(() => {
     if (authLoading || !canAccessSharkround) return;
@@ -35,7 +40,11 @@ export default function SharkroundRankingPage() {
     let mounted = true;
     const load = async () => {
       try {
-        const ranking = await fetchSharkroundTubasRanking({ maxResults: 80, forceRefresh: false });
+        const ranking = await fetchSharkroundTubasRanking({
+          maxResults: 80,
+          forceRefresh: false,
+          tenantId: tenantId || undefined,
+        });
         if (!mounted) return;
         setRows(ranking);
       } finally {
@@ -47,7 +56,7 @@ export default function SharkroundRankingPage() {
     return () => {
       mounted = false;
     };
-  }, [authLoading, canAccessSharkround]);
+  }, [authLoading, canAccessSharkround, tenantId]);
 
   const paged = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
@@ -68,7 +77,7 @@ export default function SharkroundRankingPage() {
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center gap-3">
-          <Link href="/sharkround" className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
+          <Link href={baseHref} className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
             <ArrowLeft size={18} className="text-zinc-300" />
           </Link>
           <div>

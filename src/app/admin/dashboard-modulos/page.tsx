@@ -10,9 +10,18 @@ import {
   TENANT_APP_MODULE_DEFINITIONS,
   createDefaultTenantAppModulesConfig,
   fetchTenantAppModulesConfig,
+  isTenantAdminProfileAppModuleVisible,
   saveTenantAppModulesConfig,
   type TenantAppModulesConfig,
 } from "@/lib/tenantAppModulesService";
+import {
+  createDefaultTenantAdminSidebarProfilesConfig,
+  fetchTenantAdminSidebarProfileAssignment,
+  fetchTenantAdminSidebarProfilesConfig,
+  resolveTenantAdminSidebarProfile,
+  type TenantAdminSidebarProfileKey,
+  type TenantAdminSidebarProfilesConfig,
+} from "@/lib/tenantAdminSidebarService";
 
 const GROUP_LABELS = {
   base: "Base",
@@ -25,12 +34,16 @@ const GROUP_ORDER = ["base", "conteudo", "atleta", "info"] as const;
 
 export default function AdminDashboardModulesPage() {
   const { addToast } = useToast();
-  const { tenantId: activeTenantId, tenantName, tenantSigla } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantName, tenantSigla, tenantSlug } = useTenantTheme();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<TenantAppModulesConfig>(
     createDefaultTenantAppModulesConfig
   );
+  const [profilesConfig, setProfilesConfig] = useState<TenantAdminSidebarProfilesConfig>(
+    createDefaultTenantAdminSidebarProfilesConfig
+  );
+  const [profileKey, setProfileKey] = useState<TenantAdminSidebarProfileKey>("A");
 
   useEffect(() => {
     let mounted = true;
@@ -38,21 +51,40 @@ export default function AdminDashboardModulesPage() {
       if (!activeTenantId) {
         if (mounted) {
           setConfig(createDefaultTenantAppModulesConfig());
+          setProfilesConfig(createDefaultTenantAdminSidebarProfilesConfig());
+          setProfileKey("A");
           setLoading(false);
         }
         return;
       }
 
       try {
-        const nextConfig = await fetchTenantAppModulesConfig({
-          tenantId: activeTenantId,
+        const nextProfilesConfig = await fetchTenantAdminSidebarProfilesConfig({
           forceRefresh: true,
         });
-        if (mounted) setConfig(nextConfig);
+        const [nextConfig, nextProfileKey] = await Promise.all([
+          fetchTenantAppModulesConfig({
+            tenantId: activeTenantId,
+            forceRefresh: true,
+          }),
+          fetchTenantAdminSidebarProfileAssignment({
+            tenantId: activeTenantId,
+            tenantSlug,
+            forceRefresh: true,
+            profilesConfig: nextProfilesConfig,
+          }),
+        ]);
+        if (mounted) {
+          setProfilesConfig(nextProfilesConfig);
+          setProfileKey(nextProfileKey);
+          setConfig(nextConfig);
+        }
       } catch (error: unknown) {
         console.error(error);
         if (mounted) {
           setConfig(createDefaultTenantAppModulesConfig());
+          setProfilesConfig(createDefaultTenantAdminSidebarProfilesConfig());
+          setProfileKey("A");
           addToast("Erro ao carregar modulos da tenant.", "error");
         }
       } finally {
@@ -64,19 +96,28 @@ export default function AdminDashboardModulesPage() {
     return () => {
       mounted = false;
     };
-  }, [activeTenantId, addToast]);
+  }, [activeTenantId, addToast, tenantSlug]);
+
+  const activeProfile = useMemo(
+    () => resolveTenantAdminSidebarProfile(profilesConfig, profileKey),
+    [profileKey, profilesConfig]
+  );
 
   const groups = useMemo(
     () =>
       GROUP_ORDER.map((group) => ({
         group,
         label: GROUP_LABELS[group],
-        items: TENANT_APP_MODULE_DEFINITIONS.filter((definition) => definition.group === group),
-      })),
-    []
+        items: TENANT_APP_MODULE_DEFINITIONS.filter(
+          (definition) =>
+            definition.group === group &&
+            isTenantAdminProfileAppModuleVisible(profilesConfig, profileKey, definition.key)
+        ),
+      })).filter((entry) => entry.items.length > 0),
+    [profileKey, profilesConfig]
   );
 
-  const handleToggle = (key: keyof TenantAppModulesConfig["modules"]) => {
+  const handleToggle = (key: string) => {
     setConfig((prev) => ({
       modules: {
         ...prev.modules,
@@ -140,7 +181,13 @@ export default function AdminDashboardModulesPage() {
           <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
             Nenhuma tenant ativa foi encontrada para editar os modulos.
           </div>
-        ) : null}
+        ) : (
+          <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
+            Perfil do master ativo para esta tenant:{" "}
+            <span className="font-black uppercase text-white">{activeProfile.name}</span>.
+            Itens ocultos pelo perfil nao aparecem aqui e continuam bloqueados para os usuarios.
+          </div>
+        )}
 
         {groups.map((group) => (
           <section key={group.group} className="rounded-3xl border border-zinc-800 bg-zinc-900 overflow-hidden">

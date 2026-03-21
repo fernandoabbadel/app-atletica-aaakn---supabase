@@ -75,7 +75,7 @@ export const Security = {
 
       if (now - lastPost < RULES.POST_COOLDOWN) {
         const waitTime = Math.ceil((RULES.POST_COOLDOWN - (now - lastPost)) / 1000);
-        return { allowed: false, reason: `Calma tubarao! Espere ${waitTime}s para postar novamente.` };
+        return { allowed: false, reason: `Espere ${waitTime}s para publicar novamente.` };
       }
 
       try {

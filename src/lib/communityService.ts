@@ -54,11 +54,11 @@ const DEFAULT_UNREAD_SINCE_DAYS = 90;
 const DEFAULT_RECENT_CATEGORY_WINDOW_DAYS = 2;
 const COMMUNITY_READS_TABLE = "community_category_reads";
 const COMMUNITY_POSTS_SELECT_COLUMNS =
-  "id,userId,userName,avatar,handle,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,imagem,categoria,likes,hype,comentarios,blocked,commentsDisabled,fixado,denunciasCount,createdAt,updatedAt";
+  "id,userId,userName,avatar,handle,role,tenant_role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,imagem,categoria,likes,hype,comentarios,blocked,commentsDisabled,fixado,denunciasCount,createdAt,updatedAt";
 const COMMUNITY_REPORTS_SELECT_COLUMNS =
   "id,targetId,targetType,postText,reporterId,reporterName,reason,status,timestamp,reviewedAt,reviewedBy";
 const COMMUNITY_COMMENTS_SELECT_COLUMNS =
-  "id,postId,userId,userName,avatar,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,likes,hidden,reports,createdAt,updatedAt";
+  "id,postId,userId,userName,avatar,role,tenant_role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,likes,hidden,reports,createdAt,updatedAt";
 const COMMUNITY_CONFIG_SELECT_COLUMNS = "id,data,titulo,subtitulo,capaUrl,limitMessages,updatedAt";
 
 const nowIso = (): string => new Date().toISOString();
@@ -82,6 +82,11 @@ const isMissingRelationError = (error: { code?: string | null; message?: string 
   error.code === "42P01" ||
   error.code === "PGRST205" ||
   (typeof error.message === "string" && error.message.toLowerCase().includes("does not exist"));
+
+const isDuplicateKeyError = (error: { code?: string | null; message?: string | null }): boolean =>
+  error.code === "23505" ||
+  (typeof error.message === "string" &&
+    error.message.toLowerCase().includes("duplicate key value"));
 
 const normalizeCategoryReads = (
   value: unknown,
@@ -107,6 +112,20 @@ const normalizeCategoryReads = (
   });
 
   return reads;
+};
+
+const resolveLegacyCommunityReads = (
+  extra: Record<string, unknown>,
+  tenantId?: string,
+  categories?: string[]
+): Record<string, string> => {
+  const scopedTenantId = resolveCommunityTenantId(tenantId);
+  if (!scopedTenantId) {
+    return normalizeCategoryReads(extra.communityReads, categories);
+  }
+
+  const readsByTenant = asObject(extra.communityReadsByTenant);
+  return normalizeCategoryReads(readsByTenant?.[scopedTenantId], categories);
 };
 
 const normalizeCommunityConfigRow = (row: Row): RawData => {
@@ -172,6 +191,7 @@ const applyCommunityAuthorVisuals = async (rows: Row[]): Promise<Row[]> => {
     next.avatar = visual.foto || asString(row.avatar).trim();
     next.handle = visual.apelido ? `@${visual.apelido}` : asString(row.handle).trim();
     next.role = visual.role || asString(row.role).trim();
+    next.tenant_role = visual.tenant_role || asString(row.tenant_role).trim();
     next.plano = visual.plano;
     next.plano_cor = visual.plano_cor;
     next.plano_icon = visual.plano_icon;
@@ -443,9 +463,9 @@ async function updateCommentLikes(
 }
 
 const resolveCommunityConfigDocIds = (tenantId?: string): string[] => {
-  const cleanTenantId = asString(tenantId).trim();
+  const cleanTenantId = resolveCommunityTenantId(tenantId);
   if (!cleanTenantId) return ["comunidade"];
-  return [buildTenantScopedRowId(cleanTenantId, "comunidade"), "comunidade"];
+  return [buildTenantScopedRowId(cleanTenantId, "comunidade")];
 };
 
 export async function fetchCommunityConfig(options?: {
@@ -472,7 +492,8 @@ export async function saveCommunityConfig(
   options?: { tenantId?: string }
 ): Promise<void> {
   const supabase = getSupabaseClient();
-  const docId = buildTenantScopedRowId(options?.tenantId, "comunidade") || "comunidade";
+  const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
+  const docId = buildTenantScopedRowId(scopedTenantId, "comunidade") || "comunidade";
   const { data: currentData, error: currentError } = await supabase
     .from("app_config")
     .select("data")
@@ -505,6 +526,7 @@ export async function saveCommunityConfig(
 
   const payload: Row = {
     id: docId,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     updatedAt: nowIso(),
     data: nextConfigData,
     titulo,
@@ -698,16 +720,22 @@ export async function fetchCommunityCommentPostId(
 
 export async function fetchCommunityReadMap(
   userId: string,
-  categories?: string[]
+  categories?: string[],
+  options?: { tenantId?: string }
 ): Promise<Record<string, string>> {
   const cleanUserId = userId.trim();
   if (!cleanUserId) return {};
+  const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from(COMMUNITY_READS_TABLE)
     .select("categoria,categoriaKey,readAt")
     .eq("userId", cleanUserId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query;
 
   if (error && !isMissingRelationError(error)) {
     throwSupabaseError(error);
@@ -741,37 +769,43 @@ export async function fetchCommunityReadMap(
     }
   }
 
-  return fetchLegacyCommunityReadMap(cleanUserId, categories);
+  return fetchLegacyCommunityReadMap(cleanUserId, categories, scopedTenantId || undefined);
 }
 
 async function fetchLegacyCommunityReadMap(
   userId: string,
-  categories?: string[]
+  categories?: string[],
+  tenantId?: string
 ): Promise<Record<string, string>> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const scopedTenantId = resolveCommunityTenantId(tenantId);
+  let query = supabase
     .from("users")
     .select("extra")
-    .eq("uid", userId)
-    .maybeSingle();
+    .eq("uid", userId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
 
   if (error) throwSupabaseError(error);
 
   const extra = asObject(data?.extra) ?? {};
-  const reads = normalizeCategoryReads(extra.communityReads, categories);
-  return reads;
+  return resolveLegacyCommunityReads(extra, scopedTenantId || undefined, categories);
 }
 
 export async function markCommunityCategoryRead(payload: {
   userId: string;
   categoria: string;
   readAtIso?: string;
+  tenantId?: string;
 }): Promise<void> {
   const userId = payload.userId.trim();
   const categoria = sanitizeCategoryName(payload.categoria);
   if (!userId || !categoria) return;
 
   const key = toCategoryKey(categoria);
+  const scopedTenantId = resolveCommunityTenantId(payload.tenantId);
   const readAtMillis = payload.readAtIso ? Date.parse(payload.readAtIso) : NaN;
   const readAtIso = Number.isNaN(readAtMillis) ? nowIso() : new Date(readAtMillis).toISOString();
 
@@ -783,50 +817,95 @@ export async function markCommunityCategoryRead(payload: {
         userId,
         categoria,
         categoriaKey: key,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         readAt: readAtIso,
         updatedAt: nowIso(),
       },
-      { onConflict: "userId,categoriaKey" }
+      {
+        onConflict: scopedTenantId
+          ? "tenant_id,userId,categoriaKey"
+          : "userId,categoriaKey",
+      }
     );
 
   if (!error) return;
+  if (isDuplicateKeyError(error)) {
+    let updateQuery = supabase
+      .from(COMMUNITY_READS_TABLE)
+      .update({
+        categoria,
+        categoriaKey: key,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+        readAt: readAtIso,
+        updatedAt: nowIso(),
+      })
+      .eq("userId", userId)
+      .eq("categoriaKey", key);
+    if (scopedTenantId) {
+      updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+    }
+
+    const { error: updateError } = await updateQuery;
+    if (!updateError) return;
+    if (!isMissingRelationError(updateError)) throwSupabaseError(updateError);
+  }
   if (!isMissingRelationError(error)) throwSupabaseError(error);
 
-  await saveLegacyCommunityCategoryRead(userId, key, readAtIso);
+  await saveLegacyCommunityCategoryRead(
+    userId,
+    key,
+    readAtIso,
+    scopedTenantId || undefined
+  );
 }
 
 async function saveLegacyCommunityCategoryRead(
   userId: string,
   categoriaKey: string,
-  readAtIso: string
+  readAtIso: string,
+  tenantId?: string
 ): Promise<void> {
   const supabase = getSupabaseClient();
-  const { data: currentUser, error: currentError } = await supabase
+  const scopedTenantId = resolveCommunityTenantId(tenantId);
+  let currentUserQuery = supabase
     .from("users")
     .select("extra")
-    .eq("uid", userId)
-    .maybeSingle();
+    .eq("uid", userId);
+  if (scopedTenantId) {
+    currentUserQuery = currentUserQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: currentUser, error: currentError } = await currentUserQuery.maybeSingle();
   if (currentError) throwSupabaseError(currentError);
 
   const extra = asObject(currentUser?.extra) ?? {};
-  const currentReads = normalizeCategoryReads(extra.communityReads);
+  const currentReads = resolveLegacyCommunityReads(extra, scopedTenantId || undefined);
   const nextReads: Row = {
     ...currentReads,
     [categoriaKey]: readAtIso,
   };
 
-  const nextExtra: Row = {
-    ...extra,
-    communityReads: nextReads,
-  };
+  const nextExtra: Row = { ...extra };
+  if (scopedTenantId) {
+    const currentByTenant = asObject(extra.communityReadsByTenant) ?? {};
+    nextExtra.communityReadsByTenant = {
+      ...currentByTenant,
+      [scopedTenantId]: nextReads,
+    };
+  } else {
+    nextExtra.communityReads = nextReads;
+  }
 
-  const { error } = await supabase
+  let updateQuery = supabase
     .from("users")
     .update({
       extra: nextExtra,
       updatedAt: nowIso(),
     })
     .eq("uid", userId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await updateQuery;
 
   if (error) throwSupabaseError(error);
 }
@@ -853,7 +932,9 @@ export async function fetchCommunityUnreadCounts(payload: {
     : DEFAULT_UNREAD_SINCE_DAYS;
   const unreadSinceIso = daysAgoIso(unreadSinceDays);
 
-  const reads = await fetchCommunityReadMap(userId, categories);
+  const reads = await fetchCommunityReadMap(userId, categories, {
+    tenantId: scopedTenantId || undefined,
+  });
   const categoryByKey = new Map(categories.map((categoria) => [toCategoryKey(categoria), categoria]));
   const supabase = getSupabaseClient();
 
@@ -901,6 +982,9 @@ export async function createCommunityPost(
   const visual = userId ? visuals.get(userId) : undefined;
   const payloadData: Row = { ...payload };
   delete payloadData.tenantId;
+  payloadData.texto = asString(payloadData.texto).trim().slice(0, 150);
+  payloadData.text = asString(payloadData.text ?? payloadData.texto).trim().slice(0, 150);
+  payloadData.categoria = sanitizeCategoryName(asString(payloadData.categoria));
 
   const visualPatch: Row = visual
     ? {
@@ -908,6 +992,7 @@ export async function createCommunityPost(
         avatar: visual.foto || payloadData.avatar,
         handle: visual.apelido ? `@${visual.apelido}` : payloadData.handle,
         role: visual.role || payloadData.role,
+        tenant_role: visual.tenant_role || payloadData.tenant_role,
         plano: visual.plano,
         plano_cor: visual.plano_cor,
         plano_icon: visual.plano_icon,
@@ -957,6 +1042,8 @@ export async function createCommunityComment(payload: {
   const visual = userId ? visuals.get(userId) : undefined;
   const payloadData: Row = { ...payload.data };
   delete payloadData.tenantId;
+  payloadData.texto = asString(payloadData.texto).trim().slice(0, 220);
+  payloadData.text = asString(payloadData.text ?? payloadData.texto).trim().slice(0, 220);
 
   let postLookup = supabase.from("posts").select("id").eq("id", postId);
   if (scopedTenantId) {
@@ -973,6 +1060,7 @@ export async function createCommunityComment(payload: {
         userName: visual.nome || payloadData.userName,
         avatar: visual.foto || payloadData.avatar,
         role: visual.role || payloadData.role,
+        tenant_role: visual.tenant_role || payloadData.tenant_role,
         plano: visual.plano,
         plano_cor: visual.plano_cor,
         plano_icon: visual.plano_icon,
@@ -1077,9 +1165,9 @@ export async function createCommunityReport(payload: {
   const insertPayload = {
     targetId: payload.targetId,
     targetType: payload.targetType,
-    postText: payload.postText,
+    postText: payload.postText.trim().slice(0, 240),
     reporterId: payload.reporterId,
-    reason: payload.reason,
+    reason: payload.reason.trim().slice(0, 80),
     ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     timestamp: nowIso(),
     status: "pendente",
@@ -1132,9 +1220,17 @@ export async function setCommunityPostPatch(
   if (error) throwSupabaseError(error);
 }
 
-export async function deleteCommunityReport(reportId: string): Promise<void> {
+export async function deleteCommunityReport(
+  reportId: string,
+  options?: { tenantId?: string }
+): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase.from("denuncias").delete().eq("id", reportId);
+  const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
+  let query = supabase.from("denuncias").delete().eq("id", reportId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
 }
 

@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 
 import { useAuth } from "../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
+  fetchEffectivePermissionMatrix,
   fetchPermissionMatrix,
   type PermissionMatrix,
 } from "@/lib/adminSecurityService";
+import {
+  buildPermissionMatrixStorageKey,
+  clearLegacyPermissionMatrixStorage,
+} from "@/lib/permissionCache";
 import {
   getAccessRoleCandidates,
   hasAdminPanelAccess,
@@ -13,6 +20,11 @@ import {
   resolveEffectiveAccessRole,
 } from "@/lib/roles";
 import { parseTenantScopedPath } from "@/lib/tenantRouting";
+
+const resolvePermissionPath = (path: string): string =>
+  path === "/admin/atletica" || path.startsWith("/admin/atletica/")
+    ? "/admin/configuracoes"
+    : path;
 
 const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
   if (!raw || typeof raw !== "object") return null;
@@ -32,7 +44,10 @@ const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
 
 export function usePermission() {
   const { user } = useAuth();
+  const { tenantId: activeTenantId } = useTenantTheme();
+  const pathname = usePathname() || "/";
   const [permissionMatrix, setPermissionMatrix] = useState<PermissionMatrix | null>(null);
+  const currentPath = parseTenantScopedPath(pathname).scopedPath;
 
   useEffect(() => {
     if (!user || typeof window === "undefined") {
@@ -41,23 +56,48 @@ export function usePermission() {
     }
 
     let mounted = true;
-    const cachedRules = window.localStorage.getItem("shark_permissions");
+    const targetTenantId =
+      currentPath.startsWith("/master")
+        ? ""
+        : activeTenantId ||
+          (typeof user.tenant_id === "string" ? user.tenant_id.trim() : "");
+    const permissionStorageKey = currentPath.startsWith("/master")
+      ? buildPermissionMatrixStorageKey(undefined, "platform")
+      : currentPath.startsWith("/admin")
+        ? buildPermissionMatrixStorageKey(targetTenantId, "effective")
+        : buildPermissionMatrixStorageKey(targetTenantId);
+    const cachedRules = window.localStorage.getItem(permissionStorageKey);
     if (cachedRules) {
       try {
         const parsed = normalizePermissionMatrix(JSON.parse(cachedRules));
         if (parsed && mounted) setPermissionMatrix(parsed);
       } catch {
-        window.localStorage.removeItem("shark_permissions");
+        window.localStorage.removeItem(permissionStorageKey);
+        clearLegacyPermissionMatrixStorage();
       }
     }
 
     const loadRules = async () => {
       try {
-        const liveRules = await fetchPermissionMatrix({ forceRefresh: false });
+        const liveRules = currentPath.startsWith("/admin")
+          ? await fetchEffectivePermissionMatrix({
+              forceRefresh: false,
+              tenantId: targetTenantId || undefined,
+            })
+          : await fetchPermissionMatrix({
+              forceRefresh: false,
+              tenantId:
+                currentPath.startsWith("/master")
+                  ? undefined
+                  : targetTenantId || undefined,
+            });
         if (!mounted) return;
         setPermissionMatrix(liveRules ?? null);
         if (liveRules) {
-          window.localStorage.setItem("shark_permissions", JSON.stringify(liveRules));
+          window.localStorage.setItem(
+            permissionStorageKey,
+            JSON.stringify(liveRules)
+          );
         }
       } catch {
         if (!mounted) return;
@@ -68,13 +108,15 @@ export function usePermission() {
     return () => {
       mounted = false;
     };
-  }, [user]);
+  }, [activeTenantId, currentPath, user]);
 
   const canAccess = useCallback(
     (path: string): boolean => {
       if (!user) return false;
 
-      const cleanPath = parseTenantScopedPath(path.split("?")[0]).scopedPath;
+      const cleanPath = resolvePermissionPath(
+        parseTenantScopedPath(path.split("?")[0]).scopedPath
+      );
       const userRole = resolveEffectiveAccessRole(user);
       const roleCandidates = getAccessRoleCandidates(user);
 
@@ -95,15 +137,9 @@ export function usePermission() {
         const allowedRoles = permissionMatrix?.[matchedRule].map((role) =>
           role.toLowerCase()
         ) ?? [];
-        const isTenantMasterCompatible =
-          ((allowedRoles.includes("master") &&
-            roleCandidates.includes("master_tenant")) ||
-            (allowedRoles.includes("master_tenant") &&
-              roleCandidates.includes("master")));
         return (
           allowedRoles.includes(userRole) ||
-          roleCandidates.some((role) => allowedRoles.includes(role)) ||
-          isTenantMasterCompatible
+          roleCandidates.some((role) => allowedRoles.includes(role))
         );
       }
 

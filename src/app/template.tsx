@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
 
+import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 
 export default function Template({ children }: { children: React.ReactNode }) {
@@ -12,13 +13,18 @@ export default function Template({ children }: { children: React.ReactNode }) {
   const [frase, setFrase] = useState("");
   const pathname = usePathname();
 
+  const resolvedLogo =
+    !tenantName || tenantName.trim().toUpperCase() === "USC"
+      ? PLATFORM_LOGO_URL
+      : tenantLogoUrl || PLATFORM_LOGO_URL;
+
   useEffect(() => {
     const frases = [
-      "Afiando o bisturi e os dentes.",
-      "Os tubaroes estao revisando Anatomia.",
-      "Procurando a veia certa. Aguarde.",
-      "Nadando contra a corrente e o sono.",
-      "Consultando o Harrison. Um momento.",
+      "Preparando a proxima tela.",
+      "Sincronizando as informacoes da pagina.",
+      "Conferindo o contexto da atletica.",
+      "Aplicando a identidade visual.",
+      "Quase tudo pronto por aqui.",
     ];
 
     setFrase(frases[Math.floor(Math.random() * frases.length)]);
@@ -40,12 +46,13 @@ export default function Template({ children }: { children: React.ReactNode }) {
         >
           <div className="relative z-20 w-28 h-28 flex items-center justify-center">
             <Image
-              src={tenantLogoUrl || "/logo.png"}
-              alt={`Logo ${tenantName || "Tenant"}`}
+              src={resolvedLogo}
+              alt={`Logo ${tenantName || "Plataforma"}`}
               fill
               sizes="112px"
               className="object-contain drop-shadow-2xl"
               priority
+              unoptimized={resolvedLogo.startsWith("http")}
             />
           </div>
 

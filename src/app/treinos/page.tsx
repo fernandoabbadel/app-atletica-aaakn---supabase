@@ -11,8 +11,10 @@ import {
   setTreinoRsvp
 } from "../../lib/treinosNativeService";
 import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../context/ToastContext";
 import { getTurmaImage } from "../../constants/turmaImages";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- INTERFACES (FIM DOS ANY) ---
 interface TreinoData {
@@ -65,6 +67,7 @@ const WEEKDAYS = ["D", "S", "T", "Q", "Q", "S", "S"];
 // --- 2. CARD DE TREINO SUPERCHARGED ---
 function TreinoCard({ treino }: { treino: TreinoData }) {
     const { user } = useAuth();
+    const { tenantId, tenantSlug } = useTenantTheme();
     const { addToast } = useToast();
     // 🦈 Router removido pois não era usado (navegação via Link)
     
@@ -115,7 +118,11 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
 
         const loadRsvps = async () => {
             try {
-                const rows = await fetchTreinoRsvps(treino.id, { maxResults: 180, forceRefresh: false });
+                const rows = await fetchTreinoRsvps(treino.id, {
+                    maxResults: 180,
+                    forceRefresh: false,
+                    tenantId: tenantId || undefined,
+                });
                 if (!mounted) return;
                 applyRsvps(rows as RsvpData[]);
             } catch (error: unknown) {
@@ -130,7 +137,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
         return () => {
             mounted = false;
         };
-    }, [treino.id, user?.uid, applyRsvps]);
+    }, [treino.id, user?.uid, applyRsvps, tenantId]);
 
     const handleRSVP = async (e: React.MouseEvent, status: "going" | "not_going") => {
         e.preventDefault(); 
@@ -148,6 +155,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
                 userAvatar: user.foto || "",
                 userTurma: user.turma || "Geral",
                 status,
+                tenantId: tenantId || undefined,
             });
 
             const next = status === "not_going"
@@ -204,7 +212,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
     const theme = getColors();
 
     return (
-        <Link href={`/treinos/${treino.id}`} className="block w-full">
+        <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/treinos/${treino.id}`) : `/treinos/${treino.id}`} className="block w-full">
             <div className="relative w-full min-h-[320px] rounded-[2.5rem] overflow-hidden border border-zinc-800 bg-[#09090b] group shadow-2xl hover:shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-all duration-500 hover:-translate-y-1">
                 
                 {/* 1. IMAGEM DE CAPA (EXPANDIDA E VISÍVEL) */}
@@ -316,6 +324,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
 
 // --- 3. PÁGINA PRINCIPAL ---
 export default function TreinosPage() {
+  const { tenantId, tenantSlug } = useTenantTheme();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(new Date().getDate());
   const [treinosDoMes, setTreinosDoMes] = useState<TreinoData[]>([]);
@@ -336,6 +345,7 @@ export default function TreinosPage() {
           endDate: endOfMonth,
           maxResults: 220,
           forceRefresh: false,
+          tenantId: tenantId || undefined,
         });
         setTreinosDoMes(lista as TreinoData[]);
       } catch (error: unknown) {
@@ -347,7 +357,7 @@ export default function TreinosPage() {
     };
 
     void loadTreinos();
-  }, [currentDate]);
+  }, [currentDate, tenantId]);
 
   // Calendário
   const calendarDays = useMemo(() => {
@@ -390,8 +400,8 @@ export default function TreinosPage() {
       
       <header className="fixed top-0 left-0 w-full z-30 bg-[#050505]/90 backdrop-blur-xl border-b border-white/5">
         <div className="p-4 flex items-center justify-between max-w-lg mx-auto">
-            <Link href="/" className="p-2 -ml-2 text-zinc-400 hover:text-white transition rounded-full hover:bg-white/10 group"><ArrowLeft size={24}/></Link>
-            <h1 className="font-black text-lg uppercase tracking-widest text-white italic">Agenda Tubarão 🦈</h1>
+            <Link href={tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard"} className="p-2 -ml-2 text-zinc-400 hover:text-white transition rounded-full hover:bg-white/10 group"><ArrowLeft size={24}/></Link>
+            <h1 className="font-black text-lg uppercase tracking-widest text-white italic">Agenda de Treinos</h1>
             <div className="w-8"></div>
         </div>
       </header>

@@ -6,8 +6,8 @@ import {
   ArrowLeft,
   Ban,
   ChevronDown,
-  Eye,
   Loader2,
+  Pencil,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -230,6 +230,8 @@ export default function AdminUsuariosPage() {
             <Link
               href="/admin"
               className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
+              title="Voltar ao painel admin"
+              aria-label="Voltar ao painel admin"
             >
               <ArrowLeft size={18} className="text-zinc-300" />
             </Link>
@@ -276,6 +278,7 @@ export default function AdminUsuariosPage() {
               onClick={() => void handleRecountFollows()}
               disabled={recountingFollows}
               className="px-3 py-2 rounded-lg text-[11px] font-black uppercase border transition bg-zinc-900 text-cyan-300 border-cyan-700/40 hover:bg-zinc-800 disabled:opacity-60 inline-flex items-center gap-2"
+              title="Recontar seguidores e seguindo dos usuarios"
             >
               {recountingFollows ? (
                 <Loader2 size={14} className="animate-spin" />
@@ -301,6 +304,7 @@ export default function AdminUsuariosPage() {
                     ? "bg-white text-black border-white"
                     : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white"
                 }`}
+                title={`Filtrar usuarios por plano ${option.label}`}
               >
                 {option.label}
               </button>
@@ -357,9 +361,10 @@ export default function AdminUsuariosPage() {
                           <Link
                             href={`/admin/usuarios/${row.id}`}
                             className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700"
-                            title="Abrir perfil"
+                            title="Editar usuario"
+                            aria-label={`Editar usuario ${row.nome}`}
                           >
-                            <Eye size={15} />
+                            <Pencil size={15} />
                           </Link>
                           <button
                             onClick={() => void handleToggleStatus(row)}
@@ -373,6 +378,11 @@ export default function AdminUsuariosPage() {
                                 ? "Desbloquear"
                                 : "Bloquear"
                             }
+                            aria-label={
+                              row.status === "bloqueado"
+                                ? `Desbloquear usuario ${row.nome}`
+                                : `Bloquear usuario ${row.nome}`
+                            }
                           >
                             {row.status === "bloqueado" ? (
                               <ShieldCheck size={15} />
@@ -384,6 +394,7 @@ export default function AdminUsuariosPage() {
                             onClick={() => void handleDelete(row.id)}
                             className="p-2 rounded-lg bg-red-900/20 text-red-300 border border-red-700/40"
                             title="Excluir"
+                            aria-label={`Excluir usuario ${row.nome}`}
                           >
                             <Trash2 size={15} />
                           </button>

@@ -14,16 +14,18 @@ import {
   CARTEIRINHA_CONFIG_SYNC_KEY,
   CARTEIRINHA_CONFIG_UPDATED_EVENT_NAME,
   fetchCarteirinhaConfig,
+  resolveCarteirinhaConfigSyncKey,
   type CarteirinhaConfig,
 } from "@/lib/carteirinhaService";
 import { QRCodeSVG } from "qrcode.react";
 import SharkLoader from "@/app/components/SharkLoader";
 import { getTurmaImage } from "@/constants/turmaImages";
 import { resolvePlanTheme, resolveUserPlanIcon } from "@/constants/planVisuals";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 export default function CarteirinhaPage() {
   const { user, loading } = useAuth();
-  const { palette, tenantLogoUrl, tenantSigla, tenantCourse } = useTenantTheme();
+  const { palette, tenantId, tenantLogoUrl, tenantSigla, tenantCourse, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const [config, setConfig] = useState<CarteirinhaConfig | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -36,7 +38,9 @@ export default function CarteirinhaPage() {
       const loadConfig = async (forceRefresh = false) => {
           try {
               const loadedConfig = await fetchCarteirinhaConfig(
-                forceRefresh ? { forceRefresh: true } : undefined
+                forceRefresh
+                  ? { forceRefresh: true, tenantId: tenantId || undefined }
+                  : { tenantId: tenantId || undefined }
               );
               if (mounted) setConfig(loadedConfig);
           } catch (error: unknown) {
@@ -52,7 +56,8 @@ export default function CarteirinhaPage() {
       };
 
       const handleStorage = (event: StorageEvent) => {
-        if (event.key !== CARTEIRINHA_CONFIG_SYNC_KEY) return;
+        const expectedKey = resolveCarteirinhaConfigSyncKey(tenantId || undefined);
+        if (event.key !== expectedKey && event.key !== CARTEIRINHA_CONFIG_SYNC_KEY) return;
         handleRefresh();
       };
 
@@ -65,7 +70,10 @@ export default function CarteirinhaPage() {
           window.removeEventListener(CARTEIRINHA_CONFIG_UPDATED_EVENT_NAME, handleRefresh);
           window.removeEventListener("storage", handleStorage);
       };
-  }, [addToast]);
+  }, [addToast, tenantId]);
+
+  const dashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
+  const planosHref = tenantSlug ? withTenantSlug(tenantSlug, "/planos") : "/planos";
 
   if (loading) return <SharkLoader />;
   if (!user) return null;
@@ -98,7 +106,7 @@ export default function CarteirinhaPage() {
       {/* HEADER */}
       <header className="px-6 py-5 flex items-center justify-between sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-white/5">
         <Link
-          href="/dashboard"
+          href={dashboardHref}
           className="p-2 -ml-2 text-zinc-400 hover:text-white transition rounded-full hover:bg-white/5"
         >
           <ArrowLeft size={24} />
@@ -239,7 +247,7 @@ export default function CarteirinhaPage() {
           
           {canUpgrade && (
               <Link
-                href="/planos"
+                href={planosHref}
                 className="group relative w-full block overflow-hidden rounded-xl bg-gradient-to-r from-emerald-900/50 to-black border border-emerald-500/30 p-4 transition-all active:scale-[0.98]"
               >
                 <div className="absolute inset-0 bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>

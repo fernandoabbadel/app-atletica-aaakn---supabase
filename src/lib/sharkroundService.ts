@@ -1,5 +1,6 @@
 import { httpsCallable } from "@/lib/supa/functions";
 
+import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { throwSupabaseError } from "./supabaseData";
@@ -56,6 +57,9 @@ const setCachedValue = <T>(
 ): void => {
   cache.set(key, { cachedAt: Date.now(), value });
 };
+
+const resolveSharkroundTenantId = (tenantId?: string | null): string =>
+  resolveStoredTenantScopeId(asString(tenantId).trim());
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
@@ -151,10 +155,12 @@ const normalizeLeague = (
 export async function fetchSharkroundLeagues(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<SharkroundLeagueRecord[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 120, MAX_LEAGUE_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
-  const cacheKey = `${maxResults}`;
+  const scopedTenantId = resolveSharkroundTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "global"}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCachedValue(leaguesCache, cacheKey);
@@ -162,11 +168,14 @@ export async function fetchSharkroundLeagues(options?: {
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from(SHARKROUND_LEAGUES_COLLECTION)
     .select("id,nome,senha,ativa,perguntas,foto,sigla")
-    .order("nome", { ascending: true })
-    .limit(maxResults);
+    .order("nome", { ascending: true });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
   const leagues = (data ?? [])
@@ -180,20 +189,30 @@ export async function fetchSharkroundLeagues(options?: {
 export async function setSharkroundLeagueActive(payload: {
   leagueId: string;
   ativa: boolean;
+  tenantId?: string | null;
 }): Promise<void> {
   const leagueId = payload.leagueId.trim();
   if (!leagueId) return;
+  const scopedTenantId = resolveSharkroundTenantId(payload.tenantId);
 
-  const requestPayload = { leagueId, ativa: payload.ativa };
+  const requestPayload = {
+    leagueId,
+    ativa: payload.ativa,
+    tenantId: scopedTenantId || undefined,
+  };
   await callWithFallback<typeof requestPayload, { ok: boolean }>(
     SHARKROUND_TOGGLE_CALLABLE,
     requestPayload,
     async () => {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
+      let query = supabase
         .from(SHARKROUND_LEAGUES_COLLECTION)
         .update({ ativa: payload.ativa, updatedAt: new Date().toISOString() })
         .eq("id", leagueId);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
       if (error) throwSupabaseError(error);
       return { ok: true };
     }

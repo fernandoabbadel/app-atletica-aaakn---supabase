@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+
 import { scanSupabaseTableFields } from "@/lib/partnersService";
 
 export default function ScannerPage() {
@@ -17,9 +18,9 @@ export default function ScannerPage() {
         sampleDocsPerCollection: 40,
       });
       setReport(results);
-      console.log("Aí sim! O Tubarão encontrou isso:", results);
+      console.log("Campos identificados:", results);
     } catch (error: unknown) {
-      console.error("Deu ruim no plantão:", error);
+      console.error("Erro ao escanear campos:", error);
     } finally {
       setLoading(false);
     }
@@ -27,19 +28,19 @@ export default function ScannerPage() {
 
   return (
     <div className="p-8 bg-slate-900 text-white min-h-screen">
-      <h1 className="text-2xl font-bold mb-4">🦈 Radar de Campos do Tubarão</h1>
+      <h1 className="text-2xl font-bold mb-4">Scanner de Campos do Banco</h1>
       <button
         onClick={scanDatabase}
         disabled={loading}
         className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-bold disabled:opacity-50"
       >
-        {loading ? "Escaneando Profundezas..." : "Iniciar Escaneamento"}
+        {loading ? "Escaneando tabelas..." : "Iniciar escaneamento"}
       </button>
 
       <div className="mt-8 space-y-4">
-        {Object.entries(report).map(([col, fields]) => (
-          <div key={col} className="border border-slate-700 p-4 rounded-lg bg-slate-800">
-            <h2 className="text-xl font-semibold text-blue-400 capitalize">{col}</h2>
+        {Object.entries(report).map(([collection, fields]) => (
+          <div key={collection} className="border border-slate-700 p-4 rounded-lg bg-slate-800">
+            <h2 className="text-xl font-semibold text-blue-400 capitalize">{collection}</h2>
             <div className="flex flex-wrap gap-2 mt-2">
               {fields.map((field) => (
                 <span

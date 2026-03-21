@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { 
   ArrowLeft, Heart, MessageCircle, MoreHorizontal, Flame, 
   Image as ImageIcon, ShieldCheck, Pin, X, Loader2, AlertTriangle, Send, Trash2, Flag,
-  Lock, Fish, User
+  Lock, Fish, Store, User
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -35,6 +35,7 @@ import {
   normalizeCommunityCategories,
 } from "../../constants/communityCategories";
 import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../constants/planVisuals";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGEM ---
 
@@ -69,6 +70,7 @@ interface PostData {
     patente_cor?: string; 
     
     role?: string;
+    tenant_role?: string;
     blocked?: boolean;
     fixado?: boolean;
     isTreinador?: boolean;
@@ -93,6 +95,7 @@ interface CommentData {
     patente_cor?: string; 
     
     role?: string;
+    tenant_role?: string;
     createdAt: DateLike | null;
 }
 
@@ -129,6 +132,7 @@ const formatCustomDate = (timestamp: DateLike | null | undefined) => {
 // UserBadges tipado corretamente (fim do any)
 const UserBadges = ({ userData }: { userData: Partial<PostData | CommentData> }) => {
     const isAdmin = userData?.role?.includes("admin") || userData?.role === "master";
+    const isMiniVendor = userData?.tenant_role === "mini_vendor" && !isAdmin;
     const normalizeIcon = (value: string | undefined) =>
       String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
     const isDisplayLabel = (value: string | undefined): value is string => {
@@ -162,6 +166,11 @@ const UserBadges = ({ userData }: { userData: Partial<PostData | CommentData> })
                     <ShieldCheck size={10} className="text-red-500" />
                 </span>
             )}
+            {isMiniVendor && (
+                <span className="flex items-center bg-blue-500/10 p-0.5 rounded border border-blue-500/20">
+                    <Store size={10} className="text-blue-400" />
+                </span>
+            )}
             {PlanIcon && (
                 <span className={`flex items-center opacity-80 ${planColorClass}`}>
                     <PlanIcon size={12} />
@@ -177,7 +186,7 @@ const UserBadges = ({ userData }: { userData: Partial<PostData | CommentData> })
 };
 export default function ComunidadePage() {
   const { user } = useAuth();
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   
   const [activeTab, setActiveTab] = useState(DEFAULT_COMMUNITY_CATEGORIES[0] || "Geral");
@@ -406,6 +415,7 @@ export default function ComunidadePage() {
         await markCommunityCategoryRead({
           userId: user.uid,
           categoria: activeTab,
+          tenantId: activeTenantId || user?.tenant_id || undefined,
         });
         if (!active) return;
         setUnreadByCategory((prev) => ({ ...prev, [activeTab]: 0 }));
@@ -418,7 +428,7 @@ export default function ComunidadePage() {
     return () => {
       active = false;
     };
-  }, [activeTab, modalidades, user?.uid]);
+  }, [activeTab, modalidades, user?.uid, user?.tenant_id, activeTenantId]);
 
   useEffect(() => {
       if (!commentModal) {
@@ -432,6 +442,7 @@ export default function ComunidadePage() {
               const rows = await fetchCommunityComments(commentModal, {
                   order: "asc",
                   maxResults: 60,
+                  tenantId: activeTenantId || user?.tenant_id || undefined,
               });
 
               if (!mounted) return;
@@ -466,7 +477,7 @@ export default function ComunidadePage() {
       return () => {
           mounted = false;
       };
-  }, [commentModal, addToast]);
+  }, [commentModal, addToast, activeTenantId, user?.tenant_id]);
 
   const handlePublish = async () => {
     if (!user) return addToast("Faça login!", "error");
@@ -477,8 +488,13 @@ export default function ComunidadePage() {
 
     if (!newPostText.trim() && !imageFile) return;
 
-    if (newPostText.length > 150) {
-      return addToast("Máximo de 150 caracteres! Seja direto, Tubarão.", "error");
+    const exceedsPostLimit = newPostText.length > 150;
+    if (exceedsPostLimit) {
+      return addToast("Maximo de 150 caracteres por postagem.", "error");
+    }
+
+    if (false && newPostText.length > 150) {
+      return addToast("Maximo de 150 caracteres por postagem.", "error");
     }
 
     const oneDayAgo = new Date().getTime() - 24 * 60 * 60 * 1000;
@@ -536,6 +552,7 @@ export default function ComunidadePage() {
         patente_cor: typeof user.patente_cor === "string" ? user.patente_cor : undefined,
 
         role: user.role ? String(user.role) : "user",
+        tenant_role: user.tenant_role ? String(user.tenant_role) : "",
       };
 
       const createdDoc = await createCommunityPost({
@@ -549,6 +566,8 @@ export default function ComunidadePage() {
         categoria: activeTab,
         blocked: false,
         commentsDisabled: false,
+      }, {
+        tenantId: activeTenantId || user?.tenant_id || undefined,
       });
 
       const optimisticPost: PostData = {
@@ -614,10 +633,12 @@ export default function ComunidadePage() {
               patente_cor: typeof user.patente_cor === "string" ? user.patente_cor : undefined,
 
               role: user.role ? String(user.role) : "user",
+              tenant_role: user.tenant_role ? String(user.tenant_role) : "",
           };
 
           const createdCommentRef = await createCommunityComment({
               postId: commentModal,
+              tenantId: activeTenantId || user?.tenant_id || undefined,
               data: {
                   ...safeUser,
                   texto: newComment,
@@ -662,7 +683,9 @@ export default function ComunidadePage() {
       if (!confirm("Tem certeza que quer apagar essa mensagem?")) return;
 
       try {
-          await deleteCommunityPost(post.id);
+          await deleteCommunityPost(post.id, {
+            tenantId: activeTenantId || user?.tenant_id || undefined,
+          });
           setAllPostsRaw((prev) => prev.filter((item) => item.id !== post.id));
           setCountsRefreshToken((prev) => prev + 1);
           addToast("Mensagem apagada.", "info");
@@ -676,7 +699,9 @@ export default function ComunidadePage() {
       if (!user || !commentModal) return;
       if (!confirm("Excluir comentário?")) return;
       try {
-          await deleteCommunityComment(commentModal, commentId);
+          await deleteCommunityComment(commentModal, commentId, {
+            tenantId: activeTenantId || user?.tenant_id || undefined,
+          });
 
           setCommentsList((prev) => prev.filter((comment) => comment.id !== commentId));
           setAllPostsRaw((prev) =>
@@ -711,6 +736,7 @@ export default function ComunidadePage() {
               postText: textoSalvo,
               reporterId: user.uid,
               reason: finalReason,
+              tenantId: activeTenantId || user?.tenant_id || undefined,
           });
 
           if (reportTargetType === "post" && postAlvo) {
@@ -739,7 +765,9 @@ export default function ComunidadePage() {
 
       try {
           const nextStatus = !post.fixado;
-          await setCommunityPostPatch(post.id, { fixado: nextStatus });
+          await setCommunityPostPatch(post.id, { fixado: nextStatus }, {
+            tenantId: activeTenantId || user?.tenant_id || undefined,
+          });
           setAllPostsRaw((prev) =>
               prev.map((item) =>
                   item.id === post.id ? { ...item, fixado: nextStatus } : item
@@ -762,6 +790,7 @@ export default function ComunidadePage() {
           postId,
           field,
           userId: user.uid,
+          tenantId: activeTenantId || user?.tenant_id || undefined,
       });
 
       setAllPostsRaw((prev) =>
@@ -788,6 +817,7 @@ export default function ComunidadePage() {
               postId: commentModal,
               commentId: comment.id,
               userId: user.uid,
+              tenantId: activeTenantId || user?.tenant_id || undefined,
           });
 
           setCommentsList((prev) => {
@@ -818,10 +848,10 @@ export default function ComunidadePage() {
             alt="Capa Comunidade"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/50 to-transparent" />
-          <div className="absolute top-4 left-4 z-20"><Link href="/dashboard" className="p-2 bg-black/50 rounded-full text-white hover:bg-emerald-500 hover:text-black transition"><ArrowLeft size={24}/></Link></div>
+          <div className="absolute top-4 left-4 z-20"><Link href={tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard"} className="p-2 bg-black/50 rounded-full text-white hover:bg-emerald-500 hover:text-black transition"><ArrowLeft size={24}/></Link></div>
           <div className="absolute bottom-4 left-6 z-20">
-              <h1 className="text-3xl font-black italic uppercase tracking-tighter">{config.titulo || "Resenha Tubarão"}</h1>
-              <p className="text-zinc-400 text-xs font-bold uppercase tracking-widest">{config.subtitulo || "Onde o cardume se encontra"}</p>
+              <h1 className="text-3xl font-black italic uppercase tracking-tighter">{config.titulo || "Comunidade da Atletica"}</h1>
+              <p className="text-zinc-400 text-xs font-bold uppercase tracking-widest">{config.subtitulo || "Espaco oficial da atletica"}</p>
           </div>
       </div>
 
@@ -907,7 +937,7 @@ export default function ComunidadePage() {
                     {post.blocked && <div className="bg-red-500/10 text-red-500 text-[10px] font-bold uppercase px-2 py-1 mb-2 rounded border border-red-500/20 inline-block">🚫 Post Bloqueado (Admin)</div>}
 
                     <div className="flex gap-3">
-                        <Link href={`/perfil/${post.userId}`}>
+                        <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/perfil/${post.userId}`) : `/perfil/${post.userId}`}>
                             <div className="w-10 h-10 relative">
                                 <Image src={post.avatar} fill sizes="40px" className="rounded-full border border-zinc-800 object-cover" alt={post.userName}/>
                             </div>
@@ -916,7 +946,7 @@ export default function ComunidadePage() {
                             <div className="flex justify-between items-start">
                                 <div>
                                     <div className="flex items-center gap-1.5">
-                                        <Link href={`/perfil/${post.userId}`} className={`font-bold text-sm hover:underline transition ${resolvePlanTextClass(post.plano_cor, "text-zinc-200")}`}>
+                                        <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/perfil/${post.userId}`) : `/perfil/${post.userId}`} className={`font-bold text-sm hover:underline transition ${resolvePlanTextClass(post.plano_cor, "text-zinc-200")}`}>
                                             {post.userName}
                                         </Link>
                                         <UserBadges userData={post} />
@@ -979,7 +1009,7 @@ export default function ComunidadePage() {
                       {commentsList.length === 0 && <p className="text-center text-zinc-600 text-xs py-10">Nenhum comentário ainda.</p>}
                       {commentsList.map(comment => (
                           <div key={comment.id} className="flex gap-3 group">
-                              <Link href={`/perfil/${comment.userId}`}>
+                              <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/perfil/${comment.userId}`) : `/perfil/${comment.userId}`}>
                                   <div className="w-8 h-8 relative">
                                       <Image src={comment.avatar} fill sizes="32px" className="rounded-full object-cover border border-zinc-700" alt={comment.userName}/>
                                   </div>
@@ -988,7 +1018,7 @@ export default function ComunidadePage() {
                                   <div className="bg-zinc-800/50 p-3 rounded-2xl rounded-tl-none border border-zinc-800/50 w-full">
                                       <div className="flex items-center justify-between">
                                           <div className="flex items-center gap-2">
-                                              <Link href={`/perfil/${comment.userId}`} className={`text-xs font-bold hover:underline ${resolvePlanTextClass(comment.plano_cor, "text-white")}`}>{comment.userName}</Link>
+                                              <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/perfil/${comment.userId}`) : `/perfil/${comment.userId}`} className={`text-xs font-bold hover:underline ${resolvePlanTextClass(comment.plano_cor, "text-white")}`}>{comment.userName}</Link>
                                               <UserBadges userData={comment}/> 
                                               <span className="text-[8px] text-zinc-600 ml-auto">{formatCustomDate(comment.createdAt)}</span>
                                           </div>
@@ -1017,7 +1047,7 @@ export default function ComunidadePage() {
                   </div>
                   {!currentPostCommentsDisabled ? (
                       <div className="p-3 border-t border-zinc-800 bg-black flex gap-2 sm:rounded-b-3xl">
-                          <input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Escreva..." className="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 text-sm text-white outline-none focus:border-emerald-500" onKeyDown={e => e.key === 'Enter' && handleComment()}/>
+                          <input type="text" value={newComment} onChange={e => setNewComment(e.target.value.slice(0, 220))} maxLength={220} placeholder="Escreva..." className="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 text-sm text-white outline-none focus:border-emerald-500" onKeyDown={e => e.key === 'Enter' && handleComment()}/>
                           <button onClick={handleComment} disabled={!newComment.trim() || isPostingComment} className={`p-2.5 rounded-full text-white transition ${isPostingComment ? 'bg-zinc-700 opacity-50' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
                               {isPostingComment ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
                           </button>

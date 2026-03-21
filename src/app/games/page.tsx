@@ -11,6 +11,7 @@ import Image from "next/image"; // 🦈 Importando Image
 import { useToast } from "../../context/ToastContext";
 import SharkAvatar from "../components/SharkAvatar";
 import { useAuth } from "../../context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { calculateLevel, getNextLevelXP, calculateUserStats, HeroStats } from "../../lib/games";
 import {
   fetchArenaUsers,
@@ -95,11 +96,16 @@ interface GameUser {
 export default function SharkLegendsPage() {
   const { addToast } = useToast();
   const { user, updateUser } = useAuth();
+  const { tenantId, tenantSlug } = useTenantTheme();
+  const battleStateStorageKey = useMemo(
+    () => `usc:arena:battle-state:${tenantId || tenantSlug || "default"}`,
+    [tenantId, tenantSlug]
+  );
 
   // Estados Visuais
   const [heroColor, setHeroColor] = useState("#64748b");
   const [heroEyeColor, setHeroEyeColor] = useState("#0f172a");
-  const [heroName, setHeroName] = useState("Tubarão");
+  const [heroName, setHeroName] = useState("Atleta");
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
 
@@ -142,13 +148,13 @@ export default function SharkLegendsPage() {
       const state = {
           hero: currentHero, enemy: currentEnemy, log: currentLog, turn: currentTurn, round: currentRound, timestamp: Date.now()
       };
-      localStorage.setItem("aaakn_battle_state", JSON.stringify(state));
+      localStorage.setItem(battleStateStorageKey, JSON.stringify(state));
   };
 
-  const clearGameState = () => localStorage.removeItem("aaakn_battle_state");
+  const clearGameState = () => localStorage.removeItem(battleStateStorageKey);
 
   useEffect(() => {
-      const savedState = localStorage.getItem("aaakn_battle_state");
+      const savedState = localStorage.getItem(battleStateStorageKey);
       if (savedState) {
           try {
               const parsed = JSON.parse(savedState);
@@ -163,7 +169,7 @@ export default function SharkLegendsPage() {
       const handleOffline = () => addToast("⚠️ Sem conexão! Jogo salvo localmente.", "error");
       window.addEventListener('offline', handleOffline);
       return () => window.removeEventListener('offline', handleOffline);
-  }, [addToast]); 
+  }, [addToast, battleStateStorageKey]); 
 
   // Inicialização
   useEffect(() => {
@@ -185,6 +191,7 @@ export default function SharkLegendsPage() {
             const usersRows = await fetchArenaUsers({
                 maxResults: 60,
                 forceRefresh: false,
+                tenantId: tenantId || undefined,
             });
 
             const allUsers: GameUser[] = usersRows.map((u) => {
@@ -252,7 +259,7 @@ export default function SharkLegendsPage() {
     };
 
     fetchData();
-  }, [user, addToast]);
+  }, [user, addToast, tenantId]);
 
   const handleSaveName = async () => {
       if(!tempName.trim()) return addToast("Nome vazio!", "error");
@@ -322,6 +329,7 @@ export default function SharkLegendsPage() {
             result: finalResult,
             rounds: round,
             rewardXp: xpGain,
+            tenantId: tenantId || undefined,
         });
 
         if (finalResult === "victory") {
@@ -333,7 +341,7 @@ export default function SharkLegendsPage() {
         console.error(error);
         addToast("Erro ao salvar resultado da batalha.", "error");
     }
-  }, [user, addToast, round]);
+  }, [user, addToast, round, tenantId]);
   const executeEnemyTurn = useCallback((lastPlayerMove: Move, currentHero: Combatant, currentEnemy: Combatant, currentLog: string[]) => {
       let enemyMoveType = lastPlayerMove.type;
       const staminaCost = lastPlayerMove.staminaCost;
@@ -449,7 +457,7 @@ export default function SharkLegendsPage() {
     
     if (user) {
         try {
-            await registerArenaFlee({ defenderId: enemy.id });
+            await registerArenaFlee({ defenderId: enemy.id, tenantId: tenantId || undefined });
         } catch (error: unknown) {
             console.error(error);
         }

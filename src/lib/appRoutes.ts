@@ -1,11 +1,9 @@
-﻿// src/lib/appRoutes.ts
-
-// 1. ZONA SEGURA (PÃºblicas - Login, Erro, Em Breve)
-// O RouteGuard ignora a verificaÃ§Ã£o para estas rotas para evitar loops.
 export const PUBLIC_PATHS = [
   "/login",
   "/",
   "/visitante",
+  "/nova-atletica",
+  "/contato-usc",
   "/historico",
   "/cadastro",
   "/configuracoes",
@@ -15,88 +13,208 @@ export const PUBLIC_PATHS = [
   "/sem-permissao",
   "/banned",
   "/em-breve",
-  "/nao-encontrado"
+  "/nao-encontrado",
 ];
 
-// 2. ZONA DE DEGUSTAÃ‡ÃƒO (O que visitante logado como GUEST vÃª)
-// Visitantes podem ver o Dashboard, Perfil BÃ¡sico e Lojas, mas com restriÃ§Ãµes de aÃ§Ã£o
-export const GUEST_ALLOWED_PATHS = [
-  ...PUBLIC_PATHS, // Inclui todas as publicas automaticamente
+export const GUEST_ALLOWED_PATHS = [...PUBLIC_PATHS, "/dashboard"];
+
+export const COMING_SOON_PATHS = ["/carrinho", "/checkout"];
+
+export type AppPageDefinition = {
+  path: string;
+  label: string;
+  permissionPath?: string;
+};
+
+const PATH_LABEL_OVERRIDES: Record<string, string> = {
+  "/admin": "Admin Dashboard",
+  "/admin/atletica": "Atletica",
+  "/admin/dashboard-modulos": "Dashboard Modulos",
+  "/admin/eventos/encerrados": "Admin Eventos Encerrados",
+  "/admin/ligas": "Admin Ligas",
+  "/admin/master": "Admin Master",
+  "/admin/permissoes": "Permissoes",
+  "/admin/permissoes/usuarios": "Permissoes Usuarios",
+  "/admin/scanner": "Scanner QR",
+  "/ligas_unitau": "Ligas Unitau",
+  "/master": "Dashboard Master",
+  "/master/landing": "Landing USC",
+  "/master/permissoes": "Permissoes Globais",
+  "/master/permissoes/perfis-admin": "Perfis do Admin",
+  "/master/solicitacoes": "Solicitacoes da Plataforma",
+  "/master/tenants": "Tenants",
+  "/nova-atletica": "Onboarding Atletica",
+  "/perfil/mini-vendor": "Perfil Publico Mini Vendor",
+};
+
+const ADMIN_PAGE_PATHS = [
+  "/admin",
+  "/admin/album",
+  "/admin/album/caca_calouro",
+  "/admin/album/customizacao",
+  "/admin/album/pontua_calouro",
+  "/admin/album/pontua_geral",
+  "/admin/atletica",
+  "/admin/carteirinha",
+  "/admin/comunidade",
+  "/admin/configuracoes",
+  "/admin/conquistas",
+  "/admin/dashboard-modulos",
+  "/admin/denuncias",
+  "/admin/denuncias/banidos",
+  "/admin/denuncias/comunidade",
+  "/admin/denuncias/gym",
+  "/admin/denuncias/suporte",
+  "/admin/eventos",
+  "/admin/eventos/encerrados",
+  "/admin/fidelidade",
+  "/admin/games",
+  "/admin/guia",
+  "/admin/gym",
+  "/admin/historico",
+  "/admin/lancamento",
+  "/admin/lancamento/ativacoes",
+  "/admin/lancamento/convites",
+  "/admin/lancamento/pendentes",
+  "/admin/landing",
+  "/admin/ligas",
+  "/admin/logs",
+  "/admin/loja",
+  "/admin/loja/categorias",
+  "/admin/loja/pedidos-pendentes",
+  "/admin/loja/produtos",
+  "/admin/loja/review",
+  "/admin/master",
+  "/admin/master/lancamento",
+  "/admin/master/lancamento/ativacoes",
+  "/admin/master/lancamento/convites",
+  "/admin/master/lancamento/pendentes",
+  "/admin/mini-vendors",
+  "/admin/mini-vendors/aprovacoes",
+  "/admin/mini-vendors/cadastros",
+  "/admin/parceiros",
+  "/admin/parceiros/ativos",
+  "/admin/parceiros/dados",
+  "/admin/parceiros/empresas",
+  "/admin/parceiros/historico",
+  "/admin/permissoes",
+  "/admin/permissoes/usuarios",
+  "/admin/planos",
+  "/admin/planos/auditoria",
+  "/admin/planos/editar",
+  "/admin/planos/historico",
+  "/admin/planos/lista_atleta",
+  "/admin/planos/lista_bicho_solto",
+  "/admin/planos/lista_cardume_livre",
+  "/admin/planos/lista_lenda",
+  "/admin/scanner",
+  "/admin/sharkround",
+  "/admin/treinos",
+  "/admin/treinos/antigos",
+  "/admin/turma",
+  "/admin/usuarios",
+] as const;
+
+const MASTER_PAGE_PATHS = [
+  "/master",
+  "/master/contato",
+  "/master/landing",
+  "/master/lancamento",
+  "/master/lancamento/ativacoes",
+  "/master/lancamento/convites",
+  "/master/lancamento/pendentes",
+  "/master/permissoes",
+  "/master/permissoes/perfis-admin",
+  "/master/solicitacoes",
+  "/master/tenants",
+] as const;
+
+const MEMBER_PAGE_PATHS = [
+  "/aguardando-aprovacao",
+  "/album",
+  "/carteirinha",
+  "/comunidade",
+  "/configuracoes",
+  "/configuracoes/lider-turma",
+  "/configuracoes/mini-vendor",
+  "/configuracoes/mini-vendor/editar",
+  "/configuracoes/mini-vendor/pedidos-aprovados",
+  "/configuracoes/mini-vendor/pedidos-pendentes",
+  "/configuracoes/mini-vendor/produtos",
+  "/configuracoes/pedidos",
+  "/configuracoes/pedidos/eventos",
+  "/configuracoes/pedidos/loja",
+  "/configuracoes/pedidos/planos",
+  "/configuracoes/seguranca",
+  "/configuracoes/suporte",
+  "/configuracoes/termos",
+  "/conquistas",
+  "/contato-usc",
   "/dashboard",
-];
+  "/empresa",
+  "/empresa/cadastro",
+  "/eventos",
+  "/eventos/compra",
+  "/fidelidade",
+  "/games",
+  "/guia",
+  "/gym",
+  "/gym/checkin",
+  "/gym/checkin/details",
+  "/historico",
+  "/ligas",
+  "/ligas_unitau",
+  "/loja",
+  "/nova-atletica",
+  "/parceiros",
+  "/perfil",
+  "/perfil/mini-vendor",
+  "/planos",
+  "/planos/adesao",
+  "/ranking",
+  "/sharkround",
+  "/sharkround/estatisticas",
+  "/sharkround/ranking",
+  "/treinos",
+  "/visitante",
+] as const;
 
-// 3. ZONA DE OBRAS (Funcionalidades em desenvolvimento - redirecionam para Em Breve)
-export const COMING_SOON_PATHS = [
-  "/carrinho",
-  "/checkout",
-  // "/marketplace-futuro",
-  // "/shark-tv"
-];
+const titleizeSegment = (segment: string): string =>
+  segment
+    .replace(/^\[(.+)\]$/, "$1")
+    .replace(/-/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 
-// 4. MAPA DO SISTEMA (Lista completa para o Painel Admin - Gerenciador de PermissÃµes)
-export const APP_PAGES = [
-    // --- ADMINISTRAÃ‡ÃƒO ---
-    { path: '/admin', label: 'Admin Dashboard' },
-    { path: '/admin/album', label: 'Admin Album' },
-    { path: '/admin/turma', label: 'Admin Turma' },
-    { path: '/admin/carteirinha', label: 'Admin Carteirinha' },
-    { path: '/admin/comunidade', label: 'Admin Comunidade' },
-    { path: '/admin/configuracoes', label: 'Configuracoes (Admin)' },
-    { path: '/admin/conquistas', label: 'Admin Conquistas' },
-    { path: '/admin/denuncias', label: 'Denuncias' },
-    { path: '/admin/eventos', label: 'Admin Eventos' },
-    { path: '/admin/eventos/encerrados', label: '🗃️ Adm Eventos Encerrados' },
-    { path: '/admin/fidelidade', label: 'Admin Fidelidade' },
-    { path: '/admin/games', label: 'Admin Games' },
-    { path: '/admin/guia', label: 'Admin Guia' },
-    { path: '/admin/gym', label: 'Admin Gym' },
-    { path: '/admin/historico', label: 'Admin Historico' },
-    { path: '/admin/landing', label: 'Landing' },
-    { path: '/admin/lancamento', label: 'Lancamento' },
-    { path: '/admin/lancamento/ativacoes', label: 'Lancamento - Ativacoes' },
-    { path: '/admin/lancamento/convites', label: 'Lancamento - Convites' },
-    { path: '/admin/lancamento/pendentes', label: 'Lancamento - Pendentes' },
-    { path: '/admin/ligas', label: 'Admin Ligas' },
-    { path: '/admin/logs', label: 'Logs do Sistema' },
-    { path: '/admin/loja', label: 'Admin Loja' },
-    { path: '/master', label: 'Dashboard Master' },
-    { path: '/master/landing', label: 'Landing USC' },
-    { path: '/master/permissoes', label: 'Permissoes Globais' },
-    { path: '/master/solicitacoes', label: 'Solicitacoes da Plataforma' },
-    { path: '/admin/parceiros', label: 'Admin Parceiros' },
-    { path: '/admin/permissoes', label: 'Permissoes' },
-    { path: '/admin/planos', label: 'Admin Planos' },
-    { path: '/admin/scanner', label: 'Scanner QR' },
-    { path: '/admin/sharkround', label: 'Admin SharkRound' },
-    { path: '/admin/treinos', label: 'Admin Treinos' },
-    { path: '/admin/treinos/antigos', label: 'Admin Treinos Antigos' },
-    { path: '/admin/usuarios', label: 'Gerenciar Usuarios' },
+export const resolveAppPageLabel = (path: string): string => {
+  const cleanPath = path.trim();
+  if (PATH_LABEL_OVERRIDES[cleanPath]) {
+    return PATH_LABEL_OVERRIDES[cleanPath];
+  }
 
-    // --- PÃšBLICO / MEMBROS ---
-    { path: '/aguardando-aprovacao', label: '⏳ Aguardando Aprovação' },
-    { path: '/album', label: 'Album' },
-    { path: '/carteirinha', label: 'Carteirinha' },
-    { path: '/comunidade', label: 'Comunidade' },
-    { path: '/configuracoes', label: 'Ajustes' },
-    { path: '/conquistas', label: 'Conquistas' },
-    { path: '/dashboard', label: 'Dashboard' },
-    { path: '/empresa', label: 'Painel Empresa' },
-    { path: '/eventos', label: 'Eventos' },
-    { path: '/fidelidade', label: 'Fidelidade' },
-    { path: '/games', label: 'Games' },
-    { path: '/guia', label: 'Guia' },
-    { path: '/gym', label: 'Gym / Check-in' },
-    { path: '/historico', label: 'Historico' },
-    { path: '/ligas', label: 'Ligas' },
-    { path: '/ligas_unitau', label: 'Ligas Unitau' },
-    { path: '/loja', label: 'Loja' },
-    { path: '/nova-atletica', label: '🏫 Onboarding Atletica' },
-    { path: '/parceiros', label: 'Parceiros' },
-    { path: '/perfil', label: 'Perfil' },
-    { path: '/planos', label: 'Planos' },
-    { path: '/ranking', label: 'Ranking' },
-    { path: '/sharkround', label: 'SharkRound' },
-    { path: '/treinos', label: 'Treinos' },
-    { path: '/visitante', label: 'Vitrine de Atleticas' },
-].sort((a, b) => a.path.localeCompare(b.path));
+  const segments = cleanPath.split("/").filter(Boolean);
+  if (!segments.length) return "Home";
 
+  return segments.map((segment) => titleizeSegment(segment)).join(" / ");
+};
+
+const page = (
+  path: string,
+  options?: Pick<Partial<AppPageDefinition>, "label" | "permissionPath">
+): AppPageDefinition => ({
+  path,
+  label: options?.label || resolveAppPageLabel(path),
+  ...(options?.permissionPath ? { permissionPath: options.permissionPath } : {}),
+});
+
+export const APP_PAGES: AppPageDefinition[] = [
+  ...ADMIN_PAGE_PATHS.map((path) =>
+    path === "/admin/atletica"
+      ? page(path, { permissionPath: "/admin/configuracoes" })
+      : page(path)
+  ),
+  ...MASTER_PAGE_PATHS.map((path) => page(path)),
+  ...MEMBER_PAGE_PATHS.map((path) => page(path)),
+].sort((left, right) => left.path.localeCompare(right.path, "pt-BR"));

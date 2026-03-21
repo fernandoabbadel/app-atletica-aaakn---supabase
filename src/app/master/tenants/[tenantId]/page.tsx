@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -10,15 +11,18 @@ import {
   Loader2,
   Save,
   Shield,
+  Upload,
 } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
+import { TENANT_AREA_OPTIONS } from "@/constants/tenantAreas";
 import { isPlatformMaster } from "@/lib/roles";
 import {
   fetchTenantById,
   type TenantPaletteKey,
   updateTenantProfile,
+  uploadTenantLogo,
 } from "@/lib/tenantService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
@@ -36,6 +40,7 @@ type TenantFormState = {
   contatoTelefone: string;
   logoUrl: string;
   paletteKey: TenantPaletteKey;
+  visibleInDirectory: boolean;
   allowPublicSignup: boolean;
   status: TenantStatus;
   slug: string;
@@ -53,6 +58,7 @@ const EMPTY_FORM: TenantFormState = {
   contatoTelefone: "",
   logoUrl: "",
   paletteKey: "green",
+  visibleInDirectory: true,
   allowPublicSignup: true,
   status: "active",
   slug: "",
@@ -76,7 +82,7 @@ const STATUS_OPTIONS: Array<{ value: TenantStatus; label: string }> = [
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message;
-  return "Nao foi possivel salvar o tenant.";
+  return "Nao foi possivel salvar a atletica.";
 };
 
 export default function MasterTenantEditPage() {
@@ -90,6 +96,7 @@ export default function MasterTenantEditPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [form, setForm] = useState<TenantFormState>(EMPTY_FORM);
 
   useEffect(() => {
@@ -105,7 +112,7 @@ export default function MasterTenantEditPage() {
         const tenant = await fetchTenantById(tenantId);
         if (!mounted) return;
         if (!tenant) {
-          addToast("Tenant nao encontrado para edicao.", "error");
+          addToast("Atletica nao encontrada para edicao.", "error");
           router.replace("/master");
           return;
         }
@@ -122,6 +129,7 @@ export default function MasterTenantEditPage() {
           contatoTelefone: tenant.contatoTelefone,
           logoUrl: tenant.logoUrl,
           paletteKey: tenant.paletteKey,
+          visibleInDirectory: tenant.visibleInDirectory,
           allowPublicSignup: tenant.allowPublicSignup,
           status: tenant.status,
           slug: tenant.slug,
@@ -156,6 +164,30 @@ export default function MasterTenantEditPage() {
     setForm((previous) => ({ ...previous, [key]: value }));
   };
 
+  const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || !tenantId || uploadingLogo) {
+      input.value = "";
+      return;
+    }
+
+    try {
+      setUploadingLogo(true);
+      const url = await uploadTenantLogo({ tenantId, file });
+      setForm((previous) => ({ ...previous, logoUrl: url }));
+      addToast(
+        "Logo enviada. O app reduz automaticamente para economizar storage e egress.",
+        "success"
+      );
+    } catch (error: unknown) {
+      addToast(`Erro no upload da logo: ${extractErrorMessage(error)}`, "error");
+    } finally {
+      setUploadingLogo(false);
+      input.value = "";
+    }
+  };
+
   const handleSave = async () => {
     if (!tenantId) return;
 
@@ -174,10 +206,11 @@ export default function MasterTenantEditPage() {
         contatoTelefone: form.contatoTelefone,
         logoUrl: form.logoUrl,
         paletteKey: form.paletteKey,
+        visibleInDirectory: form.visibleInDirectory,
         allowPublicSignup: form.allowPublicSignup,
         status: form.status,
       });
-      addToast(`Tenant ${form.sigla || form.nome} atualizado.`, "success");
+      addToast(`Atletica ${form.sigla || form.nome} atualizada.`, "success");
       router.refresh();
     } catch (error: unknown) {
       addToast(extractErrorMessage(error), "error");
@@ -209,14 +242,15 @@ export default function MasterTenantEditPage() {
               Voltar ao master
             </Link>
             <p className="mt-4 text-[10px] font-black uppercase tracking-[0.28em] text-red-200">
-              Tenant em edicao
+              Atletica em edicao
             </p>
             <h1 className="mt-2 flex items-center gap-3 text-3xl font-black uppercase tracking-tight text-white">
-              <Building2 className="text-red-300" /> {form.sigla || form.nome || "Tenant"}
+              <Building2 className="text-red-300" /> {form.sigla || form.nome || "Atletica"}
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-300">
-              Ajuste os dados principais da atletica, troque a paleta e libere ou bloqueie o
-              signup publico sem sair do painel master.
+              Ajuste os dados principais da atletica, troque a paleta, controle a aparicao na
+              vitrine publica e defina se a entrada fica por convite ou com cadastro aberto para
+              aprovacao.
             </p>
           </div>
 
@@ -310,11 +344,24 @@ export default function MasterTenantEditPage() {
                 <label className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
                   Area
                 </label>
-                <input
+                <select
                   value={form.area}
                   onChange={(event) => handleChange("area", event.target.value)}
                   className="mt-2 brand-input"
-                />
+                >
+                  <option value="" className="bg-zinc-950 text-white">
+                    Selecione a area
+                  </option>
+                  {TENANT_AREA_OPTIONS.map((option) => (
+                    <option
+                      key={option.value}
+                      value={option.value}
+                      className="bg-zinc-950 text-white"
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
@@ -332,13 +379,38 @@ export default function MasterTenantEditPage() {
           <div className="space-y-4">
             <div>
               <label className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                Logo URL
+                Logo da atletica
               </label>
-              <input
-                value={form.logoUrl}
-                onChange={(event) => handleChange("logoUrl", event.target.value)}
-                className="mt-2 brand-input"
-              />
+              <div className="mt-2 flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-black/35 p-4">
+                <div className="flex items-center gap-4">
+                  <div className="relative h-24 w-24 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950">
+                    <Image
+                      src={form.logoUrl || "/logo.png"}
+                      alt={`Logo ${form.sigla || form.nome || "atletica"}`}
+                      fill
+                      sizes="96px"
+                      className="object-cover"
+                      unoptimized={(form.logoUrl || "").startsWith("http")}
+                    />
+                  </div>
+
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-red-100 transition hover:bg-red-500/20">
+                    <Upload size={14} />
+                    {uploadingLogo ? "Enviando..." : "Adicionar foto"}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      disabled={uploadingLogo}
+                      onChange={(event) => void handleLogoUpload(event)}
+                    />
+                  </label>
+                </div>
+                <p className="text-[11px] text-zinc-500">
+                  PNG, JPG ou WEBP at&eacute; 2MB. A imagem &eacute; comprimida automaticamente
+                  para manter o projeto leve no plano free.
+                </p>
+              </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -401,17 +473,41 @@ export default function MasterTenantEditPage() {
               </div>
             </div>
 
-            <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3">
-              <input
-                type="checkbox"
-                checked={form.allowPublicSignup}
-                onChange={(event) => handleChange("allowPublicSignup", event.target.checked)}
-                className="accent-red-500"
-              />
-              <span className="text-sm font-bold text-zinc-200">
-                Permitir signup publico sem convite
-              </span>
-            </label>
+            <div className="space-y-3">
+              <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={form.allowPublicSignup}
+                  onChange={(event) => handleChange("allowPublicSignup", event.target.checked)}
+                  className="accent-red-500"
+                />
+                <div>
+                  <span className="block text-sm font-bold text-zinc-200">
+                    Liberar cadastro sem convite
+                  </span>
+                  <span className="text-[11px] text-zinc-500">
+                    Desmarcado: a entrada fica somente por convite.
+                  </span>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={form.visibleInDirectory}
+                  onChange={(event) => handleChange("visibleInDirectory", event.target.checked)}
+                  className="accent-red-500"
+                />
+                <div>
+                  <span className="block text-sm font-bold text-zinc-200">
+                    Exibir na pagina visitante
+                  </span>
+                  <span className="text-[11px] text-zinc-500">
+                    Desmarcado: a atlética sai da vitrine, mas o link direto continua funcionando.
+                  </span>
+                </div>
+              </label>
+            </div>
 
             <button
               onClick={handleSave}
@@ -419,7 +515,7 @@ export default function MasterTenantEditPage() {
               className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-xs font-black uppercase tracking-[0.16em] text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {saving ? "Salvando tenant..." : "Salvar tenant"}
+              {saving ? "Salvando atletica..." : "Salvar atletica"}
             </button>
           </div>
         </div>

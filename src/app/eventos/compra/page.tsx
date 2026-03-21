@@ -8,6 +8,13 @@ import { useSearchParams } from "next/navigation";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import { createEventTicketRequest, fetchEventCheckoutData } from "../../../lib/eventsService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
+import { collectUserPlanScope } from "@/lib/userPlanScope";
+import {
+  buildTenantFinanceFallback,
+  resolveTenantBrandLabel,
+} from "../../../lib/tenantBranding";
 // Interfaces para tipagem forte (fim do any)
 interface Lote {
     id: string;
@@ -36,6 +43,8 @@ function CompraContent() {
   const searchParams = useSearchParams();
   const { addToast } = useToast();
   const { user } = useAuth();
+  const { tenantId, tenantSigla, tenantName, tenantSlug } = useTenantTheme();
+  const { userPlanNames, userPlanIds } = React.useMemo(() => collectUserPlanScope(user), [user]);
   
   const eventoId = searchParams.get('evento');
   const loteId = searchParams.get('lote');
@@ -48,6 +57,9 @@ function CompraContent() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
+  const financeFallback = buildTenantFinanceFallback({ tenantSigla, tenantName });
+  const brandLabel = resolveTenantBrandLabel(tenantSigla, tenantName);
+  const eventosHref = tenantSlug ? withTenantSlug(tenantSlug, "/eventos") : "/eventos";
 
     useEffect(() => {
       const loadData = async () => {
@@ -61,6 +73,9 @@ function CompraContent() {
                   eventId: eventoId,
                   loteId,
                   forceRefresh: false,
+                  tenantId: tenantId || undefined,
+                  userPlanNames,
+                  userPlanIds,
               });
 
               if (checkoutData.evento) {
@@ -74,11 +89,7 @@ function CompraContent() {
               if (checkoutData.financeiro) {
                   setPixData(checkoutData.financeiro as unknown as PixData);
               } else {
-                  setPixData({
-                      chave: "financeiro@aaakn.com.br",
-                      banco: "Banco Inter",
-                      titular: "Assoc. Atletica Acad. Knight"
-                  });
+                  setPixData(financeFallback);
               }
 
           } catch (error: unknown) {
@@ -89,7 +100,7 @@ function CompraContent() {
           }
       };
       void loadData();
-  }, [eventoId, loteId, addToast]); // Dependencias corrigidas
+  }, [addToast, eventoId, financeFallback, loteId, tenantId, userPlanIds, userPlanNames]); // Dependencias corrigidas
 
   const handleFinish = async () => {
       if (!user || !evento || !lote) return;
@@ -111,11 +122,13 @@ function CompraContent() {
               valorUnitario: lote.preco,
               valorTotal: valorTotal.toFixed(2),
               metodo: "whatsapp",
+              tenantId: tenantId || undefined,
+              paymentConfig: { ...pixData },
           });
 
           // 2. Gerar Link do WhatsApp
-          const adminPhone = pixData.whatsapp || "5512999999999"; 
-          const message = `Fala Tubarao! Quero garantir meu lugar no *${evento.titulo}*.\n\n[INGRESSO] *${quantidade}x ${lote.nome}*\n[VALOR] Valor Total: R$ ${valorTotal.toFixed(2)}\n[PEDIDO] Pedido: ${ticketRequest.id.slice(0,5)}\n\nSegue o comprovante!`;
+          const adminPhone = pixData.whatsapp || financeFallback.whatsapp;
+          const message = `Fala, equipe ${brandLabel}! Quero garantir meu lugar no *${evento.titulo}*.\n\n[INGRESSO] *${quantidade}x ${lote.nome}*\n[VALOR] Valor Total: R$ ${valorTotal.toFixed(2)}\n[PEDIDO] Pedido: ${ticketRequest.id.slice(0,5)}\n\nSegue o comprovante!`;
           const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
 
           // 3. Redirecionar
@@ -262,7 +275,7 @@ function CompraContent() {
                 <div>
                     <h2 className="text-2xl font-black text-white uppercase italic">Ingresso Reservado!</h2>
                     <p className="text-zinc-400 mt-2 text-sm max-w-xs mx-auto">
-                        Agora o Tesoureiro vai conferir o PIX e liberar seu QR Code oficial. Fique de olho no status!
+                        Agora a equipe da atletica vai conferir o PIX e liberar seu QR Code oficial. Fique de olho no status!
                     </p>
                 </div>
 
@@ -273,7 +286,7 @@ function CompraContent() {
                     </div>
                 </div>
 
-                <button onClick={() => window.location.href = '/eventos'} className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition active:scale-95 border border-zinc-700">
+                <button onClick={() => window.location.href = eventosHref} className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition active:scale-95 border border-zinc-700">
                     Voltar ao Menu
                 </button>
             </div>
@@ -284,13 +297,15 @@ function CompraContent() {
 
 // SUSPENSE WRAPPER (obrigatorio para useSearchParams no Next.js 15)
 export default function EventoCompraPage() {
+  const { tenantSlug } = useTenantTheme();
+
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center p-6 relative overflow-hidden font-sans">
         {/* Background Animado */}
         <div className="absolute top-[-20%] right-[-20%] w-[60%] h-[60%] bg-purple-600/15 blur-[120px] rounded-full pointer-events-none animate-pulse-slow"></div>
         <div className="absolute bottom-[-20%] left-[-20%] w-[60%] h-[60%] bg-emerald-600/10 blur-[120px] rounded-full pointer-events-none"></div>
 
-        <Link href={`/eventos`} className="absolute top-6 left-6 text-zinc-500 hover:text-white flex items-center gap-2 transition z-50 font-bold uppercase text-xs tracking-wider">
+        <Link href={tenantSlug ? withTenantSlug(tenantSlug, "/eventos") : "/eventos"} className="absolute top-6 left-6 text-zinc-500 hover:text-white flex items-center gap-2 transition z-50 font-bold uppercase text-xs tracking-wider">
             <ArrowLeft size={18}/> Cancelar
         </Link>
 

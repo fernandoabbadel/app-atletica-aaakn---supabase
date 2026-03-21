@@ -3,6 +3,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { useToast } from "@/context/ToastContext"; // Usando seu sistema de feedback
+import { useTenantTheme } from "@/context/TenantThemeContext";
 
 // Definição do Produto no Carrinho
 export interface CartItem {
@@ -28,22 +29,34 @@ interface CartContextData {
 
 const CartContext = createContext<CartContextData>({} as CartContextData);
 
+const buildTenantCartStorageKey = (tenantId?: string | null): string => {
+  const cleanTenantId = typeof tenantId === "string" ? tenantId.trim() : "";
+  return cleanTenantId ? `usc:${cleanTenantId}:cart` : "usc:cart";
+};
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const { addToast } = useToast();
+  const { tenantId } = useTenantTheme();
+  const storageKey = buildTenantCartStorageKey(tenantId);
+  const [hydratedKey, setHydratedKey] = useState("");
 
   // 1. Carregar do LocalStorage ao iniciar
   useEffect(() => {
-    const storedCart = localStorage.getItem("@AAAKN:cart");
+    const storedCart = localStorage.getItem(storageKey);
     if (storedCart) {
-      setItems(JSON.parse(storedCart));
+      setItems(JSON.parse(storedCart) as CartItem[]);
+    } else {
+      setItems([]);
     }
-  }, []);
+    setHydratedKey(storageKey);
+  }, [storageKey]);
 
   // 2. Salvar no LocalStorage sempre que mudar
   useEffect(() => {
-    localStorage.setItem("@AAAKN:cart", JSON.stringify(items));
-  }, [items]);
+    if (hydratedKey !== storageKey) return;
+    localStorage.setItem(storageKey, JSON.stringify(items));
+  }, [hydratedKey, items, storageKey]);
 
   // Função: Adicionar ao Carrinho
   const addToCart = (product: CartItem) => {
@@ -88,7 +101,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Função: Limpar Carrinho (após compra)
   const clearCart = () => {
     setItems([]);
-    localStorage.removeItem("@AAAKN:cart");
+    localStorage.removeItem(storageKey);
   };
 
   // Cálculos derivados

@@ -13,6 +13,11 @@ import {
 } from "./supabaseData";
 import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import {
+  normalizeAvailabilityStatus,
+  normalizePaymentConfig,
+  normalizePlanPriceEntries,
+} from "./commerceCatalog";
 import { fetchCanonicalUserVisuals } from "./userVisualsService";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
@@ -28,7 +33,7 @@ const DEFAULT_EVENT_DETAILS_COMMENTS_LIMIT = 100;
 const DEFAULT_EVENT_DETAILS_POLLS_LIMIT = 20;
 const DEFAULT_EVENT_DETAILS_PEDIDOS_LIMIT = 20;
 const EVENTOS_SELECT_COLUMNS =
-  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,isLowStock,stats,lotes,interessados,likesList,tenant_id,createdAt,updatedAt";
+  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,isLowStock,stats,lotes,interessados,likesList,tenant_id,createdAt,updatedAt";
 const EVENTOS_RSVPS_SELECT_COLUMNS =
   "id,eventoId,userId,status,userName,userAvatar,userTurma,timestamp";
 const EVENTOS_COMENTARIOS_SELECT_COLUMNS =
@@ -37,7 +42,7 @@ const EVENTOS_ENQUETES_SELECT_COLUMNS =
   "id,eventoId,question,allowUserOptions,options,voters,userVotes,createdAt,updatedAt";
 const PATENTES_SELECT_COLUMNS = "id,titulo,minXp,cor,iconName,bg,border,text";
 const SOLICITACOES_INGRESSOS_SELECT_COLUMNS =
-  "id,eventoId,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,dataSolicitacao,dataAprovacao,aprovadoPor";
+  "id,eventoId,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,payment_config,dataSolicitacao,dataAprovacao,aprovadoPor";
 const FINANCEIRO_CONFIG_SELECT_COLUMNS =
   "id,data,chave,banco,titular,whatsapp,updatedAt,createdAt";
 const MONTHS_PT_BR: Record<string, number> = {
@@ -138,6 +143,21 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
 };
 
 const normalizeRows = (rows: Row[]): Row[] => rows.map((row) => normalizeRowTimestamps(row));
+const normalizeEventRow = (row: Row): Row => ({
+  ...normalizeRowTimestamps(row),
+  sale_status: normalizeAvailabilityStatus(row.sale_status, "ativo"),
+  payment_config: normalizePaymentConfig(row.payment_config),
+  lotes: Array.isArray(row.lotes)
+    ? row.lotes.map((entry) => {
+        const lote = asObject(entry) ?? {};
+        return {
+          ...lote,
+          status: normalizeAvailabilityStatus(lote.status, "ativo"),
+          planPrices: normalizePlanPriceEntries(lote.planPrices ?? lote.plan_prices),
+        };
+      })
+    : [],
+});
 const normalizeCommentRows = (rows: Row[]): Row[] =>
   normalizeRows(rows).map((row) => {
     const text = asString(row.text);
@@ -286,7 +306,7 @@ async function selectEventById(eventId: string, tenantId?: string): Promise<Row 
     tenantId,
   });
   if (rows.length === 0) return null;
-  return normalizeRowTimestamps(rows[0] as Row) as Row;
+  return normalizeEventRow(rows[0] as Row);
 }
 
 async function updateEventRow(eventId: string, patch: Row, tenantId?: string): Promise<void> {
@@ -444,7 +464,7 @@ export async function fetchEventsFeed(options?: {
   }
 
   const nowMs = Date.now();
-  const normalized = normalizeRows(rows);
+  const normalized = rows.map((row) => normalizeEventRow(row));
   const visibleRows = normalized
     .filter((row) => (includeInactive ? true : !isCancelledOrClosed(row)))
     .filter((row) => {
@@ -483,7 +503,7 @@ async function fetchFinanceiroConfig(
 
   const supabase = getSupabaseClient();
   const configIds = scopedTenantId
-    ? [buildTenantScopedRowId(scopedTenantId, "financeiro"), "financeiro"]
+    ? [buildTenantScopedRowId(scopedTenantId, "financeiro")]
     : ["financeiro"];
   const { data, error } = await supabase
     .from("app_config")
@@ -938,21 +958,47 @@ export async function cancelEventTicketRequest(
 export async function upsertAdminEvent(payload: {
   eventId?: string;
   data: Row;
+  tenantId?: string | null;
 }): Promise<Row | null> {
   const eventId = payload.eventId?.trim() || "";
   const supabase = getSupabaseClient();
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  const lotes = Array.isArray(payload.data.lotes)
+    ? payload.data.lotes.map((entry) => {
+        const lote = asObject(entry) ?? {};
+        return {
+          ...lote,
+          nome: asString(lote.nome).trim(),
+          preco: asString(lote.preco).trim(),
+          status: normalizeAvailabilityStatus(lote.status, "ativo"),
+          planPrices: normalizePlanPriceEntries(lote.planPrices ?? lote.plan_prices),
+        };
+      })
+    : [];
+  const paymentConfig = normalizePaymentConfig(payload.data.payment_config);
+  const normalizedPayload: Row = {
+    ...payload.data,
+    lotes,
+    sale_status: normalizeAvailabilityStatus(payload.data.sale_status, "ativo"),
+    payment_config: paymentConfig,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+  };
 
   if (eventId) {
-    const { error: updateError } = await supabase
+    let updateQuery = supabase
       .from("eventos")
       .update({
-        ...payload.data,
+        ...normalizedPayload,
         updatedAt: nowIso(),
       })
       .eq("id", eventId);
+    if (scopedTenantId) {
+      updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { error: updateError } = await updateQuery;
     if (updateError) throwSupabaseError(updateError);
 
-    const updated = await selectEventById(eventId);
+    const updated = await selectEventById(eventId, scopedTenantId || undefined);
     invalidateEventCaches(eventId);
     return updated;
   }
@@ -960,7 +1006,7 @@ export async function upsertAdminEvent(payload: {
   const { data, error } = await supabase
     .from("eventos")
     .insert({
-      ...payload.data,
+      ...normalizedPayload,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     })
@@ -968,7 +1014,7 @@ export async function upsertAdminEvent(payload: {
     .single();
 
   if (error) throwSupabaseError(error);
-  const created = normalizeRowTimestamps(data as Row);
+  const created = normalizeEventRow(data as Row);
   invalidateEventCaches(String(created.id || ""));
   return created;
 }
@@ -986,8 +1032,22 @@ export async function deleteAdminEventById(eventId: string): Promise<void> {
 export async function setAdminEventStatus(payload: {
   eventId: string;
   status: string;
+  tenantId?: string | null;
 }): Promise<void> {
-  await updateEventRow(payload.eventId.trim(), { status: payload.status });
+  await updateEventRow(payload.eventId.trim(), { status: payload.status }, payload.tenantId || undefined);
+  invalidateEventCaches(payload.eventId.trim());
+}
+
+export async function setAdminEventSaleStatus(payload: {
+  eventId: string;
+  saleStatus: "ativo" | "em_breve" | "esgotado";
+  tenantId?: string | null;
+}): Promise<void> {
+  await updateEventRow(
+    payload.eventId.trim(),
+    { sale_status: normalizeAvailabilityStatus(payload.saleStatus, "ativo") },
+    payload.tenantId || undefined
+  );
   invalidateEventCaches(payload.eventId.trim());
 }
 
@@ -1027,15 +1087,22 @@ export async function createAdminEventPoll(payload: {
   eventId: string;
   question: string;
   allowUserOptions: boolean;
+  tenantId?: string | null;
 }): Promise<{ id: string }> {
   const eventId = payload.eventId.trim();
   if (!eventId) return { id: "" };
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  const event = await selectEventById(eventId, scopedTenantId || undefined);
+  if (!event) {
+    throw new Error("Evento fora da atletica ativa.");
+  }
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("eventos_enquetes")
     .insert({
       eventoId: eventId,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       question: payload.question.trim(),
       allowUserOptions: payload.allowUserOptions,
       options: [],
@@ -1055,13 +1122,19 @@ export async function createAdminEventPoll(payload: {
 export async function deleteAdminEventPoll(payload: {
   eventId: string;
   pollId: string;
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let query = supabase
     .from("eventos_enquetes")
     .delete()
     .eq("id", payload.pollId)
     .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
   invalidateEventCaches(payload.eventId);
 }
@@ -1070,9 +1143,11 @@ export async function updateAdminEventPollOptions(payload: {
   eventId: string;
   pollId: string;
   options: unknown[];
+  tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase
+  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+  let query = supabase
     .from("eventos_enquetes")
     .update({
       options: payload.options,
@@ -1080,6 +1155,10 @@ export async function updateAdminEventPollOptions(payload: {
     })
     .eq("id", payload.pollId)
     .eq("eventoId", payload.eventId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await query;
   if (error) throwSupabaseError(error);
   invalidateEventCaches(payload.eventId);
 }

@@ -205,7 +205,9 @@ export function LaunchPendingPage({ scope }: LaunchPendingPageProps) {
         }
       );
       await loadData(selectedTenantId, "refresh");
-      addToast("Ai sim! O Tubarao aprovou! 🦈 Usuario liberado como user.", "success");
+      addToast("Solicitacao aprovada. Usuario liberado como user.", "success");
+      return;
+      addToast("Solicitacao aprovada. Usuario liberado como user.", "success");
     } catch (error: unknown) {
       addToast(
         `Deu ruim no plantao! 🚨 ${extractErrorMessage(error)}`,

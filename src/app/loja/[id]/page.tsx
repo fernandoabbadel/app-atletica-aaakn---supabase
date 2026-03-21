@@ -25,6 +25,17 @@ import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
 import { fetchFinanceiroConfig } from "../../../lib/eventsService";
 import { buildLoginPath } from "@/lib/authRedirect";
+import {
+  fetchMiniVendorProfileById,
+  resolveMiniVendorPaymentConfig,
+} from "@/lib/miniVendorService";
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
+import { collectUserPlanScope } from "@/lib/userPlanScope";
+import {
+  buildTenantFinanceFallback,
+  resolveTenantBrandLabel,
+} from "../../../lib/tenantBranding";
 
 interface ProdutoVariante {
   id?: string;
@@ -47,6 +58,14 @@ interface Produto {
   cores?: string | string[];
   variantes?: ProdutoVariante[];
   caracteristicas?: string[];
+  status?: "ativo" | "em_breve" | "esgotado";
+  payment_config?: PixData | null;
+  seller?: {
+    type: "tenant" | "mini_vendor";
+    id: string;
+    name: string;
+    logoUrl: string;
+  } | null;
 }
 
 interface Order {
@@ -75,6 +94,18 @@ interface PixData {
   titular: string;
   whatsapp?: string;
 }
+
+const getAvailabilityLabel = (status?: Produto["status"]): string => {
+  if (status === "em_breve") return "Em-breve";
+  if (status === "esgotado") return "Esgotado";
+  return "Ativo";
+};
+
+const getAvailabilityClass = (status?: Produto["status"]): string => {
+  if (status === "em_breve") return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
+  if (status === "esgotado") return "border-red-500/30 bg-red-500/10 text-red-300";
+  return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+};
 
 const parseColorLines = (value: unknown): string[] => {
   if (Array.isArray(value)) {
@@ -131,6 +162,8 @@ export default function DetalheProdutoPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { tenantId, tenantSigla, tenantName, tenantSlug, tenantLogoUrl } = useTenantTheme();
+  const { userPlanNames, userPlanIds } = useMemo(() => collectUserPlanScope(user), [user]);
 
   const [produto, setProduto] = useState<Produto | null>(null);
   const [userOrders, setUserOrders] = useState<Order[]>([]);
@@ -206,9 +239,31 @@ export default function DetalheProdutoPage() {
   const effectiveCheckoutStock = selectedColorStock >= 0 ? selectedColorStock : totalStock;
   const isSelectedColorUnavailable = checkoutColor.trim().length > 0 && selectedColorStock === 0;
   const checkoutMaxQuantity = useMemo(() => Math.max(1, Math.min(10, effectiveCheckoutStock || 1)), [effectiveCheckoutStock]);
-  const isOutOfStock = totalStock <= 0;
+  const saleStatus = produto?.status || "ativo";
+  const isOutOfStock = totalStock <= 0 || saleStatus === "esgotado";
+  const isComingSoon = saleStatus === "em_breve";
 
   const productId = typeof params.id === "string" ? params.id : "";
+  const financeFallback = useMemo(
+    () =>
+      buildTenantFinanceFallback({
+        tenantSigla,
+        tenantName,
+      }),
+    [tenantName, tenantSigla]
+  );
+  const brandLabel = useMemo(
+    () => resolveTenantBrandLabel(tenantSigla, tenantName),
+    [tenantName, tenantSigla]
+  );
+  const sellerLogo = produto?.seller?.logoUrl || tenantLogoUrl || "/logo.png";
+  const sellerName = produto?.seller?.name || brandLabel;
+  const sellerProfileHref =
+    produto?.seller?.type === "mini_vendor" && produto.seller.id
+      ? tenantSlug
+        ? withTenantSlug(tenantSlug, `/perfil/mini-vendor/${produto.seller.id}`)
+        : `/perfil/mini-vendor/${produto.seller.id}`
+      : "";
 
   useEffect(() => {
     setCheckoutQuantity((prev) => Math.min(prev, checkoutMaxQuantity));
@@ -229,6 +284,9 @@ export default function DetalheProdutoPage() {
           reviewsLimit: 0,
           ordersLimit: 50,
           forceRefresh,
+          tenantId: tenantId || undefined,
+          userPlanNames,
+          userPlanIds,
         });
 
         setProduto(bundle.produto as unknown as Produto | null);
@@ -244,7 +302,7 @@ export default function DetalheProdutoPage() {
         setLoading(false);
       }
     },
-    [addToast, productId, user?.uid]
+    [addToast, productId, tenantId, user?.uid, userPlanIds, userPlanNames]
   );
 
   useEffect(() => {
@@ -270,6 +328,7 @@ export default function DetalheProdutoPage() {
         productId: produto.id,
         userId: user.uid,
         currentlyLiked: Boolean(isLiked),
+        tenantId: tenantId || undefined,
       });
 
       setProduto((prev) => {
@@ -288,43 +347,84 @@ export default function DetalheProdutoPage() {
 
   const loadStorePixData = useCallback(async () => {
     if (loadingPixData) return;
+    if (produto?.payment_config) {
+      setPixData(produto.payment_config);
+      return;
+    }
     setLoadingPixData(true);
     try {
-      const financeiro = await fetchFinanceiroConfig({ forceRefresh: false });
+      if (
+        tenantId &&
+        produto?.seller?.type === "mini_vendor" &&
+        produto.seller.id
+      ) {
+        const sellerProfile = await fetchMiniVendorProfileById({
+          tenantId,
+          miniVendorId: produto.seller.id,
+          forceRefresh: false,
+        });
+        const sellerPayment = resolveMiniVendorPaymentConfig(sellerProfile);
+        if (sellerPayment) {
+          setPixData({
+            chave: typeof sellerPayment.chave === "string" ? sellerPayment.chave : "",
+            banco: typeof sellerPayment.banco === "string" ? sellerPayment.banco : "",
+            titular: typeof sellerPayment.titular === "string" ? sellerPayment.titular : "",
+            whatsapp: typeof sellerPayment.whatsapp === "string" ? sellerPayment.whatsapp : "",
+          });
+          return;
+        }
+      }
+
+      const financeiro = await fetchFinanceiroConfig({
+        forceRefresh: false,
+        tenantId: tenantId || undefined,
+      });
       const chave =
         typeof financeiro?.chave === "string" && financeiro.chave.trim()
           ? financeiro.chave.trim()
-          : "financeiro@aaakn.com.br";
+          : financeFallback.chave;
       const banco =
         typeof financeiro?.banco === "string" && financeiro.banco.trim()
           ? financeiro.banco.trim()
-          : "Banco Inter";
+          : financeFallback.banco;
       const titular =
         typeof financeiro?.titular === "string" && financeiro.titular.trim()
           ? financeiro.titular.trim()
-          : "Assoc. Atletica Acad. Knight";
+          : financeFallback.titular;
       const whatsapp =
         typeof financeiro?.whatsapp === "string" && financeiro.whatsapp.trim()
           ? financeiro.whatsapp.trim()
-          : "5512999999999";
+          : financeFallback.whatsapp;
 
       setPixData({ chave, banco, titular, whatsapp });
     } catch (error: unknown) {
       console.error(error);
-      setPixData({
-        chave: "financeiro@aaakn.com.br",
-        banco: "Banco Inter",
-        titular: "Assoc. Atletica Acad. Knight",
-        whatsapp: "5512999999999",
-      });
+      setPixData(financeFallback);
     } finally {
       setLoadingPixData(false);
     }
-  }, [loadingPixData]);
+  }, [
+    financeFallback,
+    loadingPixData,
+    produto?.payment_config,
+    produto?.seller?.id,
+    produto?.seller?.type,
+    tenantId,
+  ]);
 
   const handleBuy = async () => {
     if (!user || !produto) {
-      router.push(buildLoginPath(`/loja/${String(params?.id || "")}`));
+      router.push(
+        buildLoginPath(
+          tenantSlug
+            ? withTenantSlug(tenantSlug, `/loja/${String(params?.id || "")}`)
+            : `/loja/${String(params?.id || "")}`
+        )
+      );
+      return;
+    }
+    if (isComingSoon) {
+      addToast("Este produto ainda esta em breve para o seu acesso.", "info");
       return;
     }
     if (isOutOfStock || isSelectedColorUnavailable) {
@@ -360,6 +460,8 @@ export default function DetalheProdutoPage() {
         price: produto.preco,
         quantity: checkoutQuantity,
         color: checkoutColor,
+        tenantId: tenantId || undefined,
+        paymentConfig: produto.payment_config ? { ...produto.payment_config } : null,
       });
 
       setCheckoutOrderId(order.id);
@@ -386,8 +488,8 @@ export default function DetalheProdutoPage() {
 
   const handleSendReceiptWhatsapp = () => {
     if (!produto || !checkoutOrderId) return;
-    const adminPhone = (pixData.whatsapp || "5512999999999").replace(/\D/g, "");
-    const message = `Fala Tubarao! Quero finalizar a compra do produto *${produto.nome}*.\n\n[PRODUTO] ${produto.nome}\n[QTD] ${checkoutQuantity}\n${checkoutColor.trim() ? `[COR] ${checkoutColor.trim()}\n` : ""}[VALOR] R$ ${checkoutTotal.toFixed(2)}\n[PEDIDO] ${checkoutOrderId.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+    const adminPhone = (pixData.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
+    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[PRODUTO] ${produto.nome}\n[QTD] ${checkoutQuantity}\n${checkoutColor.trim() ? `[COR] ${checkoutColor.trim()}\n` : ""}[VALOR] R$ ${checkoutTotal.toFixed(2)}\n[PEDIDO] ${checkoutOrderId.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
     const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, "_blank");
     setCheckoutStep(3);
@@ -463,6 +565,36 @@ export default function DetalheProdutoPage() {
             <span className="text-[10px] font-black uppercase text-emerald-500 tracking-widest bg-emerald-900/20 px-2 py-1 rounded border border-emerald-500/20">
               {produto.categoria}
             </span>
+            <div className="mt-3 flex items-center gap-3">
+              {sellerProfileHref ? (
+                <Link
+                  href={sellerProfileHref}
+                  className="inline-flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/50 px-3 py-2 transition hover:border-blue-500/30 hover:bg-blue-500/10"
+                >
+                  <div className="relative h-10 w-10 overflow-hidden rounded-full border border-zinc-700 bg-black">
+                    <Image src={sellerLogo} alt={sellerName} fill sizes="40px" className="object-cover" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                      Mini vendor
+                    </p>
+                    <p className="text-sm font-bold text-zinc-200">{sellerName}</p>
+                  </div>
+                </Link>
+              ) : (
+                <>
+                  <div className="relative h-10 w-10 overflow-hidden rounded-full border border-zinc-700 bg-black">
+                    <Image src={sellerLogo} alt={sellerName} fill sizes="40px" className="object-cover" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                      Loja da atletica
+                    </p>
+                    <p className="text-sm font-bold text-zinc-200">{sellerName}</p>
+                  </div>
+                </>
+              )}
+            </div>
             <h1 className="text-3xl font-black text-white italic uppercase mt-2 leading-none">{produto.nome}</h1>
             <div className="flex items-center gap-2 mt-2">
               <Heart size={14} className="text-red-500 fill-red-500" />
@@ -471,6 +603,9 @@ export default function DetalheProdutoPage() {
           </div>
           <div className="text-right">
             <p className="text-3xl font-black text-emerald-400">R$ {Number(produto.preco).toFixed(2)}</p>
+            <span className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvailabilityClass(saleStatus)}`}>
+              {getAvailabilityLabel(saleStatus)}
+            </span>
           </div>
         </div>
 
@@ -486,6 +621,11 @@ export default function DetalheProdutoPage() {
                 <span className="px-2 py-1 rounded-md border border-zinc-700 bg-black text-zinc-300">
                   Estoque disponivel
                 </span>
+                {isComingSoon && (
+                  <span className="px-2 py-1 rounded-md border border-yellow-500/30 bg-yellow-500/10 text-yellow-300">
+                    Liberacao em breve
+                  </span>
+                )}
                 {isOutOfStock && (
                   <span className="px-2 py-1 rounded-md border border-red-500/30 bg-red-500/10 text-red-300">
                     Esgotado
@@ -544,14 +684,14 @@ export default function DetalheProdutoPage() {
 
             <button
               onClick={handleBuy}
-              disabled={isOutOfStock}
+              disabled={isOutOfStock || isComingSoon}
               className="w-full py-4 bg-emerald-600 rounded-xl font-black uppercase text-sm flex items-center justify-center gap-3 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20 active:scale-95 text-white disabled:opacity-50 disabled:hover:bg-emerald-600"
             >
-              <ShoppingBag size={20} /> {isOutOfStock ? "Produto Esgotado" : "Comprar Agora"}
+              <ShoppingBag size={20} /> {isComingSoon ? "Produto em breve" : isOutOfStock ? "Produto Esgotado" : "Comprar Agora"}
             </button>
 
             <Link
-              href={`/loja/${produto.id}/review`}
+              href={tenantSlug ? withTenantSlug(tenantSlug, `/loja/${produto.id}/review`) : `/loja/${produto.id}/review`}
               className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 text-xs font-black uppercase hover:border-emerald-500/40 hover:text-emerald-300 transition"
             >
               Avaliacoes

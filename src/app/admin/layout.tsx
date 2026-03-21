@@ -30,6 +30,7 @@ import {
   CreditCard,
   PanelLeftClose,
   PanelLeftOpen,
+  Store,
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -38,6 +39,13 @@ import { logActivity } from "../../lib/logger";
 import { isPlatformMaster, resolveEffectiveAccessRole } from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import { usePermission } from "@/hooks/usePermission";
+import {
+  createDefaultTenantAdminSidebarProfilesConfig,
+  fetchTenantAdminSidebarProfileAssignment,
+  fetchTenantAdminSidebarProfilesConfig,
+  isTenantAdminSidebarPathVisible,
+  type TenantAdminSidebarProfileKey,
+} from "@/lib/tenantAdminSidebarService";
 
 interface SidebarItem {
   group: "Base" | "Comercial" | "Conteudo" | "Esportes" | "Governanca" | "Plataforma";
@@ -63,8 +71,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const pathInfo = parseTenantScopedPath(pathname || "/");
   const currentPath = pathInfo.scopedPath;
-  const { user, logout } = useAuth();
-  const { tenantName, tenantSigla, tenantSlug: activeTenantSlug, isOverrideActive } = useTenantTheme();
+  const { user } = useAuth();
+  const {
+    tenantId: activeTenantId,
+    tenantName,
+    tenantSigla,
+    tenantSlug: activeTenantSlug,
+    isOverrideActive,
+  } = useTenantTheme();
   const { canAccess } = usePermission();
   const loginAuditRef = useRef(false);
   const isPlatformMasterUser = isPlatformMaster(user);
@@ -72,6 +86,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const canViewMasterLink = isPlatformMasterUser && effectiveAccessRole === "master";
   const sidebarTenantSlug = pathInfo.tenantSlug || activeTenantSlug.trim();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
+  const [sidebarProfilesConfig, setSidebarProfilesConfig] = React.useState(
+    createDefaultTenantAdminSidebarProfilesConfig
+  );
+  const [sidebarProfileKey, setSidebarProfileKey] =
+    React.useState<TenantAdminSidebarProfileKey>("A");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -116,8 +135,44 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }, [currentPath, pathname, user?.nome, user?.role, user?.uid]);
 
+  useEffect(() => {
+    let mounted = true;
+    const tenantId = (activeTenantId || "").trim();
+    const tenantSlug = sidebarTenantSlug.trim().toLowerCase();
+
+    const loadSidebarProfile = async () => {
+      try {
+        const profilesConfig = await fetchTenantAdminSidebarProfilesConfig({
+          forceRefresh: true,
+        });
+        const profileKey = tenantId
+          ? await fetchTenantAdminSidebarProfileAssignment({
+              tenantId,
+              tenantSlug,
+              forceRefresh: true,
+              profilesConfig,
+            })
+          : "A";
+        if (!mounted) return;
+        setSidebarProfilesConfig(profilesConfig);
+        setSidebarProfileKey(profileKey);
+      } catch (error: unknown) {
+        console.error("Erro ao carregar perfil de menu do admin.", error);
+        if (!mounted) return;
+        setSidebarProfilesConfig(createDefaultTenantAdminSidebarProfilesConfig());
+        setSidebarProfileKey("A");
+      }
+    };
+
+    void loadSidebarProfile();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantId, sidebarTenantSlug]);
+
   const sidebarItems: SidebarItem[] = [
     { group: "Base", name: "Album da Galera", path: "/admin/album", icon: <Camera size={18} /> },
+    { group: "Base", name: "Atletica", path: "/admin/atletica", icon: <Building2 size={18} /> },
     { group: "Esportes", name: "Arena Games", path: "/admin/games", icon: <Gamepad2 size={18} /> },
     { group: "Base", name: "Turma", path: "/admin/turma", icon: <Users size={18} /> },
     { group: "Base", name: "Carteirinha", path: "/admin/carteirinha", icon: <CreditCard size={18} /> },
@@ -125,6 +180,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { group: "Conteudo", name: "Comunidade", path: "/admin/comunidade", icon: <MessageSquare size={18} /> },
     { group: "Conteudo", name: "Conquistas", path: "/admin/conquistas", icon: <Trophy size={18} /> },
     { group: "Base", name: "Dashboard", path: "/admin", icon: <LayoutDashboard size={18} /> },
+    { group: "Base", name: "Dashboard Modulos", path: "/admin/dashboard-modulos", icon: <PanelLeftOpen size={18} /> },
     { group: "Governanca", name: "Denuncias", path: "/admin/denuncias", icon: <ShieldAlert size={18} /> },
     { group: "Conteudo", name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
     { group: "Comercial", name: "Fidelidade", path: "/admin/fidelidade", icon: <Star size={18} /> },
@@ -141,6 +197,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { group: "Comercial", name: "Landing", path: "/admin/landing", icon: <Rocket size={18} /> },
     { group: "Plataforma", name: "Lancamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
     { group: "Comercial", name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
+    { group: "Comercial", name: "Mini Vendor Admin", path: "/admin/mini-vendors", icon: <Store size={18} /> },
     { group: "Comercial", name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
     { group: "Governanca", name: "Permissoes", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
     {
@@ -155,7 +212,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   ];
 
   const activeSidebarItems = sidebarItems.filter(
-    (item) => !item.platformOnly || canViewMasterLink
+    (item) =>
+      (!item.platformOnly || canViewMasterLink) &&
+      (item.platformOnly ||
+        isTenantAdminSidebarPathVisible(sidebarProfilesConfig, sidebarProfileKey, item.path))
   );
   const groupedSidebarItems = React.useMemo(
     () =>
@@ -176,14 +236,32 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
     return path;
   };
+  const appDashboardHref = sidebarTenantSlug
+    ? withTenantSlug(sidebarTenantSlug, "/dashboard")
+    : "/dashboard";
   const semPermissaoHref = sidebarTenantSlug
     ? withTenantSlug(sidebarTenantSlug, "/sem-permissao")
     : "/sem-permissao";
 
+  useEffect(() => {
+    if (canViewMasterLink) return;
+    if (!currentPath.startsWith("/admin")) return;
+    if (currentPath === "/admin") {
+      if (!isTenantAdminSidebarPathVisible(sidebarProfilesConfig, sidebarProfileKey, currentPath)) {
+        router.replace(semPermissaoHref);
+      }
+      return;
+    }
+
+    if (!isTenantAdminSidebarPathVisible(sidebarProfilesConfig, sidebarProfileKey, currentPath)) {
+      router.replace(semPermissaoHref);
+    }
+  }, [canViewMasterLink, currentPath, router, semPermissaoHref, sidebarProfileKey, sidebarProfilesConfig]);
+
   return (
     <div className="flex min-h-screen bg-[#050505]">
       <aside
-        className={`fixed z-40 flex h-full flex-col justify-between overflow-y-auto border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl custom-scrollbar transition-all duration-300 ${
+        className={`fixed z-40 flex h-full flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 ${
           isSidebarCollapsed ? "w-[88px]" : "w-64"
         }`}
       >
@@ -194,7 +272,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         >
           {isSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
         </button>
-        <div className="p-6">
+        <div className="flex min-h-0 flex-1 flex-col p-6">
           <div className="mb-8 flex items-center gap-3">
             <div className="brand-icon-chip h-10 w-10 shrink-0 rounded-xl">
               <ShieldAlert size={24} className="text-black" />
@@ -236,19 +314,37 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           {isOverrideActive && !isSidebarCollapsed && (
             <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-amber-300">
-              Contexto: {tenantName || "Tenant selecionado"}
+              Contexto: {tenantName || "Atletica selecionada"}
             </div>
           )}
 
-          <nav className="space-y-4">
-            {groupedSidebarItems.map(({ group, items }) => (
-              <div key={group} className="space-y-1">
-                {!isSidebarCollapsed && (
-                  <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                    {group}
-                  </p>
-                )}
-                {items.map((item) => {
+          <div className="mb-4">
+            <Link
+              href={appDashboardHref}
+              title="Sair do Admin"
+              className={`group flex items-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-300 transition hover:bg-emerald-500 hover:text-black ${
+                isSidebarCollapsed ? "justify-center px-3 py-3" : "gap-3 px-4 py-3"
+              }`}
+            >
+              <LogOut size={16} className="transition-transform group-hover:-translate-x-1" />
+              {!isSidebarCollapsed && (
+                <span className="text-[10px] font-black uppercase tracking-[0.18em]">
+                  Sair do Admin
+                </span>
+              )}
+            </Link>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+            <nav className="space-y-4">
+              {groupedSidebarItems.map(({ group, items }) => (
+                <div key={group} className="space-y-1">
+                  {!isSidebarCollapsed && (
+                    <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                      {group}
+                    </p>
+                  )}
+                  {items.map((item) => {
               const itemPath = item.path.split("#")[0];
               const isActive =
                 currentPath === itemPath ||
@@ -315,22 +411,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     </span>
                   )}
                 </Link>
-              );
-                })}
-              </div>
-            ))}
-          </nav>
+                );
+                  })}
+                </div>
+              ))}
+            </nav>
+          </div>
         </div>
 
-        <div className="border-t border-white/5 bg-black/20 p-6">
-          <button
-            onClick={() => logout()}
-            className="group w-full flex items-center justify-center gap-3 rounded-xl border border-red-600/20 bg-red-600/10 p-3 text-[10px] font-bold uppercase tracking-wider text-red-500 transition-all hover:bg-red-600 hover:text-white"
-          >
-            <LogOut size={16} className="transition-transform group-hover:-translate-x-1" />
-            Sair do Painel
-          </button>
-        </div>
       </aside>
 
       <main className={`flex-1 p-8 transition-all duration-300 ${isSidebarCollapsed ? "ml-[88px]" : "ml-64"}`}>{children}</main>

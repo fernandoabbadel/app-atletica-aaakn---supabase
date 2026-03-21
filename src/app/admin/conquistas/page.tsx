@@ -47,8 +47,8 @@ const DEFAULT_PATENTES: PatenteConfig[] = [
     { id: "p1", titulo: "Plâncton", minXp: 0, cor: "text-zinc-400", iconName: "Fish" },
     { id: "p2", titulo: "Peixe Palhaço", minXp: 500, cor: "text-orange-400", iconName: "Fish" },
     { id: "p3", titulo: "Barracuda", minXp: 2000, cor: "text-blue-400", iconName: "Swords" },
-    { id: "p4", titulo: "Tubarão Martelo", minXp: 5000, cor: "text-purple-400", iconName: "Fish" },
-    { id: "p5", titulo: "Tubarão Branco", minXp: 15000, cor: "text-emerald-400", iconName: "Fish" },
+    { id: "p4", titulo: "Elite Roxa", minXp: 5000, cor: "text-purple-400", iconName: "Fish" },
+    { id: "p5", titulo: "Elite Verde", minXp: 15000, cor: "text-emerald-400", iconName: "Fish" },
     { id: "p6", titulo: "MEGALODON", minXp: 50000, cor: "text-red-600", iconName: "Crown" },
 ];
 
@@ -382,7 +382,7 @@ export default function AdminConquistasPage() {
         {activeTab === 'dashboard' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
                 <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
-                    <h3 className="font-black uppercase text-white mb-6 flex items-center gap-2 text-sm"><Crown className="text-yellow-500"/> Top 10 Tubarões</h3>
+                    <h3 className="font-black uppercase text-white mb-6 flex items-center gap-2 text-sm"><Crown className="text-yellow-500"/> Top 10 em XP</h3>
                     <div className="space-y-4">
                         {usersRanking.map((u, i) => (
                             <div key={u.id} className="flex items-center justify-between p-3 bg-black/40 rounded-2xl border border-zinc-800">
