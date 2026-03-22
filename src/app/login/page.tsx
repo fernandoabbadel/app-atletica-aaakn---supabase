@@ -21,8 +21,12 @@ import {
   sanitizeInviteToken,
   storeInviteToken,
 } from "@/lib/inviteTokenStorage";
+import { isPlatformMaster } from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import { getSupabaseClient } from "@/lib/supabase";
+
+const normalizeUserText = (value: unknown): string =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -61,15 +65,58 @@ export default function LoginPage() {
       : storedReturnToHint;
   const redirectCommittedRef = useRef(false);
   const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
+  const normalizedTenantStatus = normalizeUserText(user?.tenant_status);
+  const normalizedTenantId =
+    typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
+  const isPlatformMasterUser = isPlatformMaster(user);
+  const isPendingTenant =
+    normalizedTenantStatus === "pending" && normalizedTenantId.length > 0;
+  const isApprovedTenant =
+    normalizedTenantId.length > 0 &&
+    (normalizedTenantStatus === "" || normalizedTenantStatus === "approved");
+  const tenantScopedDashboardPath = normalizedActiveTenantSlug
+    ? withTenantSlug(normalizedActiveTenantSlug, "/dashboard")
+    : "/dashboard";
+  const tenantScopedPendingPath = normalizedActiveTenantSlug
+    ? withTenantSlug(normalizedActiveTenantSlug, "/aguardando-aprovacao")
+    : "/aguardando-aprovacao";
+
+  const canUseUnscopedCandidate = useCallback(
+    (candidate: string): boolean => {
+      if (!user) return false;
+
+      if (user.isAnonymous) {
+        return candidate === "/visitante";
+      }
+
+      if (candidate === "/visitante") return false;
+      if (candidate === "/cadastro") {
+        return !isPlatformMasterUser && !isApprovedTenant;
+      }
+      if (candidate === "/aguardando-aprovacao") {
+        return isPendingTenant;
+      }
+      if (candidate === "/master" || candidate.startsWith("/master/")) {
+        return isPlatformMasterUser;
+      }
+
+      return true;
+    },
+    [isApprovedTenant, isPendingTenant, isPlatformMasterUser, user]
+  );
 
   const resolveRedirectTarget = useCallback((): string => {
     if (!user) return "/visitante";
 
     const fallbackTarget = user.isAnonymous
       ? "/visitante"
-      : normalizedActiveTenantSlug
-        ? withTenantSlug(normalizedActiveTenantSlug, "/dashboard")
-        : "/visitante";
+      : isPlatformMasterUser
+        ? "/master"
+        : isPendingTenant
+          ? tenantScopedPendingPath
+          : isApprovedTenant
+            ? tenantScopedDashboardPath
+            : tenantScopedCadastroPath;
 
     const candidateTargets = [
       inviteAwareReturnTo,
@@ -77,18 +124,37 @@ export default function LoginPage() {
     ].filter((candidate) => candidate && candidate !== "/dashboard");
 
     for (const candidate of candidateTargets) {
-      const { tenantSlug } = parseTenantScopedPath(candidate);
+      const { tenantSlug, scopedPath } = parseTenantScopedPath(candidate);
       if (!tenantSlug) {
-        return candidate;
+        if (canUseUnscopedCandidate(candidate)) {
+          return candidate;
+        }
+        continue;
       }
 
-      if (!user.isAnonymous && tenantSlug === normalizedActiveTenantSlug) {
+      if (
+        isPlatformMasterUser ||
+        tenantSlug === normalizedActiveTenantSlug ||
+        (!user.isAnonymous && scopedPath === "/cadastro" && !isApprovedTenant) ||
+        (!user.isAnonymous && scopedPath === "/aguardando-aprovacao" && isPendingTenant)
+      ) {
         return candidate;
       }
     }
 
     return fallbackTarget;
-  }, [inviteAwareReturnTo, normalizedActiveTenantSlug, user]);
+  }, [
+    canUseUnscopedCandidate,
+    inviteAwareReturnTo,
+    isApprovedTenant,
+    isPendingTenant,
+    isPlatformMasterUser,
+    normalizedActiveTenantSlug,
+    tenantScopedCadastroPath,
+    tenantScopedDashboardPath,
+    tenantScopedPendingPath,
+    user,
+  ]);
 
   useEffect(() => {
     const nextInviteToken = inviteTokenFromUrl || readStoredInviteToken();

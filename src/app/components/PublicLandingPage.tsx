@@ -36,7 +36,7 @@ import {
   fetchPublicLandingData,
   type PublicLandingPayload,
 } from "@/lib/publicLandingService";
-import { hasAdminPanelAccess } from "@/lib/roles";
+import { hasAdminPanelAccess, isPlatformMaster } from "@/lib/roles";
 import { fetchTenantBySlug } from "@/lib/tenantService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
@@ -227,12 +227,25 @@ export default function PublicLandingPage({
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"aluno" | "empresa">("aluno");
 
-  const dashboardPath = useMemo(() => {
+  const guestPath = useMemo(() => {
     if (!isTenantLanding) {
       return "/visitante";
     }
     return withTenantSlug(tenantSlug, "/dashboard");
   }, [isTenantLanding, tenantSlug]);
+
+  const authenticatedPath = useMemo(() => {
+    if (isTenantLanding) {
+      return withTenantSlug(tenantSlug, "/dashboard");
+    }
+    if (user?.isAnonymous) {
+      return "/visitante";
+    }
+    if (isPlatformMaster(user)) {
+      return "/master";
+    }
+    return "/dashboard";
+  }, [isTenantLanding, tenantSlug, user]);
 
   const adminPath = useMemo(
     () => (isTenantLanding ? withTenantSlug(tenantSlug, "/admin") : "/admin"),
@@ -240,6 +253,14 @@ export default function PublicLandingPage({
   );
 
   const canOpenAdmin = Boolean(user && !user.isAnonymous && hasAdminPanelAccess(user));
+
+  useEffect(() => {
+    if (!isTenantLanding) return;
+    if (authLoading) return;
+    if (!user || user.isAnonymous) return;
+
+    router.replace(authenticatedPath);
+  }, [authLoading, authenticatedPath, isTenantLanding, router, user]);
 
   useEffect(() => {
     let mounted = true;
@@ -331,7 +352,7 @@ export default function PublicLandingPage({
 
   const handleGoogleLogin = async () => {
     try {
-      await loginGoogle({ returnTo: dashboardPath });
+      await loginGoogle({ returnTo: authenticatedPath });
     } catch {
       addToast("Erro no login Google", "error");
     }
@@ -341,7 +362,7 @@ export default function PublicLandingPage({
     try {
       addToast("Modo visitante ativado.", "info");
       await loginAsGuest();
-      router.push(dashboardPath);
+      router.push(guestPath);
     } catch {
       addToast("Erro ao entrar como visitante.", "error");
     }
@@ -528,7 +549,7 @@ export default function PublicLandingPage({
             {user ? (
               <div className="space-y-4">
                 <button
-                  onClick={() => router.push(dashboardPath)}
+                  onClick={() => router.push(authenticatedPath)}
                   className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-black text-zinc-900 transition-all hover:bg-zinc-200"
                 >
                   <LayoutDashboard size={18} />

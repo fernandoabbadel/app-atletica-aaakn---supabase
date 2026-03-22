@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, RefreshCcw, Save, Trash2 } from "lucide-react";
 
@@ -81,10 +81,10 @@ export default function AdminPlanosEditarPage() {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [form, setForm] = useState<PlanFormState>(EMPTY_FORM);
 
-  const load = async (forceRefresh = true) => {
+  const load = useCallback(async (forceRefresh = true) => {
     const plans = await fetchPlanCatalog({ maxResults: 40, forceRefresh, tenantId });
     setRows(plans);
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -99,7 +99,7 @@ export default function AdminPlanosEditarPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     if (rows.length === 0) {

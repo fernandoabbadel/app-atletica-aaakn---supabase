@@ -27,9 +27,9 @@ import {
   type TenantAppModuleKey,
 } from "@/lib/tenantAppModulesService";
 import {
-  fetchSharkroundAppConfig,
-  getSharkroundDisplayName,
-} from "@/lib/sharkroundConfigService";
+  fetchBoardroundAppConfig,
+  getBoardroundDisplayName,
+} from "@/lib/boardroundConfigService";
 import {
   fetchBottomNavBannedAppealsCount,
   fetchBottomNavNotifications,
@@ -177,6 +177,11 @@ export default function BottomNavbar() {
   const canAccessBannedAppeals = canAccess("/admin/denuncias/banidos");
   const [hasApprovedMiniVendor, setHasApprovedMiniVendor] = useState(false);
   const [boardroundDisplayName, setBoardroundDisplayName] = useState("BoardRound");
+  const isHiddenRoute =
+    ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao", "/visitante"].includes(normalizedPathname) ||
+    normalizedPathname.startsWith("/empresa") ||
+    normalizedPathname.startsWith("/admin") ||
+    normalizedPathname.startsWith("/master");
   const isModuleVisible = useCallback(
     (key?: TenantAppModuleKey): boolean =>
       key ? isTenantAppModuleVisible(modulesConfig, key) : true,
@@ -236,6 +241,11 @@ export default function BottomNavbar() {
   useEffect(() => {
     let mounted = true;
     const loadModulesConfig = async () => {
+      if (isHiddenRoute) {
+        if (mounted) setModulesConfig(createDefaultTenantAppModulesConfig());
+        return;
+      }
+
       try {
         const nextConfig = await fetchEffectiveTenantAppModulesConfig({
           tenantId: activeTenantId || user?.tenant_id || undefined,
@@ -251,19 +261,24 @@ export default function BottomNavbar() {
     return () => {
       mounted = false;
     };
-  }, [activeTenantId, scopedTenantSlug, user?.tenant_id]);
+  }, [activeTenantId, isHiddenRoute, scopedTenantSlug, user?.tenant_id]);
 
   useEffect(() => {
     let mounted = true;
 
     const loadBoardroundConfig = async () => {
+      if (isHiddenRoute) {
+        if (mounted) setBoardroundDisplayName("BoardRound");
+        return;
+      }
+
       try {
-        const config = await fetchSharkroundAppConfig({
+        const config = await fetchBoardroundAppConfig({
           forceRefresh: false,
           tenantId: activeTenantId || undefined,
         });
         if (mounted) {
-          setBoardroundDisplayName(getSharkroundDisplayName(config));
+          setBoardroundDisplayName(getBoardroundDisplayName(config));
         }
       } catch {
         if (mounted) {
@@ -276,7 +291,7 @@ export default function BottomNavbar() {
     return () => {
       mounted = false;
     };
-  }, [activeTenantId]);
+  }, [activeTenantId, isHiddenRoute]);
 
   const loadNotifications = useCallback(async (forceRefresh = false) => {
       if (!canLoadNotifications) {
@@ -427,11 +442,6 @@ export default function BottomNavbar() {
       router.push(resolveScopedPath(path)); 
   };
   const handleLogout = () => { if (logout) logout(); setIsSidebarOpen(false); router.push("/"); };
-  const isHiddenRoute =
-    ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao", "/visitante"].includes(normalizedPathname) ||
-    normalizedPathname.startsWith("/empresa") ||
-    normalizedPathname.startsWith("/admin") ||
-    normalizedPathname.startsWith("/master");
   if (isHiddenRoute) return null;
 
   // --- DEFINIÃ‡ÃƒO DOS MENUS (CSS e Badges Atualizados) ---

@@ -9,16 +9,16 @@ import { useToast } from "../../../context/ToastContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import {
-  fetchSharkroundLeagues,
-  setSharkroundLeagueActive,
-} from "../../../lib/sharkroundService";
+  fetchBoardroundLeagues,
+  setBoardroundLeagueActive,
+} from "../../../lib/boardroundService";
 import {
-  fetchSharkroundAppConfig,
-  getSharkroundDisplayName,
-  getDefaultSharkroundAppConfig,
-  saveSharkroundAppConfig,
-  type SharkroundAppConfig,
-} from "../../../lib/sharkroundConfigService";
+  fetchBoardroundAppConfig,
+  getBoardroundDisplayName,
+  getDefaultBoardroundAppConfig,
+  saveBoardroundAppConfig,
+  type BoardroundAppConfig,
+} from "../../../lib/boardroundConfigService";
 
 interface Questao {
   id: string;
@@ -47,11 +47,11 @@ export default function AdminBoardRound() {
   const [savingConfig, setSavingConfig] = useState(false);
 
   const [ligas, setLigas] = useState<LigaConfig[]>([]);
-  const [config, setConfig] = useState<SharkroundAppConfig>(
-    getDefaultSharkroundAppConfig()
+  const [config, setConfig] = useState<BoardroundAppConfig>(
+    getDefaultBoardroundAppConfig()
   );
   const [rulesText, setRulesText] = useState(
-    getDefaultSharkroundAppConfig().rules.join("\n")
+    getDefaultBoardroundAppConfig().rules.join("\n")
   );
 
   const stats = useMemo(() => {
@@ -63,7 +63,7 @@ export default function AdminBoardRound() {
     async (forceRefresh = false) => {
       setLoadingLigas(true);
       try {
-        const loaded = await fetchSharkroundLeagues({
+        const loaded = await fetchBoardroundLeagues({
           maxResults: 160,
           forceRefresh,
           tenantId: activeTenantId || undefined,
@@ -83,7 +83,7 @@ export default function AdminBoardRound() {
     async (forceRefresh = false) => {
       setLoadingConfig(true);
       try {
-        const loadedConfig = await fetchSharkroundAppConfig({
+        const loadedConfig = await fetchBoardroundAppConfig({
           forceRefresh,
           tenantId: activeTenantId || undefined,
         });
@@ -120,7 +120,7 @@ export default function AdminBoardRound() {
     );
 
     try {
-      await setSharkroundLeagueActive({
+      await setBoardroundLeagueActive({
         leagueId: liga.id,
         ativa: novoStatus,
         tenantId: activeTenantId || undefined,
@@ -146,7 +146,7 @@ export default function AdminBoardRound() {
   };
 
   const handleConfigNumber = (
-    key: keyof Omit<SharkroundAppConfig, "rules" | "displayName">,
+    key: keyof Omit<BoardroundAppConfig, "rules" | "displayName">,
     value: string
   ) => {
     const parsed = Number(value);
@@ -167,12 +167,12 @@ export default function AdminBoardRound() {
         .filter((line) => line.length > 0)
         .slice(0, 16);
 
-      const payload: SharkroundAppConfig = {
+      const payload: BoardroundAppConfig = {
         ...config,
-        rules: rules.length > 0 ? rules : getDefaultSharkroundAppConfig().rules,
+        rules: rules.length > 0 ? rules : getDefaultBoardroundAppConfig().rules,
       };
 
-      await saveSharkroundAppConfig(payload, {
+      await saveBoardroundAppConfig(payload, {
         tenantId: activeTenantId || undefined,
       });
       setConfig(payload);
@@ -233,7 +233,7 @@ export default function AdminBoardRound() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-black uppercase tracking-wide">Configuracao do jogo</h2>
-            <p className="text-[11px] text-zinc-500">Documento unico em `app_config/sharkround`</p>
+            <p className="text-[11px] text-zinc-500">Documento do BoardRound com compatibilidade legado `app_config/sharkround`</p>
           </div>
           <button
             onClick={() => void handleSaveConfig()}
@@ -251,7 +251,7 @@ export default function AdminBoardRound() {
             <input
               type="text"
               maxLength={40}
-              value={getSharkroundDisplayName(config)}
+              value={getBoardroundDisplayName(config)}
               onChange={(event) => handleDisplayNameChange(event.target.value)}
               className="mt-1 w-full rounded-lg bg-black border border-zinc-700 px-3 py-2 text-sm text-white"
               placeholder="BoardRound"

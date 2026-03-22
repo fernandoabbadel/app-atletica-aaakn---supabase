@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "node scripts/prepare-dev.mjs && next dev --webpack",
     "type-check": "next typegen && tsc --noEmit --pretty false",
     "check-schema": "node --experimental-strip-types scripts/check-schema.mts",
     "verify": "npm run lint && npm run type-check",

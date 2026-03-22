@@ -180,7 +180,7 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
     return () => {
       mounted = false;
     };
-  }, [user, tab]);
+  }, [tenantId, user, tab]);
 
   useEffect(() => {
     if (!selectedPedido) return;

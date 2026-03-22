@@ -27,7 +27,12 @@ import {
   MASTER_TENANT_OVERRIDE_STORAGE_KEY,
 } from "@/lib/tenantContext";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
-import { buildLoginPath, readStoredLoginReturnTo, sanitizeReturnToPath, storeLoginReturnTo } from "@/lib/authRedirect";
+import {
+  buildLoginRedirectUrl,
+  readStoredLoginReturnTo,
+  sanitizeReturnToPath,
+  storeLoginReturnTo,
+} from "@/lib/authRedirect";
 import {
   getAccessRoleCandidates,
   hasAdminPanelAccess,
@@ -1339,10 +1344,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const desiredReturnTo = sanitizeReturnToPath(options?.returnTo);
       storeLoginReturnTo(desiredReturnTo);
-      const redirectTo =
-        typeof window !== "undefined"
-          ? `${window.location.origin}${buildLoginPath(desiredReturnTo)}`
-          : undefined;
+      const redirectTo = buildLoginRedirectUrl(desiredReturnTo);
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",

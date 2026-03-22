@@ -96,7 +96,7 @@ const getErrorMessage = (error: unknown): string => {
   return "Erro desconhecido";
 };
 
-export default function SharkRoundPage() {
+export default function BoardRoundPage() {
   const { addToast } = useToast(); 
   const { user, loading } = useAuth(); 
   const { tenantId, tenantLogoUrl, tenantSlug } = useTenantTheme();
@@ -301,10 +301,32 @@ export default function SharkRoundPage() {
         }
     };
 
+    const loadRanking = async () => {
+        try {
+            const ranking = await fetchSharkroundTubasRanking({
+              maxResults: 10,
+              forceRefresh: false,
+              tenantId: tenantId || undefined,
+            });
+            setRankingData(ranking.map((entry) => ({
+              id: entry.id,
+              nome: entry.nome,
+              foto: entry.foto,
+              tubas: entry.tubas || 0,
+            })));
+        } catch (error: unknown) {
+          console.error(
+            "[sharkround] erro ao carregar ranking:",
+            getErrorMessage(error),
+            error
+          );
+        }
+    };
+
     initGame();
     if (user && !loading) {
         setJogador(prev => ({...prev, id: user.uid, nome: user.nome || "Atleta", avatar: user.foto || prev.avatar}));
-        fetchRanking();
+        void loadRanking();
     }
   }, [user, loading, boardSizeTotal, canAccessSharkround, tenantId]);
 
@@ -340,7 +362,7 @@ export default function SharkRoundPage() {
     );
   }, [gameStats, sharkroundStatsStorageKey, user?.uid]);
 
-  const fetchRanking = async () => {
+  async function fetchRanking() {
       try {
           const ranking = await fetchSharkroundTubasRanking({
             maxResults: 10,
@@ -360,9 +382,11 @@ export default function SharkRoundPage() {
           error
         );
       }
-  };
+  }
 
   // --- MECÃ‚NICA ---
+  void fetchRanking;
+
   const jogarDado = async () => {
     if (jogador.jogadasRestantes <= 0) return addToast("Sem jogadas de dado hoje. Volte amanha.", "error");
     

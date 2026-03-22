@@ -111,7 +111,7 @@ export default function AdminConfiguracoesPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   // CARREGAR DOCS COM LIMITE
   useEffect(() => {
@@ -145,7 +145,7 @@ export default function AdminConfiguracoesPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   // Seleção automática do primeiro documento (ajuste do useEffect dependency)
   useEffect(() => {
@@ -380,4 +380,3 @@ export default function AdminConfiguracoesPage() {
     </div>
   );
 }
-

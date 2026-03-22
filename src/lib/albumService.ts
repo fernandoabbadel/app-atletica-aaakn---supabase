@@ -109,8 +109,6 @@ const runWithInflight = async <T>(
   }
 };
 
-const resolveTenantCacheKey = (tenantId?: string): string => cleanTenantId(tenantId) || "default";
-
 const buildTenantScopedCacheKey = (baseKey: string, tenantId?: string): string => {
   const cleanBaseKey = baseKey.trim();
   const cleanScopedTenantId = cleanTenantId(tenantId);

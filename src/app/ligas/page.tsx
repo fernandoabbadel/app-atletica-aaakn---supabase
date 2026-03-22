@@ -395,6 +395,7 @@ export default function LigasAdminPage() {
       ligaData,
       novoLote,
       sendNotification,
+      tenantScopeId,
   ]);
 
   // 1. CARREGAMENTO INICIAL

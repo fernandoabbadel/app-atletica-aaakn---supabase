@@ -162,12 +162,6 @@ const SCANNER_FALLBACK_COLUMNS_BY_TABLE: Record<string, string[]> = {
 };
 
 const PARTNERS_CREATE_LEAD_CALLABLE = "partnersCreateLead";
-const PARTNERS_LOGIN_CALLABLE = "partnersLogin";
-const PARTNERS_ADMIN_UPSERT_CALLABLE = "partnersAdminUpsert";
-const PARTNERS_ADMIN_STATUS_CALLABLE = "partnersAdminSetStatus";
-const PARTNERS_ADMIN_DELETE_CALLABLE = "partnersAdminDelete";
-const PARTNERS_UPDATE_PROFILE_CALLABLE = "partnersUpdateProfile";
-const PARTNERS_CREATE_SCAN_CALLABLE = "partnersCreateScan";
 
 const adminBundleCache = new Map<
   string,

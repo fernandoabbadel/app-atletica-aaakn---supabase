@@ -143,15 +143,18 @@ export default function SharkLegendsPage() {
   const xpProgress = Math.min((currentXP / xpNeeded) * 100, 100);
 
   // Persistência
-  const saveGameState = (currentHero: Combatant | null, currentEnemy: Combatant | null, currentLog: string[], currentTurn: "player" | "enemy", currentRound: number) => {
+  const saveGameState = useCallback((currentHero: Combatant | null, currentEnemy: Combatant | null, currentLog: string[], currentTurn: "player" | "enemy", currentRound: number) => {
       if (!currentHero || !currentEnemy) return;
       const state = {
           hero: currentHero, enemy: currentEnemy, log: currentLog, turn: currentTurn, round: currentRound, timestamp: Date.now()
       };
       localStorage.setItem(battleStateStorageKey, JSON.stringify(state));
-  };
+  }, [battleStateStorageKey]);
 
-  const clearGameState = () => localStorage.removeItem(battleStateStorageKey);
+  const clearGameState = useCallback(
+    () => localStorage.removeItem(battleStateStorageKey),
+    [battleStateStorageKey]
+  );
 
   useEffect(() => {
       const savedState = localStorage.getItem(battleStateStorageKey);
@@ -169,7 +172,7 @@ export default function SharkLegendsPage() {
       const handleOffline = () => addToast("⚠️ Sem conexão! Jogo salvo localmente.", "error");
       window.addEventListener('offline', handleOffline);
       return () => window.removeEventListener('offline', handleOffline);
-  }, [addToast, battleStateStorageKey]); 
+  }, [addToast, battleStateStorageKey, clearGameState]); 
 
   // Inicialização
   useEffect(() => {
@@ -341,7 +344,7 @@ export default function SharkLegendsPage() {
         console.error(error);
         addToast("Erro ao salvar resultado da batalha.", "error");
     }
-  }, [user, addToast, round, tenantId]);
+  }, [user, addToast, clearGameState, round, tenantId]);
   const executeEnemyTurn = useCallback((lastPlayerMove: Move, currentHero: Combatant, currentEnemy: Combatant, currentLog: string[]) => {
       let enemyMoveType = lastPlayerMove.type;
       const staminaCost = lastPlayerMove.staminaCost;
@@ -391,7 +394,7 @@ export default function SharkLegendsPage() {
               setEnemy(prev => prev ? {...prev, expression: "normal"} : null);
           }
       }, 1000);
-  }, [round, turn, endBattle]);
+  }, [endBattle, round, saveGameState, turn]);
 
   // 4. ATAQUE PLAYER
   const handleAttack = async (playerMove: Move) => {

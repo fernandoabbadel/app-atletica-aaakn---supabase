@@ -185,7 +185,7 @@ export default function AdminTreinosPage() {
           }
           addToast("Erro ao carregar treinos.", "error");
       }
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   const loadUsers = useCallback(async (forceRefresh = false) => {
       try {
@@ -201,7 +201,7 @@ export default function AdminTreinosPage() {
           }
           addToast("Erro ao carregar usuarios.", "error");
       }
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   const loadExpandedData = useCallback(async (treinoId: string, forceRefresh = false) => {
       const [chamada, rsvps] = await Promise.all([
@@ -218,7 +218,7 @@ export default function AdminTreinosPage() {
       ]);
       setChamadaReal(chamada as AlunoChamada[]);
       setRsvpsAtuais(rsvps as RSVP[]);
-  }, []);
+  }, [activeTenantId]);
 
   // --- 1. LOADERS ---
   useEffect(() => {
@@ -247,7 +247,7 @@ export default function AdminTreinosPage() {
           }
       };
       void fetchMods();
-  }, []);
+  }, [activeTenantId]);
 
   useEffect(() => {
       void loadTreinos();
@@ -331,7 +331,7 @@ export default function AdminTreinosPage() {
       if (treinos.length > 0) {
           void calculateStats();
       }
-  }, [activeTab, treinos]);
+  }, [activeTab, activeTenantId, treinos]);
 
   // --- 4. FILTROS ---
   const treinosProcessados = useMemo(() => {

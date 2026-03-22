@@ -7,13 +7,13 @@ import { ArrowLeft, BarChart3, CheckCircle2, Building2, XCircle } from "lucide-r
 import { useAuth } from "../../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
-  fetchSharkroundAppConfig,
-  getDefaultSharkroundAppConfig,
-  getSharkroundDisplayName,
-} from "../../../lib/sharkroundConfigService";
+  fetchBoardroundAppConfig,
+  getDefaultBoardroundAppConfig,
+  getBoardroundDisplayName,
+} from "../../../lib/boardroundConfigService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
-interface SharkroundStats {
+interface BoardroundStats {
   clinicas: number;
   acertos: number;
   erros: number;
@@ -22,46 +22,46 @@ interface SharkroundStats {
 const SHARKROUND_STATS_STORAGE_KEY = "sharkround_local_stats_v1";
 const SHARKROUND_ALLOWED_ROLES = new Set(["master", "admin_geral", "admin_gestor"]);
 
-export default function SharkroundEstatisticasPage() {
+export default function BoardroundEstatisticasPage() {
   const { user, loading } = useAuth();
   const { tenantId, tenantSlug } = useTenantTheme();
   const router = useRouter();
-  const sharkroundStatsStorageKey = `${SHARKROUND_STATS_STORAGE_KEY}:${tenantId || tenantSlug || "default"}`;
-  const sharkroundHref = tenantSlug ? withTenantSlug(tenantSlug, "/boardround") : "/boardround";
+  const boardroundStatsStorageKey = `${SHARKROUND_STATS_STORAGE_KEY}:${tenantId || tenantSlug || "default"}`;
+  const boardroundHref = tenantSlug ? withTenantSlug(tenantSlug, "/boardround") : "/boardround";
   const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
   const userRole =
     typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
-  const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
+  const canAccessBoardround = SHARKROUND_ALLOWED_ROLES.has(userRole);
 
   useEffect(() => {
     if (loading) return;
-    if (canAccessSharkround) return;
+    if (canAccessBoardround) return;
     router.replace(emBreveHref);
-  }, [loading, canAccessSharkround, emBreveHref, router]);
+  }, [loading, canAccessBoardround, emBreveHref, router]);
 
-  const [stats, setStats] = useState<SharkroundStats>({
+  const [stats, setStats] = useState<BoardroundStats>({
     clinicas: 0,
     acertos: 0,
     erros: 0,
   });
   const [displayName, setDisplayName] = useState(
-    getSharkroundDisplayName(getDefaultSharkroundAppConfig())
+    getBoardroundDisplayName(getDefaultBoardroundAppConfig())
   );
 
   useEffect(() => {
     let mounted = true;
     const loadConfig = async () => {
       try {
-        const config = await fetchSharkroundAppConfig({
+        const config = await fetchBoardroundAppConfig({
           forceRefresh: false,
           tenantId: tenantId || undefined,
         });
         if (mounted) {
-          setDisplayName(getSharkroundDisplayName(config));
+          setDisplayName(getBoardroundDisplayName(config));
         }
       } catch {
         if (mounted) {
-          setDisplayName(getSharkroundDisplayName(getDefaultSharkroundAppConfig()));
+          setDisplayName(getBoardroundDisplayName(getDefaultBoardroundAppConfig()));
         }
       }
     };
@@ -73,15 +73,15 @@ export default function SharkroundEstatisticasPage() {
   }, [tenantId]);
 
   useEffect(() => {
-    if (loading || !canAccessSharkround) return;
+    if (loading || !canAccessBoardround) return;
     if (!user?.uid) return;
     const raw = window.localStorage.getItem(
-      `${sharkroundStatsStorageKey}:${user.uid}`
+      `${boardroundStatsStorageKey}:${user.uid}`
     );
     if (!raw) return;
 
     try {
-      const parsed = JSON.parse(raw) as Partial<SharkroundStats>;
+      const parsed = JSON.parse(raw) as Partial<BoardroundStats>;
       setStats({
         clinicas:
           typeof parsed.clinicas === "number" ? Math.max(0, parsed.clinicas) : 0,
@@ -92,7 +92,7 @@ export default function SharkroundEstatisticasPage() {
     } catch {
       setStats({ clinicas: 0, acertos: 0, erros: 0 });
     }
-  }, [user?.uid, loading, canAccessSharkround, sharkroundStatsStorageKey]);
+  }, [user?.uid, loading, canAccessBoardround, boardroundStatsStorageKey]);
 
   const precision = useMemo(() => {
     const total = stats.acertos + stats.erros;
@@ -100,7 +100,7 @@ export default function SharkroundEstatisticasPage() {
     return Math.round((stats.acertos / total) * 100);
   }, [stats.acertos, stats.erros]);
 
-  if (loading || !canAccessSharkround) {
+  if (loading || !canAccessBoardround) {
     return (
       <div className="min-h-screen bg-[#050505] text-white font-sans flex items-center justify-center">
         <p className="text-xs text-zinc-500 uppercase font-bold">Carregando...</p>
@@ -113,7 +113,7 @@ export default function SharkroundEstatisticasPage() {
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center gap-3">
           <Link
-            href={sharkroundHref}
+            href={boardroundHref}
             className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
           >
             <ArrowLeft size={18} className="text-zinc-300" />

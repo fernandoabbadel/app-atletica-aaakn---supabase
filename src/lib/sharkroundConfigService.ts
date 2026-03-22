@@ -307,14 +307,42 @@ async function callCallableWithFallback<TReq, TRes>(
 
 async function fetchConfigFromClient(tenantId?: string | null): Promise<{ config?: unknown }> {
   const supabase = getSupabaseClient();
-  let mutableColumns = [...SHARKROUND_CONFIG_SELECT_COLUMNS];
   const docIds = resolveSharkroundDocIds(tenantId);
+  const primaryDocId = docIds[0] ?? "";
+
+  if (!primaryDocId) {
+    return { config: DEFAULT_SHARKROUND_CONFIG };
+  }
+
+  const primaryResult = await supabase
+    .from(SHARKROUND_CONFIG_PATH[0])
+    .select("id,data")
+    .eq("id", primaryDocId);
+
+  if (!primaryResult.error) {
+    const rows = (Array.isArray(primaryResult.data) ? primaryResult.data : [])
+      .map((entry) => asObject(entry))
+      .filter((entry): entry is Record<string, unknown> => entry !== null)
+      .map((entry) => ({ ...entry }));
+    return { config: pickConfigRow(rows, tenantId) ?? DEFAULT_SHARKROUND_CONFIG };
+  }
+
+  const primaryMissingColumn = asString(
+    extractMissingSchemaColumn(primaryResult.error)
+  ).trim();
+  if (primaryMissingColumn && primaryMissingColumn.toLowerCase() !== "data") {
+    throwSupabaseError(primaryResult.error);
+  }
+
+  let mutableColumns = SHARKROUND_CONFIG_SELECT_COLUMNS.filter(
+    (column) => column !== "data"
+  );
 
   while (mutableColumns.length > 0) {
     const { data, error } = await supabase
       .from(SHARKROUND_CONFIG_PATH[0])
       .select(mutableColumns.join(","))
-      .in("id", docIds);
+      .eq("id", primaryDocId);
 
     if (!error) {
       const rows = (Array.isArray(data) ? data : [])

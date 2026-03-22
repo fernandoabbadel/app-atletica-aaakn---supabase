@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "../supabase";
+import { buildAbsoluteAppUrl } from "../authRedirect";
 
 export interface User {
   id: string;
@@ -167,9 +168,7 @@ export async function signInWithPopup(
   void _provider;
   const supabase = getSupabaseClient();
 
-  const redirectTo = typeof window !== "undefined"
-    ? `${window.location.origin}/visitante`
-    : undefined;
+  const redirectTo = buildAbsoluteAppUrl("/visitante");
 
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",

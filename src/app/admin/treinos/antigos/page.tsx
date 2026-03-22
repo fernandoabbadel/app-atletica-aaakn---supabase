@@ -54,7 +54,7 @@ export default function AdminTreinosAntigosPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   useEffect(() => {
     void loadTreinos(false);

@@ -6,20 +6,20 @@ import Link from "next/link";
 import { ArrowLeft, Trophy } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { fetchSharkroundTubasRanking, type SharkroundTubasRankingRecord } from "../../../lib/sharkroundGameService";
+import { fetchBoardroundTubasRanking, type BoardroundTubasRankingRecord } from "../../../lib/boardroundGameService";
 import { useAuth } from "../../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
-  fetchSharkroundAppConfig,
-  getDefaultSharkroundAppConfig,
-  getSharkroundDisplayName,
-} from "../../../lib/sharkroundConfigService";
+  fetchBoardroundAppConfig,
+  getDefaultBoardroundAppConfig,
+  getBoardroundDisplayName,
+} from "../../../lib/boardroundConfigService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
 const SHARKROUND_ALLOWED_ROLES = new Set(["master", "admin_geral", "admin_gestor"]);
 
-export default function SharkroundRankingPage() {
+export default function BoardroundRankingPage() {
   const { user, loading: authLoading } = useAuth();
   const { tenantId, tenantSlug } = useTenantTheme();
   const router = useRouter();
@@ -27,28 +27,28 @@ export default function SharkroundRankingPage() {
   const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
   const userRole =
     typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
-  const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
+  const canAccessBoardround = SHARKROUND_ALLOWED_ROLES.has(userRole);
 
-  const [rows, setRows] = useState<SharkroundTubasRankingRecord[]>([]);
+  const [rows, setRows] = useState<BoardroundTubasRankingRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [displayName, setDisplayName] = useState(
-    getSharkroundDisplayName(getDefaultSharkroundAppConfig())
+    getBoardroundDisplayName(getDefaultBoardroundAppConfig())
   );
 
   useEffect(() => {
     if (authLoading) return;
-    if (canAccessSharkround) return;
+    if (canAccessBoardround) return;
     router.replace(emBreveHref);
-  }, [authLoading, canAccessSharkround, emBreveHref, router]);
+  }, [authLoading, canAccessBoardround, emBreveHref, router]);
 
   useEffect(() => {
-    if (authLoading || !canAccessSharkround) return;
+    if (authLoading || !canAccessBoardround) return;
 
     let mounted = true;
     const load = async () => {
       try {
-        const ranking = await fetchSharkroundTubasRanking({
+        const ranking = await fetchBoardroundTubasRanking({
           maxResults: 80,
           forceRefresh: false,
           tenantId: tenantId || undefined,
@@ -64,22 +64,22 @@ export default function SharkroundRankingPage() {
     return () => {
       mounted = false;
     };
-  }, [authLoading, canAccessSharkround, tenantId]);
+  }, [authLoading, canAccessBoardround, tenantId]);
 
   useEffect(() => {
     let mounted = true;
     const loadConfig = async () => {
       try {
-        const config = await fetchSharkroundAppConfig({
+        const config = await fetchBoardroundAppConfig({
           forceRefresh: false,
           tenantId: tenantId || undefined,
         });
         if (mounted) {
-          setDisplayName(getSharkroundDisplayName(config));
+          setDisplayName(getBoardroundDisplayName(config));
         }
       } catch {
         if (mounted) {
-          setDisplayName(getSharkroundDisplayName(getDefaultSharkroundAppConfig()));
+          setDisplayName(getBoardroundDisplayName(getDefaultBoardroundAppConfig()));
         }
       }
     };
@@ -97,7 +97,7 @@ export default function SharkroundRankingPage() {
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
 
-  if (authLoading || !canAccessSharkround) {
+  if (authLoading || !canAccessBoardround) {
     return (
       <div className="min-h-screen bg-[#050505] text-white font-sans flex items-center justify-center">
         <p className="text-xs text-zinc-500 uppercase font-bold">Carregando...</p>

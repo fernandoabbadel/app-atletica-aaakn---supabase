@@ -31,9 +31,9 @@ import {
   isTenantAppModuleVisible,
 } from "@/lib/tenantAppModulesService";
 import {
-  fetchSharkroundAppConfig,
-  getSharkroundDisplayName,
-} from "@/lib/sharkroundConfigService";
+  fetchBoardroundAppConfig,
+  getBoardroundDisplayName,
+} from "@/lib/boardroundConfigService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- INTERFACES ESTRITAS ---
@@ -346,12 +346,12 @@ export default function DashboardPage() {
 
     const loadBoardroundConfig = async () => {
       try {
-        const config = await fetchSharkroundAppConfig({
+        const config = await fetchBoardroundAppConfig({
           forceRefresh: false,
           tenantId: activeTenantId || undefined,
         });
         if (active) {
-          setBoardroundDisplayName(getSharkroundDisplayName(config));
+          setBoardroundDisplayName(getBoardroundDisplayName(config));
         }
       } catch {
         if (active) {
@@ -499,7 +499,7 @@ export default function DashboardPage() {
   const tenantLogoFallback = tenantLogoUrl || "/logo.png";
   const tenantPath = (path: string): string =>
     activeTenantSlug.trim() ? withTenantSlug(activeTenantSlug, path) : path;
-  const sharkroundHref =
+  const boardroundHref =
     userRoleNormalized === "master" ||
     userRoleNormalized === "admin_geral" ||
     userRoleNormalized === "admin_gestor"
@@ -652,7 +652,7 @@ export default function DashboardPage() {
         }`}
       >
           {isModuleVisible("sharkround") && (
-          <Link href={sharkroundHref} className="bg-brand-solid rounded-3xl p-5 h-44 flex flex-col justify-between active:scale-95 transition relative overflow-hidden group shadow-brand">
+          <Link href={boardroundHref} className="bg-brand-solid rounded-3xl p-5 h-44 flex flex-col justify-between active:scale-95 transition relative overflow-hidden group shadow-brand">
               {/* ID 03: FAIXA EM BREVE */}
               <div className="absolute top-3 -right-8 w-32 bg-orange-500 text-black text-[9px] font-black uppercase text-center py-1 rotate-45 border-2 border-black z-20 shadow-lg">
                   Em Breve

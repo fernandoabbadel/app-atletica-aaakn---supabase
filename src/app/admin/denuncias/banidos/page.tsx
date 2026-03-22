@@ -59,7 +59,7 @@ export default function AdminDenunciasBanidosPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [activeTenantId]);
 
   const paged = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;

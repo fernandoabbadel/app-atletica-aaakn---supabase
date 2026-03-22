@@ -191,8 +191,6 @@ export interface TenantInviteActivationListEntry {
 
 const TENANT_SELECT_COLUMNS_V1 =
   "id,nome,sigla,slug,faculdade,cidade,curso,area,logo_url,palette_key,allow_public_signup,status,created_at,updated_at";
-const TENANT_SELECT_COLUMNS_V2 =
-  "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,contato_email,contato_telefone,logo_url,palette_key,allow_public_signup,status,created_at,updated_at";
 const TENANT_SELECT_COLUMNS_V3 =
   "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,contato_email,contato_telefone,logo_url,palette_key,visible_in_directory,allow_public_signup,status,created_at,updated_at";
 const TENANT_INVITE_SELECT_COLUMNS =
