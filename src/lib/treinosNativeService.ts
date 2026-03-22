@@ -4,6 +4,7 @@ import {
   asString,
   asStringArray,
   boundedLimit,
+  incrementUserStats,
   normalizeRowTimestamps,
   throwSupabaseError,
   type Row,
@@ -18,7 +19,16 @@ const MAX_RSVP_RESULTS = 240;
 const MAX_CHAMADA_RESULTS = 240;
 const MAX_MODALIDADES = 30;
 const MAX_RECURRING_WEEKS = 20;
+const USER_DIRECTORY_SEGMENT_SIZE = 30;
 const DEFAULT_MODALIDADES = ["Futsal", "Volei"];
+const USER_DIRECTORY_SELECT_COLUMNS = "uid,nome,turma,foto,email";
+const USER_DIRECTORY_BASE_GROUPS = [
+  ["A", "B", "C", "D", "E", "F"],
+  ["G", "H", "I", "J", "K", "L"],
+  ["M", "N", "O", "P", "Q"],
+  ["R", "S", "T"],
+  ["U", "V", "W", "X", "Y", "Z"],
+] as const;
 const TREINOS_SELECT_COLUMNS =
   "id,modalidade,diaSemana,dia,horario,local,treinador,treinadorId,treinadorAvatar,descricao,imagem,ordemDia,status,confirmados,createdAt,updatedAt";
 const TREINOS_RSVPS_SELECT_COLUMNS =
@@ -52,6 +62,46 @@ const normalizeModalidadeName = (value: string): string =>
 
 const toModalidadeKey = (value: string): string =>
   normalizeModalidadeName(value).toLowerCase();
+
+const normalizeDirectoryLetters = (letters: string[]): string[] =>
+  Array.from(
+    new Set(
+      letters
+        .map((letter) => asString(letter).trim().slice(0, 1).toUpperCase())
+        .filter((letter) => /^[A-Z]$/.test(letter))
+    )
+  );
+
+const buildUserDirectoryInitialsClause = (letters: string[]): string =>
+  normalizeDirectoryLetters(letters)
+    .map((letter) => `nome.ilike.${letter}%`)
+    .join(",");
+
+const buildUserDirectorySegmentId = (
+  letters: string[],
+  offset: number,
+  limit: number
+): string => `${letters.join("")}:${offset}:${limit}`;
+
+const buildUserDirectorySegmentLabel = (
+  letters: string[],
+  offset: number,
+  limit: number,
+  totalInGroup: number
+): string => {
+  const normalizedLetters = normalizeDirectoryLetters(letters);
+  const startLetter = normalizedLetters[0] || "A";
+  const endLetter = normalizedLetters[normalizedLetters.length - 1] || startLetter;
+  const baseLabel = `${startLetter}-${endLetter}`;
+
+  if (totalInGroup <= limit && offset === 0) {
+    return baseLabel;
+  }
+
+  const pageIndex = Math.floor(offset / limit) + 1;
+  const totalPages = Math.max(1, Math.ceil(totalInGroup / limit));
+  return `${baseLabel} ${pageIndex}/${totalPages}`;
+};
 
 const normalizeModalidadeImagens = (
   value: unknown,
@@ -272,6 +322,16 @@ export interface TreinoUserDirectoryItem {
   turma: string;
   foto: string;
   email: string;
+}
+
+export interface TreinoUserDirectorySegment {
+  id: string;
+  label: string;
+  letters: string[];
+  count: number;
+  totalInGroup: number;
+  offset: number;
+  limit: number;
 }
 
 export interface TreinoRankingItem {
@@ -567,11 +627,190 @@ export async function fetchUserDirectory(options?: {
   const maxResults = boundedLimit(options?.maxResults ?? 320, MAX_USERS_RESULTS);
   let query = supabase
     .from("users")
-    .select("uid, nome, turma, foto, email")
+    .select(USER_DIRECTORY_SELECT_COLUMNS)
     .order("nome", { ascending: true });
   if (scopedTenantId) {
     query = query.eq("tenant_id", scopedTenantId);
   }
+  const { data, error } = await query.limit(maxResults);
+  if (error) throwSupabaseError(error);
+
+  return ((data ?? []) as Row[])
+    .map((entry) => normalizeUserDirectoryEntry(asString(entry.uid), entry))
+    .filter((entry): entry is TreinoUserDirectoryItem => entry !== null);
+}
+
+const countUserDirectoryByLetters = async (
+  letters: string[],
+  tenantId?: string | null
+): Promise<number> => {
+  const normalizedLetters = normalizeDirectoryLetters(letters);
+  if (normalizedLetters.length === 0) return 0;
+
+  const supabase = getSupabaseClient();
+  let query = supabase.from("users").select("uid", { count: "exact", head: true });
+  const scopedTenantId = resolveTreinosTenantId(tenantId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
+  if (normalizedLetters.length === 1) {
+    query = query.ilike("nome", `${normalizedLetters[0]}%`);
+  } else {
+    query = query.or(buildUserDirectoryInitialsClause(normalizedLetters));
+  }
+
+  const { count, error } = await query;
+  if (error) throwSupabaseError(error);
+  return Math.max(0, count ?? 0);
+};
+
+const expandUserDirectoryGroup = async (
+  letters: string[],
+  tenantId: string,
+  maxUsersPerSegment: number
+): Promise<TreinoUserDirectorySegment[]> => {
+  const normalizedLetters = normalizeDirectoryLetters(letters);
+  if (normalizedLetters.length === 0) return [];
+
+  const count = await countUserDirectoryByLetters(normalizedLetters, tenantId);
+  if (count === 0) return [];
+
+  if (count <= maxUsersPerSegment) {
+    return [
+      {
+        id: buildUserDirectorySegmentId(normalizedLetters, 0, maxUsersPerSegment),
+        label: buildUserDirectorySegmentLabel(
+          normalizedLetters,
+          0,
+          maxUsersPerSegment,
+          count
+        ),
+        letters: normalizedLetters,
+        count,
+        totalInGroup: count,
+        offset: 0,
+        limit: maxUsersPerSegment,
+      },
+    ];
+  }
+
+  if (normalizedLetters.length > 1) {
+    const middleIndex = Math.ceil(normalizedLetters.length / 2);
+    const [leftSegments, rightSegments] = await Promise.all([
+      expandUserDirectoryGroup(
+        normalizedLetters.slice(0, middleIndex),
+        tenantId,
+        maxUsersPerSegment
+      ),
+      expandUserDirectoryGroup(
+        normalizedLetters.slice(middleIndex),
+        tenantId,
+        maxUsersPerSegment
+      ),
+    ]);
+    return [...leftSegments, ...rightSegments];
+  }
+
+  const segments: TreinoUserDirectorySegment[] = [];
+  for (let offset = 0; offset < count; offset += maxUsersPerSegment) {
+    const pageCount = Math.min(maxUsersPerSegment, count - offset);
+    segments.push({
+      id: buildUserDirectorySegmentId(
+        normalizedLetters,
+        offset,
+        maxUsersPerSegment
+      ),
+      label: buildUserDirectorySegmentLabel(
+        normalizedLetters,
+        offset,
+        maxUsersPerSegment,
+        count
+      ),
+      letters: normalizedLetters,
+      count: pageCount,
+      totalInGroup: count,
+      offset,
+      limit: maxUsersPerSegment,
+    });
+  }
+  return segments;
+};
+
+export async function fetchUserDirectorySegments(options?: {
+  forceRefresh?: boolean;
+  maxUsersPerSegment?: number;
+  tenantId?: string | null;
+}): Promise<TreinoUserDirectorySegment[]> {
+  void options?.forceRefresh;
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
+  const maxUsersPerSegment = boundedLimit(
+    options?.maxUsersPerSegment ?? USER_DIRECTORY_SEGMENT_SIZE,
+    USER_DIRECTORY_SEGMENT_SIZE
+  );
+
+  const groups = await Promise.all(
+    USER_DIRECTORY_BASE_GROUPS.map((letters) =>
+      expandUserDirectoryGroup([...letters], scopedTenantId, maxUsersPerSegment)
+    )
+  );
+
+  return groups.flat();
+}
+
+export async function fetchUserDirectorySegmentUsers(payload: {
+  segment: TreinoUserDirectorySegment;
+  tenantId?: string | null;
+}): Promise<TreinoUserDirectoryItem[]> {
+  const normalizedLetters = normalizeDirectoryLetters(payload.segment.letters);
+  if (normalizedLetters.length === 0) return [];
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  let query = supabase
+    .from("users")
+    .select(USER_DIRECTORY_SELECT_COLUMNS)
+    .order("nome", { ascending: true });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
+  if (normalizedLetters.length === 1) {
+    query = query.ilike("nome", `${normalizedLetters[0]}%`);
+  } else {
+    query = query.or(buildUserDirectoryInitialsClause(normalizedLetters));
+  }
+
+  const start = Math.max(0, payload.segment.offset);
+  const end = start + Math.max(1, payload.segment.limit) - 1;
+  const { data, error } = await query.range(start, end);
+  if (error) throwSupabaseError(error);
+
+  return ((data ?? []) as Row[])
+    .map((entry) => normalizeUserDirectoryEntry(asString(entry.uid), entry))
+    .filter((entry): entry is TreinoUserDirectoryItem => entry !== null);
+}
+
+export async function searchUserDirectoryByName(options: {
+  query: string;
+  maxResults?: number;
+  tenantId?: string | null;
+}): Promise<TreinoUserDirectoryItem[]> {
+  const searchTerm = asString(options.query).trim();
+  if (searchTerm.length < 2) return [];
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(options.tenantId);
+  const maxResults = boundedLimit(options.maxResults ?? 8, 20);
+  let query = supabase
+    .from("users")
+    .select(USER_DIRECTORY_SELECT_COLUMNS)
+    .ilike("nome", `%${searchTerm}%`)
+    .order("nome", { ascending: true });
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
   const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
@@ -822,6 +1061,7 @@ export async function setTreinoRsvp(payload: {
   if (existingError) throwSupabaseError(existingError);
 
   const currentConfirmados = asStringArray(treinoRow?.confirmados);
+  const hadExistingRsvp = Boolean(existing?.id);
   const nextConfirmados =
     payload.status === "not_going"
       ? currentConfirmados.filter((entry) => entry !== userId)
@@ -864,6 +1104,18 @@ export async function setTreinoRsvp(payload: {
   }
   const { error: treinoUpdateError } = await updateQuery;
   if (treinoUpdateError) throwSupabaseError(treinoUpdateError);
+
+  if (!hadExistingRsvp && payload.status === "going") {
+    try {
+      await incrementUserStats(
+        userId,
+        { treinoRsvps: 1 },
+        { tenantId: scopedTenantId || undefined }
+      );
+    } catch (statsError: unknown) {
+      console.warn("Treinos: falha ao sincronizar RSVP.", statsError);
+    }
+  }
 }
 
 export async function upsertChamadaPresence(payload: {
@@ -882,6 +1134,18 @@ export async function upsertChamadaPresence(payload: {
 
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  let existingQuery = supabase
+    .from("treinos_chamada")
+    .select("status")
+    .eq("treinoId", treinoId)
+    .eq("userId", userId);
+  if (scopedTenantId) {
+    existingQuery = existingQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: existingRow, error: existingError } = await existingQuery.maybeSingle();
+  if (existingError) throwSupabaseError(existingError);
+
+  const nextStatus = payload.status ?? "presente";
   const { error } = await supabase.from("treinos_chamada").upsert(
     {
       treinoId,
@@ -891,7 +1155,7 @@ export async function upsertChamadaPresence(payload: {
       turma: payload.turma.trim().slice(0, 30) || "Geral",
       avatar: payload.avatar.trim().slice(0, 2000),
       origem: payload.origem,
-      status: payload.status ?? "presente",
+      status: nextStatus,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       timestamp: nowIso(),
       updatedAt: nowIso(),
@@ -899,6 +1163,21 @@ export async function upsertChamadaPresence(payload: {
     { onConflict: "treinoId,userId" }
   );
   if (error) throwSupabaseError(error);
+
+  if (nextStatus === "presente" && existingRow?.status !== "presente") {
+    try {
+      await incrementUserStats(
+        userId,
+        {
+          treinoPresenceConfirmed: 1,
+          confirmedTrainings: 1,
+        },
+        { tenantId: scopedTenantId || undefined }
+      );
+    } catch (statsError: unknown) {
+      console.warn("Treinos: falha ao sincronizar chamada.", statsError);
+    }
+  }
 }
 
 const resolveChamadaFilter = async (

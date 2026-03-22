@@ -14,6 +14,7 @@ import {
 } from "../../../lib/sharkroundService";
 import {
   fetchSharkroundAppConfig,
+  getSharkroundDisplayName,
   getDefaultSharkroundAppConfig,
   saveSharkroundAppConfig,
   type SharkroundAppConfig,
@@ -36,7 +37,7 @@ interface LigaConfig {
   sigla?: string;
 }
 
-export default function AdminSharkRound() {
+export default function AdminBoardRound() {
   const { addToast } = useToast();
   const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
@@ -75,7 +76,7 @@ export default function AdminSharkRound() {
         setLoadingLigas(false);
       }
     },
-    [addToast]
+    [activeTenantId, addToast]
   );
 
   const loadConfig = useCallback(
@@ -95,7 +96,7 @@ export default function AdminSharkRound() {
         setLoadingConfig(false);
       }
     },
-    [addToast]
+    [activeTenantId, addToast]
   );
 
   useEffect(() => {
@@ -145,12 +146,16 @@ export default function AdminSharkRound() {
   };
 
   const handleConfigNumber = (
-    key: keyof Omit<SharkroundAppConfig, "rules">,
+    key: keyof Omit<SharkroundAppConfig, "rules" | "displayName">,
     value: string
   ) => {
     const parsed = Number(value);
     const safe = Number.isFinite(parsed) ? parsed : 0;
     setConfig((current) => ({ ...current, [key]: safe }));
+  };
+
+  const handleDisplayNameChange = (value: string) => {
+    setConfig((current) => ({ ...current, displayName: value }));
   };
 
   const handleSaveConfig = async () => {
@@ -200,9 +205,9 @@ export default function AdminSharkRound() {
             <ArrowLeft size={20} />
           </Link>
           <div>
-            <h1 className="text-2xl font-black uppercase">Admin SharkRound</h1>
+            <h1 className="text-2xl font-black uppercase">Admin BoardRound</h1>
             <p className="text-xs text-zinc-500">
-              Controle de ligas e configuracao global do jogo.
+              Controle de ligas, tabuleiro e nome exibido ao usuario.
             </p>
           </div>
         </div>
@@ -241,6 +246,18 @@ export default function AdminSharkRound() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <label className="text-xs font-bold uppercase text-zinc-400 md:col-span-2 xl:col-span-3">
+            Nome exibido no app
+            <input
+              type="text"
+              maxLength={40}
+              value={getSharkroundDisplayName(config)}
+              onChange={(event) => handleDisplayNameChange(event.target.value)}
+              className="mt-1 w-full rounded-lg bg-black border border-zinc-700 px-3 py-2 text-sm text-white"
+              placeholder="BoardRound"
+            />
+          </label>
+
           <label className="text-xs font-bold uppercase text-zinc-400">
             Jogadas por dia
             <input

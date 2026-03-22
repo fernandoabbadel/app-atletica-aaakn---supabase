@@ -5,6 +5,7 @@ import {
   clearStoreCaches,
   upsertStoreCategory,
 } from "./storeService";
+import { incrementUserStats } from "./supabaseData";
 import { getSupabaseClient } from "./supabase";
 
 type Row = Record<string, unknown>;
@@ -650,6 +651,14 @@ export async function upsertMiniVendorProfile(
     await syncMiniVendorStoreCategory(normalized);
   }
 
+  if (!existing) {
+    try {
+      await incrementUserStats(userId, { miniVendorCreated: 1 }, { tenantId });
+    } catch (statsError: unknown) {
+      console.warn("Mini vendor: falha ao sincronizar criacao da loja.", statsError);
+    }
+  }
+
   invalidateMiniVendorCaches(tenantId, userId);
   setCache(currentMiniVendorCache, buildScopedCacheKey(tenantId, userId), normalized);
   setCache(miniVendorByIdCache, buildScopedCacheKey(tenantId, normalized.id), normalized);
@@ -815,7 +824,7 @@ export async function fetchMiniVendorProducts(options: {
   }
 
   const supabase = getSupabaseClient();
-  let query = supabase
+  const query = supabase
     .from("produtos")
     .select(MINI_VENDOR_PRODUCT_SELECT_COLUMNS)
     .eq("tenant_id", tenantId)

@@ -1,4 +1,8 @@
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import {
+  fetchUserAchievementSnapshot,
+  syncUserAchievementState,
+} from "./achievementsService";
 import { isTreinoDayExpired } from "./eventDateUtils";
 import { getSupabaseClient } from "./supabase";
 
@@ -530,7 +534,24 @@ export async function fetchPublicProfileBundle(
     return null;
   }
 
-  const statsObj = tenantId ? null : asObject(profile.stats);
+  const achievementSnapshot = await fetchUserAchievementSnapshot({
+    userId: targetUid,
+    tenantId: tenantId || undefined,
+    fallbackStats: (asObject(profile.stats) ?? null) as Record<string, unknown> | null,
+    fallbackXp: asNumber(profile.xp, 0),
+  });
+  const profileWithGamification: ProfileUserRecord = {
+    ...profile,
+    stats: achievementSnapshot.stats,
+    xp: achievementSnapshot.displayXp,
+    patente: achievementSnapshot.patente?.titulo || asString(profile.patente) || undefined,
+    patente_icon:
+      achievementSnapshot.patente?.iconName || asString(profile.patente_icon) || undefined,
+    patente_cor:
+      achievementSnapshot.patente?.cor || asString(profile.patente_cor) || undefined,
+  };
+
+  const statsObj = tenantId ? null : asObject(profileWithGamification.stats);
   const followersCountRaw = statsObj?.followersCount;
   const followingCountRaw = statsObj?.followingCount;
 
@@ -549,7 +570,7 @@ export async function fetchPublicProfileBundle(
   ]);
 
   const bundle: PublicProfileBundle = {
-    profile,
+    profile: profileWithGamification,
     followersCount,
     followingCount,
     posts,
@@ -719,12 +740,18 @@ export async function toggleFollowProfile(payload: {
     countFollowRows("users_followers", targetUid, scopedTenantId),
     countFollowRows("users_following", viewerUid, scopedTenantId),
     (() => {
-      let query = supabase.from("users").select("stats").eq("uid", targetUid);
+      let query = supabase
+        .from("users")
+        .select("uid,nome,tenant_id,stats,xp")
+        .eq("uid", targetUid);
       if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
       return query.maybeSingle();
     })(),
     (() => {
-      let query = supabase.from("users").select("stats").eq("uid", viewerUid);
+      let query = supabase
+        .from("users")
+        .select("uid,nome,tenant_id,stats,xp")
+        .eq("uid", viewerUid);
       if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
       return query.maybeSingle();
     })(),
@@ -738,28 +765,20 @@ export async function toggleFollowProfile(payload: {
 
   const targetStats = asObject(targetUserRes.data?.stats) ?? {};
   const viewerStats = asObject(viewerUserRes.data?.stats) ?? {};
-
-  const [targetUpdate, viewerUpdate] = await Promise.all([
-    (() => {
-      let query = supabase
-        .from("users")
-        .update({ stats: { ...targetStats, followersCount }, updatedAt: new Date().toISOString() })
-        .eq("uid", targetUid);
-      if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
-      return query;
-    })(),
-    (() => {
-      let query = supabase
-        .from("users")
-        .update({ stats: { ...viewerStats, followingCount }, updatedAt: new Date().toISOString() })
-        .eq("uid", viewerUid);
-      if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
-      return query;
-    })(),
+  await Promise.all([
+    syncUserAchievementState({
+      userId: targetUid,
+      tenantId: scopedTenantId || undefined,
+      userRow: asObject(targetUserRes.data),
+      nextStats: { ...targetStats, followersCount },
+    }),
+    syncUserAchievementState({
+      userId: viewerUid,
+      tenantId: scopedTenantId || undefined,
+      userRow: asObject(viewerUserRes.data),
+      nextStats: { ...viewerStats, followingCount },
+    }),
   ]);
-
-  if (targetUpdate.error) throwSupabaseError(targetUpdate.error);
-  if (viewerUpdate.error) throwSupabaseError(viewerUpdate.error);
 
   clearProfilePublicCachesForUser(targetUid, scopedTenantId);
   clearProfilePublicCachesForUser(viewerUid, scopedTenantId);

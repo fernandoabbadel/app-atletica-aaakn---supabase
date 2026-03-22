@@ -46,10 +46,27 @@ import {
 } from "@/lib/permissionCache";
 import { fetchPublicTenantIdBySlugCached } from "@/lib/publicTenantLookup";
 
-const resolvePermissionPath = (path: string): string =>
-  path === "/admin/atletica" || path.startsWith("/admin/atletica/")
-    ? "/admin/configuracoes"
-    : path;
+const resolvePermissionPath = (path: string): string => {
+  if (path === "/admin/atletica" || path.startsWith("/admin/atletica/")) {
+    return "/admin/configuracoes";
+  }
+  if (path === "/admin/boardround" || path.startsWith("/admin/boardround/")) {
+    return path.replace("/admin/boardround", "/admin/sharkround");
+  }
+  if (path === "/boardround" || path.startsWith("/boardround/")) {
+    return path.replace("/boardround", "/sharkround");
+  }
+  if (path === "/ligas_usc" || path.startsWith("/ligas_usc/")) {
+    return path.replace("/ligas_usc", "/ligas_unitau");
+  }
+  if (path === "/historico/organograma" || path.startsWith("/historico/organograma/")) {
+    return "/historico";
+  }
+  if (path === "/admin/historico/organograma" || path.startsWith("/admin/historico/organograma/")) {
+    return "/admin/historico";
+  }
+  return path;
+};
 
 const normalizePermissionMatrix = (raw: unknown): PermissionMatrix | null => {
   if (typeof raw !== "object" || raw === null) return null;

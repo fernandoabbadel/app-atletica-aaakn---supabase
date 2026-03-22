@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { 
-  ArrowLeft, Plus, Edit, Trash2, X, Search, 
+  ArrowLeft, Plus, Edit, Edit3, Trash2, X, Search, 
   Shield, Key, UploadCloud, Eye, EyeOff, 
   Loader2, Calendar, UserPlus, MonitorPlay
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { useToast } from "../../../context/ToastContext";
+import { useAuth } from "../../../context/AuthContext";
 import { useTenantTheme } from "../../../context/TenantThemeContext";
 import {
   deleteLeagueConfig,
@@ -57,7 +58,11 @@ interface LeagueEvent {
 type Liga = LeagueRecord;
 type UserData = LeagueUserRecord;
 
+const getLeagueLogoSrc = (liga?: Partial<Liga> | null) =>
+  liga?.logoUrl || liga?.logoBase64 || liga?.foto || "";
+
 export default function AdminLigasPage() {
+  const { user } = useAuth();
   const { addToast } = useToast();
   const { tenantId } = useTenantTheme();
   const [ligas, setLigas] = useState<Liga[]>([]);
@@ -89,6 +94,7 @@ export default function AdminLigasPage() {
   const [eventModal, setEventModal] = useState(false);
   const [currentEvent, setCurrentEvent] = useState<Partial<LeagueEvent>>({});
   const [editingEventIdx, setEditingEventIdx] = useState<number | null>(null);
+  const formLogoSrc = getLeagueLogoSrc(formData);
 
   const loadLigas = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -195,6 +201,7 @@ export default function AdminLigasPage() {
       const result = await saveLeagueConfig({
         id: isEditing ? editingId || undefined : undefined,
         data: formData,
+        actorUserId: user?.uid,
         tenantId: tenantId || undefined,
       });
       await loadLigas(true);
@@ -350,7 +357,7 @@ export default function AdminLigasPage() {
                 <div className="flex items-center gap-3">
                   <div className={`w-12 h-12 rounded-full overflow-hidden border-2 ${liga.visivel ? 'border-emerald-500' : 'border-zinc-800'} relative`}>
                     <Image 
-                      src={liga.foto || "https://github.com/shadcn.png"} 
+                      src={getLeagueLogoSrc(liga) || "https://github.com/shadcn.png"} 
                       alt={liga.nome}
                       fill
                       className="object-cover"
@@ -424,7 +431,7 @@ export default function AdminLigasPage() {
                     <div className="space-y-3">
                         <div className="flex justify-center mb-4">
                             <label className="relative w-24 h-24 rounded-full bg-zinc-900 border-2 border-dashed border-zinc-700 flex items-center justify-center cursor-pointer hover:border-emerald-500 overflow-hidden group">
-                                {formData.foto ? <Image src={formData.foto} alt="Logo" fill className="object-cover" /> : <UploadCloud className="text-zinc-500 group-hover:text-emerald-500"/>}
+                                {formLogoSrc ? <Image src={formLogoSrc} alt="Logo" fill className="object-cover" /> : <UploadCloud className="text-zinc-500 group-hover:text-emerald-500"/>}
                                 <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={handleUpload}/>
                                 {uploading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>}
                             </label>
@@ -478,15 +485,38 @@ export default function AdminLigasPage() {
                 {activeTab === 'eventos' && (
                     <div className="space-y-3">
                         <button onClick={() => handleOpenEventModal(null)} className="w-full py-3 border border-dashed border-zinc-700 rounded-xl text-zinc-500 text-xs font-bold uppercase hover:border-emerald-500 hover:text-emerald-500 transition flex justify-center items-center gap-2"><Calendar size={16}/> Adicionar Evento</button>
-                        {formData.eventos?.map((ev, idx) => (
-                            <div key={idx} className="flex justify-between items-center bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                                <span className="text-sm font-bold text-white">{ev.titulo}</span>
-                                <div className="flex gap-2">
-                                    <button onClick={() => handleOpenEventModal(idx)} className="text-zinc-400 hover:text-white"><Edit size={16}/></button>
-                                    <button onClick={() => setFormData({...formData, eventos: formData.eventos?.filter((_, i) => i !== idx)})} className="text-zinc-600 hover:text-red-500"><Trash2 size={16}/></button>
+                        {formData.eventos?.map((ev, idx) => {
+                            const eventImage = ev.imagem || formLogoSrc;
+
+                            return (
+                                <div key={idx} className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 relative flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                                    <button onClick={() => setFormData({...formData, eventos: formData.eventos?.filter((_, i) => i !== idx)})} className="absolute top-3 right-3 text-zinc-600 hover:text-red-500 transition"><Trash2 size={14}/></button>
+                                    {eventImage ? (
+                                        <div className="relative w-full sm:w-16 h-28 sm:h-16 rounded-lg overflow-hidden bg-black shrink-0">
+                                            <Image src={eventImage} alt={ev.titulo} fill className="object-cover" />
+                                        </div>
+                                    ) : (
+                                        <div className="w-full sm:w-16 h-28 sm:h-16 rounded-lg bg-black shrink-0" />
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                        <h4 className="font-bold text-white text-sm mb-1 truncate pr-8">{ev.titulo}</h4>
+                                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-400 font-bold uppercase">
+                                            <span>{ev.data || "Data a definir"}{ev.hora ? ` - ${ev.hora}` : ""}</span>
+                                            <span className="text-zinc-600">•</span>
+                                            <span>{ev.local || "Local a definir"}</span>
+                                        </div>
+                                        <div className="flex gap-3 mt-3">
+                                            <button onClick={() => handleOpenEventModal(idx)} className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1 font-bold uppercase tracking-wide">
+                                                <Edit3 size={10}/> Editar Evento
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
+                        {(!formData.eventos || formData.eventos.length === 0) && (
+                            <div className="text-center py-8 text-zinc-600 text-xs">Nenhum evento criado.</div>
+                        )}
                     </div>
                 )}
 

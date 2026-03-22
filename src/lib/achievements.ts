@@ -23,6 +23,9 @@ export const ACHIEVEMENTS_CATALOG: Achievement[] = [
     { id: "acc_4", titulo: "Viciado em Resenha", desc: "Manteve 30 dias de login seguidos.", cat: "Geral", xp: 2000, target: 30, statKey: "loginStreak", iconName: "Zap", iconEmoji: "🔥" },
     { id: "acc_5", titulo: "Inabalavel", desc: "Manteve 100 dias de login seguidos.", cat: "Geral", xp: 10000, target: 100, statKey: "loginStreak", iconName: "Crown", iconEmoji: "👑" },
     { id: "acc_6", titulo: "Perfil Completo", desc: "Preencheu todos os dados do cadastro.", cat: "Geral", xp: 300, target: 1, statKey: "profileComplete", iconName: "CheckCircle2", iconEmoji: "✅" },
+    { id: "acc_7", titulo: "Cacador de Calouros", desc: "Escaneou 1 pessoa na caca ao calouro.", cat: "Geral", xp: 120, target: 1, statKey: "freshersHuntScans", iconName: "Target", iconEmoji: "📸" },
+    { id: "acc_8", titulo: "Lido no QR", desc: "Foi escaneado 1 vez por outro usuario.", cat: "Geral", xp: 80, target: 1, statKey: "gotScanned", iconName: "Star", iconEmoji: "🪪" },
+    { id: "acc_9", titulo: "Mao Leve", desc: "Deu 10 likes no app.", cat: "Geral", xp: 150, target: 10, statKey: "likesGiven", iconName: "Heart", iconEmoji: "👍" },
 
     // =================================================================
     // 2. GAMES (ARENA)
@@ -45,6 +48,9 @@ export const ACHIEVEMENTS_CATALOG: Achievement[] = [
     { id: "gym_5", titulo: "Madrugador", desc: "Treino confirmado antes das 06:30.", cat: "Gym", xp: 500, target: 1, statKey: "gymEarlyBird", iconName: "Timer", iconEmoji: "⏰" },
     { id: "gym_6", titulo: "Foco Total", desc: "Manteve 10 dias seguidos de treino.", cat: "Gym", xp: 1500, target: 10, statKey: "gymStreak", iconName: "Target", iconEmoji: "🎯" },
     { id: "gym_7", titulo: "Shape Inexplicavel", desc: "Alcancou o nivel maximo de treinos no semestre.", cat: "Gym", xp: 5000, target: 80, statKey: "gymSemesterTotal", iconName: "Trophy", iconEmoji: "🏆" },
+    { id: "gym_8", titulo: "Treino Marcado", desc: "Confirmou ida em 1 treino do modulo Treinos.", cat: "Gym", xp: 120, target: 1, statKey: "treinoRsvps", iconName: "Calendar", iconEmoji: "📅" },
+    { id: "gym_9", titulo: "Presenca Confirmada", desc: "Teve 1 presenca confirmada na chamada do treino.", cat: "Gym", xp: 220, target: 1, statKey: "treinoPresenceConfirmed", iconName: "CheckCircle2", iconEmoji: "✅" },
+    { id: "gym_10", titulo: "Parceiro de Treino", desc: "Curtiu 1 check-in de treino.", cat: "Gym", xp: 90, target: 1, statKey: "trainingLikesGiven", iconName: "ThumbsUp", iconEmoji: "🤝" },
 
     // =================================================================
     // 4. EVENTOS & LIGAS
@@ -60,6 +66,11 @@ export const ACHIEVEMENTS_CATALOG: Achievement[] = [
     { id: "evt_9", titulo: "Calouro das Ligas", desc: "Completou 1 quiz de compatibilidade das ligas.", cat: "Eventos", xp: 250, target: 1, statKey: "leagueQuizRuns", iconName: "BookOpen", iconEmoji: "🎓" },
     { id: "evt_10", titulo: "Oraculo das Ligas", desc: "Completou 5 quizzes de compatibilidade das ligas.", cat: "Eventos", xp: 1200, target: 5, statKey: "leagueQuizRuns", iconName: "Trophy", iconEmoji: "🔮" },
     { id: "evt_11", titulo: "Fa da Diretoria", desc: "Curtiu 5 ligas oficiais.", cat: "Eventos", xp: 400, target: 5, statKey: "leagueLikesGiven", iconName: "Heart", iconEmoji: "🏛️" },
+    { id: "evt_12", titulo: "Dentro do Evento", desc: "Entrou ou confirmou presenca em 1 evento.", cat: "Eventos", xp: 180, target: 1, statKey: "eventEntries", iconName: "Ticket", iconEmoji: "🎫" },
+    { id: "evt_13", titulo: "Enqueteiro", desc: "Respondeu 1 enquete oficial.", cat: "Eventos", xp: 120, target: 1, statKey: "pollAnswers", iconName: "MessageCircle", iconEmoji: "🗳️" },
+    { id: "evt_14", titulo: "Produtor", desc: "Criou 1 evento dentro do app.", cat: "Eventos", xp: 500, target: 1, statKey: "eventsCreated", iconName: "Briefcase", iconEmoji: "🎬" },
+    { id: "evt_15", titulo: "Fundador de Liga", desc: "Criou 1 liga na atletica.", cat: "Eventos", xp: 700, target: 1, statKey: "leaguesCreated", iconName: "Crown", iconEmoji: "🧬" },
+    { id: "evt_16", titulo: "Membro de Liga", desc: "Foi adicionado como membro de uma liga.", cat: "Eventos", xp: 250, target: 1, statKey: "leagueMemberships", iconName: "UserPlus", iconEmoji: "🫂" },
 
     // =================================================================
     // 5. LOJA (FINANCEIRO)
@@ -70,6 +81,10 @@ export const ACHIEVEMENTS_CATALOG: Achievement[] = [
     { id: "shop_4", titulo: "Baleia Branca", desc: "Gastou R$ 5.000,00 totais na loja.", cat: "Loja", xp: 16000, target: 5000, statKey: "moneySpent", iconName: "Diamond", iconEmoji: "🐋" },
     { id: "shop_5", titulo: "Colecionador", desc: "Comprou 10 produtos diferentes.", cat: "Loja", xp: 1000, target: 10, statKey: "uniqueProductsBought", iconName: "LayoutGrid", iconEmoji: "🧩" },
     { id: "shop_6", titulo: "Plano Ativo", desc: "Assinou o plano semestral.", cat: "Loja", xp: 5000, target: 1, statKey: "semesterPlanActive", iconName: "ShieldAlert", iconEmoji: "🦈" },
+    { id: "shop_7", titulo: "Critico Oficial", desc: "Avaliou 1 produto na loja.", cat: "Loja", xp: 120, target: 1, statKey: "reviewsGiven", iconName: "Star", iconEmoji: "📝" },
+    { id: "shop_8", titulo: "Loja Propria", desc: "Criou sua loja mini vendor.", cat: "Loja", xp: 1200, target: 1, statKey: "miniVendorCreated", iconName: "ShoppingBag", iconEmoji: "🏪" },
+    { id: "shop_9", titulo: "Compra no Mini Vendor", desc: "Comprou 1 vez em uma loja mini vendor.", cat: "Loja", xp: 250, target: 1, statKey: "miniVendorOrders", iconName: "Gem", iconEmoji: "🛒" },
+    { id: "shop_10", titulo: "Plano Evoluido", desc: "Atualizou de plano pelo menos 1 vez.", cat: "Loja", xp: 450, target: 1, statKey: "planUpdates", iconName: "ShieldAlert", iconEmoji: "📈" },
 
     // =================================================================
     // 6. SOCIAL (COMUNIDADE)
@@ -86,4 +101,6 @@ export const ACHIEVEMENTS_CATALOG: Achievement[] = [
     { id: "soc_7", titulo: "Influencer II", desc: "Recebeu 100 curtidas em seus posts.", cat: "Social", xp: 1000, target: 100, statKey: "likesReceived", iconName: "Star", iconEmoji: "⭐" },
     { id: "soc_8", titulo: "Viralizou!", desc: "Recebeu 500 curtidas totais.", cat: "Social", xp: 5000, target: 500, statKey: "likesReceived", iconName: "Flame", iconEmoji: "🚀" },
     { id: "soc_9", titulo: "Sentinela da Comunidade", desc: "Fez uma denuncia que foi aceita.", cat: "Social", xp: 200, target: 1, statKey: "validReports", iconName: "ShieldAlert", iconEmoji: "🛡️" },
+    { id: "soc_14", titulo: "Primeiro Follow", desc: "Seguiu 1 pessoa dentro do app.", cat: "Social", xp: 80, target: 1, statKey: "followingCount", iconName: "UserPlus", iconEmoji: "👣" },
+    { id: "soc_15", titulo: "Primeiro Follower", desc: "Foi seguido por 1 pessoa dentro do app.", cat: "Social", xp: 120, target: 1, statKey: "followersCount", iconName: "Heart", iconEmoji: "💖" },
 ];

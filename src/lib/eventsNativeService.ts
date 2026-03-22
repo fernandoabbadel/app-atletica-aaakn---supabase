@@ -958,9 +958,11 @@ export async function cancelEventTicketRequest(
 export async function upsertAdminEvent(payload: {
   eventId?: string;
   data: Row;
+  actorUserId?: string;
   tenantId?: string | null;
 }): Promise<Row | null> {
   const eventId = payload.eventId?.trim() || "";
+  const actorUserId = payload.actorUserId?.trim() || "";
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveEventsTenantId(payload.tenantId);
   const lotes = Array.isArray(payload.data.lotes)
@@ -1015,6 +1017,17 @@ export async function upsertAdminEvent(payload: {
 
   if (error) throwSupabaseError(error);
   const created = normalizeEventRow(data as Row);
+  if (actorUserId) {
+    try {
+      await incrementUserStats(
+        actorUserId,
+        { eventsCreated: 1 },
+        { tenantId: scopedTenantId || undefined }
+      );
+    } catch (statsError: unknown) {
+      console.warn("Eventos: falha ao sincronizar criacao de evento.", statsError);
+    }
+  }
   invalidateEventCaches(String(created.id || ""));
   return created;
 }
@@ -1193,6 +1206,16 @@ export async function toggleEventLike(payload: {
     },
   });
 
+  try {
+    await incrementUserStats(
+      userId,
+      { likesGiven: payload.currentlyLiked ? -1 : 1 },
+      { tenantId: payload.tenantId || undefined }
+    );
+  } catch (statsError: unknown) {
+    console.warn("Eventos: falha ao sincronizar like.", statsError);
+  }
+
   invalidateEventCaches(eventId);
 }
 
@@ -1231,6 +1254,7 @@ export async function setEventRsvpDetailed(payload: {
     existing?.status === "going" || existing?.status === "maybe"
       ? (existing.status as "going" | "maybe")
       : null;
+  const isFirstGoingRsvp = !existing?.id && payload.status === "going";
 
   // Mantemos comportamento antigo: clicar na mesma opcao remove o RSVP.
   if (oldStatus === payload.status) {
@@ -1298,6 +1322,18 @@ export async function setEventRsvpDetailed(payload: {
         };
       },
     });
+  }
+
+  if (isFirstGoingRsvp) {
+    try {
+      await incrementUserStats(
+        userId,
+        { eventEntries: 1 },
+        { tenantId: scopedTenantId || undefined }
+      );
+    } catch (statsError: unknown) {
+      console.warn("Eventos: falha ao sincronizar entrada no evento.", statsError);
+    }
   }
 
   invalidateEventCaches(eventId);
@@ -1554,6 +1590,8 @@ export async function voteEventPollOption(payload: {
   }
 
   const voters = asStringArray(pollRow.voters);
+  const shouldCountPollAnswer =
+    !voters.includes(payload.userId) && !myVotes.includes(index);
   const nextVoters = voters.includes(payload.userId) ? voters : [...voters, payload.userId];
 
   // Sem RPC/Edge Function, usamos read-modify-write no cliente para manter o plano free.
@@ -1572,6 +1610,18 @@ export async function voteEventPollOption(payload: {
   }
   const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
+
+  if (shouldCountPollAnswer) {
+    try {
+      await incrementUserStats(
+        payload.userId,
+        { pollAnswers: 1 },
+        { tenantId: scopedTenantId || undefined }
+      );
+    } catch (statsError: unknown) {
+      console.warn("Eventos: falha ao sincronizar resposta de enquete.", statsError);
+    }
+  }
 
   invalidateEventCaches(payload.eventId);
 }

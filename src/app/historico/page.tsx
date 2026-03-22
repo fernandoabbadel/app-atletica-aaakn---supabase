@@ -187,6 +187,13 @@ export default function HistoricoPage() {
           <p className="mt-2 max-w-lg text-xs font-medium text-zinc-400 md:text-sm">
             {config.subtituloPagina}
           </p>
+          <Link
+            href={routeTenantSlug ? withTenantSlug(routeTenantSlug, "/historico/organograma") : "/historico/organograma"}
+            className="mt-5 inline-flex items-center gap-2 rounded-full border border-brand/40 bg-black/40 px-5 py-3 text-[11px] font-black uppercase tracking-[0.3em] text-brand transition hover:border-brand hover:bg-brand-primary/10"
+          >
+            Ver Organograma
+            <ChevronRight size={14} />
+          </Link>
         </div>
 
         <div className="absolute left-6 top-6 z-30">

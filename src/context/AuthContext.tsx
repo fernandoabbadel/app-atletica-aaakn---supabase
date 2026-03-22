@@ -6,6 +6,15 @@ import { useRouter, usePathname } from "next/navigation";
 import { logActivity } from "../lib/logger"; 
 import LoadingScreen from "../app/loading";
 import { DEFAULT_STATS, DEFAULT_USER_PROPS } from "../constants/userDefaults";
+import { ACHIEVEMENTS_CATALOG } from "@/lib/achievements";
+import {
+  DEFAULT_PATENTE_CONFIG,
+  calculateAchievementSummary,
+  mergeAchievementCatalogWithDefaults,
+  mergePatentesWithDefaults,
+  resolveEffectiveXp,
+  resolvePatenteForXp,
+} from "@/lib/achievementRuntime";
 import { getBackendErrorCode, isPermissionError } from "@/lib/backendErrors";
 import { ensureAlbumSelfCollected } from "@/lib/albumService";
 import {
@@ -56,13 +65,20 @@ interface PlanoConfig {
     nivelPrioridade: number;
 }
 
-const DEFAULT_PATENTES: PatenteConfig[] = [
-  { titulo: "Lenda", minXp: 50000, iconName: "Crown", cor: "text-red-600" },
-  { titulo: "Elite", minXp: 15000, iconName: "Shield", cor: "text-emerald-400" },
-  { titulo: "Veterano", minXp: 2000, iconName: "Swords", cor: "text-blue-400" },
-  { titulo: "Membro", minXp: 500, iconName: "Star", cor: "text-orange-400" },
-  { titulo: "Iniciante", minXp: 0, iconName: "Medal", cor: "text-zinc-400" }
-];
+const DEFAULT_PATENTES: PatenteConfig[] = DEFAULT_PATENTE_CONFIG.map((entry) => ({
+  titulo: entry.titulo,
+  minXp: entry.minXp,
+  iconName: entry.iconName,
+  cor: entry.cor,
+}));
+
+const DEFAULT_ACHIEVEMENT_RUNTIME_CATALOG = mergeAchievementCatalogWithDefaults(
+  ACHIEVEMENTS_CATALOG.map((item) => ({
+    ...item,
+    active: true,
+    repeatable: false,
+  }))
+);
 
 export interface UserStats {
     inviteActivations?: number;
@@ -378,6 +394,15 @@ const getAuthAvatar = (authUser: SupabaseAuthUser): string => {
 const normalizeUserRow = (row: unknown, authUser?: SupabaseAuthUser | null): User => {
   const raw = asRecord(row) ?? {};
   const rawStats = asRecord(raw.stats) ?? {};
+  const normalizedStats = { ...DEFAULT_STATS, ...rawStats };
+  const achievementXpFloor = calculateAchievementSummary(
+    DEFAULT_ACHIEVEMENT_RUNTIME_CATALOG,
+    normalizedStats
+  ).totalUnlockedXp;
+  const effectiveXp = resolveEffectiveXp([
+    asNumber(raw.xp, DEFAULT_USER_PROPS.xp),
+    achievementXpFloor,
+  ]);
   const authAnonymous = Boolean(
     (authUser as (SupabaseAuthUser & { is_anonymous?: unknown }) | null | undefined)
       ?.is_anonymous
@@ -392,7 +417,7 @@ const normalizeUserRow = (row: unknown, authUser?: SupabaseAuthUser | null): Use
     role: asString(raw.role, "guest"),
     status: asString(raw.status, "ativo") as UserStatus,
     level: asNumber(raw.level, DEFAULT_USER_PROPS.level),
-    xp: asNumber(raw.xp, DEFAULT_USER_PROPS.xp),
+    xp: effectiveXp,
     xpMultiplier: asNumber(raw.xpMultiplier, DEFAULT_USER_PROPS.xpMultiplier),
     sharkCoins: asNumber(raw.sharkCoins, DEFAULT_USER_PROPS.sharkCoins),
     selos: asNumber(raw.selos, DEFAULT_USER_PROPS.selos),
@@ -402,7 +427,7 @@ const normalizeUserRow = (row: unknown, authUser?: SupabaseAuthUser | null): Use
       DEFAULT_USER_PROPS.nivel_prioridade
     ),
     isAnonymous: authUser ? authAnonymous : Boolean(raw.isAnonymous ?? false),
-    stats: rawStats as unknown as UserStats,
+    stats: normalizedStats as unknown as UserStats,
   };
 };
 
@@ -670,9 +695,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Helper: Calcula Patente
   const calculatePatenteData = useCallback((xp: number) => {
-      if (patentesCache.length === 0) return null;
-      const found = patentesCache.find(p => xp >= p.minXp);
-      return found || patentesCache[patentesCache.length - 1]; 
+      const runtimePatentes = mergePatentesWithDefaults(
+        patentesCache.map((patente) => ({
+          id:
+            patente.titulo
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-") || `patente-${patente.minXp}`,
+          titulo: patente.titulo,
+          minXp: patente.minXp,
+          cor: patente.cor,
+          iconName: patente.iconName,
+        }))
+      );
+      const found = resolvePatenteForXp(runtimePatentes, xp);
+      if (!found) return null;
+      return {
+        titulo: found.titulo,
+        minXp: found.minXp,
+        iconName: found.iconName,
+        cor: found.cor,
+      };
   }, [patentesCache]);
 
   // 2. RECUPERAÃƒâ€¡ÃƒÆ’O DE SESSÃƒÆ’O GUEST (Novo!)
@@ -1102,8 +1145,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
+        const statsPatch = asRecord(updates.stats) ?? {};
+        const effectiveStatsForXp: Record<string, unknown> = {
+            ...DEFAULT_STATS,
+            ...currentStats,
+            ...statsPatch,
+        };
+        if (typeof updates["stats.loginCount"] === "number") {
+            effectiveStatsForXp.loginCount = updates["stats.loginCount"];
+        }
+        if (typeof updates["stats.albumCollected"] === "number") {
+            effectiveStatsForXp.albumCollected = updates["stats.albumCollected"];
+        }
+        const effectiveStoredXp = asNumber(updates.xp, asNumber(user.xp, 0));
+        const canonicalXp = resolveEffectiveXp([
+            effectiveStoredXp,
+            asNumber(user.xp, 0),
+            calculateAchievementSummary(
+                DEFAULT_ACHIEVEMENT_RUNTIME_CATALOG,
+                effectiveStatsForXp
+            ).totalUnlockedXp,
+        ]);
+        if (canonicalXp !== effectiveStoredXp) {
+            updates.xp = canonicalXp;
+            hasUpdates = true;
+        }
+
         // C. SINCRONIA DE PATENTE
-        const patenteAlvo = calculatePatenteData(user.xp || 0);
+        const patenteAlvo = calculatePatenteData(canonicalXp);
         if (patenteAlvo) {
             if (
                 user.patente !== patenteAlvo.titulo ||
@@ -1421,6 +1490,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             asString(previous.tier),
             asString(previous.status),
             asString(previous.role),
+            asString(previous.patente),
+            asString(previous.patente_icon),
+            asString(previous.patente_cor),
+            String(asNumber(previous.xp, 0)),
+            JSON.stringify(previous.stats ?? {}),
           ].join("|");
           const nextSignature = [
             asString(normalized.plano),
@@ -1430,6 +1504,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             asString(normalized.tier),
             asString(normalized.status),
             asString(normalized.role),
+            asString(normalized.patente),
+            asString(normalized.patente_icon),
+            asString(normalized.patente_cor),
+            String(asNumber(normalized.xp, 0)),
+            JSON.stringify(normalized.stats ?? {}),
           ].join("|");
 
           return previousSignature === nextSignature ? previous : normalized;

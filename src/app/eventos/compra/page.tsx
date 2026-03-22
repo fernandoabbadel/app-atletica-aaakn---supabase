@@ -123,6 +123,8 @@ function CompraContent() {
               valorTotal: valorTotal.toFixed(2),
               metodo: "whatsapp",
               tenantId: tenantId || undefined,
+              userPlanNames,
+              userPlanIds,
               paymentConfig: { ...pixData },
           });
 

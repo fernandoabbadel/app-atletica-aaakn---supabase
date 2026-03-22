@@ -31,6 +31,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Store,
+  ScanBarcode,
+  FileText,
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -187,6 +189,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { group: "Base", name: "Guia do App", path: "/admin/guia", icon: <BookOpen size={18} /> },
     { group: "Esportes", name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },
     { group: "Conteudo", name: "Historico", path: "/admin/historico", icon: <History size={18} /> },
+    { group: "Conteudo", name: "Ligas", path: "/admin/ligas", icon: <Users size={18} /> },
     {
       group: "Plataforma",
       name: "Painel Master",
@@ -199,6 +202,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { group: "Comercial", name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
     { group: "Comercial", name: "Mini Vendor Admin", path: "/admin/mini-vendors", icon: <Store size={18} /> },
     { group: "Comercial", name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
+    { group: "Comercial", name: "Scanner", path: "/admin/scanner", icon: <ScanBarcode size={18} /> },
+    { group: "Governanca", name: "Logs", path: "/admin/logs", icon: <FileText size={18} /> },
     { group: "Governanca", name: "Permissoes", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
     {
       group: "Comercial",
@@ -206,7 +211,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       path: "/admin/planos",
       icon: <Crown size={18} />,
     },
-    { group: "Esportes", name: "SharkRound", path: "/admin/sharkround", icon: <Dice5 size={18} /> },
+    { group: "Esportes", name: "BoardRound", path: "/admin/boardround", icon: <Dice5 size={18} /> },
     { group: "Esportes", name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
     { group: "Base", name: "Usuarios", path: "/admin/usuarios", icon: <Users size={18} /> },
   ];

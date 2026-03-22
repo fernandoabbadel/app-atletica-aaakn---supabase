@@ -9,6 +9,11 @@ import { useRouter } from "next/navigation";
 import { fetchSharkroundTubasRanking, type SharkroundTubasRankingRecord } from "../../../lib/sharkroundGameService";
 import { useAuth } from "../../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import {
+  fetchSharkroundAppConfig,
+  getDefaultSharkroundAppConfig,
+  getSharkroundDisplayName,
+} from "../../../lib/sharkroundConfigService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
@@ -18,7 +23,7 @@ export default function SharkroundRankingPage() {
   const { user, loading: authLoading } = useAuth();
   const { tenantId, tenantSlug } = useTenantTheme();
   const router = useRouter();
-  const baseHref = tenantSlug ? withTenantSlug(tenantSlug, "/sharkround") : "/sharkround";
+  const baseHref = tenantSlug ? withTenantSlug(tenantSlug, "/boardround") : "/boardround";
   const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
   const userRole =
     typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
@@ -27,6 +32,9 @@ export default function SharkroundRankingPage() {
   const [rows, setRows] = useState<SharkroundTubasRankingRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [displayName, setDisplayName] = useState(
+    getSharkroundDisplayName(getDefaultSharkroundAppConfig())
+  );
 
   useEffect(() => {
     if (authLoading) return;
@@ -58,6 +66,30 @@ export default function SharkroundRankingPage() {
     };
   }, [authLoading, canAccessSharkround, tenantId]);
 
+  useEffect(() => {
+    let mounted = true;
+    const loadConfig = async () => {
+      try {
+        const config = await fetchSharkroundAppConfig({
+          forceRefresh: false,
+          tenantId: tenantId || undefined,
+        });
+        if (mounted) {
+          setDisplayName(getSharkroundDisplayName(config));
+        }
+      } catch {
+        if (mounted) {
+          setDisplayName(getSharkroundDisplayName(getDefaultSharkroundAppConfig()));
+        }
+      }
+    };
+
+    void loadConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId]);
+
   const paged = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
     return rows.slice(start, start + PAGE_SIZE);
@@ -81,7 +113,7 @@ export default function SharkroundRankingPage() {
             <ArrowLeft size={18} className="text-zinc-300" />
           </Link>
           <div>
-            <h1 className="text-xl font-black uppercase tracking-tight">Ranking Sharkround</h1>
+            <h1 className="text-xl font-black uppercase tracking-tight">Ranking {displayName}</h1>
             <p className="text-[11px] text-zinc-500 font-bold">Ranking de moedas - limite de leitura: 80 jogadores</p>
           </div>
         </div>

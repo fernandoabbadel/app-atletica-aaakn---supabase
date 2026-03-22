@@ -135,7 +135,7 @@ export const TENANT_ADMIN_SIDEBAR_ITEMS: TenantAdminSidebarItemDefinition[] = [
   sidebarItem("ligas", "Conteudo", "Ligas", "/admin/ligas", "Gestao das ligas academicas da tenant."),
   sidebarItem("arena_games", "Esportes", "Arena Games", "/admin/games", "Gestao da area gamer da atletica."),
   sidebarItem("gym", "Esportes", "Gym Champ", "/admin/gym", "Programas, ranking e painel esportivo da academia."),
-  sidebarItem("sharkround", "Esportes", "SharkRound", "/admin/sharkround", "Gestao do SharkRound e sua configuracao."),
+  sidebarItem("sharkround", "Esportes", "BoardRound", "/admin/boardround", "Gestao do BoardRound e sua configuracao."),
   sidebarItem("treinos", "Esportes", "Treinos", "/admin/treinos", "Treinos, categorias e aprovacoes esportivas."),
   sidebarItem("treinos_antigos", "Esportes", "Treinos - Antigos", "/admin/treinos/antigos", "Consulta de treinos antigos.", ["treinos"]),
   sidebarItem("denuncias", "Governanca", "Denuncias", "/admin/denuncias", "Fila de denuncias e moderacao do tenant."),

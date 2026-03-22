@@ -4,6 +4,7 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { isTreinoDayExpired } from "./eventDateUtils";
+import { incrementUserStats } from "./supabaseData";
 import { uploadImage } from "./upload";
 
 type CacheEntry<T> = {
@@ -967,50 +968,7 @@ export async function updateProfileFields(payload: {
 export async function markProfileComplete(uidRaw: string): Promise<void> {
   const uid = uidRaw.trim();
   if (!uid) return;
-  const supabase = getSupabaseClient();
-
-  const { data: row, error: readError } = await supabase
-    .from("users")
-    .select("stats")
-    .eq("uid", uid)
-    .maybeSingle();
-
-  if (readError) {
-    throw Object.assign(new Error(readError.message), {
-      code: readError.code ?? `db/${readError.name ?? "select-failed"}`,
-      cause: readError,
-    });
-  }
-
-  if (!row) {
-    throw Object.assign(new Error("Usuario nao encontrado em public.users."), {
-      code: "db/user-not-found",
-    });
-  }
-
-  const currentStats =
-    typeof row?.stats === "object" && row.stats !== null
-      ? (row.stats as Record<string, unknown>)
-      : {};
-
-  const { error: updateError } = await supabase
-    .from("users")
-    .update({
-      stats: {
-        ...currentStats,
-        profileComplete: 1,
-      },
-      updatedAt: new Date().toISOString(),
-    })
-    .eq("uid", uid);
-
-  if (updateError) {
-    throw Object.assign(new Error(updateError.message), {
-      code: updateError.code ?? `db/${updateError.name ?? "update-failed"}`,
-      cause: updateError,
-    });
-  }
-
+  await incrementUserStats(uid, { profileComplete: 1 });
   clearProfileCachesForUser(uid);
 }
 

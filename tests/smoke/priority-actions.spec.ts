@@ -10,7 +10,7 @@ const PRIORITY_ROUTES = [
   { label: "Cadastro", path: "/cadastro" },
   { label: "Perfil", path: "/perfil" },
   { label: "Ligas", path: "/ligas" },
-  { label: "Ligas Unitau", path: "/ligas_unitau" },
+  { label: "Ligas USC", path: "/ligas_usc" },
   { label: "Admin", path: "/admin" },
   { label: "Album", path: "/album" },
   { label: "Treinos", path: "/treinos" },

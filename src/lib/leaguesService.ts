@@ -310,6 +310,31 @@ export interface LeagueUserRecord {
   turma?: string;
 }
 
+const normalizeFollowedLeagueIds = (value: unknown): string[] =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+    )
+  );
+
+export const resolveFollowedLeagueIdsFromUserExtra = (
+  extra: unknown,
+  tenantId?: string | null
+): string[] => {
+  const extraData = asObject(extra) ?? {};
+  const scopedTenantId = resolveLeagueTenantId(tenantId);
+  const byTenant = asObject(extraData.followedLeagueIdsByTenant);
+
+  if (scopedTenantId && byTenant) {
+    return normalizeFollowedLeagueIds(byTenant[scopedTenantId]);
+  }
+
+  return normalizeFollowedLeagueIds(extraData.followedLeagueIds);
+};
+
 export interface LeaguePollOptionRecord {
   text: string;
   votes: number;
@@ -811,11 +836,59 @@ export async function fetchLeagueUsers(options?: {
 export async function saveLeagueConfig(payload: {
   id?: string;
   data: Partial<LeagueRecord>;
+  actorUserId?: string;
   tenantId?: string | null;
 }): Promise<{ id: string }> {
   const normalizedData = normalizeLeaguePayload(payload.data);
   const id = payload.id?.trim() || "";
   const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  const actorUserId = payload.actorUserId?.trim() || "";
+  const extractMemberIds = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((entry) => {
+        const member = asObject(entry);
+        return asString(member?.id).trim();
+      })
+      .filter((entry) => entry.length > 0);
+  };
+  const nextMemberIds = Array.from(
+    new Set([
+      ...extractMemberIds(normalizedData.membros),
+      ...(Array.isArray(normalizedData.membrosIds)
+        ? normalizedData.membrosIds
+            .filter((entry): entry is string => typeof entry === "string")
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0)
+        : []),
+    ])
+  );
+
+  let previousMemberIds = new Set<string>();
+  if (id) {
+    const supabase = getSupabaseClient();
+    let previousQuery = supabase
+      .from("ligas_config")
+      .select("membros,membrosIds")
+      .eq("id", id);
+    if (scopedTenantId) {
+      previousQuery = previousQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { data: previousRow, error: previousError } = await previousQuery.maybeSingle();
+    if (previousError) throwSupabaseError(previousError);
+    const previous = asObject(previousRow) ?? {};
+    previousMemberIds = new Set([
+      ...extractMemberIds(previous.membros),
+      ...(
+        Array.isArray(previous.membrosIds)
+          ? previous.membrosIds
+              .filter((entry): entry is string => typeof entry === "string")
+              .map((entry) => entry.trim())
+              .filter((entry) => entry.length > 0)
+          : []
+      ),
+    ]);
+  }
   const requestPayload = {
     id,
     data: normalizedData,
@@ -858,6 +931,31 @@ export async function saveLeagueConfig(payload: {
       return { id: asString((data as Record<string, unknown> | null)?.id) };
     }
   );
+
+  const membershipPromises = nextMemberIds
+    .filter((memberId) => !previousMemberIds.has(memberId))
+    .map((memberId) =>
+      incrementUserStats(
+        memberId,
+        { leagueMemberships: 1 },
+        { tenantId: scopedTenantId || undefined }
+      )
+    );
+  if (!id && actorUserId) {
+    membershipPromises.push(
+      incrementUserStats(
+        actorUserId,
+        { leaguesCreated: 1 },
+        { tenantId: scopedTenantId || undefined }
+      )
+    );
+  }
+  if (membershipPromises.length > 0) {
+    const membershipResults = await Promise.allSettled(membershipPromises);
+    if (membershipResults.some((result) => result.status === "rejected")) {
+      console.warn("Ligas: falha parcial ao sincronizar conquistas de membros.", membershipResults);
+    }
+  }
 
   clearLeagueDependentCaches();
   return result;
@@ -973,13 +1071,69 @@ export async function changeLeagueLikeCount(payload: {
   const actorUserId = payload.actorUserId?.trim() || "";
   if (actorUserId) {
     try {
-      await incrementUserStats(actorUserId, { leagueLikesGiven: payload.delta });
+      await incrementUserStats(actorUserId, {
+        leagueLikesGiven: payload.delta,
+        likesGiven: payload.delta,
+      });
     } catch (error: unknown) {
       console.warn("Liga: falha ao atualizar stats de curtidas de liga.", error);
     }
   }
 
   clearLeagueDependentCaches();
+}
+
+export async function toggleUserLeagueFollow(payload: {
+  leagueId: string;
+  userId: string;
+  currentlyFollowing: boolean;
+  tenantId?: string | null;
+}): Promise<string[]> {
+  const leagueId = payload.leagueId.trim();
+  const userId = payload.userId.trim();
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  if (!leagueId || !userId) return [];
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("extra")
+    .eq("uid", userId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const currentExtra = asObject(asObject(data)?.extra) ?? {};
+  const currentByTenant = asObject(currentExtra.followedLeagueIdsByTenant) ?? {};
+  const currentIds = resolveFollowedLeagueIdsFromUserExtra(currentExtra, scopedTenantId);
+  const nextIds = payload.currentlyFollowing
+    ? currentIds.filter((entry) => entry !== leagueId)
+    : Array.from(new Set([...currentIds, leagueId]));
+
+  const nextByTenant = scopedTenantId
+    ? {
+        ...currentByTenant,
+        [scopedTenantId]: nextIds,
+      }
+    : currentByTenant;
+
+  const nextExtra: Record<string, unknown> = {
+    ...currentExtra,
+    ...(scopedTenantId
+      ? { followedLeagueIdsByTenant: nextByTenant }
+      : { followedLeagueIds: nextIds }),
+  };
+
+  const { error: updateError } = await supabase
+    .from("users")
+    .update({
+      extra: nextExtra,
+      updatedAt: nowIso(),
+    })
+    .eq("uid", userId);
+  if (updateError) throwSupabaseError(updateError);
+
+  clearLeagueDependentCaches();
+  return nextIds;
 }
 
 export async function fetchEventPolls(

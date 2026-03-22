@@ -521,7 +521,7 @@ export default function PerfilPublicoPage() {
                         myLigas.length > 0 ? (
                             <div className="grid grid-cols-3 gap-4 animate-in fade-in">
                                 {myLigas.map(l => (
-                                    <Link href={tenantPath("/ligas_unitau")} key={l.id} className="flex flex-col items-center gap-2 group">
+                                    <Link href={tenantPath("/ligas_usc")} key={l.id} className="flex flex-col items-center gap-2 group">
                                         <div className="w-24 h-24 rounded-full bg-black border-2 border-zinc-800 p-0.5 group-hover:border-emerald-500 group-hover:scale-105 transition-all shadow-lg">
                                             <div className="w-full h-full rounded-full overflow-hidden bg-zinc-900 flex items-center justify-center relative">
                                                 {l.logoBase64 ? (

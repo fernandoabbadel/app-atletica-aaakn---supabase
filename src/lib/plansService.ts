@@ -4,6 +4,7 @@ import { getSupabaseClient } from "./supabase";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { incrementUserStats } from "./supabaseData";
 import {
   buildTenantScopedRowId,
   parseTenantScopedRowId,
@@ -21,6 +22,7 @@ const MAX_SUBSCRIPTION_RESULTS = 900;
 const MAX_REQUEST_RESULTS = 500;
 const MAX_USER_REQUEST_RESULTS = 90;
 const PLAN_VISUAL_SNAPSHOT_SYNC_LIMIT = 500;
+const PLAN_COMMERCE_SYNC_LIMIT = 500;
 
 const PLAN_CREATE_REQUEST_CALLABLE = "planCreateAdhesionRequest";
 const PLAN_UPSERT_CALLABLE = "planAdminUpsert";
@@ -629,6 +631,207 @@ const normalizePlanPayload = (
   descontoLoja: Math.max(0, asNumber(payload.descontoLoja, 0)),
 });
 
+const normalizePlanReferenceValue = (value: unknown): string =>
+  asString(value)
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const buildPlanReferenceKeys = (planId: string, planName: string): Set<string> => {
+  const keys = new Set<string>();
+  const scopedPlanId = normalizePlanReferenceValue(planId);
+  const basePlanId = normalizePlanReferenceValue(parseTenantScopedRowId(planId).baseId);
+  const normalizedPlanName = normalizePlanReferenceValue(planName);
+
+  if (scopedPlanId) keys.add(scopedPlanId);
+  if (basePlanId) keys.add(basePlanId);
+  if (normalizedPlanName) keys.add(normalizedPlanName);
+
+  return keys;
+};
+
+const matchesPlanReference = (
+  entry: Record<string, unknown>,
+  referenceKeys: Set<string>
+): boolean => {
+  const candidates = [
+    normalizePlanReferenceValue(entry.planId),
+    normalizePlanReferenceValue(entry.id),
+    normalizePlanReferenceValue(parseTenantScopedRowId(asString(entry.planId)).baseId),
+    normalizePlanReferenceValue(parseTenantScopedRowId(asString(entry.id)).baseId),
+    normalizePlanReferenceValue(entry.planName),
+    normalizePlanReferenceValue(entry.nome),
+  ].filter((value) => value.length > 0);
+
+  return candidates.some((value) => referenceKeys.has(value));
+};
+
+const syncPlanScopedCommerceReferences = async (options: {
+  planId: string;
+  planName: string;
+  tenantId?: string | null;
+}): Promise<void> => {
+  const planId = options.planId.trim();
+  const planName = options.planName.trim();
+  if (!planId || !planName) return;
+
+  const referenceKeys = buildPlanReferenceKeys(planId, planName);
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolvePlanTenantId(options.tenantId);
+
+  let productsQuery = supabase
+    .from("produtos")
+    .select("id,plan_visibility")
+    .limit(PLAN_COMMERCE_SYNC_LIMIT);
+  let eventsQuery = supabase
+    .from("eventos")
+    .select("id,lotes")
+    .limit(PLAN_COMMERCE_SYNC_LIMIT);
+
+  if (scopedTenantId) {
+    productsQuery = productsQuery.eq("tenant_id", scopedTenantId);
+    eventsQuery = eventsQuery.eq("tenant_id", scopedTenantId);
+  }
+
+  const [{ data: productRows, error: productsError }, { data: eventRows, error: eventsError }] =
+    await Promise.all([productsQuery, eventsQuery]);
+
+  if (productsError) throwSupabaseError(productsError);
+  if (eventsError) throwSupabaseError(eventsError);
+
+  const productPromises: Array<Promise<void>> = [];
+  (productRows ?? []).forEach((row) => {
+    const data = row as Record<string, unknown>;
+    const rowId = asString(data.id).trim();
+    const currentEntries = Array.isArray(data.plan_visibility)
+      ? data.plan_visibility
+      : [];
+    if (!rowId || currentEntries.length === 0) return;
+
+    let changed = false;
+    const nextEntries = currentEntries
+      .map((entry) => {
+        const item = asObject(entry);
+        if (!item) return null;
+
+        if (!matchesPlanReference(item, referenceKeys)) {
+          return {
+            planId: asString(item.planId || item.id).trim(),
+            planName: asString(item.planName || item.nome).trim(),
+            visible: asBoolean(item.visible, true),
+          };
+        }
+
+        changed = true;
+        return {
+          planId,
+          planName,
+          visible: asBoolean(item.visible, true),
+        };
+      })
+      .filter(
+        (
+          entry
+        ): entry is { planId: string; planName: string; visible: boolean } => entry !== null
+      );
+
+    if (!nextEntries.some((entry) => matchesPlanReference(entry, referenceKeys))) {
+      nextEntries.push({ planId, planName, visible: true });
+      changed = true;
+    }
+
+    if (!changed) return;
+
+    productPromises.push(
+      (async () => {
+        let query = supabase
+          .from("produtos")
+          .update({ plan_visibility: nextEntries, updatedAt: nowIso() })
+          .eq("id", rowId);
+        if (scopedTenantId) {
+          query = query.eq("tenant_id", scopedTenantId);
+        }
+        const { error } = await query;
+        if (error) throwSupabaseError(error);
+      })()
+    );
+  });
+
+  const eventPromises: Array<Promise<void>> = [];
+  (eventRows ?? []).forEach((row) => {
+    const data = row as Record<string, unknown>;
+    const rowId = asString(data.id).trim();
+    const lotes = Array.isArray(data.lotes) ? data.lotes : [];
+    if (!rowId || lotes.length === 0) return;
+
+    let eventChanged = false;
+    const nextLotes = lotes.map((entry) => {
+      const lote = asObject(entry);
+      if (!lote) return entry;
+
+      const currentPlanPricesRaw = lote.planPrices ?? lote.plan_prices;
+      const currentPlanPrices = Array.isArray(currentPlanPricesRaw)
+        ? currentPlanPricesRaw
+        : [];
+      if (currentPlanPrices.length === 0) return lote;
+
+      let loteChanged = false;
+      const nextPlanPrices = currentPlanPrices
+        .map((priceEntry: unknown) => {
+          const item = asObject(priceEntry);
+          if (!item) return null;
+
+          if (!matchesPlanReference(item, referenceKeys)) {
+            return {
+              planId: asString(item.planId || item.id).trim(),
+              planName: asString(item.planName || item.nome).trim(),
+              price: asNumber(item.price ?? item.preco, 0),
+            };
+          }
+
+          loteChanged = true;
+          return {
+            planId,
+            planName,
+            price: asNumber(item.price ?? item.preco, 0),
+          };
+        })
+        .filter(
+          (
+            item
+          ): item is { planId: string; planName: string; price: number } => item !== null
+        );
+
+      if (!loteChanged) return lote;
+
+      eventChanged = true;
+      return {
+        ...lote,
+        planPrices: nextPlanPrices,
+      };
+    });
+
+    if (!eventChanged) return;
+
+    eventPromises.push(
+      (async () => {
+        let query = supabase
+          .from("eventos")
+          .update({ lotes: nextLotes, updatedAt: nowIso() })
+          .eq("id", rowId);
+        if (scopedTenantId) {
+          query = query.eq("tenant_id", scopedTenantId);
+        }
+        const { error } = await query;
+        if (error) throwSupabaseError(error);
+      })()
+    );
+  });
+
+  await Promise.all([...productPromises, ...eventPromises]);
+};
+
 const normalizeBannerConfig = (raw: unknown): BannerConfigRecord => {
   const data = asObject(raw);
   if (!data) return DEFAULT_BANNER_CONFIG;
@@ -1063,6 +1266,16 @@ export async function upsertPlan(payload: {
     }
   );
 
+  try {
+    await syncPlanScopedCommerceReferences({
+      planId: result.id || scopedId,
+      planName: normalizedData.nome,
+      tenantId: scopedTenantId,
+    });
+  } catch (error: unknown) {
+    console.warn("Falha ao sincronizar referencias comerciais do plano.", error);
+  }
+
   clearPlanReadCaches();
   return result;
 }
@@ -1304,6 +1517,15 @@ export async function approvePlanRequest(payload: {
     planoCor: requestPayload.userPatch.planoCor,
     planoIcon: requestPayload.userPatch.planoIcon,
   });
+
+  try {
+    await incrementUserStats(requestPayload.userId, {
+      planUpdates: 1,
+      semesterPlanActive: 1,
+    });
+  } catch (statsError: unknown) {
+    console.warn("Planos: falha ao sincronizar upgrade de plano.", statsError);
+  }
 
   clearAdminPlanReadCaches();
   return result;

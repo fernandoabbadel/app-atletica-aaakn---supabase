@@ -22,6 +22,7 @@ import {
   fetchTurmasConfig,
   persistActiveTurmasSnapshot,
 } from "@/lib/turmasService";
+import { writeTenantBrandSnapshot } from "@/lib/tenantBrandSnapshot";
 import {
   dispatchMasterTenantOverrideChanged,
   getMasterTenantOverrideId,
@@ -64,7 +65,6 @@ const PALETTES: Record<TenantPaletteKey, TenantPalette> = {
 };
 
 const DEFAULT_PALETTE = PALETTES.green;
-const TENANT_BRAND_SNAPSHOT_STORAGE_KEY = "usc_active_tenant_brand";
 
 const TenantThemeContext = createContext<TenantThemeContextValue>({
   palette: DEFAULT_PALETTE,
@@ -115,15 +115,7 @@ const persistTenantBrandSnapshot = (payload: {
   tenantCourse: string;
   tenantLogoUrl: string;
 }): void => {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(
-      TENANT_BRAND_SNAPSHOT_STORAGE_KEY,
-      JSON.stringify(payload)
-    );
-  } catch {
-    // ignora erro de storage
-  }
+  writeTenantBrandSnapshot(payload);
 };
 
 const syncTenantSlugCookie = (tenantSlug: string): void => {
@@ -356,6 +348,7 @@ export function TenantThemeProvider({ children }: { children: React.ReactNode })
     authLoading,
     masterOverrideTenantId,
     refreshVersion,
+    setMasterTenantOverride,
     user,
   ]);
 

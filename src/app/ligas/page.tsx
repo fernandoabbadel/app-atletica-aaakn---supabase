@@ -874,7 +874,7 @@ export default function LigasAdminPage() {
                 .insert({
                   title: `Novo destaque da ${ligaData.sigla}!`,
                   message: ligaData.bizu,
-                  link: "/ligas_unitau",
+                  link: "/ligas_usc",
                   read: false,
                   createdAt: timestamp,
                   userId: "GLOBAL"
@@ -903,7 +903,7 @@ export default function LigasAdminPage() {
       }
   };
 
-  // --- CRUD PERGUNTAS (SHARK ROUND) ---
+  // --- CRUD PERGUNTAS (BOARDROUND) ---
   const addQuestion = () => setLigaData(prev => prev ? ({...prev, perguntas: [...prev.perguntas, { id: Date.now().toString(), texto: "", alternativas: ["","","",""], correta: 0 }]}) : null);
   const removeQuestion = (idx: number) => setLigaData(prev => prev ? ({...prev, perguntas: prev.perguntas.filter((_, i) => i !== idx)}) : null);
   
@@ -969,7 +969,7 @@ export default function LigasAdminPage() {
                 <button onClick={() => setActiveTab('visual')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'visual' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>1. Informações</button>
                 <button onClick={() => setActiveTab('members')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'members' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>2. Membros</button>
                 <button onClick={() => setActiveTab('events')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'events' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>3. Eventos</button>
-                <button onClick={() => setActiveTab('shark')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>4. Shark Round</button>
+                <button onClick={() => setActiveTab('shark')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>4. BoardRound</button>
             </div>
           </header>
 
@@ -1016,7 +1016,7 @@ export default function LigasAdminPage() {
                   {/* Status no Jogo */}
                   <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex justify-between items-center">
                       <div>
-                          <p className="text-xs text-zinc-500 uppercase font-bold">Status no SharkRound</p>
+                          <p className="text-xs text-zinc-500 uppercase font-bold">Status no BoardRound</p>
                           <p className={`text-sm font-black ${ligaData.ativa ? 'text-emerald-500' : 'text-zinc-600'}`}>{ligaData.ativa ? 'ATIVADA NO TABULEIRO' : 'AGUARDANDO ATIVAÇÃO'}</p>
                       </div>
                       <LayoutGrid className={ligaData.ativa ? "text-emerald-500" : "text-zinc-700"} size={24}/>
@@ -1101,7 +1101,7 @@ export default function LigasAdminPage() {
               </div>
           )}
 
-          {/* 4. SHARK ROUND */}
+          {/* 4. BOARDROUND */}
           {activeTab === 'shark' && ligaData && (
               <div className="space-y-6">
                   <div className="flex justify-between items-center bg-zinc-900 p-4 rounded-xl border border-zinc-800">

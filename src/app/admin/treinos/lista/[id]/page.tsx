@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -25,10 +25,13 @@ import {
   fetchTreinoById,
   fetchTreinoChamadaPage,
   fetchTreinoRsvpsPage,
-  fetchUserDirectory,
+  fetchUserDirectorySegmentUsers,
+  fetchUserDirectorySegments,
+  searchUserDirectoryByName,
   type TreinoChamadaRecord,
   type TreinoRsvpRecord,
   type TreinoUserDirectoryItem,
+  type TreinoUserDirectorySegment,
   upsertChamadaPresence,
   updateChamadaStatus,
 } from "@/lib/treinosNativeService";
@@ -83,8 +86,21 @@ export default function AdminTreinoListaPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [userPool, setUserPool] = useState<TreinoUserDirectoryItem[]>([]);
+  const [userSegments, setUserSegments] = useState<TreinoUserDirectorySegment[]>(
+    []
+  );
+  const [selectedSegmentId, setSelectedSegmentId] = useState("");
+  const [remoteUserSuggestions, setRemoteUserSuggestions] = useState<
+    TreinoUserDirectoryItem[]
+  >([]);
+  const [loadingSegments, setLoadingSegments] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [searchingUsers, setSearchingUsers] = useState(false);
   const [searchUser, setSearchUser] = useState("");
+  const selectedUserSegment = useMemo(
+    () => userSegments.find((segment) => segment.id === selectedSegmentId) ?? null,
+    [selectedSegmentId, userSegments]
+  );
 
   const loadInitial = useCallback(async () => {
     if (!treinoId) return;
@@ -110,7 +126,7 @@ export default function AdminTreinoListaPage() {
 
       if (treino) {
         setTitulo(treino.modalidade || "Treino");
-        setSubtitulo(`${treino.dia || "-"} • ${treino.horario || "-"} • ${treino.local || "-"}`);
+        setSubtitulo(`${treino.dia || "-"} â€¢ ${treino.horario || "-"} â€¢ ${treino.local || "-"}`);
       }
 
       setChamadaRows(chamadaPage.rows);
@@ -121,15 +137,75 @@ export default function AdminTreinoListaPage() {
       setHasMoreRsvp(rsvpPage.hasMore);
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao carregar lista de presença.", "error");
+      addToast("Erro ao carregar lista de presenÃ§a.", "error");
     } finally {
       setLoading(false);
     }
-  }, [treinoId, addToast]);
+  }, [activeTenantId, addToast, treinoId]);
 
   useEffect(() => {
     void loadInitial();
   }, [loadInitial]);
+
+  const loadUserSegments = useCallback(
+    async (forceRefresh = false) => {
+      setLoadingSegments(true);
+      try {
+        const segments = await fetchUserDirectorySegments({
+          forceRefresh,
+          maxUsersPerSegment: 30,
+          tenantId: activeTenantId || undefined,
+        });
+        setUserSegments(segments);
+        setSelectedSegmentId((current) =>
+          segments.some((segment) => segment.id === current)
+            ? current
+            : segments[0]?.id || ""
+        );
+      } catch (error: unknown) {
+        if (!isPermissionError(error)) {
+          console.error(error);
+        }
+        addToast("Erro ao montar grupos de usuarios.", "error");
+      } finally {
+        setLoadingSegments(false);
+      }
+    },
+    [activeTenantId, addToast]
+  );
+
+  const loadUsersFromSegment = useCallback(
+    async (segment: TreinoUserDirectorySegment) => {
+      setLoadingUsers(true);
+      try {
+        const users = await fetchUserDirectorySegmentUsers({
+          segment,
+          tenantId: activeTenantId || undefined,
+        });
+        setUserPool(users);
+      } catch (error: unknown) {
+        if (!isPermissionError(error)) {
+          console.error(error);
+        }
+        addToast("Erro ao carregar grupo de usuarios.", "error");
+      } finally {
+        setLoadingUsers(false);
+      }
+    },
+    [activeTenantId, addToast]
+  );
+
+  useEffect(() => {
+    void loadUserSegments();
+  }, [loadUserSegments]);
+
+  useEffect(() => {
+    if (!selectedUserSegment) {
+      setUserPool([]);
+      return;
+    }
+    void loadUsersFromSegment(selectedUserSegment);
+  }, [loadUsersFromSegment, selectedUserSegment]);
 
   const inscritosPendentes = useMemo(() => {
     const presentes = new Set(chamadaRows.map((row) => row.userId));
@@ -139,10 +215,51 @@ export default function AdminTreinoListaPage() {
   const userSuggestions = useMemo(() => {
     const term = searchUser.trim().toLowerCase();
     if (!term) return [];
-    return userPool
-      .filter((row) => row.nome.toLowerCase().includes(term))
-      .slice(0, 8);
-  }, [searchUser, userPool]);
+    if (term.length >= 2) {
+      return remoteUserSuggestions.slice(0, 8);
+    }
+    return userPool.filter((row) => row.nome.toLowerCase().includes(term)).slice(0, 8);
+  }, [remoteUserSuggestions, searchUser, userPool]);
+
+  useEffect(() => {
+    const term = searchUser.trim();
+    if (term.length < 2) {
+      setRemoteUserSuggestions([]);
+      setSearchingUsers(false);
+      return;
+    }
+
+    let active = true;
+    const timeoutId = window.setTimeout(() => {
+      setSearchingUsers(true);
+      void searchUserDirectoryByName({
+        query: term,
+        maxResults: 8,
+        tenantId: activeTenantId || undefined,
+      })
+        .then((users) => {
+          if (!active) return;
+          setRemoteUserSuggestions(users);
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          if (!isPermissionError(error)) {
+            console.error(error);
+          }
+          setRemoteUserSuggestions([]);
+        })
+        .finally(() => {
+          if (active) {
+            setSearchingUsers(false);
+          }
+        });
+    }, 220);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [activeTenantId, searchUser]);
 
   const handleLoadMoreChamada = async () => {
     if (!treinoId || !hasMoreChamada || !chamadaCursor || loadingMoreChamada) return;
@@ -206,7 +323,7 @@ export default function AdminTreinoListaPage() {
       );
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao atualizar presença.", "error");
+      addToast("Erro ao atualizar presenÃ§a.", "error");
     } finally {
       setUpdatingId(null);
     }
@@ -271,25 +388,6 @@ export default function AdminTreinoListaPage() {
     }
   };
 
-  const handleLoadUsersPool = async () => {
-    if (loadingUsers || userPool.length > 0) return;
-
-    setLoadingUsers(true);
-    try {
-      const users = await fetchUserDirectory({
-        maxResults: 80,
-        forceRefresh: false,
-        tenantId: activeTenantId || undefined,
-      });
-      setUserPool(users);
-    } catch (error: unknown) {
-      if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao carregar base de usuários.", "error");
-    } finally {
-      setLoadingUsers(false);
-    }
-  };
-
   const handleAddUser = async (user: TreinoUserDirectoryItem) => {
     if (!treinoId) return;
 
@@ -322,6 +420,9 @@ export default function AdminTreinoListaPage() {
     }
   };
 
+  const getRsvpStatusLabel = (status: TreinoRsvpRecord["status"]): string =>
+    status === "going" ? "Vou" : "Nao vou";
+
   const handleExportCsv = () => {
     if (!chamadaRows.length) {
       addToast("Nenhum aluno carregado na chamada.", "info");
@@ -353,9 +454,9 @@ export default function AdminTreinoListaPage() {
               <ArrowLeft size={18} className="text-zinc-300" />
             </Link>
             <div>
-              <h1 className="text-xl font-black uppercase tracking-tight">Lista de Presença</h1>
+              <h1 className="text-xl font-black uppercase tracking-tight">Lista de PresenÃ§a</h1>
               <p className="text-[11px] text-zinc-500 font-bold">
-                {titulo} • {subtitulo}
+                {titulo} â€¢ {subtitulo}
               </p>
             </div>
           </div>
@@ -378,19 +479,52 @@ export default function AdminTreinoListaPage() {
           <>
             <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
               <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-                <h2 className="text-xs font-black uppercase text-zinc-400">Adicionar Aluno Manualmente</h2>
+                <div>
+                  <h2 className="text-xs font-black uppercase text-zinc-400">
+                    Adicionar Aluno Manualmente
+                  </h2>
+                  <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+                    Faixas dinamicas com ate 30 usuarios por grupo
+                  </p>
+                </div>
                 <button
-                  onClick={() => void handleLoadUsersPool()}
-                  disabled={loadingUsers || userPool.length > 0}
+                  onClick={() => void loadUserSegments(true)}
+                  disabled={loadingSegments}
                   className="px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-200 text-[11px] font-black uppercase disabled:opacity-50"
                 >
-                  {loadingUsers
-                    ? "Carregando base..."
-                    : userPool.length > 0
-                    ? "Base carregada"
-                    : "Carregar 80 usuários"}
+                  {loadingSegments ? "Atualizando grupos..." : "Atualizar grupos"}
                 </button>
               </div>
+
+              <div className="flex flex-wrap gap-2">
+                {userSegments.length === 0 ? (
+                  <span className="text-[11px] text-zinc-500">
+                    Nenhum grupo disponivel.
+                  </span>
+                ) : (
+                  userSegments.map((segment) => (
+                    <button
+                      key={segment.id}
+                      onClick={() => setSelectedSegmentId(segment.id)}
+                      className={`rounded-full border px-3 py-2 text-[11px] font-black uppercase transition ${
+                        selectedSegmentId === segment.id
+                          ? "border-emerald-500 bg-emerald-500/15 text-emerald-300"
+                          : "border-zinc-700 bg-black text-zinc-300 hover:border-zinc-500"
+                      }`}
+                    >
+                      {segment.label} ({segment.count})
+                    </button>
+                  ))
+                )}
+              </div>
+
+              {selectedUserSegment ? (
+                <div className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+                  {loadingUsers
+                    ? "Carregando usuarios do grupo..."
+                    : `Grupo ativo: ${selectedUserSegment.label} • ${selectedUserSegment.count} usuarios`}
+                </div>
+              ) : null}
 
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -401,15 +535,24 @@ export default function AdminTreinoListaPage() {
                   className="w-full bg-black border border-zinc-700 rounded-xl py-2.5 pl-9 pr-3 text-sm text-white outline-none focus:border-emerald-500"
                 />
 
-                {searchUser.trim() && userSuggestions.length > 0 && (
+                {searchUser.trim() && (userSuggestions.length > 0 || searchingUsers) && (
                   <div className="absolute top-full mt-1 left-0 right-0 bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden z-20">
+                    {searchingUsers && (
+                      <div className="px-3 py-2 text-xs text-zinc-400 flex items-center gap-2">
+                        <Loader2 size={12} className="animate-spin" />
+                        Buscando usuarios...
+                      </div>
+                    )}
                     {userSuggestions.map((row) => (
                       <button
                         key={row.uid}
                         onClick={() => void handleAddUser(row)}
                         className="w-full px-3 py-2 text-left text-xs hover:bg-zinc-800 flex items-center justify-between"
                       >
-                        <span>{row.nome}</span>
+                        <span>
+                          {row.nome}
+                          <span className="ml-2 text-zinc-500">{row.turma || "-"}</span>
+                        </span>
                         <UserPlus size={14} className="text-zinc-400" />
                       </button>
                     ))}
@@ -533,14 +676,16 @@ export default function AdminTreinoListaPage() {
                         <tr key={row.userId} className="hover:bg-zinc-800/40">
                           <td className="p-4 font-bold text-white">{row.userName}</td>
                           <td className="p-4">{row.userTurma || "-"}</td>
-                          <td className="p-4 uppercase font-black text-[10px]">{row.status}</td>
+                          <td className="p-4 uppercase font-black text-[10px]">
+                            {getRsvpStatusLabel(row.status)}
+                          </td>
                           <td className="p-4">
                             <div className="flex justify-end">
                               <button
                                 onClick={() => void handleConfirmPendingRsvp(row)}
                                 disabled={updatingId === row.userId}
                                 className="p-2 rounded-lg bg-emerald-600 text-white border border-emerald-500 disabled:opacity-50"
-                                title="Confirmar presença"
+                                title="Confirmar presenÃ§a"
                               >
                                 {updatingId === row.userId ? (
                                   <Loader2 size={14} className="animate-spin" />
@@ -597,3 +742,4 @@ export default function AdminTreinoListaPage() {
     </div>
   );
 }
+

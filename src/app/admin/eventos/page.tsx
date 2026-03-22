@@ -377,6 +377,22 @@ export default function AdminEventosPage() {
   }, [loadEventos, loadPlanCatalog]);
 
   useEffect(() => {
+      if (planCatalog.length === 0) return;
+
+      setNovoEvento((prev) => {
+          if (!Array.isArray(prev.lotes) || prev.lotes.length === 0) return prev;
+
+          return {
+              ...prev,
+              lotes: prev.lotes.map((lote) => ({
+                  ...lote,
+                  planPrices: buildLotePlanPrices(planCatalog, lote.planPrices),
+              })),
+          };
+      });
+  }, [planCatalog]);
+
+  useEffect(() => {
       if (!showGestaoModal) return;
       void loadParticipantes(false);
   }, [showGestaoModal, loadParticipantes]);
@@ -481,7 +497,12 @@ export default function AdminEventosPage() {
 
     try {
         if (isEditing && editingId) {
-            await upsertAdminEvent({ eventId: editingId, data: eventoPayload, tenantId: activeTenantId || undefined });
+            await upsertAdminEvent({
+                eventId: editingId,
+                data: eventoPayload,
+                actorUserId: currentUser?.uid,
+                tenantId: activeTenantId || undefined,
+            });
             addToast("Evento atualizado!", "success");
         } else {
             await upsertAdminEvent({
@@ -490,6 +511,7 @@ export default function AdminEventosPage() {
                     stats: { confirmados: 0, talvez: 0, likes: 0 },
                     vendasTotais: { vendidos: 0, total: 500, receita: 0 },
                 },
+                actorUserId: currentUser?.uid,
                 tenantId: activeTenantId || undefined,
             });
             if (currentUser?.uid) {

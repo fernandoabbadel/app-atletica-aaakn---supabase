@@ -235,10 +235,58 @@ export async function createEventTicketRequest(payload: {
   valorTotal: string;
   metodo?: string;
   tenantId?: string | null;
+  userPlanNames?: Array<string | null | undefined>;
+  userPlanIds?: Array<string | null | undefined>;
   paymentConfig?: Record<string, unknown> | null;
 }): Promise<{ id: string }> {
   const scopedTenantId = resolveFinanceiroTenantId(payload.tenantId);
   const paymentConfig = normalizePaymentConfig(payload.paymentConfig);
+  const supabase = getSupabaseClient();
+  const userPlanIds = (payload.userPlanIds ?? []).filter(
+    (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+  );
+  const userPlanNames = (payload.userPlanNames ?? []).filter(
+    (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+  );
+  const fallbackUnitPrice =
+    Number.parseFloat(asString(payload.valorUnitario).replace(",", ".")) || 0;
+  let resolvedUnitPrice = fallbackUnitPrice;
+
+  let eventLookup = supabase
+    .from("eventos")
+    .select("id,lotes")
+    .eq("id", payload.eventoId.trim());
+  if (scopedTenantId) {
+    eventLookup = eventLookup.eq("tenant_id", scopedTenantId);
+  }
+  const { data: eventRow, error: eventError } = await eventLookup.maybeSingle();
+  if (eventError) throwSupabaseError(eventError);
+  if (eventRow) {
+    const lotes = Array.isArray(eventRow.lotes) ? eventRow.lotes : [];
+    const lote = lotes.find((entry) => {
+      const row = asObject(entry);
+      return row && asString(row.id).trim() === String(payload.loteId).trim();
+    });
+    if (lote) {
+      const loteRow = asObject(lote);
+      resolvedUnitPrice = resolvePlanScopedPrice({
+        basePrice:
+          Number.parseFloat(asString(loteRow?.preco).replace(",", ".")) ||
+          fallbackUnitPrice,
+        entries: normalizePlanPriceEntries(
+          loteRow?.planPrices ?? loteRow?.plan_prices
+        ),
+        userPlanIds,
+        userPlanNames,
+      });
+    }
+  }
+
+  const quantidade = Math.max(1, Math.floor(payload.quantidade));
+  const formatCurrency = (value: number): string =>
+    value.toFixed(2).replace(".", ",");
+  const valorUnitario = formatCurrency(resolvedUnitPrice);
+  const valorTotal = formatCurrency(resolvedUnitPrice * quantidade);
   const requestPayload = {
     userId: payload.userId.trim(),
     userName: payload.userName.trim() || "Aluno",
@@ -248,9 +296,9 @@ export async function createEventTicketRequest(payload: {
     eventoNome: payload.eventoNome.trim() || "Evento",
     loteNome: payload.loteNome.trim() || "Lote",
     loteId: String(payload.loteId).trim(),
-    quantidade: Math.max(1, Math.floor(payload.quantidade)),
-    valorUnitario: payload.valorUnitario.trim(),
-    valorTotal: payload.valorTotal.trim(),
+    quantidade,
+    valorUnitario,
+    valorTotal,
     metodo: payload.metodo?.trim() || "whatsapp",
     status: "pendente",
     dataSolicitacao: nowIso(),
@@ -258,7 +306,6 @@ export async function createEventTicketRequest(payload: {
     ...(paymentConfig ? { payment_config: paymentConfig } : {}),
   };
 
-  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("solicitacoes_ingressos")
     .insert(requestPayload)

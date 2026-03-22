@@ -31,20 +31,40 @@ const PATH_LABEL_OVERRIDES: Record<string, string> = {
   "/admin/atletica": "Atletica",
   "/admin/dashboard-modulos": "Dashboard Modulos",
   "/admin/eventos/encerrados": "Admin Eventos Encerrados",
+  "/admin/eventos/lista/[id]": "Admin Evento Detalhe",
   "/admin/ligas": "Admin Ligas",
   "/admin/master": "Admin Master",
+  "/admin/boardround": "Admin BoardRound",
   "/admin/permissoes": "Permissoes",
   "/admin/permissoes/usuarios": "Permissoes Usuarios",
   "/admin/scanner": "Scanner QR",
-  "/ligas_unitau": "Ligas Unitau",
+  "/admin/treinos/lista/[id]": "Admin Treino Lista",
+  "/admin/usuarios/[id]": "Admin Usuario Detalhe",
+  "/boardround": "BoardRound",
+  "/boardround/estatisticas": "BoardRound Estatisticas",
+  "/boardround/ranking": "BoardRound Ranking",
+  "/album/[turmaId]": "Album da Turma",
+  "/empresa/[id]": "Empresa Parceira",
+  "/empresa/[id]/historico": "Empresa Historico",
+  "/eventos/[id]": "Evento Detalhe",
+  "/historico/organograma": "Organograma",
+  "/ligas_usc": "Ligas USC",
+  "/loja/[id]": "Produto Loja",
+  "/loja/[id]/review": "Review do Produto",
   "/master": "Dashboard Master",
   "/master/landing": "Landing USC",
   "/master/permissoes": "Permissoes Globais",
   "/master/permissoes/perfis-admin": "Perfis do Admin",
   "/master/solicitacoes": "Solicitacoes da Plataforma",
+  "/master/tenants/[tenantId]": "Tenant Detalhe",
   "/master/tenants": "Tenants",
   "/nova-atletica": "Onboarding Atletica",
+  "/parceiros/[id]": "Parceiro Detalhe",
+  "/perfil/[id]": "Perfil Publico",
   "/perfil/mini-vendor": "Perfil Publico Mini Vendor",
+  "/perfil/mini-vendor/[id]": "Perfil Publico Mini Vendor",
+  "/ranking/[turmaId]": "Ranking da Turma",
+  "/treinos/[id]": "Treino Detalhe",
 };
 
 const ADMIN_PAGE_PATHS = [
@@ -67,11 +87,13 @@ const ADMIN_PAGE_PATHS = [
   "/admin/denuncias/suporte",
   "/admin/eventos",
   "/admin/eventos/encerrados",
+  "/admin/eventos/lista/[id]",
   "/admin/fidelidade",
   "/admin/games",
   "/admin/guia",
   "/admin/gym",
   "/admin/historico",
+  "/admin/historico/organograma",
   "/admin/lancamento",
   "/admin/lancamento/ativacoes",
   "/admin/lancamento/convites",
@@ -108,11 +130,13 @@ const ADMIN_PAGE_PATHS = [
   "/admin/planos/lista_cardume_livre",
   "/admin/planos/lista_lenda",
   "/admin/scanner",
-  "/admin/sharkround",
+  "/admin/boardround",
   "/admin/treinos",
   "/admin/treinos/antigos",
+  "/admin/treinos/lista/[id]",
   "/admin/turma",
   "/admin/usuarios",
+  "/admin/usuarios/[id]",
 ] as const;
 
 const MASTER_PAGE_PATHS = [
@@ -127,12 +151,18 @@ const MASTER_PAGE_PATHS = [
   "/master/permissoes/perfis-admin",
   "/master/solicitacoes",
   "/master/tenants",
+  "/master/tenants/[tenantId]",
 ] as const;
 
 const MEMBER_PAGE_PATHS = [
   "/aguardando-aprovacao",
+  "/banned",
   "/album",
+  "/album/[turmaId]",
+  "/cadastro",
+  "/carrinho",
   "/carteirinha",
+  "/checkout",
   "/comunidade",
   "/configuracoes",
   "/configuracoes/lider-turma",
@@ -151,9 +181,13 @@ const MEMBER_PAGE_PATHS = [
   "/conquistas",
   "/contato-usc",
   "/dashboard",
+  "/em-breve",
   "/empresa",
+  "/empresa/[id]",
+  "/empresa/[id]/historico",
   "/empresa/cadastro",
   "/eventos",
+  "/eventos/[id]",
   "/eventos/compra",
   "/fidelidade",
   "/games",
@@ -162,20 +196,31 @@ const MEMBER_PAGE_PATHS = [
   "/gym/checkin",
   "/gym/checkin/details",
   "/historico",
+  "/historico/organograma",
   "/ligas",
-  "/ligas_unitau",
+  "/ligas_usc",
+  "/login",
   "/loja",
+  "/loja/[id]",
+  "/loja/[id]/review",
+  "/nao-encontrado",
   "/nova-atletica",
   "/parceiros",
+  "/parceiros/[id]",
   "/perfil",
+  "/perfil/[id]",
   "/perfil/mini-vendor",
+  "/perfil/mini-vendor/[id]",
   "/planos",
   "/planos/adesao",
   "/ranking",
-  "/sharkround",
-  "/sharkround/estatisticas",
-  "/sharkround/ranking",
+  "/ranking/[turmaId]",
+  "/sem-permissao",
+  "/boardround",
+  "/boardround/estatisticas",
+  "/boardround/ranking",
   "/treinos",
+  "/treinos/[id]",
   "/visitante",
 ] as const;
 
@@ -213,8 +258,24 @@ export const APP_PAGES: AppPageDefinition[] = [
   ...ADMIN_PAGE_PATHS.map((path) =>
     path === "/admin/atletica"
       ? page(path, { permissionPath: "/admin/configuracoes" })
+      : path === "/admin/boardround"
+        ? page(path, { permissionPath: "/admin/sharkround" })
+        : path === "/admin/historico/organograma"
+          ? page(path, { permissionPath: "/admin/historico" })
       : page(path)
   ),
   ...MASTER_PAGE_PATHS.map((path) => page(path)),
-  ...MEMBER_PAGE_PATHS.map((path) => page(path)),
+  ...MEMBER_PAGE_PATHS.map((path) =>
+    path === "/boardround"
+      ? page(path, { permissionPath: "/sharkround" })
+      : path === "/boardround/estatisticas"
+        ? page(path, { permissionPath: "/sharkround/estatisticas" })
+        : path === "/boardround/ranking"
+          ? page(path, { permissionPath: "/sharkround/ranking" })
+          : path === "/ligas_usc"
+            ? page(path, { permissionPath: "/ligas_unitau" })
+            : path === "/historico/organograma"
+              ? page(path, { permissionPath: "/historico" })
+              : page(path)
+  ),
 ].sort((left, right) => left.path.localeCompare(right.path, "pt-BR"));

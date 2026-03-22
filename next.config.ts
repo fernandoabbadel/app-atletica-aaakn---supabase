@@ -40,6 +40,40 @@ const nextConfig = {
   turbopack: {
     root: process.cwd(),
   },
+  async redirects() {
+    return [
+      {
+        source: "/sharkround/:path*",
+        destination: "/boardround/:path*",
+        permanent: true,
+      },
+      {
+        source: "/admin/sharkround/:path*",
+        destination: "/admin/boardround/:path*",
+        permanent: true,
+      },
+      {
+        source: "/ligas_unitau",
+        destination: "/ligas_usc",
+        permanent: true,
+      },
+      {
+        source: "/:tenant/sharkround/:path*",
+        destination: "/:tenant/boardround/:path*",
+        permanent: true,
+      },
+      {
+        source: "/:tenant/admin/sharkround/:path*",
+        destination: "/:tenant/admin/boardround/:path*",
+        permanent: true,
+      },
+      {
+        source: "/:tenant/ligas_unitau",
+        destination: "/:tenant/ligas_usc",
+        permanent: true,
+      },
+    ];
+  },
   images: {
     formats: ["image/avif", "image/webp"],
     localPatterns: [{ pathname: "/**" }],

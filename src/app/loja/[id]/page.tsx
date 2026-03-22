@@ -461,6 +461,8 @@ export default function DetalheProdutoPage() {
         quantity: checkoutQuantity,
         color: checkoutColor,
         tenantId: tenantId || undefined,
+        userPlanNames,
+        userPlanIds,
         paymentConfig: produto.payment_config ? { ...produto.payment_config } : null,
       });
 

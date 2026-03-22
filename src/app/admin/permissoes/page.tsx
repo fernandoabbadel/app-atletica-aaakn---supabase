@@ -118,6 +118,7 @@ const resolveDefaultRolesForPath = (path: string): string[] => {
     matchesRoute(normalizedPath, "/admin/guia") ||
     matchesRoute(normalizedPath, "/admin/historico") ||
     matchesRoute(normalizedPath, "/admin/ligas") ||
+    matchesRoute(normalizedPath, "/admin/boardround") ||
     matchesRoute(normalizedPath, "/admin/sharkround") ||
     matchesRoute(normalizedPath, "/admin/landing")
   ) {
@@ -152,6 +153,14 @@ const resolveDefaultRolesForPath = (path: string): string[] => {
   }
 
   if (
+    normalizedPath === "/login" ||
+    normalizedPath === "/banned" ||
+    normalizedPath === "/em-breve" ||
+    normalizedPath === "/nao-encontrado" ||
+    normalizedPath === "/sem-permissao" ||
+    normalizedPath === "/cadastro" ||
+    normalizedPath === "/carrinho" ||
+    normalizedPath === "/checkout" ||
     normalizedPath === "/visitante" ||
     matchesRoute(normalizedPath, "/dashboard") ||
     matchesRoute(normalizedPath, "/historico") ||
@@ -164,6 +173,7 @@ const resolveDefaultRolesForPath = (path: string): string[] => {
     matchesRoute(normalizedPath, "/arena-games") ||
     matchesRoute(normalizedPath, "/guia") ||
     matchesRoute(normalizedPath, "/ligas") ||
+    matchesRoute(normalizedPath, "/ligas_usc") ||
     matchesRoute(normalizedPath, "/ligas_unitau") ||
     matchesRoute(normalizedPath, "/album") ||
     matchesRoute(normalizedPath, "/carteirinha") ||
@@ -172,6 +182,7 @@ const resolveDefaultRolesForPath = (path: string): string[] => {
     matchesRoute(normalizedPath, "/fidelidade") ||
     matchesRoute(normalizedPath, "/gym") ||
     matchesRoute(normalizedPath, "/ranking") ||
+    matchesRoute(normalizedPath, "/boardround") ||
     matchesRoute(normalizedPath, "/sharkround") ||
     matchesRoute(normalizedPath, "/treinos") ||
     matchesRoute(normalizedPath, "/configuracoes")
@@ -267,19 +278,10 @@ const applyRecommendedMasterMatrix = (
   baseMatrix: PermissionMatrix,
   matrix: PermissionMatrix | null
 ): PermissionMatrix | null => {
-  const hydrated: PermissionMatrix = {};
-  const knownPaths = new Set([
-    ...Object.keys(baseMatrix),
-    ...Object.keys(matrix || {}),
-  ]);
-
-  knownPaths.forEach((path) => {
-    hydrated[path] = Array.from(
-      new Set([...(baseMatrix[path] || []), ...((matrix?.[path]) || [])])
-    );
-  });
-
-  return hydrated;
+  return {
+    ...baseMatrix,
+    ...(matrix || {}),
+  };
 };
 
 export default function AdminPermissoesPage() {
@@ -348,6 +350,18 @@ export default function AdminPermissoesPage() {
     }
   }, [permissionStorageKey]);
 
+  const persistLocalCachedMatrix = useCallback(
+    (matrix: PermissionMatrix): void => {
+      if (typeof window === "undefined") return;
+      try {
+        localStorage.setItem(permissionStorageKey, JSON.stringify(matrix));
+      } catch {
+        // ignora falha de storage
+      }
+    },
+    [permissionStorageKey]
+  );
+
   useEffect(() => {
     if (authLoading) return;
 
@@ -368,7 +382,9 @@ export default function AdminPermissoesPage() {
           ? applyRecommendedMasterMatrix(defaultMatrix, loadedMatrix)
           : loadedMatrix;
         if (!mounted) return;
-        setPermissionMatrix(mergeMatrixWithDefaults(defaultMatrix, matrix));
+        const mergedMatrix = mergeMatrixWithDefaults(defaultMatrix, matrix);
+        setPermissionMatrix(mergedMatrix);
+        persistLocalCachedMatrix(mergedMatrix);
       } catch (error: unknown) {
         if (isPermissionError(error)) {
           const cached = getLocalCachedMatrix();
@@ -410,6 +426,7 @@ export default function AdminPermissoesPage() {
     getLocalCachedMatrix,
     isMasterScope,
     isPlatformMasterUser,
+    persistLocalCachedMatrix,
     router,
     semPermissaoPath,
     targetTenantId,
@@ -436,7 +453,7 @@ export default function AdminPermissoesPage() {
     });
   };
 
-  const saveMatrix = async () => {
+  const saveMatrix = useCallback(async () => {
     if (!canEditMatrix) {
       addToast("Somente o master da plataforma pode editar a matriz.", "error");
       return;
@@ -448,6 +465,7 @@ export default function AdminPermissoesPage() {
         typeof user?.displayName === "string" ? user.displayName : "Admin Master";
 
       await savePermissionMatrix(permissionMatrix, { tenantId: targetTenantId });
+      persistLocalCachedMatrix(permissionMatrix);
 
       await logActivity(
         user?.uid || "sistema",
@@ -469,7 +487,7 @@ export default function AdminPermissoesPage() {
     } finally {
       setSavingMatrix(false);
     }
-  };
+  }, [addToast, canEditMatrix, permissionMatrix, persistLocalCachedMatrix, targetTenantId, user]);
 
   if (loading) {
     return (

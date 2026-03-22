@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "./supabase";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { buildTenantScopedRowId } from "./tenantScopedCatalog";
+import { incrementUserStats } from "./supabaseData";
 
 const DEFAULT_AVATAR_URL = "https://github.com/shadcn.png";
 const ALBUM_CAPTURES_TABLE = "album_captures";
@@ -1008,24 +1009,22 @@ export async function registerAlbumCapture(payload: {
   };
 
   const userStatsWrite = async (): Promise<void> => {
-    const currentStats = (collectorData.stats &&
-    typeof collectorData.stats === "object"
-      ? (collectorData.stats as Record<string, unknown>)
-      : {}) as Record<string, unknown>;
-    const nextStats = {
-      ...currentStats,
-      albumCollected: asNumber(currentStats.albumCollected, 0) + 1,
-    };
-
-    let query = supabase
-      .from("users")
-      .update({ stats: nextStats, updatedAt: nowIso() })
-      .eq("uid", collectorUid);
-    if (scopedTenantId) {
-      query = query.eq("tenant_id", scopedTenantId);
-    }
-    const { error } = await query;
-    if (error) throwSupabaseError(error);
+    await Promise.all([
+      incrementUserStats(
+        collectorUid,
+        {
+          albumCollected: 1,
+          freshersHuntScans: 1,
+          ...(targetTurmaKey === "T8" ? { scansT8: 1 } : {}),
+        },
+        { tenantId: scopedTenantId || undefined }
+      ),
+      incrementUserStats(
+        targetId,
+        { gotScanned: 1 },
+        { tenantId: scopedTenantId || undefined }
+      ),
+    ]);
   };
 
   const summaryWrite = async (): Promise<void> => {
@@ -1059,7 +1058,7 @@ export async function registerAlbumCapture(payload: {
         {
           userId: collectorUid,
           tenant_id: scopedTenantId || null,
-          totalCollected: currentSummary.totalCollected + 1,
+          totalCollected: Array.from(new Set(Object.values(nextCapturedByTurma).flat())).length,
           capturedByTurma: nextCapturedByTurma,
           lastCaptureId: targetId,
           lastCaptureAt: nowIso(),

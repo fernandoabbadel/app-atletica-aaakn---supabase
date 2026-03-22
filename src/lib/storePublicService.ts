@@ -16,6 +16,7 @@ import {
   fetchTenantMiniVendors,
   resolveMiniVendorPaymentConfig,
 } from "./miniVendorService";
+import { incrementUserStats } from "./supabaseData";
 type CacheEntry<T> = { cachedAt: number; value: T };
 type Row = Record<string, unknown>;
 type DateLike = { toDate: () => Date };
@@ -959,6 +960,16 @@ export async function toggleStoreProductLike(payload: {
   const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
 
+  try {
+    await incrementUserStats(
+      userId,
+      { likesGiven: payload.currentlyLiked ? -1 : 1 },
+      { tenantId: scopedTenantId || undefined }
+    );
+  } catch (statsError: unknown) {
+    console.warn("Loja: falha ao sincronizar curtida de produto.", statsError);
+  }
+
   invalidateStoreCaches(productId);
 }
 
@@ -971,21 +982,24 @@ export async function createStoreOrder(payload: {
   quantity?: number;
   color?: string;
   tenantId?: string | null;
+  userPlanNames?: Array<string | null | undefined>;
+  userPlanIds?: Array<string | null | undefined>;
   paymentConfig?: Record<string, unknown> | null;
 }): Promise<{ id: string }> {
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveStoreTenantId(payload.tenantId);
   const quantity = Math.max(1, Math.floor(Number(payload.quantity ?? 1) || 1));
-  const unitPrice = Math.max(0, asNum(payload.price, 0));
-  const totalPrice = Number((unitPrice * quantity).toFixed(2));
+  const fallbackUnitPrice = Math.max(0, asNum(payload.price, 0));
+  const userPlanNames = collectUserPlanEntries(payload.userPlanNames);
+  const userPlanIds = collectUserPlanEntries(payload.userPlanIds);
   const requestPayload = {
     userId: payload.userId.trim(),
     userName: payload.userName.trim() || "Aluno",
     productId: payload.productId.trim(),
     productName: payload.productName.trim() || "Produto",
-    price: totalPrice,
+    price: 0,
     quantidade: quantity,
-    total: totalPrice,
+    total: 0,
     data: payload.color?.trim()
       ? { corSelecionada: payload.color.trim() }
       : undefined,
@@ -1003,7 +1017,7 @@ export async function createStoreOrder(payload: {
 
   let productLookup = supabase
     .from("produtos")
-    .select("id,payment_config,seller_type,seller_id,seller_name,seller_logo_url")
+    .select("id,preco,plan_prices,payment_config,seller_type,seller_id,seller_name,seller_logo_url")
     .eq("id", requestPayload.productId);
   if (scopedTenantId) {
     productLookup = productLookup.eq("tenant_id", scopedTenantId);
@@ -1013,6 +1027,16 @@ export async function createStoreOrder(payload: {
   if (!productRow) {
     throw new Error("Produto fora do tenant ativo.");
   }
+
+  const resolvedUnitPrice = resolvePlanScopedPrice({
+    basePrice: asNum(asObject(productRow)?.preco, fallbackUnitPrice),
+    entries: normalizePlanPriceEntries(asObject(productRow)?.plan_prices),
+    userPlanIds,
+    userPlanNames,
+  });
+  const totalPrice = Number((resolvedUnitPrice * quantity).toFixed(2));
+  requestPayload.price = totalPrice;
+  requestPayload.total = totalPrice;
 
   const seller = normalizeSellerSnapshot({
     type: asObject(productRow)?.seller_type,
@@ -1102,6 +1126,23 @@ export async function createStoreOrder(payload: {
     createdAt: new Date().toISOString(),
   });
 
+  try {
+    await incrementUserStats(
+      requestPayload.userId,
+      {
+        storeOrders: 1,
+        storeItemsCount: 1,
+        uniqueProductsBought: 1,
+        moneySpent: totalPrice,
+        storeSpent: totalPrice,
+        ...(seller?.type === "mini_vendor" ? { miniVendorOrders: 1 } : {}),
+      },
+      { tenantId: scopedTenantId || undefined }
+    );
+  } catch (statsError: unknown) {
+    console.warn("Loja: falha ao sincronizar pedido.", statsError);
+  }
+
   invalidateStoreCaches(requestPayload.productId);
   return { id: createdOrderId };
 }
@@ -1163,6 +1204,16 @@ export async function createStoreReview(payload: {
     .select("id")
     .single();
   if (error) throwSupabaseError(error);
+
+  try {
+    await incrementUserStats(
+      requestPayload.userId,
+      { reviewsGiven: 1 },
+      { tenantId: scopedTenantId || undefined }
+    );
+  } catch (statsError: unknown) {
+    console.warn("Loja: falha ao sincronizar avaliacao.", statsError);
+  }
 
   invalidateStoreCaches(requestPayload.productId);
   return { id: asString(asObject(data)?.id) };

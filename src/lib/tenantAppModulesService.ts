@@ -334,31 +334,31 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "sharkround",
-    "Shark Round",
-    "Mostra o card e o atalho do Shark Round.",
+    "BoardRound",
+    "Mostra o card e o atalho do BoardRound.",
     ["dashboard", "sidebar"],
-    "/sharkround",
+    "/boardround",
     "atleta",
-    ["/sharkround"]
+    ["/boardround", "/sharkround"]
   ),
   moduleItem(
     "sharkround_estatisticas",
-    "Shark Round - Estatisticas",
-    "Estatisticas detalhadas do Shark Round.",
+    "BoardRound - Estatisticas",
+    "Estatisticas detalhadas do BoardRound.",
     ["route"],
-    "/sharkround/estatisticas",
+    "/boardround/estatisticas",
     "atleta",
-    ["/sharkround/estatisticas"],
+    ["/boardround/estatisticas", "/sharkround/estatisticas"],
     ["sharkround"]
   ),
   moduleItem(
     "sharkround_ranking",
-    "Shark Round - Ranking",
-    "Ranking do Shark Round.",
+    "BoardRound - Ranking",
+    "Ranking do BoardRound.",
     ["route"],
-    "/sharkround/ranking",
+    "/boardround/ranking",
     "atleta",
-    ["/sharkround/ranking"],
+    ["/boardround/ranking", "/sharkround/ranking"],
     ["sharkround"]
   ),
   moduleItem(
@@ -419,12 +419,12 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "ligas",
-    "Ligas Unitau",
+    "Ligas USC",
     "Exibe a area principal das ligas no dashboard e no menu.",
     ["dashboard", "sidebar"],
-    "/ligas_unitau",
+    "/ligas_usc",
     "info",
-    ["/ligas_unitau"]
+    ["/ligas_usc", "/ligas_unitau"]
   ),
   moduleItem(
     "ligas_gerenciar",

@@ -84,6 +84,9 @@ export default function AdminHistoricoPage() {
   const { addToast } = useToast();
   const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+  const organogramaAdminHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/historico/organograma")
+    : "/admin/historico/organograma";
   
   // Estados Globais
   const [activeTab, setActiveTab] = useState<"gerenciar" | "configurar">("gerenciar");
@@ -133,7 +136,7 @@ export default function AdminHistoricoPage() {
     } finally {
       setLoadingData(false);
     }
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   // 1. CARREGAR DADOS
   useEffect(() => {
@@ -298,11 +301,19 @@ export default function AdminHistoricoPage() {
             <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Construindo o Legado</p>
           </div>
         </div>
-        {activeTab === "gerenciar" && (
-            <button onClick={handleCreate} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 shadow-lg transition active:scale-95">
-                <Plus size={16} /> Novo Marco
-            </button>
-        )}
+        <div className="flex items-center gap-3">
+          <Link
+            href={organogramaAdminHref}
+            className="bg-zinc-900 hover:bg-zinc-800 text-zinc-200 px-4 py-2 rounded-xl text-xs font-bold uppercase border border-zinc-700 flex items-center gap-2 transition active:scale-95"
+          >
+            <Layout size={16} /> Organograma
+          </Link>
+          {activeTab === "gerenciar" && (
+              <button onClick={handleCreate} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 shadow-lg transition active:scale-95">
+                  <Plus size={16} /> Novo Marco
+              </button>
+          )}
+        </div>
       </header>
 
       {/* ABAS */}

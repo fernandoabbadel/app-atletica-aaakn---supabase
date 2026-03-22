@@ -1,4 +1,4 @@
-// src/app/ligas_unitau/page.tsx
+// src/app/ligas_usc/page.tsx
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -21,6 +21,8 @@ import {
   changeLeagueLikeCount,
   fetchLeagueById,
   fetchLeagueSummaries,
+  resolveFollowedLeagueIdsFromUserExtra,
+  toggleUserLeagueFollow,
   type LeagueRecord,
 } from "../../lib/leaguesService";
 import { withTenantSlug } from "../../lib/tenantRouting";
@@ -191,6 +193,7 @@ export default function LigasUnitauPage() {
   const [loadingSelectedLeague, setLoadingSelectedLeague] = useState(false);
   const [likedLeagues, setLikedLeagues] = useState<string[]>([]);
   const [isJoined, setIsJoined] = useState(false); 
+  const [followedLeagueIds, setFollowedLeagueIds] = useState<string[]>([]);
 
   // Quiz
   const [quizStep, setQuizStep] = useState(0);
@@ -228,7 +231,17 @@ export default function LigasUnitauPage() {
     };
   }, [tenantId]);
 
+  useEffect(() => {
+    setFollowedLeagueIds(resolveFollowedLeagueIdsFromUserExtra(user?.extra, tenantId));
+  }, [tenantId, user?.extra]);
+
+  useEffect(() => {
+    if (!selectedLeague) return;
+    setIsJoined(followedLeagueIds.includes(selectedLeague.id));
+  }, [followedLeagueIds, selectedLeague]);
+
   const openLeagueDetails = async (league: League): Promise<void> => {
+      setIsJoined(followedLeagueIds.includes(league.id));
       setSelectedLeague(league);
       setLoadingSelectedLeague(true);
       try {
@@ -237,6 +250,7 @@ export default function LigasUnitauPage() {
             tenantId: tenantId || undefined,
           });
           if (fullLeague) {
+              setIsJoined(followedLeagueIds.includes(fullLeague.id));
               setSelectedLeague(fullLeague as League);
           }
       } catch (error: unknown) {
@@ -404,7 +418,7 @@ export default function LigasUnitauPage() {
           return (right.likes || 0) - (left.likes || 0);
         });
 
-      setTopMatches(scored);
+      setTopMatches(scored.slice(0, 5));
       setShowQuizResult(true);
 
       const topPositive = scored.find((item) => (item.matchScore || 0) > 0);
@@ -598,6 +612,36 @@ export default function LigasUnitauPage() {
                   <div className="p-4 border-t border-zinc-800 bg-zinc-900 flex justify-between items-center shrink-0">
                       <span className="text-xs font-bold text-zinc-500 flex gap-2 items-center"><Heart size={14} className="text-red-500 fill-red-500"/> {selectedLeague.likes || 0} Curtidas</span>
                       <button onClick={() => { 
+                          if (!user || !selectedLeague) return;
+                          const action = isJoined ? "UNFOLLOW" : "FOLLOW";
+                          const nextJoined = !isJoined;
+                          const previousFollowedIds = followedLeagueIds;
+                          const nextFollowedIds = nextJoined
+                            ? Array.from(new Set([...previousFollowedIds, selectedLeague.id]))
+                            : previousFollowedIds.filter((entry) => entry !== selectedLeague.id);
+
+                          setIsJoined(nextJoined);
+                          setFollowedLeagueIds(nextFollowedIds);
+
+                          void toggleUserLeagueFollow({
+                              leagueId: selectedLeague.id,
+                              userId: user.uid,
+                              currentlyFollowing: isJoined,
+                              tenantId: tenantId || undefined,
+                          }).catch((error: unknown) => {
+                              console.error(error);
+                              setIsJoined(isJoined);
+                              setFollowedLeagueIds(previousFollowedIds);
+                          });
+
+                          logActivity(
+                              user.uid,
+                              user.nome || 'Atleta',
+                              action,
+                              "Ligas",
+                              `${isJoined ? 'Deixou de seguir' : 'Seguiu'} a liga ${selectedLeague.sigla || selectedLeague.nome}`
+                          );
+                          if (Date.now() < 0) {
                           const action = isJoined ? "UNFOLLOW" : "FOLLOW";
                           setIsJoined(!isJoined); 
                           // --- CORREÇÃO DO LOG ---
@@ -607,7 +651,8 @@ export default function LigasUnitauPage() {
                               action,
                               "Ligas",
                               `${isJoined ? 'Deixou de seguir' : 'Seguiu'} a liga ${selectedLeague.sigla}`
-                          ); 
+                          );
+                          }
                       }} className={`px-6 py-3 rounded-xl text-xs font-black uppercase transition shadow-lg ${isJoined ? 'bg-zinc-800 text-zinc-400 hover:bg-red-500/10 hover:text-red-500' : 'bg-emerald-600 text-white hover:bg-emerald-500'}`}>
                           {isJoined ? "Seguindo" : "Seguir Liga"}
                       </button>

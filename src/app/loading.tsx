@@ -1,43 +1,101 @@
-﻿"use client";
+"use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import Image from "next/image";
 
 import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
-import { useTenantTheme } from "@/context/TenantThemeContext";
+import {
+  DEFAULT_LANDING_CONFIG,
+  fetchLandingConfig,
+  getStoredLandingConfigSnapshot,
+} from "@/lib/adminLandingService";
+import { readTenantBrandSnapshot } from "@/lib/tenantBrandSnapshot";
 
-const LOADING_FRASES = [
-  "Preparando o ambiente para voce.",
-  "Carregando dados da pagina.",
-  "Conferindo seu acesso atual.",
-  "Sincronizando informacoes da atletica.",
-  "Montando a proxima tela.",
-  "Buscando os dados mais recentes.",
-  "Organizando os modulos do app.",
-  "Quase tudo pronto por aqui.",
-  "Aplicando a identidade visual.",
-  "Abrindo seu painel com seguranca.",
-];
+type LoadingBrandState = {
+  tenantId: string;
+  tenantName: string;
+  tenantLogoUrl: string;
+};
+
+const DEFAULT_BRAND: LoadingBrandState = {
+  tenantId: "",
+  tenantName: "USC",
+  tenantLogoUrl: PLATFORM_LOGO_URL,
+};
+
+const pickRandomPhrase = (phrases: string[], previous?: string): string => {
+  const pool = phrases.filter((entry) => entry.trim().length > 0);
+  if (pool.length === 0) return "Carregando...";
+  if (pool.length === 1) return pool[0];
+
+  const available = pool.filter((entry) => entry !== previous);
+  const source = available.length > 0 ? available : pool;
+  const randomIndex = Math.floor(Math.random() * source.length);
+  return source[randomIndex] || pool[0];
+};
 
 export default function Loading() {
-  const { tenantLogoUrl, tenantName } = useTenantTheme();
+  const [brand, setBrand] = useState<LoadingBrandState>(DEFAULT_BRAND);
+  const [phrases, setPhrases] = useState<string[]>(DEFAULT_LANDING_CONFIG.loadingPhrases);
   const [frase, setFrase] = useState("Carregando...");
   const resolvedLogo =
-    !tenantName || tenantName.trim().toUpperCase() === "USC"
+    !brand.tenantName || brand.tenantName.trim().toUpperCase() === "USC"
       ? PLATFORM_LOGO_URL
-      : tenantLogoUrl || PLATFORM_LOGO_URL;
+      : brand.tenantLogoUrl || PLATFORM_LOGO_URL;
 
   useEffect(() => {
-    const randomIndex = Math.floor(Math.random() * LOADING_FRASES.length);
-    setFrase(LOADING_FRASES[randomIndex]);
+    const snapshot = readTenantBrandSnapshot();
+    const nextBrand: LoadingBrandState = snapshot
+      ? {
+          tenantId: snapshot.tenantId,
+          tenantName: snapshot.tenantName || snapshot.tenantSigla || "Tenant",
+          tenantLogoUrl: snapshot.tenantLogoUrl || PLATFORM_LOGO_URL,
+        }
+      : DEFAULT_BRAND;
+
+    setBrand(nextBrand);
+
+    const storedConfig = getStoredLandingConfigSnapshot({
+      tenantId: nextBrand.tenantId,
+      fallbackConfig: DEFAULT_LANDING_CONFIG,
+    });
+    if (storedConfig?.loadingPhrases?.length) {
+      setPhrases(storedConfig.loadingPhrases);
+    }
+
+    let mounted = true;
+    if (!nextBrand.tenantId) {
+      return () => {
+        mounted = false;
+      };
+    }
+
+    void fetchLandingConfig({
+      tenantId: nextBrand.tenantId,
+      fallbackConfig: DEFAULT_LANDING_CONFIG,
+    })
+      .then((config) => {
+        if (!mounted || !config.loadingPhrases.length) return;
+        setPhrases(config.loadingPhrases);
+      })
+      .catch(() => {
+        // mantem o fallback em memoria/localStorage
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setFrase((previous) => pickRandomPhrase(phrases, previous));
 
     const interval = setInterval(() => {
-      const newIndex = Math.floor(Math.random() * LOADING_FRASES.length);
-      setFrase(LOADING_FRASES[newIndex]);
+      setFrase((previous) => pickRandomPhrase(phrases, previous));
     }, 2500);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [phrases]);
 
   return (
     <div className="fixed inset-0 z-[9999] bg-[#050505] flex flex-col items-center justify-center">
@@ -48,7 +106,7 @@ export default function Loading() {
         <div className="relative z-20 w-20 h-20 flex items-center justify-center">
           <Image
             src={resolvedLogo}
-            alt={`Loading ${tenantName || "Plataforma"}`}
+            alt={`Loading ${brand.tenantName || "Plataforma"}`}
             fill
             sizes="80px"
             className="object-contain drop-shadow-2xl animate-pulse-slow"

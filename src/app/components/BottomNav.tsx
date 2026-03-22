@@ -27,6 +27,10 @@ import {
   type TenantAppModuleKey,
 } from "@/lib/tenantAppModulesService";
 import {
+  fetchSharkroundAppConfig,
+  getSharkroundDisplayName,
+} from "@/lib/sharkroundConfigService";
+import {
   fetchBottomNavBannedAppealsCount,
   fetchBottomNavNotifications,
   markBottomNavNotificationRead,
@@ -96,7 +100,19 @@ const UserBadges = ({
     );
 };
 
-const LevelIcon = ({ level }: { level: number }) => {
+const LevelIcon = ({
+    level,
+    patenteIcon,
+    patenteCor,
+}: {
+    level: number;
+    patenteIcon?: string;
+    patenteCor?: string;
+}) => {
+    const PatentIcon = patenteIcon ? resolveUserPlanIcon(patenteIcon, patenteIcon, Fish) : null;
+    if (PatentIcon) {
+        return <PatentIcon className={resolvePlanTextClass(patenteCor, "text-zinc-400")} size={12} />;
+    }
     if (level === 1) return <Fish className="text-orange-400" size={12} />; 
     if (level === 2) return <Swords className="text-blue-400" size={12} />;
     if (level >= 5) return <Crown className="text-yellow-400" size={12} />;
@@ -160,6 +176,7 @@ export default function BottomNavbar() {
   const canAccessAdminDashboard = canAccess("/admin");
   const canAccessBannedAppeals = canAccess("/admin/denuncias/banidos");
   const [hasApprovedMiniVendor, setHasApprovedMiniVendor] = useState(false);
+  const [boardroundDisplayName, setBoardroundDisplayName] = useState("BoardRound");
   const isModuleVisible = useCallback(
     (key?: TenantAppModuleKey): boolean =>
       key ? isTenantAppModuleVisible(modulesConfig, key) : true,
@@ -235,6 +252,31 @@ export default function BottomNavbar() {
       mounted = false;
     };
   }, [activeTenantId, scopedTenantSlug, user?.tenant_id]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadBoardroundConfig = async () => {
+      try {
+        const config = await fetchSharkroundAppConfig({
+          forceRefresh: false,
+          tenantId: activeTenantId || undefined,
+        });
+        if (mounted) {
+          setBoardroundDisplayName(getSharkroundDisplayName(config));
+        }
+      } catch {
+        if (mounted) {
+          setBoardroundDisplayName("BoardRound");
+        }
+      }
+    };
+
+    void loadBoardroundConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantId]);
 
   const loadNotifications = useCallback(async (forceRefresh = false) => {
       if (!canLoadNotifications) {
@@ -413,13 +455,13 @@ export default function BottomNavbar() {
   const sidebarItemsAtletaBase: NavItemProps[] = [
       { id: 'treinos', label: 'Treinos', icon: <CalendarRange size={18} />, path: '/treinos', moduleKey: 'treinos' },
       { id: 'arena', label: 'Arena Games', icon: <Gamepad2 size={18} />, path: '/arena-games', badge: "Vem ai", isComingSoon: true, moduleKey: 'arena_games' },
-      { id: 'shark_round', label: 'Shark Round', icon: <Target size={18} />, path: '/sharkround', isComingSoon: true, moduleKey: 'sharkround' },
+      { id: 'shark_round', label: boardroundDisplayName, icon: <Target size={18} />, path: '/boardround', isComingSoon: true, moduleKey: 'sharkround' },
       { id: 'ranking', label: 'Ranking', icon: <Trophy size={18} />, path: '/ranking', badge: "Vem ai", isComingSoon: true, moduleKey: 'ranking' },
       { id: 'gym_side', label: 'Treinos Avancados', icon: <Dumbbell size={18} />, path: '/gym-rats', badge: "Vem ai", isComingSoon: true, moduleKey: 'gym_rats' },
   ];
 
   const sidebarItemsInfoBase: NavItemProps[] = [
-      { id: 'ligas', label: 'Area das Ligas', icon: <Users size={18} />, path: '/ligas_unitau', moduleKey: 'ligas' },
+      { id: 'ligas', label: 'Area das Ligas', icon: <Users size={18} />, path: '/ligas_usc', moduleKey: 'ligas' },
       { id: 'avaliacao', label: 'Avaliacao Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true, moduleKey: 'avaliacao' },
       { id: 'conquistas', label: 'Conquistas', icon: <Medal size={18} />, path: '/conquistas', isComingSoon: true, moduleKey: 'conquistas' },
       { id: 'fidelidade', label: 'Fidelidade', icon: <Star size={18} />, path: '/fidelidade', isComingSoon: true, moduleKey: 'fidelidade' },
@@ -517,7 +559,11 @@ export default function BottomNavbar() {
                             <p className={`text-sm font-bold truncate ${sidebarNameColor}`}>{currentUser.nome?.split(" ")[0]}</p>
                             <div className="flex items-center gap-2 mt-1">
                                 <div className="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded border border-white/5" title={`Nivel ${currentUser.level || 1}`}>
-                                    <LevelIcon level={currentUser.level || 1} />
+                                    <LevelIcon
+                                        level={currentUser.level || 1}
+                                        patenteIcon={currentUser.patente_icon}
+                                        patenteCor={currentUser.patente_cor}
+                                    />
                                     <span className="text-[9px] font-mono text-zinc-400">Nv.{currentUser.level || 1}</span>
                                 </div>
                                 <div className="flex items-center h-5 bg-black/40 rounded border border-white/5 px-1.5">

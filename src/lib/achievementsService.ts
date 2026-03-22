@@ -7,8 +7,19 @@ import {
 } from "./tenantScopedCatalog";
 import {
   fetchTenantMembershipDirectory,
+  resolveTenantScopedStats,
   resolveTenantScopedXp,
 } from "./tenantMembershipDirectory";
+import {
+  calculateAchievementSummary,
+  mergeAchievementCatalogWithDefaults,
+  mergePatentesWithDefaults,
+  normalizeAchievementStats,
+  resolveEffectiveXp,
+  resolvePatenteForXp,
+  type RuntimeAchievementConfig,
+  type RuntimePatenteConfig,
+} from "./achievementRuntime";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -446,6 +457,276 @@ export async function fetchAchievementsLogs(options?: {
   return rows;
 }
 
+export interface UserAchievementSnapshot {
+  stats: Record<string, number>;
+  catalog: RuntimeAchievementConfig[];
+  patentes: RuntimePatenteConfig[];
+  unlockedCount: number;
+  totalUnlockedXp: number;
+  logXpTotal: number;
+  displayXp: number;
+  missingKeys: string[];
+  patente: RuntimePatenteConfig | null;
+}
+
+const fetchUserAchievementLogRows = async (options: {
+  userId: string;
+  tenantId?: string | null;
+}): Promise<Array<Record<string, unknown>>> => {
+  const userId = options.userId.trim();
+  if (!userId) return [];
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("achievements_logs")
+    .select("achievementId,achievementTitle,xp,data,timestamp")
+    .eq("userId", userId)
+    .order("timestamp", { ascending: false })
+    .limit(600);
+  if (error) throwSupabaseError(error);
+
+  const tenantId = options.tenantId?.trim() || "";
+  return ((data as Array<Record<string, unknown>> | null) ?? []).filter((row) => {
+    if (!tenantId) return true;
+    const dataPayload = asObject(row.data);
+    const logTenantId = asString(dataPayload?.tenantId).trim();
+    return !logTenantId || logTenantId === tenantId;
+  });
+};
+
+const sumAchievementLogsXp = (
+  logs: Array<Record<string, unknown>>,
+  catalog: RuntimeAchievementConfig[]
+): number => {
+  if (!logs.length) return 0;
+
+  const catalogById = new Map(catalog.map((item) => [item.id, item] as const));
+  const catalogByTitle = new Map(
+    catalog.map((item) => [item.titulo.trim().toLowerCase(), item] as const)
+  );
+  const seenKeys = new Set<string>();
+  let total = 0;
+
+  logs.forEach((row) => {
+    const achievementId = asString(row.achievementId).trim();
+    const achievementTitle = asString(row.achievementTitle).trim();
+    const matchedCatalog =
+      catalogById.get(achievementId) ||
+      catalogByTitle.get(achievementTitle.toLowerCase()) ||
+      null;
+    const dedupeKey = achievementId || achievementTitle.toLowerCase();
+    if (!dedupeKey || seenKeys.has(dedupeKey)) return;
+
+    seenKeys.add(dedupeKey);
+    total += Math.max(0, asNumber(row.xp, matchedCatalog?.xp ?? 0));
+  });
+
+  return total;
+};
+
+export async function fetchUserAchievementSnapshot(options: {
+  userId: string;
+  tenantId?: string | null;
+  fallbackStats?: Record<string, unknown> | null;
+  fallbackXp?: number | null;
+}): Promise<UserAchievementSnapshot> {
+  const userId = options.userId.trim();
+  const tenantId = options.tenantId?.trim() || "";
+
+  const [catalogRows, patentesRows, logRows, membershipRows] = await Promise.all([
+    fetchAchievementsConfig({ maxResults: 220, tenantId: tenantId || undefined }),
+    fetchPatentesConfig({ maxResults: 40, tenantId: tenantId || undefined }),
+    userId
+      ? fetchUserAchievementLogRows({ userId, tenantId: tenantId || undefined })
+      : Promise.resolve([]),
+    tenantId && userId
+      ? fetchTenantMembershipDirectory({
+          tenantId,
+          userIds: [userId],
+          statuses: ["approved", "pending", "disabled"],
+          limit: 1,
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const catalog = mergeAchievementCatalogWithDefaults(
+    (catalogRows as RuntimeAchievementConfig[]) ?? []
+  );
+  const patentes = mergePatentesWithDefaults(
+    (patentesRows as RuntimePatenteConfig[]) ?? []
+  );
+  const membership = membershipRows[0];
+  const stats = normalizeAchievementStats(
+    membership ? resolveTenantScopedStats(membership) : options.fallbackStats
+  );
+  const summary = calculateAchievementSummary(catalog, stats);
+  const logXpTotal = sumAchievementLogsXp(logRows, catalog);
+  const displayXp = resolveEffectiveXp([
+    membership ? resolveTenantScopedXp(membership) : options.fallbackXp,
+    summary.totalUnlockedXp,
+    logXpTotal,
+  ]);
+
+  return {
+    stats,
+    catalog,
+    patentes,
+    unlockedCount: summary.unlockedCount,
+    totalUnlockedXp: summary.totalUnlockedXp,
+    logXpTotal,
+    displayXp,
+    missingKeys: summary.missingKeys,
+    patente: resolvePatenteForXp(patentes, displayXp),
+  };
+}
+
+export async function syncUserAchievementState(payload: {
+  userId: string;
+  tenantId?: string | null;
+  deltas?: Record<string, number>;
+  nextStats?: Record<string, unknown>;
+  userName?: string;
+  xpDelta?: number;
+  userRow?: Record<string, unknown> | null;
+}): Promise<{
+  stats: Record<string, number>;
+  xp: number;
+  patente: RuntimePatenteConfig | null;
+}> {
+  const userId = payload.userId.trim();
+  if (!userId) {
+    return {
+      stats: normalizeAchievementStats(payload.nextStats),
+      xp: Math.max(0, asNumber(payload.xpDelta, 0)),
+      patente: null,
+    };
+  }
+
+  const supabase = getSupabaseClient();
+  const existingUserRow =
+    payload.userRow && typeof payload.userRow === "object"
+      ? payload.userRow
+      : null;
+
+  let userRow = existingUserRow;
+  if (!userRow) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("uid,nome,tenant_id,stats,xp,patente,patente_icon,patente_cor")
+      .eq("uid", userId)
+      .maybeSingle();
+    if (error) throwSupabaseError(error);
+    userRow = (data as Record<string, unknown> | null) ?? null;
+  }
+
+  if (!userRow) {
+    return {
+      stats: normalizeAchievementStats(payload.nextStats),
+      xp: Math.max(0, asNumber(payload.xpDelta, 0)),
+      patente: null,
+    };
+  }
+
+  const effectiveTenantId =
+    payload.tenantId?.trim() || asString(userRow.tenant_id).trim() || "";
+  const currentStats = normalizeAchievementStats(asObject(userRow.stats));
+  const nextStats = payload.nextStats
+    ? normalizeAchievementStats(payload.nextStats)
+    : (() => {
+        const mutable = { ...currentStats };
+        Object.entries(payload.deltas ?? {}).forEach(([key, delta]) => {
+          if (!Number.isFinite(delta) || !delta) return;
+          mutable[key] = Math.max(0, asNumber(mutable[key], 0) + delta);
+        });
+        return mutable;
+      })();
+
+  const [catalogRows, patentesRows] = await Promise.all([
+    fetchAchievementsConfig({ maxResults: 220, tenantId: effectiveTenantId || undefined }),
+    fetchPatentesConfig({ maxResults: 40, tenantId: effectiveTenantId || undefined }),
+  ]);
+  const catalog = mergeAchievementCatalogWithDefaults(
+    (catalogRows as RuntimeAchievementConfig[]) ?? []
+  );
+  const patentes = mergePatentesWithDefaults(
+    (patentesRows as RuntimePatenteConfig[]) ?? []
+  );
+  const previousSummary = calculateAchievementSummary(catalog, currentStats);
+  const nextSummary = calculateAchievementSummary(catalog, nextStats);
+  const nextXp = resolveEffectiveXp([
+    asNumber(userRow.xp, 0) + asNumber(payload.xpDelta, 0),
+    nextSummary.totalUnlockedXp,
+  ]);
+  const patente = resolvePatenteForXp(patentes, nextXp);
+
+  const { error: updateError } = await supabase
+    .from("users")
+    .update({
+      stats: nextStats,
+      xp: nextXp,
+      patente: patente?.titulo || null,
+      patente_icon: patente?.iconName || null,
+      patente_cor: patente?.cor || null,
+      updatedAt: new Date().toISOString(),
+    })
+    .eq("uid", userId);
+  if (updateError) throwSupabaseError(updateError);
+
+  const previousUnlockIds = new Set(
+    previousSummary.list.filter((item) => item.isUnlocked).map((item) => item.id)
+  );
+  const unlockedNow = nextSummary.list.filter(
+    (item) => item.isUnlocked && !previousUnlockIds.has(item.id)
+  );
+
+  if (unlockedNow.length > 0) {
+    const achievementIds = unlockedNow.map((item) => item.id);
+    const { data: existingLogs, error: logsError } = await supabase
+      .from("achievements_logs")
+      .select("achievementId")
+      .eq("userId", userId)
+      .in("achievementId", achievementIds);
+    if (logsError) throwSupabaseError(logsError);
+
+    const existingAchievementIds = new Set(
+      ((existingLogs as Array<Record<string, unknown>> | null) ?? []).map((row) =>
+        asString(row.achievementId).trim()
+      )
+    );
+
+    const insertRows = unlockedNow
+      .filter((item) => !existingAchievementIds.has(item.id))
+      .map((item) => ({
+        userId,
+        userName: asString(userRow.nome, payload.userName || "Usuario"),
+        achievementId: item.id,
+        achievementTitle: item.titulo,
+        xp: item.xp,
+        timestamp: new Date().toISOString(),
+        data: {
+          tenantId: effectiveTenantId || undefined,
+          statKey: item.statKey,
+          progress: item.progress,
+          target: item.target,
+        },
+      }));
+
+    if (insertRows.length > 0) {
+      const { error: insertError } = await supabase
+        .from("achievements_logs")
+        .insert(insertRows);
+      if (insertError) throwSupabaseError(insertError);
+    }
+  }
+
+  clearReadCaches();
+  return {
+    stats: nextStats,
+    xp: nextXp,
+    patente,
+  };
+}
+
 export async function fetchXpRanking(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
@@ -463,6 +744,13 @@ export async function fetchXpRanking(options?: {
   }
 
   if (tenantId) {
+    const catalog = mergeAchievementCatalogWithDefaults(
+      (await fetchAchievementsConfig({
+        maxResults: 220,
+        forceRefresh,
+        tenantId,
+      })) as RuntimeAchievementConfig[]
+    );
     const directory = await fetchTenantMembershipDirectory({
       tenantId,
       statuses: ["approved", "pending"],
@@ -472,7 +760,10 @@ export async function fetchXpRanking(options?: {
         id: entry.userId,
         nome: entry.nome,
         turma: entry.turma,
-        xp: resolveTenantScopedXp(entry),
+        xp: resolveEffectiveXp([
+          resolveTenantScopedXp(entry),
+          calculateAchievementSummary(catalog, entry.stats).totalUnlockedXp,
+        ]),
         foto: entry.foto,
       }))
       .filter((row) => row.id)

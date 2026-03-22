@@ -12,7 +12,8 @@ const DASHBOARD_PRODUCTS_LIMIT = 8;
 const DASHBOARD_POSTS_LIMIT = 2;
 const DASHBOARD_TREINOS_LIMIT = 4;
 const DASHBOARD_PARTNERS_LIMIT = 50;
-const DASHBOARD_LIGAS_LIMIT = 60;
+const DASHBOARD_LIGAS_DASHBOARD_LIMIT = 2;
+const DASHBOARD_TREINO_RSVPS_LIMIT = 12;
 const DASHBOARD_ALBUM_FALLBACK_LIMIT = 350;
 const DASHBOARD_LIKES_SAMPLE_PER_PRODUCT = 10;
 const DASHBOARD_USERS_IN_CHUNK = 10;
@@ -27,11 +28,11 @@ const DASHBOARD_PRODUCTS_SELECT =
 const DASHBOARD_PARTNERS_SELECT =
   "id,nome,imgLogo,imgCapa,categoria,tier,status";
 const DASHBOARD_LIGAS_SELECT =
-  "id,nome,sigla,foto,logoUrl,logo,descricao,bizu,ativa,visivel,status,createdAt,updatedAt";
+  "id,nome,sigla,foto,logoUrl,logo,descricao,bizu,ativa,visivel,status,likes,createdAt,updatedAt";
 const DASHBOARD_POSTS_SELECT =
   "id,userId,userName,avatar,createdAt,texto,likes,tenant_id";
-const DASHBOARD_TREINOS_SELECT = "id,imagem,tenant_id";
-const DASHBOARD_ALBUM_FALLBACK_SELECT = "totalColetado";
+const DASHBOARD_TREINOS_SELECT = "id,imagem,dia,createdAt,status,tenant_id";
+const DASHBOARD_ALBUM_FALLBACK_SELECT = "targetUserId";
 
 const dashboardCache = new Map<string, CacheEntry<DashboardBundle>>();
 
@@ -52,6 +53,14 @@ const asInteger = (value: unknown, fallback = 0): number => {
 };
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+const normalizeIdList = (value: unknown): string[] =>
+  Array.from(
+    new Set(
+      asStringArray(value)
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+    )
+  );
 
 const toMillis = (value: unknown): number => {
   if (value instanceof Date) return value.getTime();
@@ -67,6 +76,42 @@ const toMillis = (value: unknown): number => {
     if (parsed instanceof Date) return parsed.getTime();
   }
   return 0;
+};
+
+const resolveFollowedLeagueIdsFromUserExtra = (
+  extra: unknown,
+  tenantId?: string
+): string[] => {
+  const extraData = asObject(extra) ?? {};
+  const byTenant = asObject(extraData.followedLeagueIdsByTenant);
+  const cleanTenantId = asString(tenantId).trim();
+
+  if (cleanTenantId && byTenant) {
+    return normalizeIdList(byTenant[cleanTenantId]);
+  }
+
+  return normalizeIdList(extraData.followedLeagueIds);
+};
+
+const buildStableSeed = (value: string): number => {
+  let seed = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    seed = (seed * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return seed || 1;
+};
+
+const seededShuffle = <T>(rows: T[], seedInput: string): T[] => {
+  const next = [...rows];
+  let seed = buildStableSeed(seedInput);
+
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const swapIndex = seed % (index + 1);
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+
+  return next;
 };
 
 const getCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
@@ -270,18 +315,24 @@ async function fetchDashboardEventRows(tenantId?: string): Promise<Row[]> {
 async function fetchDashboardTotalCaca(tenantId?: string): Promise<number> {
   const supabase = getSupabaseClient();
   const scopedTenantId = asString(tenantId).trim();
-  const { data, error } = await supabase.rpc(DASHBOARD_TOTAL_CACA_RPC);
-  if (!error && !scopedTenantId) {
+  const { data, error } = await supabase.rpc(DASHBOARD_TOTAL_CACA_RPC, {
+    p_tenant_id: scopedTenantId || null,
+  });
+  if (!error) {
     return Math.max(0, asInteger(data, 0));
   }
 
-  const albumRows = await fetchRowsWithFallback("album_rankings", DASHBOARD_ALBUM_FALLBACK_SELECT, [
+  const albumRows = await fetchRowsWithFallback("album_captures", DASHBOARD_ALBUM_FALLBACK_SELECT, [
     {
-      limit: DASHBOARD_ALBUM_FALLBACK_LIMIT,
+      limit: DASHBOARD_ALBUM_FALLBACK_LIMIT * 4,
       ...(scopedTenantId ? { eq: { tenant_id: scopedTenantId } } : {}),
     },
   ]);
-  return albumRows.reduce((acc, row) => acc + asNumber(row.totalColetado, 0), 0);
+  return new Set(
+    albumRows
+      .map((row) => asString(row.targetUserId).trim())
+      .filter((targetUserId) => targetUserId.length > 0)
+  ).size;
 }
 
 async function safeUsersCount(tenantId?: string): Promise<number> {
@@ -304,6 +355,117 @@ async function safeUsersCount(tenantId?: string): Promise<number> {
     if (error) throwSupabaseError(error);
     return (data ?? []).length;
   }
+}
+
+async function fetchUserExtra(userId?: string): Promise<Row | null> {
+  const cleanUserId = asString(userId).trim();
+  if (!cleanUserId) return null;
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("extra")
+    .eq("uid", cleanUserId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  return asObject(asObject(data)?.extra);
+}
+
+async function fetchDashboardLeagueRows(options: {
+  tenantId?: string;
+  userId?: string;
+}): Promise<Row[]> {
+  const cleanTenantId = asString(options.tenantId).trim();
+  const cleanUserId = asString(options.userId).trim();
+  if (!cleanUserId) return [];
+
+  const userExtra = await fetchUserExtra(cleanUserId);
+  const followedLeagueIds = resolveFollowedLeagueIdsFromUserExtra(
+    userExtra,
+    cleanTenantId || undefined
+  );
+  if (!followedLeagueIds.length) return [];
+
+  const supabase = getSupabaseClient();
+  let query = supabase
+    .from("ligas_config")
+    .select(DASHBOARD_LIGAS_SELECT)
+    .in("id", followedLeagueIds)
+    .limit(followedLeagueIds.length);
+  if (cleanTenantId) {
+    query = query.eq("tenant_id", cleanTenantId);
+  }
+
+  const { data, error } = await query;
+  if (error) throwSupabaseError(error);
+  return (data ?? []) as unknown as Row[];
+}
+
+async function fetchDashboardTreinoRows(options: {
+  tenantId?: string;
+  userId?: string;
+}): Promise<Row[]> {
+  const cleanTenantId = asString(options.tenantId).trim();
+  const cleanUserId = asString(options.userId).trim();
+  const supabase = getSupabaseClient();
+
+  if (cleanUserId) {
+    let rsvpQuery = supabase
+      .from("treinos_rsvps")
+      .select("treinoId,timestamp,status")
+      .eq("userId", cleanUserId)
+      .eq("status", "going")
+      .order("timestamp", { ascending: false })
+      .limit(DASHBOARD_TREINO_RSVPS_LIMIT);
+    if (cleanTenantId) {
+      rsvpQuery = rsvpQuery.eq("tenant_id", cleanTenantId);
+    }
+
+    const { data: rsvpRows, error: rsvpError } = await rsvpQuery;
+    if (rsvpError) throwSupabaseError(rsvpError);
+
+    const treinoIds = Array.from(
+      new Set(
+        ((rsvpRows ?? []) as Row[])
+          .map((row) => asString(row.treinoId).trim())
+          .filter((entry) => entry.length > 0)
+      )
+    );
+
+    if (treinoIds.length > 0) {
+      let treinoQuery = supabase
+        .from("treinos")
+        .select(DASHBOARD_TREINOS_SELECT)
+        .in("id", treinoIds)
+        .eq("status", "ativo")
+        .limit(treinoIds.length);
+      if (cleanTenantId) {
+        treinoQuery = treinoQuery.eq("tenant_id", cleanTenantId);
+      }
+
+      const { data: treinoRows, error: treinoError } = await treinoQuery;
+      if (treinoError) throwSupabaseError(treinoError);
+      const rows = ((treinoRows ?? []) as Row[])
+        .sort((left, right) => {
+          const dateDiff = toMillis(right.dia) - toMillis(left.dia);
+          if (dateDiff !== 0) return dateDiff;
+          return toMillis(right.createdAt) - toMillis(left.createdAt);
+        })
+        .slice(0, DASHBOARD_TREINOS_LIMIT);
+
+      if (rows.length > 0) return rows;
+    }
+  }
+
+  return fetchRowsWithFallback("treinos", DASHBOARD_TREINOS_SELECT, [
+    {
+      orderBy: { column: "createdAt", ascending: false },
+      limit: DASHBOARD_TREINOS_LIMIT,
+      ...(cleanTenantId ? { eq: { tenant_id: cleanTenantId } } : {}),
+    },
+    { limit: DASHBOARD_TREINOS_LIMIT, ...(cleanTenantId ? { eq: { tenant_id: cleanTenantId } } : {}) },
+  ]);
 }
 
 const normalizeEvento = (id: string, raw: unknown): DashboardEvent | null => {
@@ -370,6 +532,7 @@ const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
     ativa: asBoolean(data.ativa, false),
     visivel: asBoolean(data.visivel, false),
     status: asString(data.status) || undefined,
+    likes: asNumber(data.likes, 0),
     createdAt: data.createdAt ?? null,
     updatedAt: data.updatedAt ?? null,
   };
@@ -528,6 +691,7 @@ export interface DashboardLiga {
   ativa?: boolean;
   visivel?: boolean;
   status?: string;
+  likes: number;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -567,10 +731,12 @@ export interface DashboardBundle {
 export async function fetchDashboardBundle(options?: {
   forceRefresh?: boolean;
   tenantId?: string;
+  userId?: string;
 }): Promise<DashboardBundle> {
   const forceRefresh = options?.forceRefresh ?? false;
   const tenantId = asString(options?.tenantId).trim();
-  const cacheKey = tenantId || "default";
+  const userId = asString(options?.userId).trim();
+  const cacheKey = `${tenantId || "default"}:${userId || "anon"}`;
   if (!forceRefresh) {
     const cached = getCachedValue(dashboardCache, cacheKey);
     if (cached) return cached;
@@ -601,9 +767,10 @@ export async function fetchDashboardBundle(options?: {
         },
         { limit: DASHBOARD_PARTNERS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
       ]),
-      fetchRowsWithFallback("ligas_config", DASHBOARD_LIGAS_SELECT, [
-        { limit: DASHBOARD_LIGAS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
-      ]),
+      fetchDashboardLeagueRows({
+        tenantId: tenantId || undefined,
+        userId: userId || undefined,
+      }),
       fetchRowsWithFallback("posts", DASHBOARD_POSTS_SELECT, [
         {
           orderBy: { column: "createdAt", ascending: false },
@@ -612,14 +779,10 @@ export async function fetchDashboardBundle(options?: {
         },
         { limit: DASHBOARD_POSTS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
       ]),
-      fetchRowsWithFallback("treinos", DASHBOARD_TREINOS_SELECT, [
-        {
-          orderBy: { column: "createdAt", ascending: false },
-          limit: DASHBOARD_TREINOS_LIMIT,
-          ...(tenantFilter ? { eq: tenantFilter } : {}),
-        },
-        { limit: DASHBOARD_TREINOS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
-      ]),
+      fetchDashboardTreinoRows({
+        tenantId: tenantId || undefined,
+        userId: userId || undefined,
+      }),
       safeUsersCount(tenantId || undefined),
       fetchDashboardTotalCaca(tenantId || undefined),
     ]);
@@ -644,7 +807,20 @@ export async function fetchDashboardBundle(options?: {
     .map((row) => normalizeParceiro(asString(row.id), row))
     .filter((row): row is DashboardPartner => row !== null)
     .filter((partner) => (partner.status || "active") === "active");
-  const ligas = ligaRows.map((row) => normalizeLiga(asString(row.id), row)).filter((row): row is DashboardLiga => row !== null);
+  const ligasBase = ligaRows
+    .map((row) => normalizeLiga(asString(row.id), row))
+    .filter((row): row is DashboardLiga => row !== null)
+    .filter((liga) => liga.visivel === true)
+    .sort((left, right) => (right.likes || 0) - (left.likes || 0));
+  const ligas =
+    ligasBase.length > DASHBOARD_LIGAS_DASHBOARD_LIMIT
+      ? seededShuffle(
+          ligasBase,
+          `${userId || "anon"}:${tenantId || "default"}:${new Date().toISOString().slice(0, 10)}`
+        )
+          .slice(0, DASHBOARD_LIGAS_DASHBOARD_LIMIT)
+          .sort((left, right) => (right.likes || 0) - (left.likes || 0))
+      : ligasBase;
   const mensagens = [...postRows]
     .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt))
     .map((row) => normalizePost(asString(row.id), row))

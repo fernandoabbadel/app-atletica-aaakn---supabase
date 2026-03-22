@@ -1,4 +1,4 @@
-import { getSupabaseClient } from "./supabase";
+import { syncUserAchievementState } from "./achievementsService";
 
 export type Row = Record<string, unknown>;
 
@@ -98,37 +98,16 @@ export const toggleArrayValue = (values: string[], item: string): string[] => {
 
 export async function incrementUserStats(
   userId: string,
-  deltas: Record<string, number>
+  deltas: Record<string, number>,
+  options?: { tenantId?: string | null; xpDelta?: number }
 ): Promise<void> {
   const cleanUserId = userId.trim();
   if (!cleanUserId) return;
 
-  const supabase = getSupabaseClient();
-  const { data: current, error: selectError } = await supabase
-    .from("users")
-    .select("stats")
-    .eq("uid", cleanUserId)
-    .maybeSingle();
-
-  if (selectError) throwSupabaseError(selectError);
-
-  const currentStats = asObject(current?.stats) ?? {};
-  const nextStats: Row = { ...currentStats };
-
-  for (const [key, delta] of Object.entries(deltas)) {
-    if (!Number.isFinite(delta) || !delta) continue;
-    const base = asNumber(nextStats[key], 0);
-    const updated = base + delta;
-    nextStats[key] = updated < 0 ? 0 : updated;
-  }
-
-  const { error: updateError } = await supabase
-    .from("users")
-    .update({
-      stats: nextStats,
-      updatedAt: new Date().toISOString(),
-    })
-    .eq("uid", cleanUserId);
-
-  if (updateError) throwSupabaseError(updateError);
+  await syncUserAchievementState({
+    userId: cleanUserId,
+    tenantId: options?.tenantId,
+    deltas,
+    xpDelta: options?.xpDelta,
+  });
 }

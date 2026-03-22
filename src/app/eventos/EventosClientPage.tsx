@@ -15,6 +15,11 @@ import { getTurmaImage } from "../../constants/turmaImages";
 import { resolvePlanScopedPrice } from "../../lib/commerceCatalog";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { collectUserPlanScope } from "@/lib/userPlanScope";
+import {
+  createDefaultTenantAppModulesConfig,
+  fetchEffectiveTenantAppModulesConfig,
+  isTenantAppModuleVisible,
+} from "@/lib/tenantAppModulesService";
 // --- INTERFACES ---
 export interface Evento {
   id: string;
@@ -63,6 +68,15 @@ const getSaleStatusClass = (status?: Evento["saleStatus"]): string => {
 interface EventosClientPageProps {
   initialEventos: Evento[];
 }
+
+const EVENT_FILTER_ALL = "Todos";
+const EVENT_FILTER_LEAGUES = "Eventos das Ligas";
+
+const isLeagueEvent = (event: Evento): boolean => {
+  const tipo = String(event.tipo || "").trim().toLowerCase();
+  const categoria = String(event.categoria || "").trim().toLowerCase();
+  return tipo === "liga" || categoria === "liga";
+};
 
 // --- HELPER: PARSER DE DATA ---
 const parseEventDate = (dateStr: string, timeStr: string = "00:00") => {
@@ -366,11 +380,13 @@ function EventCard({
 // --- PAGINA PRINCIPAL ---
 export default function EventosClientPage({ initialEventos }: EventosClientPageProps) {
   const { user } = useAuth();
-  const { tenantId, tenantSlug } = useTenantTheme();
+  const { tenantId, tenantSigla, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const [eventos, setEventos] = useState<Evento[]>(initialEventos);
   const [loading, setLoading] = useState(initialEventos.length === 0);
-  const [filter, setFilter] = useState("Todos");
+  const [loadingModules, setLoadingModules] = useState(true);
+  const [modulesConfig, setModulesConfig] = useState(createDefaultTenantAppModulesConfig);
+  const [filter, setFilter] = useState(EVENT_FILTER_ALL);
   const [searchTerm, setSearchTerm] = useState("");
   const { userPlanNames, userPlanIds } = useMemo(() => collectUserPlanScope(user), [user]);
 
@@ -405,38 +421,101 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
     };
   }, [addToast, initialEventos.length, tenantId]);
 
-  const activeEvents = eventos.filter((event) => {
-    const status = String(event.status || "ativo").toLowerCase().trim();
-    if (status !== "ativo") return false;
+  useEffect(() => {
+    let mounted = true;
 
-    const parsedDate = parseEventDate(event.data, event.hora);
-    if (!parsedDate) return true;
-    return parsedDate.getTime() >= Date.now();
-  });
+    const loadModules = async () => {
+      try {
+        const nextConfig = await fetchEffectiveTenantAppModulesConfig({
+          tenantId: tenantId || user?.tenant_id || undefined,
+          tenantSlug,
+        });
+        if (!mounted) return;
+        setModulesConfig(nextConfig);
+      } catch (error: unknown) {
+        console.error("Erro ao carregar modulos de eventos:", error);
+      } finally {
+        if (mounted) {
+          setLoadingModules(false);
+        }
+      }
+    };
 
-  const categoryFilteredEvents =
-    filter === "Todos"
-      ? activeEvents
-      : activeEvents.filter((event) => event.tipo === filter || event.categoria === filter);
+    void loadModules();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId, tenantSlug, user?.tenant_id]);
+
+  const ligasModuleEnabled = isTenantAppModuleVisible(modulesConfig, "ligas");
+  const tenantEventsLabel = useMemo(() => {
+    const sigla = String(tenantSigla || "").trim().toUpperCase();
+    return sigla ? `Eventos ${sigla}` : "Eventos da Atlética";
+  }, [tenantSigla]);
+
+  const filterOptions = useMemo(() => {
+    const options = [EVENT_FILTER_ALL, tenantEventsLabel];
+    if (ligasModuleEnabled) {
+      options.push(EVENT_FILTER_LEAGUES);
+    }
+    return options;
+  }, [ligasModuleEnabled, tenantEventsLabel]);
+
+  useEffect(() => {
+    if (filterOptions.includes(filter)) return;
+    setFilter(EVENT_FILTER_ALL);
+  }, [filter, filterOptions]);
+
+  const activeEvents = useMemo(
+    () =>
+      eventos.filter((event) => {
+        const status = String(event.status || "ativo").toLowerCase().trim();
+        if (status !== "ativo") return false;
+
+        const parsedDate = parseEventDate(event.data, event.hora);
+        if (!parsedDate) return true;
+        return parsedDate.getTime() >= Date.now();
+      }),
+    [eventos]
+  );
+
+  const visibleEvents = useMemo(
+    () =>
+      ligasModuleEnabled ? activeEvents : activeEvents.filter((event) => !isLeagueEvent(event)),
+    [activeEvents, ligasModuleEnabled]
+  );
+
+  const categoryFilteredEvents = useMemo(() => {
+    if (filter === tenantEventsLabel) {
+      return visibleEvents.filter((event) => !isLeagueEvent(event));
+    }
+    if (filter === EVENT_FILTER_LEAGUES) {
+      return ligasModuleEnabled ? visibleEvents.filter(isLeagueEvent) : [];
+    }
+    return visibleEvents;
+  }, [filter, ligasModuleEnabled, tenantEventsLabel, visibleEvents]);
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
-  const filteredEvents =
-    normalizedSearch.length === 0
-      ? categoryFilteredEvents
-      : categoryFilteredEvents.filter((event) => {
-          const haystack = [
-            event.titulo,
-            event.local,
-            event.tipo,
-            event.categoria || "",
-            event.destaque || "",
-          ]
-            .join(" ")
-            .toLowerCase();
-          return haystack.includes(normalizedSearch);
-        });
+  const filteredEvents = useMemo(
+    () =>
+      normalizedSearch.length === 0
+        ? categoryFilteredEvents
+        : categoryFilteredEvents.filter((event) => {
+            const haystack = [
+              event.titulo,
+              event.local,
+              event.tipo,
+              event.categoria || "",
+              event.destaque || "",
+            ]
+              .join(" ")
+              .toLowerCase();
+            return haystack.includes(normalizedSearch);
+          }),
+    [categoryFilteredEvents, normalizedSearch]
+  );
 
-  if (loading) return (
+  if (loading || loadingModules) return (
       <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-emerald-500 gap-3">
           <Loader2 className="animate-spin w-10 h-10"/>
           <p className="text-xs font-black tracking-widest uppercase">Carregando Agenda...</p>
@@ -472,13 +551,13 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
       </div>
 
       <div className="flex gap-3 mb-8 overflow-x-auto pb-2 custom-scrollbar">
-          {["Todos", "Festa", "Esporte", "Liga"].map(f => (
+          {filterOptions.map((option) => (
               <button 
-                  key={f} 
-                  onClick={() => setFilter(f)} 
-                  className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase transition whitespace-nowrap border ${filter === f ? 'bg-emerald-600 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-700'}`}
+                  key={option}
+                  onClick={() => setFilter(option)}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase transition whitespace-nowrap border ${filter === option ? 'bg-emerald-600 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-700'}`}
               >
-                  {f}
+                  {option}
               </button>
           ))}
       </div>

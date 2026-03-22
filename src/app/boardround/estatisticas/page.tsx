@@ -6,6 +6,11 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, BarChart3, CheckCircle2, Building2, XCircle } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import {
+  fetchSharkroundAppConfig,
+  getDefaultSharkroundAppConfig,
+  getSharkroundDisplayName,
+} from "../../../lib/sharkroundConfigService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 interface SharkroundStats {
@@ -22,7 +27,7 @@ export default function SharkroundEstatisticasPage() {
   const { tenantId, tenantSlug } = useTenantTheme();
   const router = useRouter();
   const sharkroundStatsStorageKey = `${SHARKROUND_STATS_STORAGE_KEY}:${tenantId || tenantSlug || "default"}`;
-  const sharkroundHref = tenantSlug ? withTenantSlug(tenantSlug, "/sharkround") : "/sharkround";
+  const sharkroundHref = tenantSlug ? withTenantSlug(tenantSlug, "/boardround") : "/boardround";
   const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
   const userRole =
     typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
@@ -39,6 +44,33 @@ export default function SharkroundEstatisticasPage() {
     acertos: 0,
     erros: 0,
   });
+  const [displayName, setDisplayName] = useState(
+    getSharkroundDisplayName(getDefaultSharkroundAppConfig())
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    const loadConfig = async () => {
+      try {
+        const config = await fetchSharkroundAppConfig({
+          forceRefresh: false,
+          tenantId: tenantId || undefined,
+        });
+        if (mounted) {
+          setDisplayName(getSharkroundDisplayName(config));
+        }
+      } catch {
+        if (mounted) {
+          setDisplayName(getSharkroundDisplayName(getDefaultSharkroundAppConfig()));
+        }
+      }
+    };
+
+    void loadConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId]);
 
   useEffect(() => {
     if (loading || !canAccessSharkround) return;
@@ -88,7 +120,7 @@ export default function SharkroundEstatisticasPage() {
           </Link>
           <div>
             <h1 className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
-              <BarChart3 size={18} className="text-cyan-400" /> Estatisticas
+              <BarChart3 size={18} className="text-cyan-400" /> {displayName}
             </h1>
             <p className="text-[11px] text-zinc-500 font-bold">
               Resumo local sem leituras extras

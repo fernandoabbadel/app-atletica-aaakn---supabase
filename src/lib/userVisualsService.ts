@@ -374,9 +374,9 @@ const toCanonicalVisual = (
     plano: planVisual.planName,
     plano_cor: planVisual.planColor,
     plano_icon: planVisual.planIcon,
-    patente: patenteByXp?.titulo || safeRawPatente,
-    patente_icon: patenteByXp?.iconName || safeRawPatenteIcon,
-    patente_cor: patenteByXp?.cor || safeRawPatenteCor,
+    patente: safeRawPatente || patenteByXp?.titulo || "",
+    patente_icon: safeRawPatenteIcon || patenteByXp?.iconName || "",
+    patente_cor: safeRawPatenteCor || patenteByXp?.cor || "",
     xp: raw.xp,
   };
 };

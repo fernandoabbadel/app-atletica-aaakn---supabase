@@ -21,6 +21,7 @@ const nowIso = (): string => new Date().toISOString();
 const SHARKROUND_CONFIG_SELECT_COLUMNS = [
   "id",
   "data",
+  "displayName",
   "dailyRollsLimit",
   "startingCoins",
   "bailCost",
@@ -28,6 +29,7 @@ const SHARKROUND_CONFIG_SELECT_COLUMNS = [
   "heartHelpReward",
   "cycleBaseReward",
   "rules",
+  "display_name",
   "daily_rolls_limit",
   "starting_coins",
   "bail_cost",
@@ -40,6 +42,7 @@ const configCache = new Map<string, CacheEntry<SharkroundAppConfig>>();
 const inflightConfig = new Map<string, Promise<SharkroundAppConfig>>();
 
 export interface SharkroundAppConfig {
+  displayName: string;
   dailyRollsLimit: number;
   startingCoins: number;
   bailCost: number;
@@ -50,6 +53,7 @@ export interface SharkroundAppConfig {
 }
 
 const DEFAULT_SHARKROUND_CONFIG: SharkroundAppConfig = {
+  displayName: "BoardRound",
   dailyRollsLimit: 5,
   startingCoins: 100,
   bailCost: 50,
@@ -84,6 +88,11 @@ const clampInt = (value: number, min: number, max: number): number => {
   if (rounded < min) return min;
   if (rounded > max) return max;
   return rounded;
+};
+
+const normalizeDisplayName = (value: unknown): string => {
+  const cleanValue = asString(value).trim().replace(/\s+/g, " ").slice(0, 40);
+  return cleanValue || DEFAULT_SHARKROUND_CONFIG.displayName;
 };
 
 const normalizeRules = (value: unknown): string[] => {
@@ -154,6 +163,9 @@ const normalizeConfig = (raw: unknown): SharkroundAppConfig => {
   const sources = [data, nestedData];
 
   return {
+    displayName: normalizeDisplayName(
+      pickUnknown(sources, ["displayName", "display_name"])
+    ),
     dailyRollsLimit: clampInt(
       pickNumber(
         sources,
@@ -330,6 +342,7 @@ async function saveConfigWithClient(
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveSharkroundTenantId(tenantId);
   const dataPayload = {
+    displayName: normalized.displayName,
     dailyRollsLimit: normalized.dailyRollsLimit,
     startingCoins: normalized.startingCoins,
     bailCost: normalized.bailCost,
@@ -344,6 +357,7 @@ async function saveConfigWithClient(
     ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     data: dataPayload,
     ...normalized,
+    display_name: normalized.displayName,
     daily_rolls_limit: normalized.dailyRollsLimit,
     starting_coins: normalized.startingCoins,
     bail_cost: normalized.bailCost,
@@ -373,7 +387,7 @@ async function saveConfigWithClient(
     delete mutablePayload[safeRemovableKey];
   }
 
-  throw new Error("Falha ao salvar configuracao SharkRound.");
+  throw new Error("Falha ao salvar configuracao do BoardRound.");
 }
 
 export async function fetchSharkroundAppConfig(options?: {
@@ -443,6 +457,10 @@ export async function saveSharkroundAppConfig(
 export function getDefaultSharkroundAppConfig(): SharkroundAppConfig {
   return { ...DEFAULT_SHARKROUND_CONFIG, rules: [...DEFAULT_SHARKROUND_CONFIG.rules] };
 }
+
+export const getSharkroundDisplayName = (
+  config?: Pick<SharkroundAppConfig, "displayName"> | null
+): string => normalizeDisplayName(config?.displayName);
 
 export function clearSharkroundAppConfigCache(): void {
   configCache.clear();

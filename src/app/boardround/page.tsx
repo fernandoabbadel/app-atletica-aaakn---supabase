@@ -20,6 +20,7 @@ import {
 } from "../../lib/sharkroundGameService";
 import {
   fetchSharkroundAppConfig,
+  getSharkroundDisplayName,
   getDefaultSharkroundAppConfig,
   type SharkroundAppConfig,
 } from "../../lib/sharkroundConfigService";
@@ -151,6 +152,7 @@ export default function SharkRoundPage() {
   const [gameConfig, setGameConfig] = useState<SharkroundAppConfig>(
     getDefaultSharkroundAppConfig()
   );
+  const boardroundDisplayName = getSharkroundDisplayName(gameConfig);
   
   const [isDebugMode, setIsDebugMode] = useState(false);
 
@@ -426,7 +428,7 @@ export default function SharkRoundPage() {
             user?.uid || 'guest', 
             user?.nome || 'Visitante',
             'GAME_CYCLE', 
-            'SharkRound', 
+            boardroundDisplayName,
             `Ganhou ${total} moedas no ciclo.`
         );
     }
@@ -538,15 +540,15 @@ export default function SharkRoundPage() {
   }
 
   const dashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
-  const rankingHref = tenantSlug ? withTenantSlug(tenantSlug, "/sharkround/ranking") : "/sharkround/ranking";
-  const statsHref = tenantSlug ? withTenantSlug(tenantSlug, "/sharkround/estatisticas") : "/sharkround/estatisticas";
+  const rankingHref = tenantSlug ? withTenantSlug(tenantSlug, "/boardround/ranking") : "/boardround/ranking";
+  const statsHref = tenantSlug ? withTenantSlug(tenantSlug, "/boardround/estatisticas") : "/boardround/estatisticas";
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-24 overflow-hidden selection:bg-emerald-500/30">
       
       {/* HEADER */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 p-4 flex justify-between items-center shadow-lg">
-         <div className="flex items-center gap-3"><Link href={dashboardHref} className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition"><ArrowLeft size={24}/></Link><div><h1 className="font-black text-lg italic uppercase text-white">SharkRound</h1><p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">O jogo da atletica</p></div></div>
+         <div className="flex items-center gap-3"><Link href={dashboardHref} className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition"><ArrowLeft size={24}/></Link><div><h1 className="font-black text-lg italic uppercase text-white">{boardroundDisplayName}</h1><p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">O jogo da atletica</p></div></div>
          <div className="flex gap-3 items-center">
               <Link href={rankingHref} className="p-2 bg-zinc-800 rounded-full border border-zinc-700 text-emerald-400 hover:bg-zinc-700 transition">
                 <Trophy size={18}/>

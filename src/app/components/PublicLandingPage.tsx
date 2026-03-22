@@ -28,7 +28,10 @@ import {
   PLATFORM_BRAND_SUBTITLE,
   PLATFORM_LOGO_URL,
 } from "@/constants/platformBrand";
-import { type LandingConfig } from "@/lib/adminLandingService";
+import {
+  DEFAULT_LOADING_PHRASES,
+  type LandingConfig,
+} from "@/lib/adminLandingService";
 import {
   fetchPublicLandingData,
   type PublicLandingPayload,
@@ -54,6 +57,7 @@ const DEFAULT_CONFIG: LandingConfig = {
   phone: "(12) 99999-9999",
   whatsapp: "5512999999999",
   email: "suporte@spotconnect.app",
+  loadingPhrases: [...DEFAULT_LOADING_PHRASES],
   socialLinks: [],
   reviews: [],
 };

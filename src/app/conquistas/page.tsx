@@ -6,7 +6,7 @@ import {
   Fish, Rocket, Swords, Skull, ShoppingBag, Gem, PartyPopper, 
   Beer, Ticket, BookOpen, DollarSign, HeartHandshake, Heart, Megaphone, 
   ShieldAlert, Crown, Activity, Dumbbell, Flame, Zap, Wallet, Timer, MessageCircle, Gamepad2,
-  ThumbsUp, LayoutGrid, UserPlus, Target, Star, Ghost, Medal,
+  ThumbsUp, LayoutGrid, UserPlus, Target, Star, Ghost, Medal, Calendar,
   Briefcase, GraduationCap, AlertTriangle, Database, Wrench, Bot
 } from "lucide-react";
 import Link from "next/link";
@@ -15,16 +15,12 @@ import { useToast } from "../../context/ToastContext";
 import { useTenantTheme } from "../../context/TenantThemeContext";
 import { ACHIEVEMENTS_CATALOG, AchievementCategory } from "../../lib/achievements";
 import {
-  fetchAchievementsConfig,
-  fetchPatentesConfig,
-  type AchievementConfigRecord,
-  type PatenteConfigRecord,
+  fetchUserAchievementSnapshot,
 } from "../../lib/achievementsService";
 import {
-  fetchTenantMembershipDirectory,
-  resolveTenantScopedStats,
-  resolveTenantScopedXp,
-} from "../../lib/tenantMembershipDirectory";
+  type RuntimeAchievementConfig,
+  type RuntimePatenteConfig,
+} from "../../lib/achievementRuntime";
 
 // 🦈 Tipagem Segura para o Mapa de Ícones
 const IconMap: Record<string, React.ElementType> = {
@@ -34,7 +30,7 @@ const IconMap: Record<string, React.ElementType> = {
     HeartHandshake, Heart, Megaphone,
     ShieldAlert, Activity, Dumbbell,
     Flame, Crown, Zap, Wallet,
-    Timer, MessageCircle, Gamepad2,
+    Timer, MessageCircle, Gamepad2, Calendar,
     ThumbsUp, LayoutGrid, CheckCircle2,
     UserPlus, Target, Star, Ghost, Medal,
     Briefcase, GraduationCap, Diamond: Gem, Beiceps: Dumbbell
@@ -58,6 +54,9 @@ interface AchievementDisplay extends AchievementConfig {
     isUnlocked: boolean;
     keyExists: boolean;
 }
+
+type AchievementConfigRecord = RuntimeAchievementConfig;
+type PatenteConfigRecord = RuntimePatenteConfig;
 
 interface BadgeConfig {
     id: string;
@@ -156,7 +155,7 @@ export default function ConquistasPage() {
   
   // 🦈 Verificação segura de role
   const role = typeof user?.role === 'string' ? user.role : '';
-  const isAdmin = role === 'master' || role.includes('admin');
+  const isMaster = role === 'master';
   const effectiveTenantId =
     activeTenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
   useEffect(() => {
@@ -170,54 +169,26 @@ export default function ConquistasPage() {
 
       const loadCatalogData = async () => {
           try {
-              const membershipPromise =
-                  effectiveTenantId
-                      ? fetchTenantMembershipDirectory({
-                            tenantId: effectiveTenantId,
-                            userIds: [user.uid],
-                            statuses: ["approved", "pending", "disabled"],
-                            limit: 1,
-                        })
-                      : Promise.resolve([]);
-
-              const [catalogData, badgesData, membershipRows] = await Promise.all([
-                  fetchAchievementsConfig({
-                      maxResults: 220,
-                      tenantId: effectiveTenantId || undefined,
-                  }),
-                  fetchPatentesConfig({
-                      maxResults: 40,
-                      tenantId: effectiveTenantId || undefined,
-                  }),
-                  membershipPromise,
-              ]);
+              const snapshot = await fetchUserAchievementSnapshot({
+                  userId: user.uid,
+                  tenantId: effectiveTenantId || undefined,
+                  fallbackStats: (user.stats ?? {}) as Record<string, unknown>,
+                  fallbackXp: Math.max(0, user.xp || 0),
+              });
 
               if (!mounted) return;
 
-              const membership = membershipRows[0];
-              setTenantScopedStats(
-                  membership
-                      ? (resolveTenantScopedStats(membership) as Record<string, number | undefined>)
-                      : (user.stats ?? {})
-              );
-              setTenantScopedXp(
-                  membership ? resolveTenantScopedXp(membership) : Math.max(0, user.xp || 0)
-              );
-
-              if (catalogData.length > 0) {
-                  setCatalog(mergeCatalogWithDefaults(catalogData));
-              } else {
-                  setCatalog(ACHIEVEMENTS_CATALOG);
-              }
-
-              if (badgesData.length > 0) {
-                  setBadgesList(badgesData.map(mapBadgeConfig));
-              }
+              setTenantScopedStats(snapshot.stats);
+              setTenantScopedXp(snapshot.displayXp);
+              setCatalog(mergeCatalogWithDefaults(snapshot.catalog));
+              setBadgesList(snapshot.patentes.map(mapBadgeConfig));
           } catch (error: unknown) {
               console.error(error);
               if (mounted) {
                   setTenantScopedStats(user.stats ?? {});
                   setTenantScopedXp(Math.max(0, user.xp || 0));
+                  setCatalog(ACHIEVEMENTS_CATALOG);
+                  setBadgesList(DEFAULT_BADGES);
                   addToast("Nao foi possivel sincronizar conquistas agora.", "error");
               }
           }
@@ -338,7 +309,7 @@ Por favor, analise onde essas chaves deveriam ser atualizadas (ex: ao fazer logi
             </p>
         </div>
         
-        {isAdmin && (
+        {isMaster && (
             <div className="flex gap-2">
                 {debugMode && (
                     <button 

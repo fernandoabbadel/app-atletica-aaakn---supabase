@@ -30,6 +30,10 @@ import {
   fetchEffectiveTenantAppModulesConfig,
   isTenantAppModuleVisible,
 } from "@/lib/tenantAppModulesService";
+import {
+  fetchSharkroundAppConfig,
+  getSharkroundDisplayName,
+} from "@/lib/sharkroundConfigService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- INTERFACES ESTRITAS ---
@@ -281,6 +285,7 @@ export default function DashboardPage() {
 
   const [loadingData, setLoadingData] = useState(true);
   const [loadingLike, setLoadingLike] = useState(false);
+  const [boardroundDisplayName, setBoardroundDisplayName] = useState("BoardRound");
   const [modulesConfig, setModulesConfig] = useState(createDefaultTenantAppModulesConfig);
 
   // Refs com Tipagem Correta para scroll
@@ -302,6 +307,7 @@ export default function DashboardPage() {
         const [data, modules] = await Promise.all([
           fetchDashboardBundle({
             tenantId: activeTenantId || undefined,
+            userId: user?.uid || undefined,
           }),
           fetchEffectiveTenantAppModulesConfig({
             tenantId: activeTenantId || user?.tenant_id || undefined,
@@ -333,7 +339,32 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [activeTenantId, activeTenantSlug, user?.tenant_id]);
+  }, [activeTenantId, activeTenantSlug, user?.tenant_id, user?.uid]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadBoardroundConfig = async () => {
+      try {
+        const config = await fetchSharkroundAppConfig({
+          forceRefresh: false,
+          tenantId: activeTenantId || undefined,
+        });
+        if (active) {
+          setBoardroundDisplayName(getSharkroundDisplayName(config));
+        }
+      } catch {
+        if (active) {
+          setBoardroundDisplayName("BoardRound");
+        }
+      }
+    };
+
+    void loadBoardroundConfig();
+    return () => {
+      active = false;
+    };
+  }, [activeTenantId]);
 
   const scroll = (ref: React.RefObject<HTMLDivElement | null>, dir: 'left' | 'right') => { 
       if (ref.current) {
@@ -472,7 +503,7 @@ export default function DashboardPage() {
     userRoleNormalized === "master" ||
     userRoleNormalized === "admin_geral" ||
     userRoleNormalized === "admin_gestor"
-      ? tenantPath("/sharkround")
+      ? tenantPath("/boardround")
       : tenantPath("/em-breve");
 
   return (
@@ -611,7 +642,7 @@ export default function DashboardPage() {
       </Link>
       )}
 
-      {/* 2. SHARK ROUND (COM FAIXA "EM BREVE") & TREINOS */}
+      {/* 2. BOARDROUND (COM FAIXA "EM BREVE") & TREINOS */}
       {(isModuleVisible("sharkround") || isModuleVisible("treinos")) && (
       <div
         className={`grid gap-4 ${
@@ -629,7 +660,7 @@ export default function DashboardPage() {
               
               <div className="absolute right-0 top-0 w-24 h-24 bg-white/10 rounded-full blur-xl -mr-6 -mt-6"></div>
               <Target size={32} className="text-black relative z-10" />
-              <h3 className="font-black text-black text-xl uppercase italic leading-none relative z-10 drop-shadow-md">Shark<br/>Round</h3>
+              <h3 className="font-black text-black text-xl uppercase italic leading-none relative z-10 drop-shadow-md">{boardroundDisplayName}</h3>
           </Link>
           )}
           
@@ -736,7 +767,7 @@ export default function DashboardPage() {
                <SectionHeader 
                   title="Ligas Acadêmicas" 
                   icon={Users} 
-                  link={tenantPath("/ligas_unitau")} 
+                  link={tenantPath("/ligas_usc")} 
                   colorClass="text-yellow-500"
                   onPrev={() => scroll(ligasScrollRef, 'left')} 
                   onNext={() => scroll(ligasScrollRef, 'right')} 
@@ -748,7 +779,7 @@ export default function DashboardPage() {
                            const bizuAtivo = getLigaBizuAtivo(liga);
                            const textoCard = (bizuAtivo || liga.descricao || "Liga acadêmica em destaque.").trim();
                            return (
-                           <Link href={tenantPath("/ligas_unitau")} key={liga.id} className="min-w-[160px] flex flex-col items-center gap-4 snap-start group cursor-pointer relative bg-gradient-to-b from-zinc-900 to-black p-5 rounded-[24px] border border-zinc-800 hover:border-yellow-500/50 transition-all shadow-xl active:scale-95">
+                           <Link href={tenantPath("/ligas_usc")} key={liga.id} className="min-w-[160px] flex flex-col items-center gap-4 snap-start group cursor-pointer relative bg-gradient-to-b from-zinc-900 to-black p-5 rounded-[24px] border border-zinc-800 hover:border-yellow-500/50 transition-all shadow-xl active:scale-95">
                                
                                <div className="relative w-24 h-24">
                                    <div className="absolute inset-0 rounded-full border-2 border-dashed border-yellow-500/50 animate-spin-slow pointer-events-none"></div>

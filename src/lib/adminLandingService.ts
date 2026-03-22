@@ -9,6 +9,8 @@ const READ_CACHE_TTL_MS = 45_000;
 
 const MAX_SOCIAL_LINKS = 20;
 const MAX_REVIEWS = 30;
+export const MAX_LOADING_PHRASES = 10;
+export const LOADING_PHRASE_MAX_LENGTH = 90;
 
 const MIN_STAT_VALUE = 0;
 const MAX_STAT_VALUE = 9_999_999;
@@ -17,6 +19,7 @@ const MAX_STAT_VALUE = 9_999_999;
 const SITE_CONFIG_TABLE = "site_config";
 const LANDING_CONFIG_ROW_ID = "landing_page";
 const LANDING_ROW_SELECT_COLUMNS = "id,data,updated_at";
+const LANDING_CONFIG_STORAGE_KEY_PREFIX = "usc:landing-config:";
 
 const landingConfigCache = new Map<string, CacheEntry<LandingConfig>>();
 
@@ -58,9 +61,23 @@ export interface LandingConfig {
   phone: string;
   whatsapp: string;
   email: string;
+  loadingPhrases: string[];
   socialLinks: SocialLink[];
   reviews: ReviewConfig[];
 }
+
+export const DEFAULT_LOADING_PHRASES = [
+  "Preparando o ambiente para voce.",
+  "Carregando dados da pagina.",
+  "Conferindo seu acesso atual.",
+  "Sincronizando informacoes da atletica.",
+  "Montando a proxima tela.",
+  "Buscando os dados mais recentes.",
+  "Organizando os modulos do app.",
+  "Quase tudo pronto por aqui.",
+  "Aplicando a identidade visual.",
+  "Abrindo seu painel com seguranca.",
+] as const;
 
 export const DEFAULT_LANDING_CONFIG: LandingConfig = {
   tagline: "Gestao Esportiva 2.0",
@@ -78,6 +95,7 @@ export const DEFAULT_LANDING_CONFIG: LandingConfig = {
   phone: "",
   whatsapp: "",
   email: "suporte@usc.app",
+  loadingPhrases: [...DEFAULT_LOADING_PHRASES],
   socialLinks: [],
   reviews: [],
 };
@@ -158,6 +176,19 @@ const normalizeReviews = (raw: unknown, fallback: ReviewConfig[]): ReviewConfig[
   return normalized;
 };
 
+const normalizeLoadingPhrases = (
+  raw: unknown,
+  fallback: string[]
+): string[] => {
+  const source = Array.isArray(raw) ? raw : fallback;
+  const normalized = source
+    .map((entry) => trimField(entry, LOADING_PHRASE_MAX_LENGTH))
+    .filter((entry) => entry.length > 0)
+    .slice(0, MAX_LOADING_PHRASES);
+
+  return normalized.length > 0 ? normalized : [...fallback];
+};
+
 // Aceita tanto linha flat quanto JSON em colunas data/config/payload.
 const extractPayloadData = (raw: unknown): unknown => {
   const obj = asObject(raw);
@@ -206,6 +237,10 @@ export function sanitizeLandingConfig(
     phone: trimField(obj.phone, 40, fallbackConfig.phone),
     whatsapp: trimField(obj.whatsapp, 30, fallbackConfig.whatsapp),
     email: trimField(obj.email, 160, fallbackConfig.email),
+    loadingPhrases: normalizeLoadingPhrases(
+      obj.loadingPhrases,
+      fallbackConfig.loadingPhrases
+    ),
     socialLinks: normalizeSocialLinks(obj.socialLinks, fallbackConfig.socialLinks),
     reviews: normalizeReviews(obj.reviews, fallbackConfig.reviews),
   };
@@ -220,6 +255,42 @@ const buildLandingRowId = (tenantId?: string | null): string => {
   const cleanTenantId = tenantId?.trim() || "";
   return cleanTenantId ? `${LANDING_CONFIG_ROW_ID}__${cleanTenantId}` : LANDING_CONFIG_ROW_ID;
 };
+
+const getLandingStorageKey = (tenantId?: string | null): string =>
+  `${LANDING_CONFIG_STORAGE_KEY_PREFIX}${getLandingCacheKey(tenantId)}`;
+
+const persistLandingSnapshot = (
+  config: LandingConfig,
+  tenantId?: string | null
+): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      getLandingStorageKey(tenantId),
+      JSON.stringify(config)
+    );
+  } catch {
+    // ignora falha de storage
+  }
+};
+
+export function getStoredLandingConfigSnapshot(options?: {
+  tenantId?: string | null;
+  fallbackConfig?: LandingConfig;
+}): LandingConfig | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(getLandingStorageKey(options?.tenantId));
+    if (!raw) return null;
+    return sanitizeLandingConfig(
+      JSON.parse(raw) as unknown,
+      options?.fallbackConfig ?? DEFAULT_LANDING_CONFIG
+    );
+  } catch {
+    return null;
+  }
+}
 
 async function fetchLandingConfigRow(tenantId?: string | null): Promise<unknown> {
   const supabase = getSupabaseClient();
@@ -280,6 +351,7 @@ export async function fetchLandingConfig(options?: {
     cachedAt: Date.now(),
     value: normalized,
   });
+  persistLandingSnapshot(normalized, options?.tenantId);
 
   return normalized;
 }
@@ -297,6 +369,7 @@ export async function saveLandingConfig(
     cachedAt: Date.now(),
     value: normalized,
   });
+  persistLandingSnapshot(normalized, options?.tenantId);
 }
 
 export function clearAdminLandingCache(): void {

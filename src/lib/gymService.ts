@@ -5,6 +5,7 @@ import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { compressImageFile } from "./imageCompression";
 import { functions, storage } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
+import { incrementUserStats } from "./supabaseData";
 import { getSupabaseClient } from "./supabase";
 import { validateImageFile } from "./upload";
 
@@ -237,6 +238,19 @@ export async function toggleGymPostLike(payload: {
       const { error: updateError } = await updateQuery;
       if (updateError) throwSupabaseError(updateError);
 
+      try {
+        await incrementUserStats(
+          userId,
+          {
+            trainingLikesGiven: payload.currentlyLiked ? -1 : 1,
+            likesGiven: payload.currentlyLiked ? -1 : 1,
+          },
+          { tenantId: scopedTenantId || undefined }
+        );
+      } catch (statsError: unknown) {
+        console.warn("Gym: falha ao sincronizar curtida do check-in.", statsError);
+      }
+
       return { ok: true };
     }
   );
@@ -334,26 +348,18 @@ export async function submitGymCheckin(payload: {
         .single();
       if (postError) throwSupabaseError(postError);
 
-      let userQuery = supabase
-        .from("users")
-        .select("xp")
-        .eq("uid", requestPayload.userId);
-      if (scopedTenantId) {
-        userQuery = userQuery.eq("tenant_id", scopedTenantId);
+      try {
+        await incrementUserStats(
+          requestPayload.userId,
+          { gymCheckins: 1 },
+          {
+            tenantId: scopedTenantId || undefined,
+            xpDelta: CHECKIN_XP_REWARD,
+          }
+        );
+      } catch (statsError: unknown) {
+        console.warn("Gym: falha ao sincronizar XP do check-in.", statsError);
       }
-      const { data: userRow, error: userError } = await userQuery.maybeSingle();
-      if (userError) throwSupabaseError(userError);
-
-      const nextXp = asNumber(userRow?.xp, 0) + CHECKIN_XP_REWARD;
-      let userUpdateQuery = supabase
-        .from("users")
-        .update({ xp: nextXp, updatedAt: nowIso })
-        .eq("uid", requestPayload.userId);
-      if (scopedTenantId) {
-        userUpdateQuery = userUpdateQuery.eq("tenant_id", scopedTenantId);
-      }
-      const { error: userUpdateError } = await userUpdateQuery;
-      if (userUpdateError) throwSupabaseError(userUpdateError);
 
       return { postId: asString((postRow as RawRow | null)?.id) };
     }

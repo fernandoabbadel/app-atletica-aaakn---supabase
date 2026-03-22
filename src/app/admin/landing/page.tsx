@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { 
   Save, LayoutTemplate, Palette, Users, 
   MessageSquare, MapPin, Share2, Plus, Trash2,
-  Smartphone, Instagram, Linkedin, Twitter, Youtube, Music2, Globe, Building2
+  Smartphone, Instagram, Linkedin, Twitter, Youtube, Music2, Globe, Building2, Loader2
 } from "lucide-react";
 
 // IMPORTS DO SISTEMA
@@ -15,8 +15,11 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import {
+  DEFAULT_LOADING_PHRASES,
   DEFAULT_LANDING_CONFIG,
   fetchLandingConfig,
+  LOADING_PHRASE_MAX_LENGTH,
+  MAX_LOADING_PHRASES,
   saveLandingConfig,
   type LandingConfig,
   type SocialLink,
@@ -66,6 +69,7 @@ const TENANT_INITIAL_CONFIG: LandingConfig = {
   phone: "",
   whatsapp: "",
   email: "",
+  loadingPhrases: [...DEFAULT_LOADING_PHRASES],
   socialLinks: [],
   reviews: []
 };
@@ -208,6 +212,37 @@ export default function AdminLandingPage() {
       ...config,
       reviews: [...(config.reviews || []), { id: Date.now().toString(), name: "", role: "", text: "", profileUrl: "" }]
     });
+  };
+
+  const addLoadingPhrase = () => {
+    if ((config.loadingPhrases || []).length >= MAX_LOADING_PHRASES) {
+      addToast(`Limite de ${MAX_LOADING_PHRASES} frases atingido.`, "info");
+      return;
+    }
+
+    setConfig({
+      ...config,
+      loadingPhrases: [...(config.loadingPhrases || []), ""],
+    });
+  };
+
+  const removeLoadingPhrase = (index: number) => {
+    const current = config.loadingPhrases || [];
+    if (current.length <= 1) {
+      addToast("Mantenha pelo menos 1 frase de carregamento.", "info");
+      return;
+    }
+
+    setConfig({
+      ...config,
+      loadingPhrases: current.filter((_, phraseIndex) => phraseIndex !== index),
+    });
+  };
+
+  const updateLoadingPhrase = (index: number, value: string) => {
+    const nextLoadingPhrases = [...(config.loadingPhrases || [])];
+    nextLoadingPhrases[index] = value.slice(0, LOADING_PHRASE_MAX_LENGTH);
+    setConfig({ ...config, loadingPhrases: nextLoadingPhrases });
   };
 
   const removeReview = (index: number) => {
@@ -439,6 +474,49 @@ export default function AdminLandingPage() {
                             ))}
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl space-y-5">
+                <div className="flex items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                            <Loader2 className="text-emerald-400" size={20} /> Loading do App
+                        </h2>
+                        <p className="mt-1 text-xs text-zinc-500">
+                            Personalize as frases da tela de carregamento da tenant. Maximo de {MAX_LOADING_PHRASES} frases.
+                        </p>
+                    </div>
+                    <button onClick={addLoadingPhrase} className="text-xs flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded-lg transition">
+                        <Plus size={14}/> Adicionar
+                    </button>
+                </div>
+
+                <div className="space-y-3">
+                    {(config.loadingPhrases || []).map((phrase, idx) => (
+                        <div key={`loading-phrase-${idx}`} className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
+                                    Frase {idx + 1}
+                                </span>
+                                <div className="flex items-center gap-3">
+                                    <span className={`text-[10px] font-bold ${phrase.length >= LOADING_PHRASE_MAX_LENGTH ? "text-yellow-400" : "text-zinc-500"}`}>
+                                        {phrase.length}/{LOADING_PHRASE_MAX_LENGTH}
+                                    </span>
+                                    <button onClick={() => removeLoadingPhrase(idx)} className="text-zinc-600 hover:text-red-500">
+                                        <Trash2 size={14}/>
+                                    </button>
+                                </div>
+                            </div>
+                            <input
+                                value={phrase}
+                                maxLength={LOADING_PHRASE_MAX_LENGTH}
+                                onChange={(e) => updateLoadingPhrase(idx, e.target.value)}
+                                placeholder="Ex: Preparando o cardume para entrar em campo."
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-emerald-500 outline-none"
+                            />
+                        </div>
+                    ))}
                 </div>
             </div>
         </section>
