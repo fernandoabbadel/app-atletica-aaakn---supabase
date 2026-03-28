@@ -34,7 +34,7 @@ import {
   setCommunityPostPatch,
 } from "@/lib/communityService";
 import type { DateLike } from "@/lib/supabaseData";
-import { uploadImage } from "@/lib/upload";
+import { uploadImage, VERSIONED_PUBLIC_ASSET_CACHE_CONTROL } from "@/lib/upload";
 import {
   DEFAULT_COMMUNITY_CATEGORIES,
   normalizeCommunityCategories,
@@ -266,7 +266,8 @@ export default function AdminComunidadePage() {
           compressionMaxBytes: 220 * 1024,
           fileName: "community-cover",
           upsert: true,
-          appendVersionQuery: true,
+          versionStrategy: "file-metadata",
+          cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
         }
       );
 

@@ -299,6 +299,7 @@ export default function AdminLandingPage() {
             className="object-contain p-3"
             sizes="80px"
             unoptimized={!isMasterScope && (tenantLogoUrl || "").startsWith("http")}
+            priority
           />
         </div>
         <div>

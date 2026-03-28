@@ -67,6 +67,7 @@ export default function AdminParceirosAtivosPage() {
           fetchAdminPartnersPage({
             pageSize: PAGE_SIZE,
             status: "active",
+            view: "summary",
             cursorId: reset ? null : cursorId,
             forceRefresh: false,
           }),

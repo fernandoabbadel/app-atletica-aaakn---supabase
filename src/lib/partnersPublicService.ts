@@ -49,8 +49,9 @@ type CacheEntry<T> = { cachedAt: number; value: T };
 const TTL_MS = 30_000;
 const MAX_RESULTS = 600;
 const publicPartnersCache = new Map<string, CacheEntry<PartnerRecord[]>>();
+const PUBLIC_PARTNER_LIST_RPC = "public_partner_list_bundle";
 const PARTNERS_SELECT_COLUMNS =
-  "id,nome,categoria,tier,status,cnpj,responsavel,email,telefone,descricao,endereco,horario,insta,site,whats,imgCapa,imgLogo,mensalidade,vendasTotal,totalScans,cupons,senha,createdAt";
+  "id,nome,categoria,tier,status,descricao,imgCapa,imgLogo,createdAt";
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -172,6 +173,43 @@ const throwSupabaseError = (error: { message: string; code?: string | null; name
   });
 };
 
+const isMissingRpcError = (error: { code?: string | null; message?: string | null }): boolean => {
+  const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "PGRST202" ||
+    code === "42883" ||
+    message.includes("could not find the function") ||
+    message.includes("schema cache") ||
+    (message.includes("function") && message.includes("does not exist"))
+  );
+};
+
+async function fetchPublicPartnersViaRpc(options?: {
+  maxResults?: number;
+  tenantId?: string | null;
+}): Promise<PartnerRecord[] | undefined> {
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
+  if (!scopedTenantId) return [];
+
+  const { data, error } = await supabase.rpc(PUBLIC_PARTNER_LIST_RPC, {
+    p_tenant_id: scopedTenantId,
+    p_limit: boundedLimit(options?.maxResults ?? 240, MAX_RESULTS),
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      return undefined;
+    }
+    throwSupabaseError(error);
+  }
+
+  return asArray(asObject(data)?.partners)
+    .map(normalizePartner)
+    .filter((row): row is PartnerRecord => row !== null);
+}
+
 export async function fetchPublicPartners(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
@@ -191,6 +229,15 @@ export async function fetchPublicPartners(options?: {
   if (!scopedTenantId) {
     setCache(publicPartnersCache, cacheKey, []);
     return [];
+  }
+
+  const rpcRows = await fetchPublicPartnersViaRpc({
+    maxResults,
+    tenantId: scopedTenantId,
+  });
+  if (rpcRows) {
+    setCache(publicPartnersCache, cacheKey, rpcRows);
+    return rpcRows;
   }
 
   let data: unknown[] | null = null;

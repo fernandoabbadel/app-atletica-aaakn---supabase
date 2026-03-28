@@ -181,9 +181,7 @@ export default function AdminTreinosAntigosPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {Array.isArray(entry.confirmados)
-                        ? entry.confirmados.length
-                        : 0}
+                      {Math.max(0, entry.confirmedCount ?? 0)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link

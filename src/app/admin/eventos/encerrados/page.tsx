@@ -5,8 +5,10 @@ import Link from "next/link";
 import { ArrowLeft, Calendar, RefreshCw, Search, Tag } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { isEventExpiredByGrace } from "@/lib/eventDateUtils";
 import { fetchEventsFeed } from "@/lib/eventsNativeService";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const EVENT_ARCHIVE_GRACE_MS = 24 * 60 * 60 * 1000;
 
@@ -44,10 +46,12 @@ const formatDate = (value: string): string => {
 
 export default function AdminEventosEncerradosPage() {
   const { addToast } = useToast();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [events, setEvents] = useState<ArchivedEventRow[]>([]);
+  const adminEventosHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/eventos") : "/admin/eventos";
 
   const loadEvents = useCallback(async (forceRefresh = false) => {
     if (forceRefresh) setRefreshing(true);
@@ -59,6 +63,7 @@ export default function AdminEventosEncerradosPage() {
         includeInactive: true,
         includePast: true,
         forceRefresh,
+        tenantId: activeTenantId || undefined,
       });
       const normalized = rows.map((row) => toArchivedEventRow(row));
       setEvents(normalized);
@@ -70,7 +75,7 @@ export default function AdminEventosEncerradosPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [addToast]);
+  }, [activeTenantId, addToast]);
 
   useEffect(() => {
     void loadEvents(false);
@@ -101,7 +106,7 @@ export default function AdminEventosEncerradosPage() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-6 py-4">
           <div className="flex items-center gap-3">
             <Link
-              href="/admin/eventos"
+              href={adminEventosHref}
               className="rounded-full bg-zinc-900 p-2 text-zinc-300 hover:bg-zinc-800"
             >
               <ArrowLeft size={18} />
@@ -191,13 +196,13 @@ export default function AdminEventosEncerradosPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-2">
                         <Link
-                          href={`/admin/eventos/lista/${entry.id}`}
+                          href={`${adminEventosHref}/lista/${entry.id}`}
                           className="inline-flex rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20"
                         >
                           Lista
                         </Link>
                         <Link
-                          href={`/admin/eventos`}
+                          href={`${adminEventosHref}?edit=${encodeURIComponent(entry.id)}`}
                           className="inline-flex rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-200 hover:border-zinc-500"
                         >
                           Editar

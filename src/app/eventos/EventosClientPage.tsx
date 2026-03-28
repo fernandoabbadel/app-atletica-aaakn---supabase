@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { 
   ArrowLeft, Calendar, MapPin, 
   Loader2, ArrowRight, Heart, Clock, Zap, Users, Search
 } from "lucide-react";
 import Link from "next/link";
 import { OptimizedImage } from "@/app/components/shared/OptimizedImage";
+import { ClientCache } from "@/lib/clientCache";
 import { useAuth } from "../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../context/ToastContext";
@@ -19,6 +20,7 @@ import {
   createDefaultTenantAppModulesConfig,
   fetchEffectiveTenantAppModulesConfig,
   isTenantAppModuleVisible,
+  type TenantAppModulesConfig,
 } from "@/lib/tenantAppModulesService";
 // --- INTERFACES ---
 export interface Evento {
@@ -48,9 +50,8 @@ export interface Evento {
     status: 'ativo' | 'esgotado' | 'em_breve';
     planPrices?: Array<{ planId?: string; planName?: string; price?: string | number }>;
   }>;
-  likesList?: string[];
+  viewerHasLiked?: boolean;
   topTurmas?: string[];
-  interessados?: string[]; // Array de UIDs para controle
 }
 
 const getSaleStatusLabel = (status?: Evento["saleStatus"]): string => {
@@ -67,10 +68,13 @@ const getSaleStatusClass = (status?: Evento["saleStatus"]): string => {
 
 interface EventosClientPageProps {
   initialEventos: Evento[];
+  initialModulesConfig?: TenantAppModulesConfig;
+  initialModulesHydrated?: boolean;
 }
 
 const EVENT_FILTER_ALL = "Todos";
 const EVENT_FILTER_LEAGUES = "Eventos das Ligas";
+const EVENTS_CLIENT_CACHE_TTL_MS = 2 * 60 * 1000;
 
 const isLeagueEvent = (event: Evento): boolean => {
   const tipo = String(event.tipo || "").trim().toLowerCase();
@@ -217,6 +221,7 @@ function EventCard({
   onLikeError,
   tenantId,
   tenantSlug,
+  imageEager = false,
   imagePriority = false,
 }: {
   ev: Evento;
@@ -226,16 +231,17 @@ function EventCard({
   onLikeError: (message: string) => void;
   tenantId?: string;
   tenantSlug?: string;
+  imageEager?: boolean;
   imagePriority?: boolean;
 }) {
-  const [liked, setLiked] = useState(Boolean(userId && ev.likesList?.includes(userId)));
+  const [liked, setLiked] = useState(Boolean(ev.viewerHasLiked));
   const [likesCount, setLikesCount] = useState(ev.stats?.likes || 0);
   const saleStatus = ev.saleStatus || ev.sale_status || "ativo";
 
   useEffect(() => {
-    setLiked(Boolean(userId && ev.likesList?.includes(userId)));
+    setLiked(Boolean(ev.viewerHasLiked));
     setLikesCount(ev.stats?.likes || 0);
-  }, [userId, ev.likesList, ev.stats?.likes]);
+  }, [ev.stats?.likes, ev.viewerHasLiked]);
 
   const loteAtivo = ev.lotes?.find((l) => l.status === 'ativo');
   const precoDisplay = loteAtivo
@@ -300,6 +306,7 @@ function EventCard({
                 alt={ev.titulo}
                 fill
                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                loading={!imagePriority && imageEager ? "eager" : undefined}
                 priority={imagePriority}
                 className="object-cover transition-transform duration-700 group-hover:scale-105 opacity-80 group-hover:opacity-100"
                 style={{ objectPosition: `50% ${ev.imagePositionY || 50}%` }}
@@ -378,20 +385,27 @@ function EventCard({
 }
 
 // --- PAGINA PRINCIPAL ---
-export default function EventosClientPage({ initialEventos }: EventosClientPageProps) {
+export default function EventosClientPage({
+  initialEventos,
+  initialModulesConfig,
+  initialModulesHydrated = false,
+}: EventosClientPageProps) {
   const { user } = useAuth();
   const { tenantId, tenantSigla, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const [eventos, setEventos] = useState<Evento[]>(initialEventos);
   const [loading, setLoading] = useState(initialEventos.length === 0);
-  const [loadingModules, setLoadingModules] = useState(true);
-  const [modulesConfig, setModulesConfig] = useState(createDefaultTenantAppModulesConfig);
+  const [loadingModules, setLoadingModules] = useState(!initialModulesHydrated);
+  const [modulesConfig, setModulesConfig] = useState<TenantAppModulesConfig>(
+    initialModulesConfig ?? createDefaultTenantAppModulesConfig()
+  );
   const [filter, setFilter] = useState(EVENT_FILTER_ALL);
   const [searchTerm, setSearchTerm] = useState("");
   const { userPlanNames, userPlanIds } = useMemo(() => collectUserPlanScope(user), [user]);
+  const skipInitialModulesFetch = useRef(initialModulesHydrated);
 
   useEffect(() => {
-    if (initialEventos.length > 0) {
+    if (initialEventos.length > 0 && !user?.uid) {
       setLoading(false);
       return;
     }
@@ -400,11 +414,17 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
 
     const loadEvents = async () => {
       try {
-        const rows = await fetchEventsFeed({
-          maxResults: 24,
-          forceRefresh: false,
-          tenantId: tenantId || undefined,
-        });
+        const rows = await ClientCache.getOrSet(
+          `events:feed:${tenantId || "all"}:${user?.uid || "anon"}:24`,
+          () =>
+            fetchEventsFeed({
+              maxResults: 24,
+              forceRefresh: false,
+              userId: user?.uid || undefined,
+              tenantId: tenantId || undefined,
+            }),
+          EVENTS_CLIENT_CACHE_TTL_MS
+        );
         if (!mounted) return;
         setEventos(rows as unknown as Evento[]);
       } catch (error: unknown) {
@@ -419,9 +439,15 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
     return () => {
       mounted = false;
     };
-  }, [addToast, initialEventos.length, tenantId]);
+  }, [addToast, initialEventos.length, tenantId, user?.uid]);
 
   useEffect(() => {
+    if (skipInitialModulesFetch.current) {
+      skipInitialModulesFetch.current = false;
+      setLoadingModules(false);
+      return;
+    }
+
     let mounted = true;
 
     const loadModules = async () => {
@@ -574,7 +600,8 @@ export default function EventosClientPage({ initialEventos }: EventosClientPageP
                 onLikeError={(message) => addToast(message, "error")}
                 tenantId={tenantId || undefined}
                 tenantSlug={tenantSlug || undefined}
-                imagePriority={index < 2}
+                imageEager={index < 3}
+                imagePriority={index === 0}
               />
           ))}
 

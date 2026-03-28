@@ -11,18 +11,22 @@ type CacheEntry<T> = { cachedAt: number; value: T };
 const USER_CACHE_TTL_MS = 90_000;
 const PLAN_CACHE_TTL_MS = 120_000;
 const PATENTE_CACHE_TTL_MS = 120_000;
+const VISUAL_CATALOG_SESSION_TTL_MS = 300_000;
+const VISUAL_CATALOG_SESSION_KEY = "userVisualsService:visualCatalog:v1";
 const MAX_IN_CLAUSE = 120;
 const MAX_PLAN_RESULTS = 120;
 const MAX_PATENTE_RESULTS = 80;
 
-type PlanRow = {
+export type UserVisualPlanConfig = {
   nome: string;
   cor: string;
   icon: string;
+  descontoLoja: number;
+  xpMultiplier: number;
   nivelPrioridade: number;
 };
 
-type PatenteRow = {
+export type UserVisualPatenteConfig = {
   titulo: string;
   minXp: number;
   cor: string;
@@ -63,12 +67,90 @@ export type CanonicalUserVisual = {
   xp: number;
 };
 
+type VisualCatalogSessionEnvelope = {
+  cachedAt: number;
+  plans: UserVisualPlanConfig[];
+  patentes: UserVisualPatenteConfig[];
+};
+
 const userCache = new Map<string, CacheEntry<RawUserVisualRow | null>>();
-let planCache: CacheEntry<PlanRow[]> | null = null;
-let patenteCache: CacheEntry<PatenteRow[]> | null = null;
+let planCache: CacheEntry<UserVisualPlanConfig[]> | null = null;
+let patenteCache: CacheEntry<UserVisualPatenteConfig[]> | null = null;
 
 const isFresh = (cachedAt: number, ttl: number): boolean =>
   Date.now() - cachedAt <= ttl;
+
+const readVisualCatalogSessionCache = (): VisualCatalogSessionEnvelope | null => {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(VISUAL_CATALOG_SESSION_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as VisualCatalogSessionEnvelope;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof parsed.cachedAt !== "number" ||
+      !Array.isArray(parsed.plans) ||
+      !Array.isArray(parsed.patentes)
+    ) {
+      window.sessionStorage.removeItem(VISUAL_CATALOG_SESSION_KEY);
+      return null;
+    }
+
+    if (!isFresh(parsed.cachedAt, VISUAL_CATALOG_SESSION_TTL_MS)) {
+      window.sessionStorage.removeItem(VISUAL_CATALOG_SESSION_KEY);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeVisualCatalogSessionCache = (
+  plans: UserVisualPlanConfig[],
+  patentes: UserVisualPatenteConfig[]
+): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    const payload: VisualCatalogSessionEnvelope = {
+      cachedAt: Date.now(),
+      plans,
+      patentes,
+    };
+    window.sessionStorage.setItem(
+      VISUAL_CATALOG_SESSION_KEY,
+      JSON.stringify(payload)
+    );
+  } catch {
+    // ignora erro de quota
+  }
+};
+
+const hydrateVisualCatalogCachesFromSession = (): boolean => {
+  const cached = readVisualCatalogSessionCache();
+  if (!cached) return false;
+
+  if (!planCache || !isFresh(planCache.cachedAt, PLAN_CACHE_TTL_MS)) {
+    planCache = {
+      cachedAt: cached.cachedAt,
+      value: cached.plans,
+    };
+  }
+
+  if (!patenteCache || !isFresh(patenteCache.cachedAt, PATENTE_CACHE_TTL_MS)) {
+    patenteCache = {
+      cachedAt: cached.cachedAt,
+      value: cached.patentes,
+    };
+  }
+
+  return true;
+};
 
 const normalizePlanName = (value: string): string => {
   const raw = value.trim().toLowerCase();
@@ -145,7 +227,9 @@ const toRawUserVisualRow = (row: Row): RawUserVisualRow => ({
   xp: asNumber(row.xp, 0),
 });
 
-const fetchPlanRows = async (): Promise<PlanRow[]> => {
+const fetchPlanRows = async (): Promise<UserVisualPlanConfig[]> => {
+  hydrateVisualCatalogCachesFromSession();
+
   if (planCache && isFresh(planCache.cachedAt, PLAN_CACHE_TTL_MS)) {
     return planCache.value;
   }
@@ -153,7 +237,7 @@ const fetchPlanRows = async (): Promise<PlanRow[]> => {
   const supabase = getSupabaseClient();
   const prioritizedQuery = await supabase
     .from("planos")
-    .select("nome,cor,icon,nivelPrioridade")
+    .select("nome,cor,icon,descontoLoja,xpMultiplier,nivelPrioridade")
     .limit(MAX_PLAN_RESULTS);
 
   let planRowsSource: Row[] = [];
@@ -172,7 +256,7 @@ const fetchPlanRows = async (): Promise<PlanRow[]> => {
 
     const fallbackQuery = await supabase
       .from("planos")
-      .select("nome,cor,icon")
+      .select("nome,cor,icon,descontoLoja,xpMultiplier")
       .limit(MAX_PLAN_RESULTS);
 
     if (fallbackQuery.error) throwSupabaseError(fallbackQuery.error);
@@ -186,6 +270,8 @@ const fetchPlanRows = async (): Promise<PlanRow[]> => {
       nome: asString(row.nome).trim(),
       cor: asString(row.cor).trim(),
       icon: asString(row.icon).trim(),
+      descontoLoja: asNumber((row as Row).descontoLoja, 0),
+      xpMultiplier: asNumber((row as Row).xpMultiplier, 1),
       nivelPrioridade: asNumber((row as Row).nivelPrioridade, Number.MAX_SAFE_INTEGER),
     }))
     .filter((row) => row.nome.length > 0);
@@ -202,7 +288,9 @@ const fetchPlanRows = async (): Promise<PlanRow[]> => {
   return rows;
 };
 
-const fetchPatenteRows = async (): Promise<PatenteRow[]> => {
+const fetchPatenteRows = async (): Promise<UserVisualPatenteConfig[]> => {
+  hydrateVisualCatalogCachesFromSession();
+
   if (patenteCache && isFresh(patenteCache.cachedAt, PATENTE_CACHE_TTL_MS)) {
     return patenteCache.value;
   }
@@ -231,12 +319,12 @@ const fetchPatenteRows = async (): Promise<PatenteRow[]> => {
 };
 
 const resolvePatenteByXp = (
-  patentes: PatenteRow[],
+  patentes: UserVisualPatenteConfig[],
   xp: number
-): PatenteRow | null => {
+): UserVisualPatenteConfig | null => {
   if (patentes.length === 0) return null;
 
-  let selected: PatenteRow | null = null;
+  let selected: UserVisualPatenteConfig | null = null;
   for (const patente of patentes) {
     if (xp >= patente.minXp) {
       selected = patente;
@@ -288,8 +376,10 @@ const shouldFetchUserFromDb = (userId: string): boolean => {
   return !isFresh(cached.cachedAt, USER_CACHE_TTL_MS);
 };
 
-const buildPlanMap = (plans: PlanRow[]): Map<string, PlanRow> => {
-  const map = new Map<string, PlanRow>();
+const buildPlanMap = (
+  plans: UserVisualPlanConfig[]
+): Map<string, UserVisualPlanConfig> => {
+  const map = new Map<string, UserVisualPlanConfig>();
   plans.forEach((plan) => {
     const normalized = normalizePlanName(plan.nome);
     if (!normalized || map.has(normalized)) return;
@@ -298,14 +388,16 @@ const buildPlanMap = (plans: PlanRow[]): Map<string, PlanRow> => {
   return map;
 };
 
-const getDefaultPlan = (plans: PlanRow[]): PlanRow | null => plans[0] ?? null;
+const getDefaultPlan = (
+  plans: UserVisualPlanConfig[]
+): UserVisualPlanConfig | null => plans[0] ?? null;
 
 const resolvePlanVisual = (
   rawPlan: string,
   rawColor: string,
   rawIcon: string,
-  planMap: Map<string, PlanRow>,
-  defaultPlan: PlanRow | null
+  planMap: Map<string, UserVisualPlanConfig>,
+  defaultPlan: UserVisualPlanConfig | null
 ): {
   planName: string;
   planColor: string;
@@ -342,9 +434,9 @@ const resolvePlanVisual = (
 
 const toCanonicalVisual = (
   raw: RawUserVisualRow,
-  planMap: Map<string, PlanRow>,
-  patentes: PatenteRow[],
-  defaultPlan: PlanRow | null
+  planMap: Map<string, UserVisualPlanConfig>,
+  patentes: UserVisualPatenteConfig[],
+  defaultPlan: UserVisualPlanConfig | null
 ): CanonicalUserVisual => {
   const planVisual = resolvePlanVisual(
     raw.plano,
@@ -394,6 +486,7 @@ export async function fetchCanonicalUserVisuals(
   }
 
   const [plans, patentes] = await Promise.all([fetchPlanRows(), fetchPatenteRows()]);
+  writeVisualCatalogSessionCache(plans, patentes);
   const planMap = buildPlanMap(plans);
   const defaultPlan = getDefaultPlan(plans);
 
@@ -405,4 +498,16 @@ export async function fetchCanonicalUserVisuals(
   });
 
   return output;
+}
+
+export async function fetchUserVisualCatalog(): Promise<{
+  plans: UserVisualPlanConfig[];
+  patentes: UserVisualPatenteConfig[];
+}> {
+  hydrateVisualCatalogCachesFromSession();
+
+  const [plans, patentes] = await Promise.all([fetchPlanRows(), fetchPatenteRows()]);
+  writeVisualCatalogSessionCache(plans, patentes);
+
+  return { plans, patentes };
 }

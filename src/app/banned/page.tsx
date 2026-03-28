@@ -61,6 +61,7 @@ export default function BannedPage() {
             fill
             sizes="80px"
             className="object-contain p-2"
+            priority
           />
         </div>
 

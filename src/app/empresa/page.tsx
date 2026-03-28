@@ -83,8 +83,10 @@ export default function EmpresaLoginPage() {
                      src={tenantLogoUrl || "/logo.png"} 
                      alt={tenantName ? `Logo ${tenantName}` : "Logo da atletica"} 
                      fill
+                     sizes="96px"
                      className="object-contain relative z-10 drop-shadow-2xl" 
                      unoptimized={Boolean(tenantLogoUrl && tenantLogoUrl.startsWith("http"))}
+                     priority
                    />
                 </div>
                 <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-1">Área do Parceiro</h1>

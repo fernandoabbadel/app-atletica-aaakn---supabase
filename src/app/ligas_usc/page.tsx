@@ -25,6 +25,7 @@ import {
   toggleUserLeagueFollow,
   type LeagueRecord,
 } from "../../lib/leaguesService";
+import { resolveLeagueLogoSrc } from "../../lib/leagueMedia";
 import { withTenantSlug } from "../../lib/tenantRouting";
 
 // --- 1. INTERFACES (Fim dos 'any') ---
@@ -48,6 +49,8 @@ interface QuizQuestion {
 
 type QuizAnswers = Partial<Record<LeagueQuizQuestionKey, string[]>>;
 const QUIZ_DIRECT_MATCH_WEIGHT = 3;
+const getLeagueLogoSrc = (league?: League | null): string =>
+  resolveLeagueLogoSrc(league, "/placeholder_liga.png");
 
 const normalizeLeagueText = (value: string): string =>
   value
@@ -482,7 +485,7 @@ export default function LigasUnitauPage() {
                         <div key={l.id} onClick={() => { void openLeagueDetails(l); }} className="flex items-center gap-4 bg-black/40 p-3 rounded-xl border border-indigo-500/30 cursor-pointer hover:bg-indigo-900/20 transition group">
                             <span className="font-black text-lg text-indigo-800 w-6 text-center group-hover:text-indigo-500">{i+1}</span>
                             <Image
-                              src={l.logoBase64 || "https://github.com/shadcn.png"}
+                              src={getLeagueLogoSrc(l)}
                               alt={l.nome}
                               width={48}
                               height={48}
@@ -502,7 +505,7 @@ export default function LigasUnitauPage() {
             <div key={l.id} onClick={() => { void openLeagueDetails(l); }} className={`relative rounded-3xl p-1 border transition hover:scale-[1.02] cursor-pointer flex flex-col h-[320px] shadow-2xl ${getRankStyle(i)}`}>
                 <div className="h-40 w-full bg-black rounded-t-[20px] overflow-hidden relative shrink-0">
                     <Image
-                      src={l.logoBase64 || "https://github.com/shadcn.png"}
+                      src={getLeagueLogoSrc(l)}
                       alt={l.nome}
                       fill
                       sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
@@ -515,7 +518,7 @@ export default function LigasUnitauPage() {
                 <div className="p-4 bg-[#050505] rounded-b-[20px] flex-1 flex flex-col justify-between">
                     <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed">{l.descricao || "Sem descrição disponível."}</p>
                     <div className="flex justify-between items-center border-t border-zinc-800 pt-3 mt-auto">
-                        <div className="flex items-center gap-1 text-zinc-400"><Users size={14} className="text-emerald-500"/><span className="text-[10px] font-bold uppercase">Membros: {l.membrosIds?.length || l.membros?.length || 0}</span></div>
+                        <div className="flex items-center gap-1 text-zinc-400"><Users size={14} className="text-emerald-500"/><span className="text-[10px] font-bold uppercase">Membros: {l.membersCount ?? l.membros?.length ?? 0}</span></div>
                         <button onClick={(e) => handleLike(e, l.id)} className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-500 hover:text-red-500 hover:border-red-500/50 transition active:scale-95"><Heart size={14} className={likedLeagues.includes(l.id) ? "fill-current text-red-500" : ""}/><span className="text-xs font-black">{l.likes || 0}</span></button>
                     </div>
                 </div>
@@ -533,7 +536,7 @@ export default function LigasUnitauPage() {
                   {/* Banner Modal */}
                   <div className="h-40 bg-zinc-900 relative shrink-0">
                       <Image
-                        src={selectedLeague.logoBase64 || "https://github.com/shadcn.png"}
+                        src={getLeagueLogoSrc(selectedLeague)}
                         alt="Logo"
                         fill
                         sizes="(max-width: 768px) 100vw, 672px"

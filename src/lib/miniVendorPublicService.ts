@@ -10,9 +10,13 @@ type CacheEntry<T> = { cachedAt: number; value: T };
 
 const TTL_MS = 120_000;
 const MAX_PRODUCTS = 24;
+const SOCIAL_COUNT_SCAN_LIMIT = 2_000;
+const LIGHTWEIGHT_COUNT_MODES = ["planned", "estimated"] as const;
 const bundleCache = new Map<string, CacheEntry<MiniVendorPublicBundle | null>>();
 const socialCountCache = new Map<string, CacheEntry<number>>();
 const socialStateCache = new Map<string, CacheEntry<boolean>>();
+const socialCountInflight = new Map<string, Promise<number>>();
+const bundleInflight = new Map<string, Promise<MiniVendorPublicBundle | null>>();
 
 const asObject = (value: unknown): Row | null =>
   typeof value === "object" && value !== null ? (value as Row) : null;
@@ -71,6 +75,22 @@ const clearMiniVendorPublicCaches = (tenantId?: string | null, miniVendorId?: st
       (!cleanMiniVendorId || key.includes(`:${cleanMiniVendorId}:`))
     ) {
       socialStateCache.delete(key);
+    }
+  });
+  socialCountInflight.forEach((_, key) => {
+    if (
+      (!scopedTenantId || key.startsWith(`${scopedTenantId}:`)) &&
+      (!cleanMiniVendorId || key.includes(`:${cleanMiniVendorId}:`))
+    ) {
+      socialCountInflight.delete(key);
+    }
+  });
+  bundleInflight.forEach((_, key) => {
+    if (
+      (!scopedTenantId || key.startsWith(`${scopedTenantId}:`)) &&
+      (!cleanMiniVendorId || key.includes(`:${cleanMiniVendorId}:`))
+    ) {
+      bundleInflight.delete(key);
     }
   });
 };
@@ -185,26 +205,59 @@ async function countMiniVendorSocialRows(options: {
   if (!options.forceRefresh) {
     const cached = getCache(socialCountCache, cacheKey);
     if (cached !== null) return cached;
+
+    const pending = socialCountInflight.get(cacheKey);
+    if (pending) return pending;
   }
 
-  const supabase = getSupabaseClient();
-  const { count, error } = await supabase
-    .from(options.table)
-    .select("id", { count: "exact", head: true })
-    .eq("tenant_id", tenantId)
-    .eq("mini_vendor_id", miniVendorId);
+  const requestPromise = (async () => {
+    const supabase = getSupabaseClient();
+    for (const mode of LIGHTWEIGHT_COUNT_MODES) {
+      const { count, error } = await supabase
+        .from(options.table)
+        .select("id", { count: mode, head: true })
+        .eq("tenant_id", tenantId)
+        .eq("mini_vendor_id", miniVendorId);
 
-  if (error) {
-    if (isMissingMiniVendorSocialSchema(error)) {
-      setCache(socialCountCache, cacheKey, 0);
-      return 0;
+      if (!error && typeof count === "number") {
+        setCache(socialCountCache, cacheKey, count);
+        return count;
+      }
+
+      if (error && isMissingMiniVendorSocialSchema(error)) {
+        setCache(socialCountCache, cacheKey, 0);
+        return 0;
+      }
     }
-    throwSupabaseError(error);
-  }
 
-  const normalized = count ?? 0;
-  setCache(socialCountCache, cacheKey, normalized);
-  return normalized;
+    const { data, error } = await supabase
+      .from(options.table)
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("mini_vendor_id", miniVendorId)
+      .limit(SOCIAL_COUNT_SCAN_LIMIT);
+
+    if (error) {
+      if (isMissingMiniVendorSocialSchema(error)) {
+        setCache(socialCountCache, cacheKey, 0);
+        return 0;
+      }
+      throwSupabaseError(error);
+    }
+
+    const normalized = (data ?? []).length;
+    setCache(socialCountCache, cacheKey, normalized);
+    return normalized;
+  })();
+
+  socialCountInflight.set(cacheKey, requestPromise);
+  try {
+    return await requestPromise;
+  } finally {
+    if (socialCountInflight.get(cacheKey) === requestPromise) {
+      socialCountInflight.delete(cacheKey);
+    }
+  }
 }
 
 async function readMiniVendorSocialState(options: {
@@ -283,71 +336,85 @@ export async function fetchMiniVendorPublicBundle(options: {
   if (!forceRefresh) {
     const cached = getCache(bundleCache, cacheKey);
     if (cached !== null || bundleCache.has(cacheKey)) return cached;
+
+    const pending = bundleInflight.get(cacheKey);
+    if (pending) return pending;
   }
 
-  const profile = await fetchMiniVendorProfileById({
-    tenantId,
-    miniVendorId,
-    forceRefresh,
-  });
-  if (!profile || profile.status !== "approved") {
-    setCache(bundleCache, cacheKey, null);
-    return null;
+  const requestPromise = (async () => {
+    const profile = await fetchMiniVendorProfileById({
+      tenantId,
+      miniVendorId,
+      forceRefresh,
+    });
+    if (!profile || profile.status !== "approved") {
+      setCache(bundleCache, cacheKey, null);
+      return null;
+    }
+
+    const [productsRows, followersCount, likesCount, isFollowing, isLiked] = await Promise.all([
+      fetchStoreProductsBySeller({
+        seller: { type: "mini_vendor", id: miniVendorId },
+        tenantId,
+        maxResults: maxProducts,
+        forceRefresh,
+        userPlanNames: options.userPlanNames,
+        userPlanIds: options.userPlanIds,
+      }),
+      countMiniVendorSocialRows({
+        table: "mini_vendor_followers",
+        tenantId,
+        miniVendorId,
+        forceRefresh,
+      }),
+      countMiniVendorSocialRows({
+        table: "mini_vendor_likes",
+        tenantId,
+        miniVendorId,
+        forceRefresh,
+      }),
+      readMiniVendorSocialState({
+        table: "mini_vendor_followers",
+        tenantId,
+        miniVendorId,
+        userId: viewerUid,
+        forceRefresh,
+      }),
+      readMiniVendorSocialState({
+        table: "mini_vendor_likes",
+        tenantId,
+        miniVendorId,
+        userId: viewerUid,
+        forceRefresh,
+      }),
+    ]);
+
+    const products = productsRows
+      .map((row) => normalizeMiniVendorPublicProduct(row))
+      .filter((row): row is MiniVendorPublicProduct => row !== null);
+
+    const bundle: MiniVendorPublicBundle = {
+      profile,
+      products,
+      followersCount,
+      likesCount,
+      productsCount: products.length,
+      isFollowing,
+      isLiked,
+    };
+
+    setCache(bundleCache, cacheKey, bundle);
+    return bundle;
+  })();
+
+  bundleInflight.set(cacheKey, requestPromise);
+  try {
+    return await requestPromise;
+  } finally {
+    if (bundleInflight.get(cacheKey) === requestPromise) {
+      bundleInflight.delete(cacheKey);
+    }
   }
-
-  const [productsRows, followersCount, likesCount, isFollowing, isLiked] = await Promise.all([
-    fetchStoreProductsBySeller({
-      seller: { type: "mini_vendor", id: miniVendorId },
-      tenantId,
-      maxResults: maxProducts,
-      forceRefresh,
-      userPlanNames: options.userPlanNames,
-      userPlanIds: options.userPlanIds,
-    }),
-    countMiniVendorSocialRows({
-      table: "mini_vendor_followers",
-      tenantId,
-      miniVendorId,
-      forceRefresh,
-    }),
-    countMiniVendorSocialRows({
-      table: "mini_vendor_likes",
-      tenantId,
-      miniVendorId,
-      forceRefresh,
-    }),
-    readMiniVendorSocialState({
-      table: "mini_vendor_followers",
-      tenantId,
-      miniVendorId,
-      userId: viewerUid,
-      forceRefresh,
-    }),
-    readMiniVendorSocialState({
-      table: "mini_vendor_likes",
-      tenantId,
-      miniVendorId,
-      userId: viewerUid,
-      forceRefresh,
-    }),
-  ]);
-
-  const products = productsRows
-    .map((row) => normalizeMiniVendorPublicProduct(row))
-    .filter((row): row is MiniVendorPublicProduct => row !== null);
-
-  const bundle: MiniVendorPublicBundle = {
-    profile,
-    products,
-    followersCount,
-    likesCount,
-    productsCount: products.length,
-    isFollowing,
-    isLiked,
-  };
-
-  setCache(bundleCache, cacheKey, bundle);
-  return bundle;
 }
 
 async function toggleMiniVendorSocialRow(options: {
@@ -393,6 +460,8 @@ async function toggleMiniVendorSocialRow(options: {
   }
 
   const shouldRemove = options.currentlyActive || Boolean(existing);
+  const countCacheKey = buildScopedKey(tenantId, miniVendorId, options.table);
+  const cachedCount = getCache(socialCountCache, countCacheKey);
 
   if (shouldRemove) {
     const { error } = await supabase
@@ -438,12 +507,16 @@ async function toggleMiniVendorSocialRow(options: {
   }
 
   clearMiniVendorPublicCaches(tenantId, miniVendorId);
-  const count = await countMiniVendorSocialRows({
-    table: options.table,
-    tenantId,
-    miniVendorId,
-    forceRefresh: true,
-  });
+  const count =
+    typeof cachedCount === "number"
+      ? Math.max(0, cachedCount + (shouldRemove ? -1 : 1))
+      : await countMiniVendorSocialRows({
+          table: options.table,
+          tenantId,
+          miniVendorId,
+          forceRefresh: true,
+        });
+  setCache(socialCountCache, countCacheKey, count);
   setCache(
     socialStateCache,
     buildScopedKey(tenantId, miniVendorId, options.table, viewerUid),

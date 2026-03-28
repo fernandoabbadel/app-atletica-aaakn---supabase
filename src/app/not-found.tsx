@@ -25,6 +25,7 @@ export default function NotFound() {
             width={112}
             height={112}
             className="w-full h-full object-contain drop-shadow-2xl grayscale"
+            priority
           />
         </div>
 

@@ -14,7 +14,6 @@ import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
 import { useTenantTheme } from "../../../context/TenantThemeContext";
 import {
-  fetchFollowCounts,
   fetchFollowList,
   fetchPublicProfileBundle,
   toggleFollowProfile
@@ -31,10 +30,10 @@ import { withTenantSlug } from "../../../lib/tenantRouting";
 interface PostItem {
   id: string;
   texto?: string;
-  likes?: string[];
+  likesCount?: number;
   comentarios?: number;
   createdAt?: unknown;
-  userId: string;
+  userId?: string;
 }
 
 interface EventItem {
@@ -43,24 +42,22 @@ interface EventItem {
   data?: string;
   imagem?: string;
   imagePositionY?: number;
-  interessados?: string[];
 }
 
 interface TreinoItem {
   id: string;
   modalidade: string;
   imagem?: string;
-  dia: string;
-  horario: string;
-  local: string;
-  confirmados?: string[];
+  dia?: string;
+  horario?: string;
+  local?: string;
 }
 
 interface LigaItem {
   id: string;
   sigla?: string;
-  logoBase64?: string;
-  membrosIds?: string[];
+  foto?: string;
+  logo?: string;
 }
 
 interface UserProfile {
@@ -240,18 +237,6 @@ export default function PerfilPublicoPage() {
                 setFollowersCount(bundle.followersCount);
                 setFollowingCount(bundle.followingCount);
 
-                void fetchFollowCounts(uid, {
-                  forceRefresh: true,
-                  tenantId: effectiveTenantId || undefined,
-                })
-                  .then((counts) => {
-                      setFollowersCount(counts.followersCount);
-                      setFollowingCount(counts.followingCount);
-                  })
-                  .catch(() => {
-                      // Mantem contador do bundle se count falhar.
-                  });
-
                 setIsFollowing(bundle.isFollowing);
 
                 setRecentPosts((bundle.posts as PostItem[]).slice(0, 5));
@@ -330,10 +315,8 @@ export default function PerfilPublicoPage() {
           });
           if (type === 'followers') {
               setFollowersList(list);
-              setFollowersCount(list.length);
           } else {
               setFollowingList(list);
-              setFollowingCount(list.length);
           }
       } catch (error: unknown) {
           console.error(error);
@@ -505,7 +488,7 @@ export default function PerfilPublicoPage() {
                     {/* POSTS */}
                     {activeTab === 'posts' && (
                         recentPosts.length > 0 ? (
-                            <div className="space-y-2 animate-in fade-in">{recentPosts.map(p => (<div key={p.id} className="bg-zinc-900/50 border border-zinc-800 p-3 rounded-xl"><p className="text-xs text-zinc-300 truncate mb-1">&quot;{p.texto}&quot;</p><div className="flex justify-between items-center text-[10px] text-zinc-500"><div className="flex items-center gap-2"><span className="flex items-center gap-1"><Heart size={10}/> {p.likes?.length || 0}</span><span className="flex items-center gap-1"><MessageCircle size={10}/> {p.comentarios || 0}</span></div><span>{formatPostDate(p.createdAt)}</span></div></div>))}<div className="text-center pt-2"><Link href={tenantPath("/comunidade")} className="text-[10px] text-emerald-500 font-bold hover:underline">Ver Mais na Comunidade</Link></div></div>
+                            <div className="space-y-2 animate-in fade-in">{recentPosts.map(p => (<div key={p.id} className="bg-zinc-900/50 border border-zinc-800 p-3 rounded-xl"><p className="text-xs text-zinc-300 truncate mb-1">&quot;{p.texto}&quot;</p><div className="flex justify-between items-center text-[10px] text-zinc-500"><div className="flex items-center gap-2"><span className="flex items-center gap-1"><Heart size={10}/> {p.likesCount || 0}</span><span className="flex items-center gap-1"><MessageCircle size={10}/> {p.comentarios || 0}</span></div><span>{formatPostDate(p.createdAt)}</span></div></div>))}<div className="text-center pt-2"><Link href={tenantPath("/comunidade")} className="text-[10px] text-emerald-500 font-bold hover:underline">Ver Mais na Comunidade</Link></div></div>
                         ) : <div className="text-center text-zinc-600 text-xs py-4">Nenhum post recente.</div>
                     )}
 
@@ -524,8 +507,8 @@ export default function PerfilPublicoPage() {
                                     <Link href={tenantPath("/ligas_usc")} key={l.id} className="flex flex-col items-center gap-2 group">
                                         <div className="w-24 h-24 rounded-full bg-black border-2 border-zinc-800 p-0.5 group-hover:border-emerald-500 group-hover:scale-105 transition-all shadow-lg">
                                             <div className="w-full h-full rounded-full overflow-hidden bg-zinc-900 flex items-center justify-center relative">
-                                                {l.logoBase64 ? (
-                                                    <Image src={l.logoBase64} alt={l.sigla || "Liga"} fill sizes="96px" className="object-cover" />
+                                                {l.logo || l.foto ? (
+                                                    <Image src={l.logo || l.foto || ""} alt={l.sigla || "Liga"} fill sizes="96px" className="object-cover" />
                                                 ) : (
                                                     <Users size={32} className="text-zinc-500"/>
                                                 )}
@@ -585,7 +568,7 @@ export default function PerfilPublicoPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm animate-in fade-in">
               <div className="bg-zinc-950 w-full max-w-sm rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
                   <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
-                      <h3 className="text-sm font-bold text-white uppercase flex items-center gap-2">{activeModal === 'followers' ? <Users size={16} className="text-emerald-500"/> : <UserCheck size={16} className="text-blue-500"/>} {activeModal === 'followers' ? `Seguidores (${followersList.length})` : `Seguindo (${followingList.length})`}</h3>
+                      <h3 className="text-sm font-bold text-white uppercase flex items-center gap-2">{activeModal === 'followers' ? <Users size={16} className="text-emerald-500"/> : <UserCheck size={16} className="text-blue-500"/>} {activeModal === 'followers' ? `Seguidores (${followersCount})` : `Seguindo (${followingCount})`}</h3>
                       <button onClick={() => setActiveModal(null)} className="p-1 text-zinc-500 hover:text-white"><X size={20}/></button>
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-1">

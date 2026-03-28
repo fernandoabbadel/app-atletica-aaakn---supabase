@@ -142,12 +142,8 @@ export default function LojaProdutoReviewPage() {
     });
   }, [approvedOrders]);
 
-  const remainingReviewSlots = useMemo(
-    () => Math.max(0, eligibleApprovedOrders.length - userReviewCount),
-    [eligibleApprovedOrders.length, userReviewCount]
-  );
-
-  const canReview = remainingReviewSlots > 0;
+  const hasExistingReview = userReviewCount > 0;
+  const canReview = eligibleApprovedOrders.length > 0 && !hasExistingReview;
 
   const reviewBlockReason = useMemo(() => {
     if (approvedOrders.length === 0) {
@@ -156,11 +152,11 @@ export default function LojaProdutoReviewPage() {
     if (eligibleApprovedOrders.length === 0) {
       return "Prazo encerrado: a avaliacao vale por 5 dias apos a aprovacao.";
     }
-    if (remainingReviewSlots <= 0) {
-      return "Todas as avaliacoes permitidas para este produto ja foram usadas.";
+    if (hasExistingReview) {
+      return "Voce ja avaliou este produto.";
     }
     return "";
-  }, [approvedOrders.length, eligibleApprovedOrders.length, remainingReviewSlots]);
+  }, [approvedOrders.length, eligibleApprovedOrders.length, hasExistingReview]);
 
   useEffect(() => {
     if (loading || canReview || reasonToastShown) return;
@@ -280,7 +276,7 @@ export default function LojaProdutoReviewPage() {
           <form onSubmit={handleSubmit} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 space-y-4">
             <h2 className="text-sm font-black uppercase">Como foi sua experiencia?</h2>
             <p className="text-[11px] text-zinc-500">
-              Avaliacoes disponiveis agora: {remainingReviewSlots}
+              Avaliacao disponivel agora: 1
             </p>
 
             <div className="flex items-center gap-2">

@@ -21,6 +21,7 @@ import {
   type LeagueRecord,
   type LeagueUserRecord,
 } from "../../../lib/leaguesService";
+import { resolveLeagueLogoSrc } from "../../../lib/leagueMedia";
 
 // --- TIPAGEM ---
 interface Member { 
@@ -59,7 +60,7 @@ type Liga = LeagueRecord;
 type UserData = LeagueUserRecord;
 
 const getLeagueLogoSrc = (liga?: Partial<Liga> | null) =>
-  liga?.logoUrl || liga?.logoBase64 || liga?.foto || "";
+  resolveLeagueLogoSrc(liga);
 
 export default function AdminLigasPage() {
   const { user } = useAuth();
@@ -235,7 +236,6 @@ export default function AdminLigasPage() {
         ...prev,
         foto: imageUrl,
         logoUrl: imageUrl,
-        logoBase64: undefined,
       }));
       addToast("Logo enviada com sucesso.", "success");
     } catch (error: unknown) {

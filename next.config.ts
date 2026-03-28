@@ -15,6 +15,8 @@ const remotePatterns: Array<{
   pathname?: string;
 }> = [
   { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" },
+  { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/sign/**" },
+  { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/authenticated/**" },
   { protocol: "https", hostname: "lh3.googleusercontent.com" },
   { protocol: "https", hostname: "www.google.com" },
   { protocol: "https", hostname: "i.pravatar.cc" },
@@ -32,6 +34,16 @@ if (supabaseStorageHostname) {
     protocol: "https",
     hostname: supabaseStorageHostname,
     pathname: "/storage/v1/object/public/**",
+  });
+  remotePatterns.push({
+    protocol: "https",
+    hostname: supabaseStorageHostname,
+    pathname: "/storage/v1/object/sign/**",
+  });
+  remotePatterns.push({
+    protocol: "https",
+    hostname: supabaseStorageHostname,
+    pathname: "/storage/v1/object/authenticated/**",
   });
 }
 

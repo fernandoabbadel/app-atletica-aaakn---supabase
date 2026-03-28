@@ -206,15 +206,12 @@ create table if not exists public.eventos (
   stats jsonb not null default '{"confirmados":0,"talvez":0,"likes":0}'::jsonb,
   "vendasTotais" jsonb not null default '{"vendidos":0,"total":0}'::jsonb,
   "pixChave" text, "pixBanco" text, "pixTitular" text, "contatoComprovante" text,
-  interessados text[] not null default '{}',
-  "likesList" text[] not null default '{}',
   "createdAt" timestamptz not null default now(),
   "updatedAt" timestamptz not null default now(),
   data_extra jsonb not null default '{}'::jsonb
 );
 create index if not exists idx_eventos_data on public.eventos (data);
 create index if not exists idx_eventos_createdAt_desc on public.eventos ("createdAt" desc);
-create index if not exists idx_eventos_interessados_gin on public.eventos using gin (interessados);
 
 create table if not exists public.eventos_rsvps (
   id text primary key default gen_random_uuid()::text,
@@ -228,6 +225,16 @@ create table if not exists public.eventos_rsvps (
   unique ("eventoId", "userId")
 );
 create index if not exists idx_eventos_rsvps_evento_status on public.eventos_rsvps ("eventoId", status);
+
+create table if not exists public.eventos_likes (
+  id text primary key default gen_random_uuid()::text,
+  "eventoId" text not null references public.eventos(id) on delete cascade,
+  "userId" text not null,
+  "createdAt" timestamptz not null default now(),
+  unique ("eventoId", "userId")
+);
+create index if not exists idx_eventos_likes_evento_created_at on public.eventos_likes ("eventoId", "createdAt" desc);
+create index if not exists idx_eventos_likes_user_created_at on public.eventos_likes ("userId", "createdAt" desc);
 
 create table if not exists public.eventos_comentarios (
   id text primary key default gen_random_uuid()::text,
@@ -253,12 +260,23 @@ create table if not exists public.eventos_enquetes (
   question text not null default '',
   "allowUserOptions" boolean not null default true,
   options jsonb not null default '[]'::jsonb,
-  voters text[] not null default '{}',
-  "userVotes" jsonb not null default '{}'::jsonb,
   "createdAt" timestamptz not null default now(),
   "updatedAt" timestamptz not null default now()
 );
 create index if not exists idx_eventos_enquetes_evento_createdAt on public.eventos_enquetes ("eventoId", "createdAt" desc);
+
+create table if not exists public.eventos_enquete_votos (
+  id text primary key default gen_random_uuid()::text,
+  "enqueteId" text not null references public.eventos_enquetes(id) on delete cascade,
+  "eventoId" text not null references public.eventos(id) on delete cascade,
+  "userId" text not null,
+  "optionIndex" integer not null,
+  "userTurma" text not null default 'Geral',
+  "createdAt" timestamptz not null default now(),
+  unique ("enqueteId", "userId", "optionIndex")
+);
+create index if not exists idx_eventos_enquete_votos_poll_user on public.eventos_enquete_votos ("enqueteId", "userId");
+create index if not exists idx_eventos_enquete_votos_poll_option on public.eventos_enquete_votos ("enqueteId", "optionIndex");
 
 create table if not exists public.solicitacoes_ingressos (
   id text primary key default gen_random_uuid()::text,
@@ -459,13 +477,12 @@ create table if not exists public.treinos (
   descricao text, imagem text,
   "ordemDia" integer not null default 0,
   status text not null default 'ativo',
-  confirmados text[] not null default '{}',
+  "confirmedCount" integer not null default 0,
   "createdAt" timestamptz not null default now(),
   "updatedAt" timestamptz not null default now(),
   data jsonb not null default '{}'::jsonb
 );
 create index if not exists idx_treinos_dia on public.treinos (dia);
-create index if not exists idx_treinos_confirmados_gin on public.treinos using gin (confirmados);
 
 create table if not exists public.treinos_rsvps (
   id text primary key default gen_random_uuid()::text,
@@ -567,46 +584,72 @@ create table if not exists public.album_config (
 
 create table if not exists public.album_captures (
   id text primary key default gen_random_uuid()::text,
+  tenant_id uuid not null,
   "collectorUserId" text not null,
   "targetUserId" text not null,
   nome text, turma text,
   "dataColada" timestamptz not null default now(),
-  unique ("collectorUserId", "targetUserId")
+  unique (tenant_id, "collectorUserId", "targetUserId")
 );
-create index if not exists idx_album_captures_collector on public.album_captures ("collectorUserId", "dataColada" desc);
+create index if not exists idx_album_captures_tenant_collector on public.album_captures (tenant_id, "collectorUserId", "dataColada" desc);
 
 create table if not exists public.album_summary (
-  "userId" text primary key,
+  tenant_id uuid not null,
+  "userId" text not null,
   "totalCollected" integer not null default 0,
-  "capturedByTurma" jsonb not null default '{}'::jsonb,
   "lastCaptureId" text,
   "lastCaptureAt" timestamptz,
-  "updatedAt" timestamptz not null default now()
+  "updatedAt" timestamptz not null default now(),
+  primary key (tenant_id, "userId")
 );
+
+create table if not exists public.album_summary_turmas (
+  id text primary key default gen_random_uuid()::text,
+  tenant_id uuid not null,
+  "userId" text not null,
+  turma text not null,
+  "capturedCount" integer not null default 0,
+  "updatedAt" timestamptz not null default now(),
+  unique (tenant_id, "userId", turma)
+);
+create index if not exists idx_album_summary_turmas_tenant_user on public.album_summary_turmas (tenant_id, "userId", turma);
 
 create table if not exists public.album_rankings (
   id text primary key default gen_random_uuid()::text,
-  "userId" text not null unique,
+  tenant_id uuid not null,
+  "userId" text not null,
   nome text not null default 'Sem nome',
   foto text not null default '',
   turma text not null default '',
   "totalColetado" integer not null default 0,
   "scansT8" integer not null default 0,
   "ultimoScan" timestamptz,
-  "updatedAt" timestamptz not null default now()
+  "updatedAt" timestamptz not null default now(),
+  unique (tenant_id, "userId")
 );
-create index if not exists idx_album_rank_total on public.album_rankings ("totalColetado" desc, "scansT8" desc);
+create index if not exists idx_album_rank_tenant_total on public.album_rankings (tenant_id, "totalColetado" desc, "scansT8" desc);
 
 create table if not exists public.ligas_config (
   id text primary key default gen_random_uuid()::text,
-  nome text, sigla text, foto text, logo text, "logoBase64" text, bizu text,
-  "membrosIds" text[] not null default '{}',
+  nome text, sigla text, foto text, logo text, "logoUrl" text, bizu text,
+  membros jsonb not null default '[]'::jsonb,
+  "membersCount" integer not null default 0,
   status text not null default 'ativa',
   "createdAt" timestamptz not null default now(),
   "updatedAt" timestamptz not null default now(),
   data jsonb not null default '{}'::jsonb
 );
-create index if not exists idx_ligas_membros_gin on public.ligas_config using gin ("membrosIds");
+
+create table if not exists public.ligas_membros (
+  id text primary key default gen_random_uuid()::text,
+  "ligaId" text not null references public.ligas_config(id) on delete cascade,
+  "userId" text not null,
+  cargo text not null default 'Membro',
+  "joinedAt" timestamptz not null default now(),
+  unique ("ligaId", "userId")
+);
+create index if not exists idx_ligas_membros_liga_joined on public.ligas_membros ("ligaId", "joinedAt" desc);
+create index if not exists idx_ligas_membros_user_joined on public.ligas_membros ("userId", "joinedAt" desc);
 
 create table if not exists public.arena_matches (
   id text primary key default gen_random_uuid()::text,

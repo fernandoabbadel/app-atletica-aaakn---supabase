@@ -38,6 +38,11 @@ import {
   hasAdminPanelAccess,
   isPlatformMaster,
 } from "@/lib/roles";
+import {
+  fetchUserVisualCatalog,
+  type UserVisualPatenteConfig,
+  type UserVisualPlanConfig,
+} from "@/lib/userVisualsService";
 
 // --- TIPAGEM ---
 export type UserRole =
@@ -54,21 +59,8 @@ export type UserRole =
   | "vendas";
 export type UserStatus = "ativo" | "inadimplente" | "banned" | "pendente" | "paused" | "bloqueado";
 
-interface PatenteConfig {
-    titulo: string;
-    minXp: number;
-    iconName: string;
-    cor: string;
-}
-
-interface PlanoConfig {
-    nome: string;
-    cor: string;
-    icon: string;
-    descontoLoja: number;
-    xpMultiplier: number;
-    nivelPrioridade: number;
-}
+type PatenteConfig = UserVisualPatenteConfig;
+type PlanoConfig = UserVisualPlanConfig;
 
 const DEFAULT_PATENTES: PatenteConfig[] = DEFAULT_PATENTE_CONFIG.map((entry) => ({
   titulo: entry.titulo,
@@ -523,14 +515,50 @@ const buildUserPatchPayload = (
   return { dbPatch };
 };
 
+const mergeUserSnapshot = (previous: User | null, next: User): User =>
+  previous && previous.uid === next.uid ? { ...previous, ...next } : next;
+
+const shouldHydrateFullUserProfile = (pathname: string): boolean =>
+  pathname === "/cadastro" || pathname.startsWith("/configuracoes");
+
+const needsApprovedPlanReconciliation = (user: User): boolean => {
+  const planNormalized = normalizePlanName(user.plano);
+  return (
+    !planNormalized ||
+    planNormalized === "visitante" ||
+    planNormalized === "bicho" ||
+    planNormalized === "bicho solto"
+  );
+};
+
+const hasMissingVisualMetadata = (user: User): boolean =>
+  !user.patente ||
+  !user.patente_icon ||
+  !user.patente_cor ||
+  !user.plano ||
+  !user.plano_badge ||
+  !user.plano_cor ||
+  !user.plano_icon ||
+  user.desconto_loja === undefined ||
+  user.xpMultiplier === undefined ||
+  user.nivel_prioridade === undefined;
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const USER_SELECT_COLUMNS =
-  "uid,nome,email,foto,role,status,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,desconto_loja,nivel_prioridade,isAnonymous,capa,estadoOrigem,extra,createdAt";
-const USER_SELECT_COLUMNS_LIST = USER_SELECT_COLUMNS.split(",")
+const USER_SESSION_SELECT_COLUMNS =
+  "uid,nome,email,foto,role,status,saved_role,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,stats,sharkCoins,selos,matricula,turma,telefone,dataNascimento,apelido,cidadeOrigem,estadoOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,desconto_loja,nivel_prioridade,isAnonymous";
+const USER_PROFILE_SELECT_COLUMNS =
+  "uid,nome,email,foto,role,status,saved_role,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,estadoOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,desconto_loja,nivel_prioridade,isAnonymous,turmaPhoto,capa,extra,createdAt";
+const USER_SESSION_SELECT_COLUMNS_LIST = USER_SESSION_SELECT_COLUMNS.split(",")
+  .map((entry) => entry.trim())
+  .filter((entry) => entry.length > 0);
+const USER_PROFILE_SELECT_COLUMNS_LIST = USER_PROFILE_SELECT_COLUMNS.split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);
 const MISSING_USER_WRITE_COLUMNS = new Set<string>();
 const MISSING_USER_SELECT_COLUMNS = new Set<string>();
+const SESSION_REFRESH_TTL_MS = 60_000;
+const FULL_PROFILE_REFRESH_TTL_MS = 300_000;
+const VISUAL_MAINTENANCE_TTL_MS = 600_000;
 
 const filterMissingUsersWriteColumns = (
   patch: Record<string, unknown>
@@ -558,9 +586,12 @@ const removeMissingColumnFromSelection = (
 const runUsersRowQueryWithSelectFallback = async (
   runQuery: (
     selectColumns: string
-  ) => PromiseLike<{ data: unknown; error: unknown }>
+  ) => PromiseLike<{ data: unknown; error: unknown }>,
+  preferredColumns?: string[]
 ): Promise<Record<string, unknown> | null> => {
-  let mutableColumns = filterMissingUsersSelectColumns([...USER_SELECT_COLUMNS_LIST]);
+  let mutableColumns = filterMissingUsersSelectColumns(
+    [...(preferredColumns ?? USER_SESSION_SELECT_COLUMNS_LIST)]
+  );
 
   if (mutableColumns.length === 0) {
     return null;
@@ -592,11 +623,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   
   // Ã°Å¸Â¦Ë† ESTADO LOCAL DE GUEST
   const [isLocalGuest, setIsLocalGuest] = useState(false);
-  
-  const [patentesCache, setPatentesCache] = useState<PatenteConfig[]>([]); 
-  const [planosCache, setPlanosCache] = useState<PlanoConfig[]>([]);
+
   const lastMaintenanceUid = useRef<string | null>(null);
+  const lastMaintenanceAtRef = useRef(0);
   const lastUserRefreshAtRef = useRef(0);
+  const lastFullProfileUidRef = useRef<string | null>(null);
+  const lastFullProfileAtRef = useRef(0);
+  const lastPlanReconcileKeyRef = useRef<string | null>(null);
+  const lastPlanReconcileAtRef = useRef(0);
+  const lastVisualMaintenanceKeyRef = useRef<string | null>(null);
+  const lastVisualMaintenanceAtRef = useRef(0);
   const syncingAuthUidRef = useRef<string | null>(null);
   const authSyncFallbackUidRef = useRef<string | null>(null);
 
@@ -634,74 +670,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [masterOverrideTenantId, masterRolePreview, user]
   );
 
-  // 1. CARREGAMENTO INICIAL UNIFICADO
   useEffect(() => {
     setMounted(true);
-
-    const fetchData = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("patentes_config")
-          .select("titulo,minXp,iconName,cor")
-          .order("minXp", { ascending: false });
-
-        if (error) throw error;
-
-        if (data && data.length > 0) {
-          setPatentesCache(
-            data.map((row) => ({
-              titulo: asString(row.titulo, "Patente"),
-              minXp: asNumber(row.minXp, 0),
-              iconName: asString(row.iconName, "Fish"),
-              cor: asString(row.cor, "text-zinc-400"),
-            }))
-          );
-        } else {
-          setPatentesCache(DEFAULT_PATENTES);
-        }
-      } catch (error: unknown) {
-        setPatentesCache(DEFAULT_PATENTES);
-        if (!isPermissionError(error) && !isSupabaseRetryableFetchError(error)) {
-          console.error("Erro ao carregar patentes:", error);
-        }
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from("planos")
-          .select("nome,cor,icon,descontoLoja,xpMultiplier,nivelPrioridade");
-
-        if (error) throw error;
-
-        if (data && data.length > 0) {
-          setPlanosCache(
-            data.map((row) => ({
-              nome: asString(row.nome, "Plano"),
-              cor: asString(row.cor, "zinc"),
-              icon: asString(row.icon, "ghost"),
-              descontoLoja: asNumber(row.descontoLoja, 0),
-              xpMultiplier: asNumber(row.xpMultiplier, 1),
-              nivelPrioridade: asNumber(row.nivelPrioridade, 1),
-            }))
-          );
-        }
-      } catch (error: unknown) {
-        if (
-          !isPermissionError(error) &&
-          !isNavigatorLockTimeoutError(error) &&
-          !isSupabaseRetryableFetchError(error)
-        ) {
-          console.error("Erro ao carregar planos:", error);
-        }
-      }
-    };
-    fetchData();
   }, []);
 
   // Helper: Calcula Patente
-  const calculatePatenteData = useCallback((xp: number) => {
+  const calculatePatenteData = useCallback((xp: number, patentes: PatenteConfig[]) => {
       const runtimePatentes = mergePatentesWithDefaults(
-        patentesCache.map((patente) => ({
+        patentes.map((patente) => ({
           id:
             patente.titulo
               .trim()
@@ -721,7 +697,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         iconName: found.iconName,
         cor: found.cor,
       };
-  }, [patentesCache]);
+  }, []);
 
   // 2. RECUPERAÃƒâ€¡ÃƒÆ’O DE SESSÃƒÆ’O GUEST (Novo!)
   useEffect(() => {
@@ -809,19 +785,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       syncingAuthUidRef.current = authUid;
 
       try {
-        const existingRow = await runUsersRowQueryWithSelectFallback((columns) =>
-          supabase
-            .from("users")
-            .select(columns)
-            .eq("uid", authUser.id)
-            .maybeSingle()
+        // Bootstrap auth com snapshot minimo; o perfil completo sobe depois so quando a rota pede.
+        const existingRow = await runUsersRowQueryWithSelectFallback(
+          (columns) =>
+            supabase
+              .from("users")
+              .select(columns)
+              .eq("uid", authUser.id)
+              .maybeSingle(),
+          USER_SESSION_SELECT_COLUMNS_LIST
         );
 
         if (existingRow) {
           if (!active || currentToken !== syncToken) return;
           authSyncFallbackUidRef.current = null;
           const normalized = normalizeUserRow(existingRow, authUser);
-          setUser(normalized);
+          setUser((previous) => mergeUserSnapshot(previous, normalized));
           setIsAdmin(hasAdminPanelAccess(normalized));
           setLoading(false);
           void ensureAlbumSelfCollected(normalized.uid).catch(() => {});
@@ -832,23 +811,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         let insertedRow: Record<string, unknown> | null = null;
         try {
-          insertedRow = await runUsersRowQueryWithSelectFallback((columns) =>
-            supabase
-              .from("users")
-              .insert(newUserPayload)
-              .select(columns)
-              .single()
+          insertedRow = await runUsersRowQueryWithSelectFallback(
+            (columns) =>
+              supabase
+                .from("users")
+                .insert(newUserPayload)
+                .select(columns)
+                .single(),
+            USER_SESSION_SELECT_COLUMNS_LIST
           );
         } catch (insertError: unknown) {
           if (!isDuplicateKeyError(insertError)) throw insertError;
 
           // Corrida comum: onAuthStateChange e getSession disparam em paralelo no primeiro login.
-          const concurrentRow = await runUsersRowQueryWithSelectFallback((columns) =>
-            supabase
-              .from("users")
-              .select(columns)
-              .eq("uid", authUser.id)
-              .maybeSingle()
+          const concurrentRow = await runUsersRowQueryWithSelectFallback(
+            (columns) =>
+              supabase
+                .from("users")
+                .select(columns)
+                .eq("uid", authUser.id)
+                .maybeSingle(),
+            USER_SESSION_SELECT_COLUMNS_LIST
           );
           if (!concurrentRow) throw insertError;
           insertedRow = concurrentRow;
@@ -861,7 +844,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const normalized = normalizeUserRow(insertedRow, authUser);
         authSyncFallbackUidRef.current = null;
-        setUser(normalized);
+        setUser((previous) => mergeUserSnapshot(previous, normalized));
         setIsAdmin(false);
         setLoading(false);
         void ensureAlbumSelfCollected(normalized.uid).catch(() => {});
@@ -924,6 +907,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAdmin(false);
         setLoading(false);
         lastMaintenanceUid.current = null;
+        lastMaintenanceAtRef.current = 0;
+        lastFullProfileUidRef.current = null;
+        lastFullProfileAtRef.current = 0;
+        lastPlanReconcileKeyRef.current = null;
+        lastPlanReconcileAtRef.current = 0;
+        lastVisualMaintenanceKeyRef.current = null;
+        lastVisualMaintenanceAtRef.current = 0;
+        lastUserRefreshAtRef.current = 0;
         authSyncFallbackUidRef.current = null;
       }
     };
@@ -956,14 +947,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isLocalGuest]);
 
   const persistUserPatch = useCallback(
-    async (currentUser: User, patch: Record<string, unknown>): Promise<User> => {
+    async (
+      currentUser: User,
+      patch: Record<string, unknown>,
+      options?: { selectColumns?: string[] }
+    ): Promise<User> => {
       const { dbPatch } = buildUserPatchPayload(currentUser, patch);
       const mutablePatch: Record<string, unknown> = filterMissingUsersWriteColumns({
         ...dbPatch,
       });
       let data: Record<string, unknown> | null = null;
+      const selectColumns = options?.selectColumns ?? USER_SESSION_SELECT_COLUMNS_LIST;
       let mutableSelectColumns = filterMissingUsersSelectColumns([
-        ...USER_SELECT_COLUMNS_LIST,
+        ...selectColumns,
       ]);
 
       if (Object.keys(mutablePatch).length === 0) {
@@ -1019,111 +1015,67 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ...mutablePatch,
         });
 
-        const recoveredRow = await runUsersRowQueryWithSelectFallback((columns) =>
-          supabase
-            .from("users")
-            .upsert(recoveryPayload, { onConflict: "uid" })
-            .select(columns)
-            .single()
+        const recoveredRow = await runUsersRowQueryWithSelectFallback(
+          (columns) =>
+            supabase
+              .from("users")
+              .upsert(recoveryPayload, { onConflict: "uid" })
+              .select(columns)
+              .single(),
+          mutableSelectColumns
         );
         if (!recoveredRow) throw new Error("Falha ao recuperar perfil do usuario.");
 
         const recoveredNormalized = normalizeUserRow(recoveredRow);
-        setUser(recoveredNormalized);
+        setUser((previous) => mergeUserSnapshot(previous, recoveredNormalized));
         setIsAdmin(hasAdminPanelAccess(recoveredNormalized));
         return recoveredNormalized;
       }
 
       const normalized = normalizeUserRow(data);
-      setUser(normalized);
+      setUser((previous) => mergeUserSnapshot(previous, normalized));
       setIsAdmin(hasAdminPanelAccess(normalized));
       return normalized;
     },
     []
   );
 
-  // 4. MANUTENÃƒâ€¡ÃƒÆ’O (ATUALIZAÃƒâ€¡ÃƒÆ’O DE DADOS)
+  // 4. MANUTENCAO LEVE + RECONCILIACAO SOB DEMANDA
   useEffect(() => {
     const runMaintenance = async () => {
-        // Ã°Å¸Â¦Ë† TRAVA DE SEGURANÃƒâ€¡A: Guest Local NÃƒÆ’O roda manutenÃƒÂ§ÃƒÂ£o no banco
-        if (
-          !user ||
-          isLocalGuest ||
-          user.isAnonymous ||
-          loading ||
-          patentesCache.length === 0 ||
-          planosCache.length === 0
-        ) {
+        // Guest local nao roda manutencao no banco.
+        if (!user || isLocalGuest || user.isAnonymous || loading) {
           return;
         }
 
+        const now = Date.now();
         const maintenanceKey = [
           user.uid,
+          asString(user.ultimoLoginDiario),
+          String(asNumber(user.xp, 0)),
           normalizePlanName(user.plano),
           asString(user.plano_icon).toLowerCase(),
           asString(user.plano_cor).toLowerCase(),
-          planosCache
-            .map((plan) => `${normalizePlanName(plan.nome)}:${plan.icon}:${plan.cor}:${plan.descontoLoja}:${plan.xpMultiplier}:${plan.nivelPrioridade}`)
-            .sort()
-            .join("|"),
+          asString(user.patente).toLowerCase(),
+          asString(user.patente_icon).toLowerCase(),
+          asString(user.patente_cor).toLowerCase(),
+          JSON.stringify(user.stats ?? {}),
         ].join("::");
 
-        if (lastMaintenanceUid.current === maintenanceKey) return;
+        if (
+          lastMaintenanceUid.current === maintenanceKey &&
+          now - lastMaintenanceAtRef.current < SESSION_REFRESH_TTL_MS
+        ) return;
 
         const updates: Record<string, unknown> = {};
         let hasUpdates = false;
         let maintenanceFailed = false;
-        const primaryPlan = [...planosCache].sort((left, right) => {
-          if (left.nivelPrioridade !== right.nivelPrioridade) {
-            return left.nivelPrioridade - right.nivelPrioridade;
-          }
-
-          return normalizePlanName(left.nome).localeCompare(normalizePlanName(right.nome), "pt-BR", {
-            sensitivity: "base",
-          });
-        })[0];
-        const defaultPlanName = primaryPlan?.nome || DEFAULT_USER_PROPS.plano;
-        const defaultPlanBadge = primaryPlan?.nome || DEFAULT_USER_PROPS.plano_badge;
-        const defaultPlanColor = primaryPlan?.cor || DEFAULT_USER_PROPS.plano_cor;
-        const defaultPlanIcon = primaryPlan?.icon || DEFAULT_USER_PROPS.plano_icon;
-        const defaultPlanDiscount = primaryPlan?.descontoLoja ?? DEFAULT_USER_PROPS.desconto_loja;
-        const defaultPlanXpMultiplier = primaryPlan?.xpMultiplier ?? DEFAULT_USER_PROPS.xpMultiplier;
-        const defaultPlanPriority = primaryPlan?.nivelPrioridade ?? DEFAULT_USER_PROPS.nivel_prioridade;
-        const defaultPlanTier: "bicho" | "atleta" | "lenda" =
-          normalizePlanName(defaultPlanName).includes("lenda")
-            ? "lenda"
-            : normalizePlanName(defaultPlanName).includes("atleta")
-            ? "atleta"
-            : "bicho";
 
         // A. AUTO-CURA
         if (user.xp === undefined) { updates.xp = DEFAULT_USER_PROPS.xp; hasUpdates = true; }
         if (user.level === undefined) { updates.level = DEFAULT_USER_PROPS.level; hasUpdates = true; }
         if (user.sharkCoins === undefined) { updates.sharkCoins = DEFAULT_USER_PROPS.sharkCoins; hasUpdates = true; }
         if (!user.patente) { updates.patente = DEFAULT_USER_PROPS.patente; hasUpdates = true; }
-
-        const roleNormalized = typeof user.role === "string" ? user.role.toLowerCase() : "";
-        const planNormalized = normalizePlanName(user.plano);
-        // Corrige contaminacao de fallback "Visitante" em usuarios reais apos falhas transitórias de auth sync.
-        if (roleNormalized && roleNormalized !== "guest" && planNormalized === "visitante") {
-            updates.plano = defaultPlanName;
-            updates.plano_badge = defaultPlanBadge;
-            updates.plano_cor = defaultPlanColor;
-            updates.plano_icon = defaultPlanIcon;
-            updates.desconto_loja = defaultPlanDiscount;
-            updates.xpMultiplier = defaultPlanXpMultiplier;
-            updates.nivel_prioridade = defaultPlanPriority;
-            updates.tier = defaultPlanTier;
-            hasUpdates = true;
-        }
-        
-        if (!user.plano) { updates.plano = defaultPlanName; hasUpdates = true; }
-        if (!user.plano_badge) { updates.plano_badge = defaultPlanBadge; hasUpdates = true; }
-        if (!user.plano_cor) { updates.plano_cor = defaultPlanColor; hasUpdates = true; }
-        if (!user.plano_icon) { updates.plano_icon = defaultPlanIcon; hasUpdates = true; }
-        if (user.desconto_loja === undefined) { updates.desconto_loja = defaultPlanDiscount; hasUpdates = true; }
-        if (user.xpMultiplier === undefined) { updates.xpMultiplier = defaultPlanXpMultiplier; hasUpdates = true; }
-        if (user.nivel_prioridade === undefined) { updates.nivel_prioridade = defaultPlanPriority; hasUpdates = true; }
 
         const currentStats = user.stats || {};
         const missingStatKeys = Object.keys(DEFAULT_STATS).some(key => currentStats[key] === undefined);
@@ -1176,35 +1128,122 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             hasUpdates = true;
         }
 
-        // C. SINCRONIA DE PATENTE
-        const patenteAlvo = calculatePatenteData(canonicalXp);
-        if (patenteAlvo) {
-            if (
-                user.patente !== patenteAlvo.titulo ||
-                user.patente_icon !== patenteAlvo.iconName ||
-                user.patente_cor !== patenteAlvo.cor
-            ) {
-                updates.patente = patenteAlvo.titulo;
-                updates.patente_icon = patenteAlvo.iconName;
-                updates.patente_cor = patenteAlvo.cor;
+        const visualMaintenanceKey = [
+            user.uid,
+            String(canonicalXp),
+            normalizePlanName(user.plano),
+            asString(user.plano_icon).toLowerCase(),
+            asString(user.plano_cor).toLowerCase(),
+            asString(user.patente).toLowerCase(),
+            asString(user.patente_icon).toLowerCase(),
+            asString(user.patente_cor).toLowerCase(),
+        ].join("::");
+        const shouldRunVisualMaintenance =
+            hasMissingVisualMetadata(user) ||
+            lastVisualMaintenanceKeyRef.current !== visualMaintenanceKey ||
+            now - lastVisualMaintenanceAtRef.current >= VISUAL_MAINTENANCE_TTL_MS;
+
+        if (shouldRunVisualMaintenance) {
+            let patentes: PatenteConfig[] = DEFAULT_PATENTES;
+            let planos: PlanoConfig[] = [];
+
+            try {
+                const catalog = await fetchUserVisualCatalog();
+                if (catalog.patentes.length > 0) {
+                    patentes = catalog.patentes;
+                }
+                planos = catalog.plans;
+            } catch (catalogError: unknown) {
+                if (
+                    !isPermissionError(catalogError) &&
+                    !isNavigatorLockTimeoutError(catalogError) &&
+                    !isSupabaseRetryableFetchError(catalogError)
+                ) {
+                    console.warn("Falha ao carregar catalogo visual do usuario:", catalogError);
+                }
+            }
+
+            const primaryPlan = [...planos].sort((left, right) => {
+                if (left.nivelPrioridade !== right.nivelPrioridade) {
+                    return left.nivelPrioridade - right.nivelPrioridade;
+                }
+
+                return normalizePlanName(left.nome).localeCompare(
+                    normalizePlanName(right.nome),
+                    "pt-BR",
+                    { sensitivity: "base" }
+                );
+            })[0];
+            const defaultPlanName = primaryPlan?.nome || DEFAULT_USER_PROPS.plano;
+            const defaultPlanBadge = primaryPlan?.nome || DEFAULT_USER_PROPS.plano_badge;
+            const defaultPlanColor = primaryPlan?.cor || DEFAULT_USER_PROPS.plano_cor;
+            const defaultPlanIcon = primaryPlan?.icon || DEFAULT_USER_PROPS.plano_icon;
+            const defaultPlanDiscount =
+                primaryPlan?.descontoLoja ?? DEFAULT_USER_PROPS.desconto_loja;
+            const defaultPlanXpMultiplier =
+                primaryPlan?.xpMultiplier ?? DEFAULT_USER_PROPS.xpMultiplier;
+            const defaultPlanPriority =
+                primaryPlan?.nivelPrioridade ?? DEFAULT_USER_PROPS.nivel_prioridade;
+            const defaultPlanTier: "bicho" | "atleta" | "lenda" =
+                normalizePlanName(defaultPlanName).includes("lenda")
+                    ? "lenda"
+                    : normalizePlanName(defaultPlanName).includes("atleta")
+                        ? "atleta"
+                        : "bicho";
+
+            const roleNormalized = typeof user.role === "string" ? user.role.toLowerCase() : "";
+            const planNormalized = normalizePlanName(updates.plano ?? user.plano);
+            if (roleNormalized && roleNormalized !== "guest" && planNormalized === "visitante") {
+                updates.plano = defaultPlanName;
+                updates.plano_badge = defaultPlanBadge;
+                updates.plano_cor = defaultPlanColor;
+                updates.plano_icon = defaultPlanIcon;
+                updates.desconto_loja = defaultPlanDiscount;
+                updates.xpMultiplier = defaultPlanXpMultiplier;
+                updates.nivel_prioridade = defaultPlanPriority;
+                updates.tier = defaultPlanTier;
                 hasUpdates = true;
             }
-        }
 
-        // D. RECONCILIACAO COM ULTIMA SOLICITACAO APROVADA
-        if (planosCache.length > 0) {
-            const planoAtual = normalizePlanName(user.plano);
-            const precisaReconciliarPlano =
-                !planoAtual ||
-                planoAtual === "visitante" ||
-                planoAtual === "bicho" ||
-                planoAtual === "bicho solto";
+            if (!user.plano) { updates.plano = defaultPlanName; hasUpdates = true; }
+            if (!user.plano_badge) { updates.plano_badge = defaultPlanBadge; hasUpdates = true; }
+            if (!user.plano_cor) { updates.plano_cor = defaultPlanColor; hasUpdates = true; }
+            if (!user.plano_icon) { updates.plano_icon = defaultPlanIcon; hasUpdates = true; }
+            if (user.desconto_loja === undefined) { updates.desconto_loja = defaultPlanDiscount; hasUpdates = true; }
+            if (user.xpMultiplier === undefined) { updates.xpMultiplier = defaultPlanXpMultiplier; hasUpdates = true; }
+            if (user.nivel_prioridade === undefined) { updates.nivel_prioridade = defaultPlanPriority; hasUpdates = true; }
 
-            if (precisaReconciliarPlano) {
+            const patenteAlvo = calculatePatenteData(canonicalXp, patentes);
+            if (patenteAlvo) {
+                if (
+                    user.patente !== patenteAlvo.titulo ||
+                    user.patente_icon !== patenteAlvo.iconName ||
+                    user.patente_cor !== patenteAlvo.cor
+                ) {
+                    updates.patente = patenteAlvo.titulo;
+                    updates.patente_icon = patenteAlvo.iconName;
+                    updates.patente_cor = patenteAlvo.cor;
+                    hasUpdates = true;
+                }
+            }
+
+            const planReconcileKey = [
+                user.uid,
+                normalizePlanName(user.plano),
+                asString(user.tenant_id).trim(),
+            ].join("::");
+            const shouldRunPlanReconcile =
+                needsApprovedPlanReconciliation(user) &&
+                (
+                    lastPlanReconcileKeyRef.current !== planReconcileKey ||
+                    now - lastPlanReconcileAtRef.current >= VISUAL_MAINTENANCE_TTL_MS
+                );
+
+            if (shouldRunPlanReconcile) {
                 try {
                     const { data: latestApprovedRequest, error: latestApprovedError } = await supabase
                         .from("solicitacoes_adesao")
-                        .select("planoNome, status, updatedAt, dataSolicitacao")
+                        .select("planoNome,status,updatedAt,dataSolicitacao")
                         .eq("userId", user.uid)
                         .eq("status", "aprovado")
                         .order("updatedAt", { ascending: false })
@@ -1213,7 +1252,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
                     if (!latestApprovedError && latestApprovedRequest) {
                         const approvedPlanName = normalizePlanName(latestApprovedRequest.planoNome);
-                        const approvedPlan = findPlanByName(planosCache, latestApprovedRequest.planoNome);
+                        const approvedPlan = findPlanByName(planos, latestApprovedRequest.planoNome);
+                        const planoAtual = normalizePlanName(updates.plano ?? user.plano);
 
                         if (approvedPlan && approvedPlanName && approvedPlanName !== planoAtual) {
                             updates.plano = approvedPlan.nome;
@@ -1236,54 +1276,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     if (!isPermissionError(reconcileError) && !isNavigatorLockTimeoutError(reconcileError)) {
                         console.warn("Falha ao reconciliar plano aprovado:", reconcileError);
                     }
+                } finally {
+                    lastPlanReconcileKeyRef.current = planReconcileKey;
+                    lastPlanReconcileAtRef.current = Date.now();
                 }
             }
-        }
 
-        // E. SINCRONIA DE PLANO
-        const effectivePlanName = updates.plano ?? user.plano;
-        const planoReal = findPlanByName(planosCache, effectivePlanName);
-        if (planoReal) {
-            const currentPlanColor = asString(updates.plano_cor ?? user.plano_cor);
-            const currentPlanIcon = asString(updates.plano_icon ?? user.plano_icon);
-            const currentDiscount = Number(updates.desconto_loja ?? user.desconto_loja ?? 0);
-            const currentXpMultiplier = Number(updates.xpMultiplier ?? user.xpMultiplier ?? 1);
-            const currentPriority = Number(updates.nivel_prioridade ?? user.nivel_prioridade ?? 1);
+            const effectivePlanName = updates.plano ?? user.plano;
+            const planoReal = findPlanByName(planos, effectivePlanName);
+            if (planoReal) {
+                const resolvedTier: "bicho" | "atleta" | "lenda" =
+                    normalizePlanName(planoReal.nome).includes("lenda")
+                        ? "lenda"
+                        : normalizePlanName(planoReal.nome).includes("atleta")
+                            ? "atleta"
+                            : "bicho";
+                const currentPlanBadge = asString(updates.plano_badge ?? user.plano_badge);
+                const currentPlanColor = asString(updates.plano_cor ?? user.plano_cor);
+                const currentPlanIcon = asString(updates.plano_icon ?? user.plano_icon);
+                const currentDiscount = Number(updates.desconto_loja ?? user.desconto_loja ?? 0);
+                const currentXpMultiplier = Number(updates.xpMultiplier ?? user.xpMultiplier ?? 1);
+                const currentPriority = Number(updates.nivel_prioridade ?? user.nivel_prioridade ?? 1);
+                const currentTier = asString(updates.tier ?? user.tier);
 
-            if (
-              currentPlanColor !== planoReal.cor ||
-              currentPlanIcon !== planoReal.icon ||
-              currentDiscount !== planoReal.descontoLoja ||
-              currentXpMultiplier !== planoReal.xpMultiplier ||
-              currentPriority !== planoReal.nivelPrioridade
-            ) {
-              updates.plano_cor = planoReal.cor;
-              updates.plano_icon = planoReal.icon;
-              updates.desconto_loja = planoReal.descontoLoja;
-              updates.xpMultiplier = planoReal.xpMultiplier;
-              updates.nivel_prioridade = planoReal.nivelPrioridade;
-              hasUpdates = true;
+                if (currentPlanBadge !== planoReal.nome) {
+                    updates.plano_badge = planoReal.nome;
+                    hasUpdates = true;
+                }
+                if (
+                    currentPlanColor !== planoReal.cor ||
+                    currentPlanIcon !== planoReal.icon ||
+                    currentDiscount !== planoReal.descontoLoja ||
+                    currentXpMultiplier !== planoReal.xpMultiplier ||
+                    currentPriority !== planoReal.nivelPrioridade
+                ) {
+                    updates.plano_cor = planoReal.cor;
+                    updates.plano_icon = planoReal.icon;
+                    updates.desconto_loja = planoReal.descontoLoja;
+                    updates.xpMultiplier = planoReal.xpMultiplier;
+                    updates.nivel_prioridade = planoReal.nivelPrioridade;
+                    hasUpdates = true;
+                }
+                if (currentTier !== resolvedTier) {
+                    updates.tier = resolvedTier;
+                    hasUpdates = true;
+                }
             }
+
+            lastVisualMaintenanceKeyRef.current = visualMaintenanceKey;
+            lastVisualMaintenanceAtRef.current = Date.now();
         }
 
         if (hasUpdates) {
             try {
-                await persistUserPatch(user, updates);
+                await persistUserPatch(user, updates, {
+                    selectColumns: USER_SESSION_SELECT_COLUMNS_LIST,
+                });
             } catch (err: unknown) {
                 maintenanceFailed = true;
                 if (!isPermissionError(err)) {
-                    console.warn("Erro ao atualizar manutenÃ§Ã£o do usuÃ¡rio:", err);
+                    console.warn("Erro ao atualizar manutencao do usuario:", err);
                 }
             }
         }
 
         if (!maintenanceFailed) {
             lastMaintenanceUid.current = maintenanceKey;
+            lastMaintenanceAtRef.current = Date.now();
         }
     };
 
-    runMaintenance();
-  }, [user, loading, patentesCache, planosCache, isLocalGuest, calculatePatenteData, persistUserPatch]);
+    void runMaintenance();
+  }, [user, loading, isLocalGuest, calculatePatenteData, persistUserPatch]);
 
   // 5. SEGURANÃƒâ€¡A E REDIRECIONAMENTOS
   useEffect(() => {
@@ -1411,6 +1475,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setIsAdmin(false);
     lastMaintenanceUid.current = null;
+    lastMaintenanceAtRef.current = 0;
+    lastUserRefreshAtRef.current = 0;
+    lastFullProfileUidRef.current = null;
+    lastFullProfileAtRef.current = 0;
+    lastPlanReconcileKeyRef.current = null;
+    lastPlanReconcileAtRef.current = 0;
+    lastVisualMaintenanceKeyRef.current = null;
+    lastVisualMaintenanceAtRef.current = 0;
     authSyncFallbackUidRef.current = null;
     router.push("/");
   };
@@ -1440,7 +1512,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      await persistUserPatch(user, data as Record<string, unknown>);
+      await persistUserPatch(user, data as Record<string, unknown>, {
+        selectColumns: USER_PROFILE_SELECT_COLUMNS_LIST,
+      });
+      lastFullProfileUidRef.current = user.uid;
+      lastFullProfileAtRef.current = Date.now();
     } catch (error: unknown) {
       if (!isPermissionError(error)) {
         const formatted = formatBackendErrorForConsole(error);
@@ -1464,25 +1540,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!user || isLocalGuest || user.isAnonymous) return;
+    if (!shouldHydrateFullUserProfile(pathname)) return;
 
     const now = Date.now();
-    if (now - lastUserRefreshAtRef.current < 15_000) return;
+    if (
+      lastFullProfileUidRef.current === user.uid &&
+      now - lastFullProfileAtRef.current < FULL_PROFILE_REFRESH_TTL_MS
+    ) {
+      return;
+    }
+
+    let active = true;
+    const hydrate = async () => {
+      try {
+        const data = await runUsersRowQueryWithSelectFallback(
+          (columns) =>
+            supabase
+              .from("users")
+              .select(columns)
+              .eq("uid", user.uid)
+              .maybeSingle(),
+          USER_PROFILE_SELECT_COLUMNS_LIST
+        );
+        if (!data || !active) return;
+
+        const normalized = normalizeUserRow(data);
+        lastFullProfileUidRef.current = user.uid;
+        lastFullProfileAtRef.current = Date.now();
+        setUser((previous) => mergeUserSnapshot(previous, normalized));
+        setIsAdmin(hasAdminPanelAccess(normalized));
+      } catch (error: unknown) {
+        if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
+          console.warn("Falha ao hidratar perfil completo:", formatBackendErrorForConsole(error));
+        }
+      }
+    };
+
+    void hydrate();
+    return () => {
+      active = false;
+    };
+  }, [pathname, user, isLocalGuest]);
+
+  useEffect(() => {
+    if (!user || isLocalGuest || user.isAnonymous) return;
+
+    const now = Date.now();
+    if (now - lastUserRefreshAtRef.current < SESSION_REFRESH_TTL_MS) return;
     lastUserRefreshAtRef.current = now;
 
     const refresh = async () => {
       try {
-        const data = await runUsersRowQueryWithSelectFallback((columns) =>
-          supabase
-            .from("users")
-            .select(columns)
-            .eq("uid", user.uid)
-            .maybeSingle()
+        const data = await runUsersRowQueryWithSelectFallback(
+          (columns) =>
+            supabase
+              .from("users")
+              .select(columns)
+              .eq("uid", user.uid)
+              .maybeSingle(),
+          USER_SESSION_SELECT_COLUMNS_LIST
         );
         if (!data) return;
 
         const normalized = normalizeUserRow(data);
         setUser((previous) => {
-          if (!previous) return normalized;
+          const merged = mergeUserSnapshot(previous, normalized);
+          if (!previous) return merged;
 
           const previousSignature = [
             asString(previous.plano),
@@ -1499,21 +1622,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             JSON.stringify(previous.stats ?? {}),
           ].join("|");
           const nextSignature = [
-            asString(normalized.plano),
-            asString(normalized.plano_badge),
-            asString(normalized.plano_cor),
-            asString(normalized.plano_icon),
-            asString(normalized.tier),
-            asString(normalized.status),
-            asString(normalized.role),
-            asString(normalized.patente),
-            asString(normalized.patente_icon),
-            asString(normalized.patente_cor),
-            String(asNumber(normalized.xp, 0)),
-            JSON.stringify(normalized.stats ?? {}),
+            asString(merged.plano),
+            asString(merged.plano_badge),
+            asString(merged.plano_cor),
+            asString(merged.plano_icon),
+            asString(merged.tier),
+            asString(merged.status),
+            asString(merged.role),
+            asString(merged.patente),
+            asString(merged.patente_icon),
+            asString(merged.patente_cor),
+            String(asNumber(merged.xp, 0)),
+            JSON.stringify(merged.stats ?? {}),
           ].join("|");
 
-          return previousSignature === nextSignature ? previous : normalized;
+          return previousSignature === nextSignature ? previous : merged;
         });
 
         setIsAdmin(hasAdminPanelAccess(normalized));

@@ -1,10 +1,16 @@
 import { getSupabaseClient } from "./supabase";
 import { compressImageFile } from "./imageCompression";
+import { getPublicObjectUrl, getStorage, ref } from "./supa/storage";
 
 export interface UploadResult {
   url: string | null;
   error: string | null;
+  bucket?: string | null;
+  objectPath?: string | null;
+  versionToken?: string | null;
 }
+
+export type UploadImageVersionStrategy = "none" | "file-metadata";
 
 export interface UploadImageOptions {
   scopeKey?: string;
@@ -21,6 +27,7 @@ export interface UploadImageOptions {
   upsert?: boolean;
   cacheControl?: string;
   fileName?: string;
+  versionStrategy?: UploadImageVersionStrategy;
   appendVersionQuery?: boolean;
   minIntervalMs?: number;
   rateLimitWindowMs?: number;
@@ -39,6 +46,7 @@ export const ALLOWED_UPLOAD_IMAGE_TYPES = [
 export const MAX_UPLOAD_IMAGE_WIDTH = 2400;
 export const MAX_UPLOAD_IMAGE_HEIGHT = 2400;
 export const MAX_UPLOAD_IMAGE_PIXELS = MAX_UPLOAD_IMAGE_WIDTH * MAX_UPLOAD_IMAGE_HEIGHT;
+export const VERSIONED_PUBLIC_ASSET_CACHE_CONTROL = "31536000";
 
 const DEFAULT_MIN_UPLOAD_INTERVAL_MS = 1200;
 const DEFAULT_UPLOAD_RATE_LIMIT_WINDOW_MS = 60_000;
@@ -76,7 +84,7 @@ export const validateImageFile = (
   return null;
 };
 
-const sanitizeStorageSegment = (value: string): string =>
+export const sanitizeStoragePathSegment = (value: string): string =>
   value
     .replace(/[^a-zA-Z0-9._-]+/g, "_")
     .replace(/_+/g, "_")
@@ -86,7 +94,7 @@ const sanitizeStorageSegment = (value: string): string =>
 const normalizeStoragePath = (path: string): string =>
   path
     .split("/")
-    .map((segment) => sanitizeStorageSegment(segment))
+    .map((segment) => sanitizeStoragePathSegment(segment))
     .filter(Boolean)
     .join("/");
 
@@ -96,16 +104,59 @@ const detectExtension = (file: File): string => {
   return "jpg";
 };
 
+export const buildDraftAssetFileName = (baseName: string): string =>
+  `${sanitizeStoragePathSegment(baseName)}-${Date.now()}`;
+
+export const buildFileMetadataVersionToken = (
+  file: Pick<File, "size" | "lastModified">
+): string | null => {
+  const sizeToken =
+    typeof file.size === "number" && Number.isFinite(file.size) && file.size >= 0
+      ? Math.floor(file.size).toString(36)
+      : "";
+  const modifiedToken =
+    typeof file.lastModified === "number" &&
+    Number.isFinite(file.lastModified) &&
+    file.lastModified > 0
+      ? Math.floor(file.lastModified).toString(36)
+      : "";
+
+  const token = [sizeToken, modifiedToken].filter((part) => part.length > 0).join("-");
+  return token || null;
+};
+
+export const appendAssetVersionQuery = (
+  url: string | null,
+  versionToken?: string | null
+): string | null => {
+  const cleanUrl = typeof url === "string" ? url.trim() : "";
+  if (!cleanUrl) return null;
+
+  const cleanToken = typeof versionToken === "string" ? versionToken.trim() : "";
+  if (!cleanToken) return cleanUrl;
+
+  return `${cleanUrl}${cleanUrl.includes("?") ? "&" : "?"}v=${encodeURIComponent(cleanToken)}`;
+};
+
+const resolveVersionStrategy = (
+  options?: UploadImageOptions
+): UploadImageVersionStrategy => {
+  if (options?.versionStrategy) {
+    return options.versionStrategy;
+  }
+  return options?.appendVersionQuery ? "file-metadata" : "none";
+};
+
 const resolveOutputFileName = (file: File, options?: UploadImageOptions): string => {
   const hint = options?.fileName?.trim();
   if (hint) {
-    const safeHint = sanitizeStorageSegment(hint);
+    const safeHint = sanitizeStoragePathSegment(hint);
     const hasExtension = /\.[a-z0-9]{2,5}$/i.test(safeHint);
     if (hasExtension) return safeHint;
     return `${safeHint}.${detectExtension(file)}`;
   }
 
-  const cleanName = sanitizeStorageSegment(file.name);
+  const cleanName = sanitizeStoragePathSegment(file.name);
   return `${Date.now()}-${cleanName}`;
 };
 
@@ -252,18 +303,24 @@ export async function uploadImage(
     allowedTypes: options?.allowedTypes,
   });
   if (fileError) {
-    return { url: null, error: fileError };
+    return { url: null, error: fileError, bucket: null, objectPath: null, versionToken: null };
   }
 
   const guardError = reserveUploadSlot(scope, file, options ?? {});
   if (guardError) {
-    return { url: null, error: guardError };
+    return { url: null, error: guardError, bucket: null, objectPath: null, versionToken: null };
   }
 
   try {
     const sourceDimensionsError = await validateImageDimensions(file, options);
     if (sourceDimensionsError) {
-      return { url: null, error: sourceDimensionsError };
+      return {
+        url: null,
+        error: sourceDimensionsError,
+        bucket: null,
+        objectPath: null,
+        versionToken: null,
+      };
     }
 
     // Canvas compression reduces Storage usage and egress while keeping quality acceptable.
@@ -283,7 +340,7 @@ export async function uploadImage(
     if (optimizedError) {
       const canFallbackToOriginal = Boolean(options?.allowOriginalOnCompressionFail);
       if (!canFallbackToOriginal) {
-        return { url: null, error: optimizedError };
+        return { url: null, error: optimizedError, bucket: null, objectPath: null, versionToken: null };
       }
 
       const originalStillValid = validateImageFile(file, {
@@ -291,20 +348,31 @@ export async function uploadImage(
         allowedTypes: options?.allowedTypes,
       });
       if (originalStillValid) {
-        return { url: null, error: optimizedError };
+        return { url: null, error: optimizedError, bucket: null, objectPath: null, versionToken: null };
       }
       uploadCandidate = file;
     }
 
     const candidateDimensionsError = await validateImageDimensions(uploadCandidate, options);
     if (candidateDimensionsError) {
-      return { url: null, error: candidateDimensionsError };
+      return {
+        url: null,
+        error: candidateDimensionsError,
+        bucket: null,
+        objectPath: null,
+        versionToken: null,
+      };
     }
 
     const supabase = getSupabaseClient();
     const bucket = (process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET || "uploads").trim() || "uploads";
     const filename = resolveOutputFileName(uploadCandidate, options);
     const objectPath = `${safePath}/${filename}`;
+    const versionStrategy = resolveVersionStrategy(options);
+    const versionToken =
+      versionStrategy === "file-metadata"
+        ? buildFileMetadataVersionToken(uploadCandidate)
+        : null;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
@@ -318,13 +386,11 @@ export async function uploadImage(
       throw uploadError;
     }
 
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from(bucket).getPublicUrl(objectPath);
-    const urlBase = publicUrl || null;
-    const url = options?.appendVersionQuery && urlBase
-      ? `${urlBase}${urlBase.includes("?") ? "&" : "?"}v=${Date.now()}`
-      : urlBase;
+    const urlBase = getPublicObjectUrl(ref(getStorage(), `${bucket}:${objectPath}`));
+    const url =
+      versionStrategy === "file-metadata"
+        ? appendAssetVersionQuery(urlBase, versionToken)
+        : urlBase;
 
     // Registramos dedupe apenas apos upload valido no Storage.
     const dedupeFingerprint = buildUploadFingerprint(file);
@@ -332,10 +398,16 @@ export async function uploadImage(
     dedupeCache.set(dedupeFingerprint, Date.now());
     recentFingerprintByScope.set(scope, dedupeCache);
 
-    return { url, error: null };
+    return { url, error: null, bucket, objectPath, versionToken };
   } catch (error: unknown) {
     console.error("Erro critico no upload:", error);
-    return { url: null, error: "Falha ao subir imagem. Tente novamente." };
+    return {
+      url: null,
+      error: "Falha ao subir imagem. Tente novamente.",
+      bucket: null,
+      objectPath: null,
+      versionToken: null,
+    };
   } finally {
     releaseUploadSlot(scope);
   }

@@ -23,7 +23,12 @@ import {
   upsertStoreCategory,
 } from "@/lib/storeService";
 import { withTenantSlug } from "@/lib/tenantRouting";
-import { uploadImage } from "@/lib/upload";
+import {
+  buildDraftAssetFileName,
+  sanitizeStoragePathSegment,
+  uploadImage,
+  VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "@/lib/upload";
 import { URL_MAX_LENGTH } from "@/utils/contactFields";
 
 type CategoryRow = {
@@ -291,7 +296,21 @@ export default function AdminLojaCategoriasPage() {
 
     try {
       setUploadingCover(true);
-      const { url, error } = await uploadImage(file, "categorias");
+      const tenantScope = sanitizeStoragePathSegment(activeTenantId || "global");
+      const stableCategoryId =
+        editingCategory?.categoryId?.trim() ||
+        sanitizeStoragePathSegment(form.nome || editingCategory?.nome || "");
+      const isStableTarget = stableCategoryId.length > 0;
+      const objectDir = isStableTarget
+        ? `store/${tenantScope}/categorias/${stableCategoryId}`
+        : `store/${tenantScope}/categorias/drafts`;
+      const { url, error } = await uploadImage(file, objectDir, {
+        fileName: isStableTarget ? "cover" : buildDraftAssetFileName("cover"),
+        upsert: isStableTarget,
+        versionStrategy: isStableTarget ? "file-metadata" : "none",
+        cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+        scopeKey: `store:category:${tenantScope}:${stableCategoryId || "draft"}`,
+      });
       if (error || !url) {
         addToast(error || "Erro ao enviar capa da categoria.", "error");
         return;

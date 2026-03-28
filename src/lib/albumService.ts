@@ -5,6 +5,7 @@ import { incrementUserStats } from "./supabaseData";
 
 const DEFAULT_AVATAR_URL = "https://github.com/shadcn.png";
 const ALBUM_CAPTURES_TABLE = "album_captures";
+const ALBUM_SUMMARY_TURMAS_TABLE = "album_summary_turmas";
 const MAX_RANKING_RESULTS = 100;
 const MAX_USERS_PER_CLASS = 150;
 const MAX_USERS_PAGE_SIZE = 60;
@@ -17,10 +18,10 @@ const ALBUM_RANKINGS_SELECT_COLUMNS =
 const ALBUM_USERS_SELECT_COLUMNS =
   "uid,nome,turma,foto,apelido,dataNascimento,idadePublica,esportes,pets,cidadeOrigem,relacionamentoPublico,statusRelacionamento,bio,instagram,tenant_id";
 const ALBUM_SUMMARY_SELECT_COLUMNS =
-  "userId,totalCollected,capturedByTurma,lastCaptureId,lastCaptureAt,updatedAt,tenant_id";
+  "userId,totalCollected,lastCaptureId,lastCaptureAt,updatedAt,tenant_id";
 const ALBUM_CONFIG_SELECT_COLUMNS = "id,capa,titulo,subtitulo,updatedAt";
 const ALBUM_UI_SELECT_COLUMNS = "id,capa,titulo,subtitulo,updatedAt,data";
-const ALBUM_CAPTURES_SELECT_COLUMNS = "id,collectorUserId,targetUserId,nome,turma,dataColada";
+const ALBUM_COLLECTED_IDS_SELECT_COLUMNS = "targetUserId,turma,dataColada";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -51,6 +52,15 @@ const asNumber = (value: unknown, fallback = 0): number =>
 const cleanTenantId = (value?: string): string =>
   resolveStoredTenantScopeId(asString(value).trim());
 
+const requireAlbumTenantId = (value?: string): string => {
+  const scopedTenantId = cleanTenantId(value);
+  if (scopedTenantId) return scopedTenantId;
+
+  throw Object.assign(new Error("Tenant do album nao resolvido."), {
+    code: "album/tenant-required",
+  });
+};
+
 const nowIso = (): string => new Date().toISOString();
 
 const throwSupabaseError = (error: {
@@ -69,6 +79,12 @@ const boundedLimit = (requested: number, max: number): number => {
   if (requested < 1) return 1;
   if (requested > max) return max;
   return Math.floor(requested);
+};
+
+const parsePageOffset = (cursorId?: string | null): number => {
+  const parsed = Number(cursorId ?? "");
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.floor(parsed);
 };
 
 const getCacheValue = <T>(
@@ -158,7 +174,6 @@ export interface AlbumUsersPageResult {
 export interface AlbumSummary {
   userId: string;
   totalCollected: number;
-  capturedByTurma: Record<string, string[]>;
   lastCaptureId?: string;
   lastCaptureAt?: unknown;
   updatedAt?: unknown;
@@ -249,36 +264,12 @@ const normalizeTurmaCode = (raw: unknown): string => {
   return "OUTROS";
 };
 
-const toCapturedByTurma = (raw: unknown): Record<string, string[]> => {
-  if (typeof raw !== "object" || raw === null) return {};
-
-  const map = raw as Record<string, unknown>;
-  const normalized: Record<string, string[]> = {};
-
-  Object.entries(map).forEach(([turmaRaw, idsRaw]) => {
-    if (!Array.isArray(idsRaw)) return;
-    const turma = normalizeTurmaCode(turmaRaw);
-    const ids = Array.from(
-      new Set(
-        idsRaw
-          .filter((value): value is string => typeof value === "string")
-          .map((value) => value.trim())
-          .filter(Boolean)
-      )
-    );
-    normalized[turma] = ids;
-  });
-
-  return normalized;
-};
-
 const toAlbumSummary = (
   userId: string,
   raw: Record<string, unknown>
 ): AlbumSummary => ({
   userId: asString(raw.userId, userId),
   totalCollected: asNumber(raw.totalCollected, 0),
-  capturedByTurma: toCapturedByTurma(raw.capturedByTurma),
   lastCaptureId: asString(raw.lastCaptureId) || undefined,
   lastCaptureAt: raw.lastCaptureAt,
   updatedAt: raw.updatedAt,
@@ -357,6 +348,7 @@ export async function fetchAlbumRankings(
   const safeLimit = boundedLimit(maxResults, MAX_RANKING_RESULTS);
   const turmaFilter = options?.turma?.trim().toUpperCase() || "";
   const scopedTenantId = cleanTenantId(options?.tenantId);
+  if (!scopedTenantId) return [];
   const cacheKey = buildTenantScopedCacheKey(
     `${safeLimit}:${turmaFilter || "all"}`,
     scopedTenantId
@@ -447,8 +439,12 @@ export async function fetchUsersByTurmaPage(
 
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_USERS_PAGE_SIZE);
   const cursorId = options?.cursorId?.trim() || "";
+  const offset = parsePageOffset(cursorId);
   const forceRefresh = options?.forceRefresh ?? false;
   const scopedTenantId = cleanTenantId(options?.tenantId);
+  if (!scopedTenantId) {
+    return { users: [], nextCursorId: null, hasMore: false };
+  }
   const cacheKey = buildTenantScopedCacheKey(
     `${turmaCode}:${pageSize}:${cursorId || "first"}`,
     scopedTenantId
@@ -465,42 +461,25 @@ export async function fetchUsersByTurmaPage(
     const turmaCandidates = Array.from(
       new Set([turmaCode, turmaCode.toLowerCase()])
     );
-    const allRows: AlbumUserEntry[] = [];
-
-    for (const turmaCandidate of turmaCandidates) {
-      let query = supabase
-        .from("users")
-        .select(ALBUM_USERS_SELECT_COLUMNS)
-        .eq("turma", turmaCandidate);
-      if (scopedTenantId) {
-        query = query.eq("tenant_id", scopedTenantId);
-      }
-      const { data, error } = await query
-        .order("nome", { ascending: true })
-        .limit(MAX_USERS_PER_CLASS);
-      if (error) throwSupabaseError(error);
-
-      for (const row of (data as unknown as Record<string, unknown>[] | null) ?? []) {
-        allRows.push(toUserEntry(asString(row.uid), row));
-      }
+    let query = supabase
+      .from("users")
+      .select(ALBUM_USERS_SELECT_COLUMNS)
+      .in("turma", turmaCandidates);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
     }
+    const { data, error } = await query
+      .order("nome", { ascending: true })
+      .order("uid", { ascending: true })
+      .range(offset, offset + pageSize);
+    if (error) throwSupabaseError(error);
 
-    const deduped = Array.from(
-      new Map(allRows.map((entry) => [entry.id, entry])).values()
-    ).sort((left, right) =>
-      left.nome.localeCompare(right.nome, "pt-BR", { sensitivity: "base" })
+    const rows = ((data as unknown as Record<string, unknown>[] | null) ?? []).map((row) =>
+      toUserEntry(asString(row.uid), row)
     );
-
-    const startIndex = cursorId
-      ? Math.max(
-          0,
-          deduped.findIndex((entry) => entry.id === cursorId) + 1
-        )
-      : 0;
-    const pageRows = deduped.slice(startIndex, startIndex + pageSize);
-    const users = pageRows;
-    const hasMore = startIndex + pageRows.length < deduped.length;
-    const nextCursorId = pageRows.length > 0 ? pageRows[pageRows.length - 1].id : null;
+    const users = rows.slice(0, pageSize);
+    const hasMore = rows.length > pageSize;
+    const nextCursorId = hasMore ? String(offset + pageSize) : null;
 
     const result: AlbumUsersPageResult = {
       users,
@@ -524,8 +503,11 @@ export async function fetchAlbumCollectedIds(
 ): Promise<string[]> {
   if (!userId) return [];
 
+  const scopedTenantId = cleanTenantId(options?.tenantId);
+  if (!scopedTenantId) return [];
+
   try {
-    await ensureAlbumSelfCollected(userId, options?.tenantId);
+    await ensureAlbumSelfCollected(userId, scopedTenantId);
   } catch {
     // Se a semente falhar por politica/RLS, seguimos com leitura sem quebrar a tela.
   }
@@ -536,7 +518,6 @@ export async function fetchAlbumCollectedIds(
     MAX_USERS_PER_CLASS * 2
   );
   const forceRefresh = options?.forceRefresh ?? false;
-  const scopedTenantId = cleanTenantId(options?.tenantId);
   const cacheKey = buildTenantScopedCacheKey(
     `${userId}:${turma || "all"}:${maxResults}`,
     scopedTenantId
@@ -548,25 +529,12 @@ export async function fetchAlbumCollectedIds(
       if (cached) return cached;
     }
 
-    const summary = await fetchAlbumSummary(userId, {
-      forceRefresh,
-      tenantId: scopedTenantId,
-    });
-    if (summary) {
-      const source = turma
-        ? summary.capturedByTurma[normalizeTurmaCode(turma)] || []
-        : Object.values(summary.capturedByTurma).flat();
-
-      const rows = Array.from(new Set([userId, ...source])).slice(0, maxResults);
-      setCacheValue(collectedIdsCache, cacheKey, rows);
-      return rows;
-    }
-
     const supabase = getSupabaseClient();
     let capturesQuery = supabase
       .from(ALBUM_CAPTURES_TABLE)
-      .select(ALBUM_CAPTURES_SELECT_COLUMNS)
+      .select(ALBUM_COLLECTED_IDS_SELECT_COLUMNS)
       .eq("collectorUserId", userId)
+      .eq("tenant_id", scopedTenantId)
       .order("dataColada", { ascending: false })
       .limit(maxResults);
 
@@ -593,55 +561,6 @@ export async function fetchAlbumCollectedIds(
       )
     );
 
-    if (!turma && ids.length > 0) {
-      const capturedByTurma = rowsRaw.reduce<Record<string, string[]>>(
-        (acc, row) => {
-          const targetId = asString(row.targetUserId).trim();
-          if (!targetId || !allowedTargetIds.has(targetId)) return acc;
-          const turmaKey = normalizeTurmaCode(row.turma);
-          if (!acc[turmaKey]) acc[turmaKey] = [];
-          acc[turmaKey].push(targetId);
-          return acc;
-        },
-        {}
-      );
-      try {
-        const userTurma = await resolveUserTurmaCode(userId, scopedTenantId);
-        capturedByTurma[userTurma] = Array.from(
-          new Set([...(capturedByTurma[userTurma] || []), userId])
-        );
-      } catch {
-        capturedByTurma.OUTROS = Array.from(
-          new Set([...(capturedByTurma.OUTROS || []), userId])
-        );
-      }
-
-      const hydratedSummary: AlbumSummary = {
-        userId,
-        totalCollected: Array.from(new Set(Object.values(capturedByTurma).flat())).length,
-        capturedByTurma,
-      };
-
-      try {
-        await supabase
-          .from(ALBUM_SUMMARY_COLLECTION)
-          .upsert(
-            {
-              userId,
-              tenant_id: scopedTenantId || null,
-              totalCollected: hydratedSummary.totalCollected,
-              capturedByTurma: hydratedSummary.capturedByTurma,
-              updatedAt: nowIso(),
-              migratedFromCapturesAt: nowIso(),
-            },
-            { onConflict: "userId" }
-          );
-      } catch {
-        // Regras podem bloquear write do resumo. Nao interrompe a tela.
-      }
-      setCacheValue(albumSummaryCache, buildTenantScopedCacheKey(userId, scopedTenantId), hydratedSummary);
-    }
-
     setCacheValue(collectedIdsCache, cacheKey, ids);
     return ids;
   });
@@ -654,57 +573,132 @@ export async function ensureAlbumSelfCollected(
   const cleanUserId = userId.trim();
   if (!cleanUserId) return;
   const scopedTenantId = cleanTenantId(tenantId);
+  if (!scopedTenantId) return;
 
   return runWithInflight(
     inflightEnsureSelfCollectedCache,
     buildTenantScopedCacheKey(cleanUserId, scopedTenantId),
     async () => {
       const userTurma = await resolveUserTurmaCode(cleanUserId, scopedTenantId);
-      const summary = await fetchAlbumSummary(cleanUserId, {
-        forceRefresh: true,
-        tenantId: scopedTenantId,
-      });
-      const currentSummary = summary ?? {
-        userId: cleanUserId,
-        totalCollected: 0,
-        capturedByTurma: {} as Record<string, string[]>,
-      };
+      const supabase = getSupabaseClient();
+      let existingCaptureQuery = supabase
+        .from(ALBUM_CAPTURES_TABLE)
+        .select("id")
+        .eq("collectorUserId", cleanUserId)
+        .eq("targetUserId", cleanUserId);
+      let existingSummaryQuery = supabase
+        .from(ALBUM_SUMMARY_COLLECTION)
+        .select(ALBUM_SUMMARY_SELECT_COLUMNS)
+        .eq("userId", cleanUserId);
+      if (scopedTenantId) {
+        existingCaptureQuery = existingCaptureQuery.eq("tenant_id", scopedTenantId);
+        existingSummaryQuery = existingSummaryQuery.eq("tenant_id", scopedTenantId);
+      }
 
-      const turmaRows = currentSummary.capturedByTurma[userTurma] || [];
-      if (turmaRows.includes(cleanUserId)) return;
+      const [
+        { data: existingCapture, error: existingError },
+        { data: existingSummaryRaw, error: existingSummaryError },
+      ] = await Promise.all([existingCaptureQuery.maybeSingle(), existingSummaryQuery.maybeSingle()]);
+      if (existingError) throwSupabaseError(existingError);
+      if (existingSummaryError) throwSupabaseError(existingSummaryError);
 
-      const nextCapturedByTurma = {
-        ...currentSummary.capturedByTurma,
-        [userTurma]: Array.from(new Set([...turmaRows, cleanUserId])),
-      };
-      const uniqueCollected = Array.from(
-        new Set(Object.values(nextCapturedByTurma).flat())
-      );
+      const existingSummary = existingSummaryRaw
+        ? toAlbumSummary(cleanUserId, existingSummaryRaw as Record<string, unknown>)
+        : null;
+      if (existingCapture && existingSummary && existingSummary.totalCollected > 0) {
+        setCacheValue(
+          albumSummaryCache,
+          buildTenantScopedCacheKey(cleanUserId, scopedTenantId),
+          existingSummary
+        );
+        return;
+      }
+
+      if (!existingCapture) {
+        const { error: insertError } = await supabase.from(ALBUM_CAPTURES_TABLE).upsert(
+          {
+            collectorUserId: cleanUserId,
+            targetUserId: cleanUserId,
+            turma: userTurma,
+            tenant_id: scopedTenantId,
+            dataColada: nowIso(),
+          },
+          { onConflict: "tenant_id,collectorUserId,targetUserId" }
+        );
+        if (insertError) throwSupabaseError(insertError);
+      }
+
+      let totalCountQuery = supabase
+        .from(ALBUM_CAPTURES_TABLE)
+        .select("id", { count: "exact", head: true })
+        .eq("collectorUserId", cleanUserId);
+      let lastCaptureQuery = supabase
+        .from(ALBUM_CAPTURES_TABLE)
+        .select("targetUserId,dataColada")
+        .eq("collectorUserId", cleanUserId);
+      if (scopedTenantId) {
+        totalCountQuery = totalCountQuery.eq("tenant_id", scopedTenantId);
+        lastCaptureQuery = lastCaptureQuery.eq("tenant_id", scopedTenantId);
+      }
+      const [{ count: totalCollected, error: totalCountError }, { data: lastCaptureRaw, error: lastCaptureError }] =
+        await Promise.all([
+          totalCountQuery,
+          lastCaptureQuery.order("dataColada", { ascending: false }).limit(1).maybeSingle(),
+        ]);
+      if (totalCountError) throwSupabaseError(totalCountError);
+      if (lastCaptureError) throwSupabaseError(lastCaptureError);
+
+      const lastCapture = (lastCaptureRaw ?? {}) as Record<string, unknown>;
+      const lastCaptureId = asString(lastCapture.targetUserId) || cleanUserId;
+      const lastCaptureAt = lastCapture.dataColada ?? nowIso();
+
       const nextSummary: AlbumSummary = {
         userId: cleanUserId,
-        totalCollected: uniqueCollected.length,
-        capturedByTurma: nextCapturedByTurma,
-        lastCaptureId: currentSummary.lastCaptureId,
-        lastCaptureAt: currentSummary.lastCaptureAt,
+        totalCollected: Math.max(0, totalCollected ?? 0),
+        lastCaptureId,
+        lastCaptureAt,
         updatedAt: nowIso(),
       };
 
-      const supabase = getSupabaseClient();
-      const { error } = await supabase
+      await supabase
         .from(ALBUM_SUMMARY_COLLECTION)
         .upsert(
           {
             userId: nextSummary.userId,
-            tenant_id: scopedTenantId || null,
+            tenant_id: scopedTenantId,
             totalCollected: nextSummary.totalCollected,
-            capturedByTurma: nextSummary.capturedByTurma,
             lastCaptureId: nextSummary.lastCaptureId,
             lastCaptureAt: nextSummary.lastCaptureAt,
             updatedAt: nowIso(),
           },
-          { onConflict: "userId" }
+          { onConflict: "tenant_id,userId" }
         );
-      if (error) throwSupabaseError(error);
+
+      try {
+        let turmaCountQuery = supabase
+          .from(ALBUM_CAPTURES_TABLE)
+          .select("id", { count: "exact", head: true })
+          .eq("collectorUserId", cleanUserId)
+          .eq("turma", userTurma);
+        if (scopedTenantId) {
+          turmaCountQuery = turmaCountQuery.eq("tenant_id", scopedTenantId);
+        }
+        const { count: turmaCount, error: turmaCountError } = await turmaCountQuery;
+        if (turmaCountError) throwSupabaseError(turmaCountError);
+
+        await supabase.from(ALBUM_SUMMARY_TURMAS_TABLE).upsert(
+          {
+            userId: cleanUserId,
+            turma: userTurma,
+            capturedCount: Math.max(0, turmaCount ?? 0),
+            tenant_id: scopedTenantId,
+            updatedAt: nowIso(),
+          },
+          { onConflict: "tenant_id,userId,turma" }
+        );
+      } catch {
+        // A tabela relacional de resumo pode ainda nao existir durante rollout.
+      }
 
       setCacheValue(
         albumSummaryCache,
@@ -722,6 +716,7 @@ export async function fetchAlbumSummary(
 ): Promise<AlbumSummary | null> {
   if (!userId) return null;
   const scopedTenantId = cleanTenantId(options?.tenantId);
+  if (!scopedTenantId) return null;
   const cacheKey = buildTenantScopedCacheKey(userId, scopedTenantId);
 
   return runWithInflight(inflightAlbumSummaryCache, cacheKey, async () => {
@@ -902,7 +897,7 @@ export async function registerAlbumCapture(payload: {
 }): Promise<AlbumCaptureResult> {
   const targetId = payload.targetId.trim();
   const collectorUid = payload.collector.uid.trim();
-  const scopedTenantId = cleanTenantId(payload.tenantId);
+  const scopedTenantId = requireAlbumTenantId(payload.tenantId);
   if (!targetId || !collectorUid || targetId === collectorUid) {
     return { status: "invalid-target" };
   }
@@ -953,18 +948,17 @@ export async function registerAlbumCapture(payload: {
     payload.collector.foto || collectorData.foto,
     DEFAULT_AVATAR_URL
   );
+  const capturedAt = nowIso();
 
-  const captureId = `${collectorUid}__${targetId}`;
   const { error: insertCaptureError } = await supabase
     .from(ALBUM_CAPTURES_TABLE)
     .insert({
-      id: captureId,
       collectorUserId: collectorUid,
       targetUserId: targetId,
-      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+      tenant_id: scopedTenantId,
       nome: targetName,
       turma: targetTurmaKey,
-      dataColada: nowIso(),
+      dataColada: capturedAt,
     });
   if (insertCaptureError) {
     if (isUniqueViolationError(insertCaptureError)) {
@@ -974,34 +968,62 @@ export async function registerAlbumCapture(payload: {
   }
 
   const rankingWrite = async (): Promise<void> => {
-    let rankingReadQuery = supabase
+    const rankingRowId =
+      buildTenantScopedRowId(scopedTenantId, collectorUid) || collectorUid;
+    const rankingReadQuery = supabase
       .from("album_rankings")
       .select("id,totalColetado,scansT8")
-      .eq("id", collectorUid);
-    if (scopedTenantId) {
-      rankingReadQuery = rankingReadQuery.eq("tenant_id", scopedTenantId);
-    }
+      .eq("tenant_id", scopedTenantId)
+      .eq("userId", collectorUid);
     const { data: rankingData, error: rankingReadError } = await rankingReadQuery.maybeSingle();
     if (rankingReadError) throwSupabaseError(rankingReadError);
 
     const rankingRaw = (rankingData ?? {}) as Record<string, unknown>;
-    const nextTotalColetado = asNumber(rankingRaw.totalColetado, 0) + 1;
-    const nextScansT8 =
-      asNumber(rankingRaw.scansT8, 0) + (targetTurmaKey === "T8" ? 1 : 0);
+    let nextTotalColetado = asNumber(rankingRaw.totalColetado, 0);
+    let nextScansT8 = asNumber(rankingRaw.scansT8, 0);
+
+    if (rankingData && nextTotalColetado > 0) {
+      nextTotalColetado += 1;
+      nextScansT8 += targetTurmaKey === "T8" ? 1 : 0;
+    } else {
+      let totalCountQuery = supabase
+        .from(ALBUM_CAPTURES_TABLE)
+        .select("id", { count: "exact", head: true })
+        .eq("collectorUserId", collectorUid);
+      let scansT8Query = supabase
+        .from(ALBUM_CAPTURES_TABLE)
+        .select("id", { count: "exact", head: true })
+        .eq("collectorUserId", collectorUid)
+        .eq("turma", "T8");
+      if (scopedTenantId) {
+        totalCountQuery = totalCountQuery.eq("tenant_id", scopedTenantId);
+        scansT8Query = scansT8Query.eq("tenant_id", scopedTenantId);
+      }
+
+      const [
+        { count: totalCollected, error: totalCountError },
+        { count: scansT8Count, error: scansT8Error },
+      ] = await Promise.all([totalCountQuery, scansT8Query]);
+      if (totalCountError) throwSupabaseError(totalCountError);
+      if (scansT8Error) throwSupabaseError(scansT8Error);
+
+      nextTotalColetado = Math.max(1, totalCollected ?? 1);
+      nextScansT8 = Math.max(0, scansT8Count ?? (targetTurmaKey === "T8" ? 1 : 0));
+    }
 
     const { error: rankingWriteError } = await supabase.from("album_rankings").upsert(
       {
-        id: collectorUid,
+        id: rankingRowId,
         userId: collectorUid,
         nome: collectorName,
         turma: collectorTurma,
         foto: collectorFoto,
-        tenant_id: scopedTenantId || null,
+        tenant_id: scopedTenantId,
         totalColetado: nextTotalColetado,
         scansT8: nextScansT8,
-        ultimoScan: nowIso(),
+        ultimoScan: capturedAt,
       },
-      { onConflict: "id" }
+      { onConflict: "tenant_id,userId" }
     );
     if (rankingWriteError) throwSupabaseError(rankingWriteError);
   };
@@ -1036,35 +1058,82 @@ export async function registerAlbumCapture(payload: {
     const { data: summaryData, error: summaryReadError } = await summaryReadQuery.maybeSingle();
     if (summaryReadError) throwSupabaseError(summaryReadError);
 
-    const currentSummary = summaryData
-      ? toAlbumSummary(collectorUid, summaryData as Record<string, unknown>)
-      : {
-          userId: collectorUid,
-          totalCollected: 0,
-          capturedByTurma: {} as Record<string, string[]>,
-        };
-
-    const nextCapturedByTurma = { ...currentSummary.capturedByTurma };
-    const turmaIds = Array.from(
-      new Set([...(nextCapturedByTurma[targetTurmaKey] || []), targetId])
-    );
-    nextCapturedByTurma[targetTurmaKey] = turmaIds;
+    const summaryRaw = (summaryData ?? {}) as Record<string, unknown>;
+    let nextTotalCollected = asNumber(summaryRaw.totalCollected, 0);
+    if (summaryData && nextTotalCollected > 0) {
+      nextTotalCollected += 1;
+    } else {
+      let totalCountQuery = supabase
+        .from(ALBUM_CAPTURES_TABLE)
+        .select("id", { count: "exact", head: true })
+        .eq("collectorUserId", collectorUid);
+      if (scopedTenantId) {
+        totalCountQuery = totalCountQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { count: totalCollected, error: totalCountError } = await totalCountQuery;
+      if (totalCountError) throwSupabaseError(totalCountError);
+      nextTotalCollected = Math.max(1, totalCollected ?? 1);
+    }
 
     const { error: summaryWriteError } = await supabase
       .from(ALBUM_SUMMARY_COLLECTION)
       .upsert(
         {
           userId: collectorUid,
-          tenant_id: scopedTenantId || null,
-          totalCollected: Array.from(new Set(Object.values(nextCapturedByTurma).flat())).length,
-          capturedByTurma: nextCapturedByTurma,
+          tenant_id: scopedTenantId,
+          totalCollected: nextTotalCollected,
           lastCaptureId: targetId,
-          lastCaptureAt: nowIso(),
-          updatedAt: nowIso(),
+          lastCaptureAt: capturedAt,
+          updatedAt: capturedAt,
         },
-        { onConflict: "userId" }
+        { onConflict: "tenant_id,userId" }
       );
     if (summaryWriteError) throwSupabaseError(summaryWriteError);
+
+    try {
+      let turmaSummaryQuery = supabase
+        .from(ALBUM_SUMMARY_TURMAS_TABLE)
+        .select("capturedCount")
+        .eq("userId", collectorUid)
+        .eq("turma", targetTurmaKey);
+      if (scopedTenantId) {
+        turmaSummaryQuery = turmaSummaryQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { data: turmaSummaryData, error: turmaSummaryError } =
+        await turmaSummaryQuery.maybeSingle();
+      if (turmaSummaryError) throwSupabaseError(turmaSummaryError);
+
+      const turmaSummaryRaw = (turmaSummaryData ?? {}) as Record<string, unknown>;
+      let nextTurmaCount = asNumber(turmaSummaryRaw.capturedCount, 0);
+      if (turmaSummaryData && nextTurmaCount > 0) {
+        nextTurmaCount += 1;
+      } else {
+        let turmaCountQuery = supabase
+          .from(ALBUM_CAPTURES_TABLE)
+          .select("id", { count: "exact", head: true })
+          .eq("collectorUserId", collectorUid)
+          .eq("turma", targetTurmaKey);
+        if (scopedTenantId) {
+          turmaCountQuery = turmaCountQuery.eq("tenant_id", scopedTenantId);
+        }
+        const { count: turmaCount, error: turmaCountError } = await turmaCountQuery;
+        if (turmaCountError) throwSupabaseError(turmaCountError);
+        nextTurmaCount = Math.max(1, turmaCount ?? 1);
+      }
+
+      await supabase.from(ALBUM_SUMMARY_TURMAS_TABLE).upsert(
+        {
+          userId: collectorUid,
+          turma: targetTurmaKey,
+          capturedCount: nextTurmaCount,
+          tenant_id: scopedTenantId,
+          updatedAt: capturedAt,
+        },
+        { onConflict: "tenant_id,userId,turma" }
+      );
+    } catch {
+      // A tabela nova pode nao existir em ambientes ainda nao migrados.
+    }
   };
 
   const notificationWrite = async (): Promise<void> => {
@@ -1077,8 +1146,8 @@ export async function registerAlbumCapture(payload: {
       link: "/album",
       read: false,
       type: "album",
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
+      createdAt: capturedAt,
+      updatedAt: capturedAt,
     });
     if (error) throwSupabaseError(error);
   };

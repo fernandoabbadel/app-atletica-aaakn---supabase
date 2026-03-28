@@ -3,7 +3,7 @@
 create extension if not exists pgcrypto;
 
 -- Compat tables used by the Firestore-like layer but absent from the core free schema
-create table if not exists public.guia_data (
+create table if not exists public.guia_data (j
   id text primary key default gen_random_uuid()::text,
   categoria text,
   ordem integer,

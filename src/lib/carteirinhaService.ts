@@ -1,11 +1,24 @@
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { compressImageFile } from "./imageCompression";
 import { getSupabaseClient } from "./supabase";
+import { getPublicObjectUrl, getStorage, parseStorageUrl, ref } from "./supa/storage";
 import { buildTenantScopedRowId } from "./tenantScopedCatalog";
+import {
+  appendAssetVersionQuery,
+  buildFileMetadataVersionToken,
+  VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "./upload";
+
+export interface CarteirinhaBackgroundAssetRef {
+  bucket: string;
+  path: string;
+  versionToken?: string | null;
+}
 
 export interface CarteirinhaConfig {
   validade: string;
   backgrounds: Record<string, string>;
+  backgroundAssets: Record<string, CarteirinhaBackgroundAssetRef>;
   backgroundOpacity: number;
 }
 
@@ -16,11 +29,12 @@ export const CARTEIRINHA_CONFIG_SYNC_KEY = "usc:carteirinha-config:updated-at";
 export const CARTEIRINHA_CONFIG_UPDATED_EVENT_NAME = "usc:carteirinha-config-updated";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_SOURCE_FILE_BYTES = 12 * 1024 * 1024;
-const MAX_UPLOAD_FILE_BYTES = 2.5 * 1024 * 1024;
+const MAX_UPLOAD_FILE_BYTES = 256 * 1024;
 
 const DEFAULT_CONFIG: CarteirinhaConfig = {
   validade: "DEZ/2026",
   backgrounds: {},
+  backgroundAssets: {},
   backgroundOpacity: 60,
 };
 
@@ -32,6 +46,7 @@ const DEFAULT_BUCKET =
 const createDefaultConfig = (): CarteirinhaConfig => ({
   validade: DEFAULT_CONFIG.validade,
   backgrounds: {},
+  backgroundAssets: {},
   backgroundOpacity: DEFAULT_CONFIG.backgroundOpacity,
 });
 
@@ -105,6 +120,103 @@ const isBackgroundUrlAllowed = (value: string): boolean => {
   return value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/");
 };
 
+const normalizeVersionToken = (value: unknown): string | null => {
+  const token = asString(value).trim();
+  return token || null;
+};
+
+const normalizeCarteirinhaBackgroundAssetRef = (
+  value: unknown
+): CarteirinhaBackgroundAssetRef | null => {
+  if (typeof value === "string") {
+    const parsed = parseStorageUrl(value);
+    if (!parsed) return null;
+    return {
+      bucket: parsed.ref.bucket,
+      path: parsed.ref.fullPath,
+      versionToken: parsed.versionToken,
+    };
+  }
+
+  const raw = asObject(value);
+  if (!raw) return null;
+
+  const bucket = asString(raw.bucket).trim();
+  const path = asString(raw.path ?? raw.objectPath ?? raw.fullPath).trim();
+  if (bucket && path) {
+    return {
+      bucket,
+      path,
+      versionToken: normalizeVersionToken(raw.versionToken),
+    };
+  }
+
+  const parsedFromUrl = parseStorageUrl(asString(raw.url).trim());
+  if (!parsedFromUrl) return null;
+  return {
+    bucket: parsedFromUrl.ref.bucket,
+    path: parsedFromUrl.ref.fullPath,
+    versionToken:
+      normalizeVersionToken(raw.versionToken) ?? parsedFromUrl.versionToken,
+  };
+};
+
+export const resolveCarteirinhaBackgroundUrl = (
+  value: CarteirinhaBackgroundAssetRef | string | null | undefined
+): string | null => {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return isBackgroundUrlAllowed(normalized) ? normalized : null;
+  }
+
+  if (!value) return null;
+
+  const baseUrl = getPublicObjectUrl(ref(getStorage(), `${value.bucket}:${value.path}`));
+  return appendAssetVersionQuery(baseUrl, value.versionToken) || baseUrl;
+};
+
+const setNormalizedBackgroundEntry = (
+  turma: string,
+  rawValue: unknown,
+  targetUrls: Record<string, string>,
+  targetAssets: Record<string, CarteirinhaBackgroundAssetRef>
+): void => {
+  const turmaCode = normalizeTurmaCode(turma);
+  if (!isValidTurmaCode(turmaCode)) return;
+
+  const assetRef = normalizeCarteirinhaBackgroundAssetRef(rawValue);
+  const resolvedUrl =
+    resolveCarteirinhaBackgroundUrl(assetRef) ??
+    resolveCarteirinhaBackgroundUrl(asString(rawValue).trim());
+
+  if (assetRef) {
+    targetAssets[turmaCode] = assetRef;
+  }
+
+  if (resolvedUrl) {
+    targetUrls[turmaCode] = resolvedUrl;
+  }
+};
+
+const serializeBackgroundAssets = (
+  backgrounds: Record<string, CarteirinhaBackgroundAssetRef>
+): Record<string, CarteirinhaBackgroundAssetRef> =>
+  Object.fromEntries(
+    Object.entries(backgrounds)
+      .map(([turma, asset]) => {
+        const turmaCode = normalizeTurmaCode(turma);
+        if (!isValidTurmaCode(turmaCode)) return null;
+        const normalizedAsset = normalizeCarteirinhaBackgroundAssetRef(asset);
+        if (!normalizedAsset) return null;
+        return [turmaCode, normalizedAsset];
+      })
+      .filter(
+        (
+          entry
+        ): entry is [string, CarteirinhaBackgroundAssetRef] => entry !== null
+      )
+  );
+
 const normalizeConfig = (raw: Record<string, unknown> | null): CarteirinhaConfig => {
   if (!raw) return createDefaultConfig();
 
@@ -113,16 +225,42 @@ const normalizeConfig = (raw: Record<string, unknown> | null): CarteirinhaConfig
     rawValidade.length > 24 ? rawValidade.slice(0, 24) : rawValidade || DEFAULT_CONFIG.validade;
 
   const normalizedBackgrounds: Record<string, string> = {};
+  const normalizedBackgroundAssets: Record<string, CarteirinhaBackgroundAssetRef> = {};
   const rawBackgrounds = asObject(raw.backgrounds);
   const rawData = asObject(raw.data);
+  const rawDataBackgrounds = asObject(rawData?.backgrounds);
+  const rawBackgroundAssets = asObject(rawData?.backgroundAssets);
 
   if (rawBackgrounds) {
     for (const [turma, value] of Object.entries(rawBackgrounds)) {
-      const turmaCode = normalizeTurmaCode(turma);
-      if (!isValidTurmaCode(turmaCode)) continue;
-      const url = asString(value).trim();
-      if (!isBackgroundUrlAllowed(url)) continue;
-      normalizedBackgrounds[turmaCode] = url;
+      setNormalizedBackgroundEntry(
+        turma,
+        value,
+        normalizedBackgrounds,
+        normalizedBackgroundAssets
+      );
+    }
+  }
+
+  if (rawDataBackgrounds) {
+    for (const [turma, value] of Object.entries(rawDataBackgrounds)) {
+      setNormalizedBackgroundEntry(
+        turma,
+        value,
+        normalizedBackgrounds,
+        normalizedBackgroundAssets
+      );
+    }
+  }
+
+  if (rawBackgroundAssets) {
+    for (const [turma, value] of Object.entries(rawBackgroundAssets)) {
+      setNormalizedBackgroundEntry(
+        turma,
+        value,
+        normalizedBackgrounds,
+        normalizedBackgroundAssets
+      );
     }
   }
 
@@ -135,7 +273,12 @@ const normalizeConfig = (raw: Record<string, unknown> | null): CarteirinhaConfig
     ? Math.max(0, Math.min(100, Math.round(parsedOpacity)))
     : DEFAULT_CONFIG.backgroundOpacity;
 
-  return { validade, backgrounds: normalizedBackgrounds, backgroundOpacity };
+  return {
+    validade,
+    backgrounds: normalizedBackgrounds,
+    backgroundAssets: normalizedBackgroundAssets,
+    backgroundOpacity,
+  };
 };
 
 const broadcastConfigUpdate = (tenantId?: string | null): void => {
@@ -264,6 +407,7 @@ export async function saveCarteirinhaConfig(
   options?: { tenantId?: string | null }
 ): Promise<void> {
   const normalized = normalizeConfig(config as unknown as Record<string, unknown>);
+  const backgroundAssets = serializeBackgroundAssets(normalized.backgroundAssets);
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveCarteirinhaTenantId(options?.tenantId);
 
@@ -274,7 +418,7 @@ export async function saveCarteirinhaConfig(
       validade: normalized.validade,
       backgrounds: normalized.backgrounds,
       data: {
-        backgrounds: normalized.backgrounds,
+        backgroundAssets,
         backgroundOpacity: normalized.backgroundOpacity,
       },
       updatedAt: new Date().toISOString(),
@@ -290,7 +434,7 @@ export async function uploadCarteirinhaBackground(
   turma: string,
   file: File,
   options?: { tenantId?: string | null }
-): Promise<string> {
+): Promise<CarteirinhaBackgroundAssetRef> {
   const turmaCode = normalizeTurmaCode(turma);
   if (!isValidTurmaCode(turmaCode)) {
     throw new Error("Turma invalida para upload.");
@@ -307,6 +451,7 @@ export async function uploadCarteirinhaBackground(
   const optimized = await compressImageFile(file, {
     maxWidth: 1600,
     maxHeight: 1000,
+    maxBytes: MAX_UPLOAD_FILE_BYTES,
     quality: 0.82,
   });
 
@@ -320,6 +465,7 @@ export async function uploadCarteirinhaBackground(
 
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveCarteirinhaTenantId(options?.tenantId);
+  const versionToken = buildFileMetadataVersionToken(optimized);
   const path = scopedTenantId
     ? `carteirinha/${scopedTenantId}/backgrounds/${turmaCode}`
     : `carteirinha/backgrounds/${turmaCode}`;
@@ -327,7 +473,7 @@ export async function uploadCarteirinhaBackground(
   const { error: uploadError } = await supabase.storage.from(DEFAULT_BUCKET).upload(path, optimized, {
     upsert: true,
     contentType: optimized.type,
-    cacheControl: "3600",
+    cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
   });
 
   if (uploadError) {
@@ -337,21 +483,9 @@ export async function uploadCarteirinhaBackground(
     });
   }
 
-  const { data: publicData } = supabase.storage.from(DEFAULT_BUCKET).getPublicUrl(path);
-  const baseUrl = publicData?.publicUrl;
-
-  if (!baseUrl) {
-    const { data: signed, error: signedError } = await supabase.storage
-      .from(DEFAULT_BUCKET)
-      .createSignedUrl(path, 60 * 60 * 24 * 30);
-    if (signedError || !signed?.signedUrl) {
-      throw Object.assign(new Error(signedError?.message || "Falha ao gerar URL do upload."), {
-        code: `storage/${signedError?.name ?? "signed-url-failed"}`,
-        cause: signedError,
-      });
-    }
-    return `${signed.signedUrl}${signed.signedUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
-  }
-
-  return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
+  return {
+    bucket: DEFAULT_BUCKET,
+    path,
+    versionToken,
+  };
 }

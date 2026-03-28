@@ -51,6 +51,9 @@ const fileNameToWebp = (name: string): string => {
   return `${sanitized || "image"}.webp`;
 };
 
+const resolveCompressedLastModified = (file: File): number =>
+  file.lastModified > 0 ? file.lastModified : Date.now();
+
 export async function compressImageFile(
   file: File,
   options?: ImageCompressionOptions
@@ -89,7 +92,7 @@ export async function compressImageFile(
         if (blob.size <= config.maxBytes) {
           return new File([blob], fileNameToWebp(file.name), {
             type: "image/webp",
-            lastModified: Date.now(),
+            lastModified: resolveCompressedLastModified(file),
           });
         }
       }
@@ -112,7 +115,7 @@ export async function compressImageFile(
   if (bestBlob) {
     return new File([bestBlob], fileNameToWebp(file.name), {
       type: "image/webp",
-      lastModified: Date.now(),
+      lastModified: resolveCompressedLastModified(file),
     });
   }
 

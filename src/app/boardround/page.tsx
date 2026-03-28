@@ -24,6 +24,7 @@ import {
   getDefaultSharkroundAppConfig,
   type SharkroundAppConfig,
 } from "../../lib/sharkroundConfigService";
+import { resolveLeagueLogoSrc } from "../../lib/leagueMedia";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGENS ---
@@ -43,14 +44,14 @@ interface Pergunta {
     texto: string; 
     alternativas: string[]; 
     respostaCorreta: number; 
-    imagemBase64?: string; 
+    imageUrl?: string;
 }
 
 interface LigaConfig {
     id: string;
     nome: string;
     sigla?: string;
-    logoBase64?: string;
+    logoUrl?: string;
     perguntas: Pergunta[];
     ativa?: boolean;
 }
@@ -240,7 +241,7 @@ export default function BoardRoundPage() {
         setLigasAtivasMap(ligasMap); 
 
         // Fallback tipado
-        const ligasPool = ligasLoaded.length > 0 ? ligasLoaded : [{id: 'demo', nome: "Liga Genérica", sigla: "LIGA", logoBase64: undefined, perguntas: [], ativa: true} as LigaConfig];
+        const ligasPool = ligasLoaded.length > 0 ? ligasLoaded : [{id: 'demo', nome: "Liga Genérica", sigla: "LIGA", logoUrl: undefined, perguntas: [], ativa: true} as LigaConfig];
         
         // Monta Tabuleiro
         const novoTab: CasaTabuleiro[] = [];
@@ -266,7 +267,7 @@ export default function BoardRoundPage() {
                 const l = ligasPool[ligaIdx % ligasPool.length];
                 titulo = l.nome;
                 sigla = l.sigla || l.nome.substring(0,4).toUpperCase();
-                bg = l.logoBase64;
+                bg = resolveLeagueLogoSrc(l) || undefined;
                 cor = cores[ligaIdx % cores.length];
                 currentLigaId = l.id;
                 ligaIdx++;
@@ -611,7 +612,7 @@ export default function BoardRoundPage() {
               {/* Logo Central */}
               <div className="col-start-3 col-end-10 row-start-3 row-end-10 flex flex-col items-center justify-center relative z-0">
                   <div className="absolute inset-0 bg-emerald-900/10 blur-3xl rounded-full animate-pulse"></div>
-                  <div className="w-40 h-40 md:w-64 md:h-64 relative mb-4 opacity-100 hover:scale-105 transition duration-500 animate-float"><Image src={tenantLogoUrl || "/logo.png"} alt="Logo da atletica" fill className="object-contain drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]" unoptimized={Boolean(tenantLogoUrl && tenantLogoUrl.startsWith("http"))} /></div>
+                  <div className="w-40 h-40 md:w-64 md:h-64 relative mb-4 opacity-100 hover:scale-105 transition duration-500 animate-float"><Image src={tenantLogoUrl || "/logo.png"} alt="Logo da atletica" fill sizes="(max-width: 768px) 160px, 256px" className="object-contain drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]" unoptimized={Boolean(tenantLogoUrl && tenantLogoUrl.startsWith("http"))} priority /></div>
               </div>
 
               {tabuleiro.map((casa) => {

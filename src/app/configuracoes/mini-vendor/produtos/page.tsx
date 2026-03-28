@@ -17,7 +17,12 @@ import {
 import { fetchPlanCatalog, type PlanRecord } from "@/lib/plansPublicService";
 import { upsertStoreProduct } from "@/lib/storeService";
 import { withTenantSlug } from "@/lib/tenantRouting";
-import { uploadImage } from "@/lib/upload";
+import {
+  buildDraftAssetFileName,
+  sanitizeStoragePathSegment,
+  uploadImage,
+  VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "@/lib/upload";
 import {
   hasValidPhoneLength,
   normalizePhoneToBrE164,
@@ -246,7 +251,20 @@ export default function MiniVendorProductsPage() {
 
     try {
       setUploadingProductImage(true);
-      const { url, error } = await uploadImage(file, "mini-vendors/produtos");
+      const cleanTenantId = tenantId.trim();
+      const sellerId = profile?.id?.trim() || "";
+      const productId = editingProductId?.trim() || "";
+      const isStableTarget = cleanTenantId.length > 0 && sellerId.length > 0 && productId.length > 0;
+      const objectDir = isStableTarget
+        ? `mini-vendors/${sanitizeStoragePathSegment(cleanTenantId)}/${sanitizeStoragePathSegment(sellerId)}/produtos/${sanitizeStoragePathSegment(productId)}`
+        : `mini-vendors/${sanitizeStoragePathSegment(cleanTenantId || "draft")}/${sanitizeStoragePathSegment(sellerId || "draft")}/produtos/drafts`;
+      const { url, error } = await uploadImage(file, objectDir, {
+        fileName: isStableTarget ? "produto" : buildDraftAssetFileName("produto"),
+        upsert: isStableTarget,
+        versionStrategy: isStableTarget ? "file-metadata" : "none",
+        cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+        scopeKey: `mini-vendor:product:${cleanTenantId || "draft"}:${sellerId || "draft"}:${productId || "draft"}`,
+      });
       if (error || !url) {
         addToast(error || "Erro ao subir imagem do produto.", "error");
         return;

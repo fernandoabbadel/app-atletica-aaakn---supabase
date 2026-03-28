@@ -114,6 +114,7 @@ export default function AdminParceirosEmpresasPage() {
           pageSize: PAGE_SIZE,
           cursorId: reset ? null : cursorId,
           status: statusFilter,
+          view: "editor",
           forceRefresh: false,
         });
 

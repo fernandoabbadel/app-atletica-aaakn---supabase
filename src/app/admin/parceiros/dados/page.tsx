@@ -72,6 +72,7 @@ export default function AdminParceirosDadosPage() {
           pageSize: PAGE_SIZE,
           cursorId: reset ? null : cursorId,
           status: "all",
+          view: "contact",
           forceRefresh: false,
         });
 

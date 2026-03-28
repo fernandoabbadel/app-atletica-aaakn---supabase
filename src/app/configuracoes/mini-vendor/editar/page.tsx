@@ -13,7 +13,12 @@ import {
   type MiniVendorProfile,
   upsertMiniVendorProfile,
 } from "@/lib/miniVendorService";
-import { uploadImage } from "@/lib/upload";
+import {
+  buildDraftAssetFileName,
+  sanitizeStoragePathSegment,
+  uploadImage,
+  VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "@/lib/upload";
 import {
   hasValidPhoneLength,
   normalizePhoneToBrE164,
@@ -121,9 +126,29 @@ export default function MiniVendorCompanyEditPage() {
       if (target === "logoUrl") setUploadingLogo(true);
       else setUploadingCover(true);
 
+      const cleanTenantId = tenantId.trim();
+      const cleanUserId = user?.uid?.trim() || "";
+      const isStableTarget = cleanTenantId.length > 0 && cleanUserId.length > 0;
+      const folder = target === "logoUrl" ? "logos" : "covers";
+      const objectDir = isStableTarget
+        ? `mini-vendors/${sanitizeStoragePathSegment(cleanTenantId)}/${sanitizeStoragePathSegment(cleanUserId)}/${folder}`
+        : `mini-vendors/drafts/${folder}`;
+      const fileName = isStableTarget
+        ? target === "logoUrl"
+          ? "logo"
+          : "cover"
+        : buildDraftAssetFileName(target === "logoUrl" ? "logo" : "cover");
+
       const { url, error } = await uploadImage(
         file,
-        target === "logoUrl" ? "mini-vendors/logos" : "mini-vendors/covers"
+        objectDir,
+        {
+          fileName,
+          upsert: isStableTarget,
+          versionStrategy: isStableTarget ? "file-metadata" : "none",
+          cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+          scopeKey: `mini-vendor:profile:${cleanTenantId || "draft"}:${cleanUserId || "anon"}:${target}`,
+        }
       );
       if (error || !url) {
         addToast(error || "Erro ao subir imagem da loja.", "error");

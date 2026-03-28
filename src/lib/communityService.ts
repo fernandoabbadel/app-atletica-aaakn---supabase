@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "./supabase";
 import {
   asObject,
+  asNumber,
   asString,
   asStringArray,
   boundedLimit,
@@ -53,6 +54,7 @@ const MAX_COMMENT_RESULTS = 60;
 const DEFAULT_UNREAD_SINCE_DAYS = 90;
 const DEFAULT_RECENT_CATEGORY_WINDOW_DAYS = 2;
 const COMMUNITY_READS_TABLE = "community_category_reads";
+const COMMUNITY_CATEGORY_COUNTS_RPC = "community_category_counts_bundle";
 const COMMUNITY_POSTS_SELECT_COLUMNS =
   "id,userId,userName,avatar,handle,role,tenant_role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,imagem,categoria,likes,hype,comentarios,blocked,commentsDisabled,fixado,denunciasCount,createdAt,updatedAt";
 const COMMUNITY_REPORTS_SELECT_COLUMNS =
@@ -60,6 +62,7 @@ const COMMUNITY_REPORTS_SELECT_COLUMNS =
 const COMMUNITY_COMMENTS_SELECT_COLUMNS =
   "id,postId,userId,userName,avatar,role,tenant_role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,likes,hidden,reports,createdAt,updatedAt";
 const COMMUNITY_CONFIG_SELECT_COLUMNS = "id,data,titulo,subtitulo,capaUrl,limitMessages,updatedAt";
+let communityCategoryCountsRpcAvailable: boolean | null = null;
 
 const nowIso = (): string => new Date().toISOString();
 const daysAgoIso = (days: number): string => {
@@ -87,6 +90,18 @@ const isDuplicateKeyError = (error: { code?: string | null; message?: string | n
   error.code === "23505" ||
   (typeof error.message === "string" &&
     error.message.toLowerCase().includes("duplicate key value"));
+
+const isMissingRpcError = (error: { code?: string | null; message?: string | null }): boolean => {
+  const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "PGRST202" ||
+    code === "42883" ||
+    message.includes("could not find the function") ||
+    message.includes("schema cache") ||
+    (message.includes("function") && message.includes("does not exist"))
+  );
+};
 
 const normalizeCategoryReads = (
   value: unknown,
@@ -585,11 +600,207 @@ export async function fetchCommunityFeedByCategory(payload: {
   return enriched.map((row) => mapRow(row));
 }
 
+type CommunityCategoryCountsRpcRow = {
+  categoria: string;
+  recentCount: number;
+  unreadCount: number;
+  lastReadAt: string | null;
+};
+
+export interface CommunityCategoryBadgeCounts {
+  recentCounts: Record<string, number>;
+  unreadCounts: Record<string, number>;
+}
+
+interface CommunityCategoryCountsBundle {
+  recentCounts: Record<string, number>;
+  unreadCounts: Record<string, number>;
+  readMap: Record<string, string>;
+}
+
+const buildZeroCategoryCounts = (categories: string[]): Record<string, number> => {
+  const counts: Record<string, number> = {};
+  categories.forEach((categoria) => {
+    counts[categoria] = 0;
+  });
+  return counts;
+};
+
+const buildCommunityCategoryCountsBundle = (
+  rows: CommunityCategoryCountsRpcRow[],
+  categories: string[]
+): CommunityCategoryCountsBundle => {
+  const normalizedCategories = categories.length > 0 ? categories : [];
+  const recentCounts = buildZeroCategoryCounts(normalizedCategories);
+  const unreadCounts = buildZeroCategoryCounts(normalizedCategories);
+  const readMap: Record<string, string> = {};
+  const categoryByKey = new Map(
+    normalizedCategories.map((categoria) => [toCategoryKey(categoria), categoria])
+  );
+
+  rows.forEach((row) => {
+    const key = toCategoryKey(row.categoria);
+    if (!key) return;
+
+    const categoryName = categoryByKey.get(key) || sanitizeCategoryName(row.categoria);
+    if (!(categoryName in recentCounts)) {
+      recentCounts[categoryName] = 0;
+    }
+    if (!(categoryName in unreadCounts)) {
+      unreadCounts[categoryName] = 0;
+    }
+
+    recentCounts[categoryName] = row.recentCount;
+    unreadCounts[categoryName] = row.unreadCount;
+    if (row.lastReadAt) {
+      readMap[key] = row.lastReadAt;
+    }
+  });
+
+  return {
+    recentCounts,
+    unreadCounts,
+    readMap,
+  };
+};
+
+async function fetchCommunityCategoryCountsRpc(payload: {
+  userId?: string;
+  categorias?: string[];
+  includeBlocked?: boolean;
+  windowDays?: number;
+  unreadSinceDays?: number;
+  tenantId?: string;
+}): Promise<CommunityCategoryCountsRpcRow[] | undefined> {
+  if (communityCategoryCountsRpcAvailable === false) {
+    return undefined;
+  }
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveCommunityTenantId(payload.tenantId);
+  const cleanUserId = asString(payload.userId).trim();
+  const categories =
+    payload.categorias && payload.categorias.length > 0
+      ? normalizeCommunityCategories(payload.categorias)
+      : [];
+  const { data, error } = await supabase.rpc(COMMUNITY_CATEGORY_COUNTS_RPC, {
+    p_tenant_id: scopedTenantId || null,
+    p_user_id: cleanUserId || null,
+    p_categories: categories.length > 0 ? categories : null,
+    p_recent_window_days: Number.isFinite(payload.windowDays)
+      ? Math.max(1, Math.floor(payload.windowDays ?? DEFAULT_RECENT_CATEGORY_WINDOW_DAYS))
+      : DEFAULT_RECENT_CATEGORY_WINDOW_DAYS,
+    p_unread_since_days: Number.isFinite(payload.unreadSinceDays)
+      ? Math.max(1, Math.floor(payload.unreadSinceDays ?? DEFAULT_UNREAD_SINCE_DAYS))
+      : DEFAULT_UNREAD_SINCE_DAYS,
+    p_include_blocked: Boolean(payload.includeBlocked),
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      communityCategoryCountsRpcAvailable = false;
+      return undefined;
+    }
+    throwSupabaseError(error);
+  }
+
+  communityCategoryCountsRpcAvailable = true;
+
+  const rows = asObject(data)?.categories;
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+
+  return rows
+    .map((entry) => {
+      const row = asObject(entry);
+      if (!row) return null;
+      const categoria = asString(row.categoria).trim();
+      if (!categoria) return null;
+      const lastReadAtRaw = asString(row.lastReadAt).trim();
+      const parsedLastReadAt = lastReadAtRaw ? Date.parse(lastReadAtRaw) : NaN;
+      return {
+        categoria,
+        recentCount: Math.max(0, asNumber(row.recentCount, 0)),
+        unreadCount: Math.max(0, asNumber(row.unreadCount, 0)),
+        lastReadAt:
+          lastReadAtRaw && !Number.isNaN(parsedLastReadAt)
+            ? new Date(parsedLastReadAt).toISOString()
+            : null,
+      };
+    })
+    .filter((entry): entry is CommunityCategoryCountsRpcRow => entry !== null);
+}
+
+export async function fetchCommunityCategoryBadgeCounts(payload?: {
+  userId?: string;
+  categorias?: string[];
+  includeBlocked?: boolean;
+  windowDays?: number;
+  unreadSinceDays?: number;
+  tenantId?: string;
+}): Promise<CommunityCategoryBadgeCounts> {
+  const categories =
+    payload?.categorias && payload.categorias.length > 0
+      ? normalizeCommunityCategories(payload.categorias)
+      : [...DEFAULT_COMMUNITY_CATEGORIES];
+  const recentCounts = buildZeroCategoryCounts(categories);
+  const unreadCounts = buildZeroCategoryCounts(categories);
+
+  if (categories.length === 0) {
+    return { recentCounts, unreadCounts };
+  }
+
+  const userId = asString(payload?.userId).trim();
+  const rpcRows = await fetchCommunityCategoryCountsRpc({
+    userId,
+    categorias: categories,
+    includeBlocked: payload?.includeBlocked,
+    windowDays: payload?.windowDays,
+    unreadSinceDays: payload?.unreadSinceDays,
+    tenantId: payload?.tenantId,
+  });
+
+  if (rpcRows !== undefined) {
+    const bundle = buildCommunityCategoryCountsBundle(rpcRows, categories);
+    return {
+      recentCounts: bundle.recentCounts,
+      unreadCounts: bundle.unreadCounts,
+    };
+  }
+
+  const [recentFallback, unreadFallback] = await Promise.all([
+    fetchCommunityRecentCategoryCounts({
+      categorias: categories,
+      includeBlocked: payload?.includeBlocked,
+      windowDays: payload?.windowDays,
+      tenantId: payload?.tenantId,
+      skipRpc: true,
+    }),
+    userId
+      ? fetchCommunityUnreadCounts({
+          userId,
+          categorias: categories,
+          includeBlocked: payload?.includeBlocked,
+          unreadSinceDays: payload?.unreadSinceDays,
+          tenantId: payload?.tenantId,
+          skipRpc: true,
+        })
+      : Promise.resolve(unreadCounts),
+  ]);
+
+  return {
+    recentCounts: recentFallback,
+    unreadCounts: unreadFallback,
+  };
+}
+
 export async function fetchCommunityRecentCategoryCounts(payload?: {
   categorias?: string[];
   includeBlocked?: boolean;
   windowDays?: number;
   tenantId?: string;
+  skipRpc?: boolean;
 }): Promise<Record<string, number>> {
   const tenantId = resolveCommunityTenantId(payload?.tenantId);
   const categories =
@@ -607,6 +818,18 @@ export async function fetchCommunityRecentCategoryCounts(payload?: {
   const windowDays = Number.isFinite(payload?.windowDays)
     ? Math.max(1, Math.floor(payload?.windowDays ?? DEFAULT_RECENT_CATEGORY_WINDOW_DAYS))
     : DEFAULT_RECENT_CATEGORY_WINDOW_DAYS;
+  if (!payload?.skipRpc) {
+    const rpcRows = await fetchCommunityCategoryCountsRpc({
+      categorias: categories,
+      includeBlocked: payload?.includeBlocked,
+      windowDays,
+      tenantId,
+    });
+    if (rpcRows !== undefined) {
+      return buildCommunityCategoryCountsBundle(rpcRows, categories).recentCounts;
+    }
+  }
+
   const sinceIso = daysAgoIso(windowDays);
   const supabase = getSupabaseClient();
 
@@ -721,19 +944,54 @@ export async function fetchCommunityCommentPostId(
 export async function fetchCommunityReadMap(
   userId: string,
   categories?: string[],
-  options?: { tenantId?: string }
+  options?: { tenantId?: string; skipRpc?: boolean }
 ): Promise<Record<string, string>> {
   const cleanUserId = userId.trim();
   if (!cleanUserId) return {};
   const scopedTenantId = resolveCommunityTenantId(options?.tenantId);
 
+  if (!options?.skipRpc) {
+    const rpcRows = await fetchCommunityCategoryCountsRpc({
+      userId: cleanUserId,
+      categorias: categories,
+      tenantId: scopedTenantId || undefined,
+    });
+    if (rpcRows !== undefined) {
+      return buildCommunityCategoryCountsBundle(
+        rpcRows,
+        categories ? normalizeCommunityCategories(categories) : []
+      ).readMap;
+    }
+  }
+
+  const reads = await fetchCommunityReadMapFromTable(
+    cleanUserId,
+    categories,
+    scopedTenantId || undefined
+  );
+  if (Object.keys(reads).length > 0) {
+    return reads;
+  }
+
+  return fetchLegacyCommunityReadMapLastResort(
+    cleanUserId,
+    categories,
+    scopedTenantId || undefined
+  );
+}
+
+async function fetchCommunityReadMapFromTable(
+  userId: string,
+  categories?: string[],
+  tenantId?: string
+): Promise<Record<string, string>> {
   const supabase = getSupabaseClient();
   let query = supabase
     .from(COMMUNITY_READS_TABLE)
     .select("categoria,categoriaKey,readAt")
-    .eq("userId", cleanUserId);
-  if (scopedTenantId) {
-    query = query.eq("tenant_id", scopedTenantId);
+    .eq("userId", userId);
+  if (tenantId) {
+    query = query.eq("tenant_id", tenantId);
   }
   const { data, error } = await query;
 
@@ -769,10 +1027,11 @@ export async function fetchCommunityReadMap(
     }
   }
 
-  return fetchLegacyCommunityReadMap(cleanUserId, categories, scopedTenantId || undefined);
+  return {};
 }
 
-async function fetchLegacyCommunityReadMap(
+// Legacy reads in users.extra are only touched after RPC + dedicated table fallbacks.
+async function fetchLegacyCommunityReadMapLastResort(
   userId: string,
   categories?: string[],
   tenantId?: string
@@ -916,6 +1175,7 @@ export async function fetchCommunityUnreadCounts(payload: {
   includeBlocked?: boolean;
   unreadSinceDays?: number;
   tenantId?: string;
+  skipRpc?: boolean;
 }): Promise<Record<string, number>> {
   const scopedTenantId = resolveCommunityTenantId(payload.tenantId);
   const userId = payload.userId.trim();
@@ -930,10 +1190,24 @@ export async function fetchCommunityUnreadCounts(payload: {
   const unreadSinceDays = Number.isFinite(payload.unreadSinceDays)
     ? Math.max(1, Math.floor(payload.unreadSinceDays ?? DEFAULT_UNREAD_SINCE_DAYS))
     : DEFAULT_UNREAD_SINCE_DAYS;
+  if (!payload.skipRpc) {
+    const rpcRows = await fetchCommunityCategoryCountsRpc({
+      userId,
+      categorias: categories,
+      includeBlocked: payload.includeBlocked,
+      unreadSinceDays,
+      tenantId: scopedTenantId || undefined,
+    });
+    if (rpcRows !== undefined) {
+      return buildCommunityCategoryCountsBundle(rpcRows, categories).unreadCounts;
+    }
+  }
+
   const unreadSinceIso = daysAgoIso(unreadSinceDays);
 
   const reads = await fetchCommunityReadMap(userId, categories, {
     tenantId: scopedTenantId || undefined,
+    skipRpc: true,
   });
   const categoryByKey = new Map(categories.map((categoria) => [toCategoryKey(categoria), categoria]));
   const supabase = getSupabaseClient();

@@ -16,13 +16,17 @@ import {
   PLATFORM_BRAND_SUBTITLE,
   PLATFORM_LOGO_URL,
 } from "@/constants/platformBrand";
+import { QueryMonitor } from "@/lib/queryMonitor";
 import { cleanupExpiredRateLimitBuckets, consumeRateLimit } from "@/lib/rateLimiter";
+import { ServerCache } from "@/lib/serverCache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { TENANT_SLUG_COOKIE_NAME } from "@/lib/tenantRouting";
 import { cookies } from "next/headers";
 
 export const revalidate = 43200; // 12h
-export const dynamic = "force-dynamic";
+const LANDING_ROUTE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const LANDING_SERVER_CACHE_TTL_MS = 10 * 60 * 1000;
+const LANDING_ENDPOINT = "/api/public/landing";
 
 const DEFAULT_PLATFORM_BRAND: PublicLandingBrand = {
   sigla: PLATFORM_BRAND_SIGLA,
@@ -38,6 +42,14 @@ type TenantPublicBrand = {
   brand: PublicLandingBrand;
 };
 
+type RouteCacheEntry<T> = {
+  cachedAt: number;
+  value: T;
+};
+
+const tenantBrandCache = new Map<string, RouteCacheEntry<TenantPublicBrand | null>>();
+const landingConfigCache = new Map<string, RouteCacheEntry<LandingConfig>>();
+
 const fallbackPayload = (
   config: LandingConfig = DEFAULT_LANDING_CONFIG,
   brand: PublicLandingBrand = DEFAULT_PLATFORM_BRAND
@@ -48,6 +60,36 @@ const fallbackPayload = (
   partnersCount: 0,
   brand,
 });
+
+const measurePayloadBytes = (payload: unknown): number => {
+  try {
+    return new TextEncoder().encode(JSON.stringify(payload)).length;
+  } catch {
+    return 0;
+  }
+};
+
+const getRouteCacheValue = <T>(
+  cache: Map<string, RouteCacheEntry<T>>,
+  key: string
+): T | null => {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.cachedAt > LANDING_ROUTE_CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+
+const setRouteCacheValue = <T>(
+  cache: Map<string, RouteCacheEntry<T>>,
+  key: string,
+  value: T
+): T => {
+  cache.set(key, { cachedAt: Date.now(), value });
+  return value;
+};
 
 const buildTenantFallbackBrand = (tenantSlug: string): PublicLandingBrand => {
   const normalizedSlug = tenantSlug.trim().toUpperCase();
@@ -76,6 +118,11 @@ const resolveTenantPublicBrand = async (
   const cleanTenantSlug = tenantSlug.trim().toLowerCase();
   if (!cleanTenantSlug) return null;
 
+  const cached = getRouteCacheValue(tenantBrandCache, cleanTenantSlug);
+  if (cached !== null || tenantBrandCache.has(cleanTenantSlug)) {
+    return cached;
+  }
+
   const { data, error } = await supabaseAdmin
     .from("tenants")
     .select("id,nome,sigla,slug,faculdade,curso,logo_url,status")
@@ -88,7 +135,7 @@ const resolveTenantPublicBrand = async (
   }
 
   if (!data || typeof data.id !== "string" || !data.id.trim()) {
-    return null;
+    return setRouteCacheValue(tenantBrandCache, cleanTenantSlug, null);
   }
 
   const slug = typeof data.slug === "string" ? data.slug.trim() : "";
@@ -98,7 +145,7 @@ const resolveTenantPublicBrand = async (
   const faculdade = typeof data.faculdade === "string" ? data.faculdade.trim() : "";
   const logoUrl = typeof data.logo_url === "string" ? data.logo_url.trim() : "";
 
-  return {
+  return setRouteCacheValue(tenantBrandCache, cleanTenantSlug, {
     tenantId: data.id.trim(),
     brand: {
       sigla: sigla || slug.toUpperCase() || "TENANT",
@@ -106,7 +153,7 @@ const resolveTenantPublicBrand = async (
       subtitle: curso || faculdade || "Landing oficial da atletica.",
       logoUrl: logoUrl || PLATFORM_LOGO_URL,
     },
-  };
+  });
 };
 
 const buildLandingRowIds = (tenantId?: string): string[] => {
@@ -127,6 +174,10 @@ const extractConfigPayload = (raw: unknown): unknown => {
 const fetchLandingConfigWithAdmin = async (
   tenantId?: string
 ): Promise<LandingConfig> => {
+  const cacheKey = (tenantId || "").trim() || "default";
+  const cached = getRouteCacheValue(landingConfigCache, cacheKey);
+  if (cached) return cached;
+
   for (const rowId of buildLandingRowIds(tenantId)) {
     const { data, error } = await supabaseAdmin
       .from(SITE_CONFIG_TABLE)
@@ -136,14 +187,19 @@ const fetchLandingConfigWithAdmin = async (
 
     if (error) throw error;
     if (data) {
-      return sanitizeLandingConfig(extractConfigPayload(data), DEFAULT_LANDING_CONFIG);
+      return setRouteCacheValue(
+        landingConfigCache,
+        cacheKey,
+        sanitizeLandingConfig(extractConfigPayload(data), DEFAULT_LANDING_CONFIG)
+      );
     }
   }
 
-  return DEFAULT_LANDING_CONFIG;
+  return setRouteCacheValue(landingConfigCache, cacheKey, DEFAULT_LANDING_CONFIG);
 };
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   const requestUrl = new URL(request.url);
   const scope = (requestUrl.searchParams.get("scope") || "").trim().toLowerCase();
   const queryTenantSlug = (requestUrl.searchParams.get("tenant") || "")
@@ -152,19 +208,27 @@ export async function GET(request: Request) {
   const rateLimit = consumeRateLimit(resolveRequestIp(request), "/api/public/landing");
 
   if (!rateLimit.allowed) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded. Try again in 1 minute." },
-      {
-        status: 429,
-        headers: {
-          "Cache-Control": "no-store",
-          "Retry-After": String(
-            Math.max(1, Math.ceil((rateLimit.resetAt - Date.now()) / 1000))
-          ),
-          "X-RateLimit-Remaining": "0",
-        },
-      }
-    );
+    const payload = { error: "Rate limit exceeded. Try again in 1 minute." };
+    QueryMonitor.recordQuery({
+      endpoint: LANDING_ENDPOINT,
+      method: "GET",
+      durationMs: Date.now() - startedAt,
+      payloadBytes: measurePayloadBytes(payload),
+      cacheHit: false,
+      statusCode: 429,
+      tenantId: queryTenantSlug || "platform",
+      error: payload.error,
+    });
+    return NextResponse.json(payload, {
+      status: 429,
+      headers: {
+        "Cache-Control": "no-store",
+        "Retry-After": String(
+          Math.max(1, Math.ceil((rateLimit.resetAt - Date.now()) / 1000))
+        ),
+        "X-RateLimit-Remaining": "0",
+      },
+    });
   }
 
   if (Math.random() < 0.02) {
@@ -177,37 +241,68 @@ export async function GET(request: Request) {
       .trim()
       .toLowerCase();
     const tenantSlug = scope === "platform" ? "" : queryTenantSlug || cookieTenantSlug;
-    const tenant = tenantSlug ? await resolveTenantPublicBrand(tenantSlug) : null;
-    const brand = tenant?.brand ??
-      (tenantSlug ? buildTenantFallbackBrand(tenantSlug) : DEFAULT_PLATFORM_BRAND);
-    const config = await fetchLandingConfigWithAdmin(tenant?.tenantId || "");
+    const cacheKey = `public:landing:${scope || "default"}:${tenantSlug || "platform"}`;
+    const cachedPayload = ServerCache.get<PublicLandingPayload>(cacheKey);
+    const cacheHit = cachedPayload !== null;
+    const payload =
+      cachedPayload ??
+      (await (async (): Promise<PublicLandingPayload> => {
+        const tenant = tenantSlug ? await resolveTenantPublicBrand(tenantSlug) : null;
+        const brand =
+          tenant?.brand ??
+          (tenantSlug ? buildTenantFallbackBrand(tenantSlug) : DEFAULT_PLATFORM_BRAND);
+        const config = await fetchLandingConfigWithAdmin(tenant?.tenantId || "");
 
-    const data = await fetchPublicLandingData({
-      forceRefresh: true,
-      fallbackConfig: DEFAULT_LANDING_CONFIG,
-      tenantId: tenant?.tenantId || "",
+        const data = await fetchPublicLandingData({
+          forceRefresh: false,
+          fallbackConfig: DEFAULT_LANDING_CONFIG,
+          prefetchedConfig: config,
+          tenantId: tenant?.tenantId || "",
+        });
+
+        const nextPayload = {
+          ...data,
+          tenantId: tenant?.tenantId || "",
+          config,
+          brand,
+        } satisfies PublicLandingPayload;
+        ServerCache.set(cacheKey, nextPayload, LANDING_SERVER_CACHE_TTL_MS);
+        return nextPayload;
+      })());
+
+    QueryMonitor.recordQuery({
+      endpoint: LANDING_ENDPOINT,
+      method: "GET",
+      durationMs: Date.now() - startedAt,
+      payloadBytes: measurePayloadBytes(payload),
+      cacheHit,
+      statusCode: 200,
+      tenantId: payload.tenantId || tenantSlug || "platform",
     });
 
-    return NextResponse.json(
-      {
-        ...data,
-        tenantId: tenant?.tenantId || "",
-        config,
-        brand,
-      } satisfies PublicLandingPayload,
-      {
+    return NextResponse.json(payload, {
       headers: {
         "Cache-Control": "public, s-maxage=43200, stale-while-revalidate=86400",
         "X-RateLimit-Remaining": String(rateLimit.remaining),
       },
-      }
-    );
+    });
   } catch (error: unknown) {
     console.error("Falha ao gerar payload publico da landing:", error);
     const fallbackBrand = queryTenantSlug
       ? buildTenantFallbackBrand(queryTenantSlug)
       : DEFAULT_PLATFORM_BRAND;
-    return NextResponse.json(fallbackPayload(DEFAULT_LANDING_CONFIG, fallbackBrand), {
+    const payload = fallbackPayload(DEFAULT_LANDING_CONFIG, fallbackBrand);
+    QueryMonitor.recordQuery({
+      endpoint: LANDING_ENDPOINT,
+      method: "GET",
+      durationMs: Date.now() - startedAt,
+      payloadBytes: measurePayloadBytes(payload),
+      cacheHit: false,
+      statusCode: 200,
+      tenantId: queryTenantSlug || "platform",
+      error: error instanceof Error ? error.message : "landing_fallback",
+    });
+    return NextResponse.json(payload, {
       headers: {
         "Cache-Control": "public, s-maxage=43200, stale-while-revalidate=86400",
         "X-RateLimit-Remaining": String(rateLimit.remaining),

@@ -26,6 +26,7 @@ const MAX_PRODUCTS = 240;
 const MAX_ORDERS = 1200;
 const MAX_REVIEWS = 600;
 const MAX_CATEGORIES = 300;
+const USER_REVIEW_EXISTS_LIMIT = 1;
 const STORE_PRODUCT_SELECT_COLUMNS =
   "id,tenant_id,nome,preco,precoAntigo,img,descricao,likes,categoria,estoque,cores,variantes,caracteristicas,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,createdAt,updatedAt";
 const STORE_CATEGORY_SELECT_COLUMNS =
@@ -788,14 +789,14 @@ export async function fetchStoreProductReviewsPage(options: {
   }
 
   const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
+  const fetchTo = from + pageSize;
 
   const runQuery = async (withOrder: boolean) => {
     let query = supabase
       .from("reviews")
-      .select(STORE_REVIEW_SELECT_COLUMNS, { count: "exact" })
+      .select(STORE_REVIEW_SELECT_COLUMNS)
       .eq("productId", productId)
-      .range(from, to);
+      .range(from, fetchTo);
     if (scopedTenantId) {
       query = query.eq("tenant_id", scopedTenantId);
     }
@@ -806,10 +807,9 @@ export async function fetchStoreProductReviewsPage(options: {
   };
 
   let data: unknown[] = [];
-  let totalCount: number | null = null;
 
   try {
-    const { data: rows, error, count } = await runQuery(true);
+    const { data: rows, error } = await runQuery(true);
     if (error) {
       if (scopedTenantId && isMissingTenantIdColumn(error)) {
         const emptyResult: StoreProductReviewsPageResult = {
@@ -825,9 +825,8 @@ export async function fetchStoreProductReviewsPage(options: {
       throwSupabaseError(error);
     }
     data = rows ?? [];
-    totalCount = typeof count === "number" ? count : null;
   } catch {
-    const { data: rows, error, count } = await runQuery(false);
+    const { data: rows, error } = await runQuery(false);
     if (error) {
       if (scopedTenantId && isMissingTenantIdColumn(error)) {
         const emptyResult: StoreProductReviewsPageResult = {
@@ -843,14 +842,12 @@ export async function fetchStoreProductReviewsPage(options: {
       throwSupabaseError(error);
     }
     data = rows ?? [];
-    totalCount = typeof count === "number" ? count : null;
   }
 
-  const reviews = (data as Row[]).map((row) => normalizeRowTimestamps(row));
-  const hasMore =
-    totalCount !== null
-      ? from + reviews.length < totalCount
-      : reviews.length >= pageSize;
+  const pageRows = (data as Row[]).slice(0, pageSize);
+  const reviews = pageRows.map((row) => normalizeRowTimestamps(row));
+  const hasMore = (data as Row[]).length > pageSize;
+  const totalCount = hasMore ? null : from + reviews.length;
 
   const result: StoreProductReviewsPageResult = {
     reviews,
@@ -882,48 +879,26 @@ export async function fetchStoreProductUserReviewCount(options: {
     if (cached !== null) return cached;
   }
 
-  try {
-    let query = supabase
-      .from("reviews")
-      .select("id", { count: "exact", head: true })
-      .eq("productId", productId)
-      .eq("userId", userId);
-    if (scopedTenantId) {
-      query = query.eq("tenant_id", scopedTenantId);
-    }
-    const { count, error } = await query;
-    if (error) {
-      if (scopedTenantId && isMissingTenantIdColumn(error)) {
-        setCache(productUserReviewCountCache, cacheKey, 0);
-        return 0;
-      }
-      throwSupabaseError(error);
-    }
-    const normalized = count ?? 0;
-    setCache(productUserReviewCountCache, cacheKey, normalized);
-    return normalized;
-  } catch {
-    const fallbackLimit = boundedLimit(MAX_REVIEWS, 2000);
-    let query = supabase
-      .from("reviews")
-      .select("id")
-      .eq("productId", productId)
-      .eq("userId", userId);
-    if (scopedTenantId) {
-      query = query.eq("tenant_id", scopedTenantId);
-    }
-    const { data, error } = await query.limit(fallbackLimit);
-    if (error) {
-      if (scopedTenantId && isMissingTenantIdColumn(error)) {
-        setCache(productUserReviewCountCache, cacheKey, 0);
-        return 0;
-      }
-      throwSupabaseError(error);
-    }
-    const normalized = (data ?? []).length;
-    setCache(productUserReviewCountCache, cacheKey, normalized);
-    return normalized;
+  let query = supabase
+    .from("reviews")
+    .select("id")
+    .eq("productId", productId)
+    .eq("userId", userId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
   }
+  const { data, error } = await query.limit(USER_REVIEW_EXISTS_LIMIT);
+  if (error) {
+    if (scopedTenantId && isMissingTenantIdColumn(error)) {
+      setCache(productUserReviewCountCache, cacheKey, 0);
+      return 0;
+    }
+    throwSupabaseError(error);
+  }
+
+  const normalized = Array.isArray(data) && data.length > 0 ? 1 : 0;
+  setCache(productUserReviewCountCache, cacheKey, normalized);
+  return normalized;
 }
 
 export async function toggleStoreProductLike(payload: {

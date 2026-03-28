@@ -363,6 +363,15 @@ export interface AlbumConfig {
 
 export interface CarteirinhaConfig {
   validade: string;
-  backgrounds: Record<string, string>; // { "T1": "url...", "T2": "url..." }
+  backgrounds: Record<string, string>; // URLs resolvidas em runtime para preview/consumo da UI
+  backgroundAssets?: Record<
+    string,
+    {
+      bucket: string;
+      path: string;
+      versionToken?: string | null;
+    }
+  >;
+  backgroundOpacity?: number;
 }
 

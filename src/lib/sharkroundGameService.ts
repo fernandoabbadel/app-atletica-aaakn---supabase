@@ -1,4 +1,5 @@
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { resolveLeagueLogoSrc } from "./leagueMedia";
 import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
@@ -163,14 +164,14 @@ export interface SharkroundGameQuestionRecord {
   texto: string;
   alternativas: string[];
   respostaCorreta: number;
-  imagemBase64?: string;
+  imageUrl?: string;
 }
 
 export interface SharkroundGameLeagueRecord {
   id: string;
   nome: string;
   sigla?: string;
-  logoBase64?: string;
+  logoUrl?: string;
   ativa: boolean;
   perguntas: SharkroundGameQuestionRecord[];
 }
@@ -197,7 +198,7 @@ const normalizeLeague = (raw: RawRow): SharkroundGameLeagueRecord => {
           const alternativas = Array.isArray(question.alternativas)
             ? question.alternativas.filter((item): item is string => typeof item === "string")
             : [];
-          const imagemBase64 = asString(question.imagemBase64) || undefined;
+          const imageUrl = asString(question.imageUrl) || undefined;
           const corretaRaw =
             typeof question.respostaCorreta === "number"
               ? question.respostaCorreta
@@ -208,20 +209,20 @@ const normalizeLeague = (raw: RawRow): SharkroundGameLeagueRecord => {
             texto: asString(question.texto, "Pergunta"),
             alternativas: alternativas.slice(0, 4),
             respostaCorreta: Math.max(0, Math.min(3, Math.floor(corretaRaw))),
-            ...(imagemBase64 ? { imagemBase64 } : {}),
+            ...(imageUrl ? { imageUrl } : {}),
           } satisfies SharkroundGameQuestionRecord;
         })
         .filter((entry): entry is SharkroundGameQuestionRecord => entry !== null)
     : [];
 
   const sigla = asString(raw.sigla) || undefined;
-  const logoBase64 = asString(raw.logoBase64) || undefined;
+  const logoUrl = resolveLeagueLogoSrc(raw) || undefined;
 
   return {
     id: asString(raw.id),
     nome: asString(raw.nome, "Liga"),
     ...(sigla ? { sigla } : {}),
-    ...(logoBase64 ? { logoBase64 } : {}),
+    ...(logoUrl ? { logoUrl } : {}),
     ativa: Boolean(raw.ativa),
     perguntas,
   };
@@ -244,7 +245,7 @@ export async function fetchActiveSharkroundLeagues(options?: {
 
   const rows = await queryRows({
     tableName: "ligas_config",
-    selectColumns: "id,nome,sigla,logoBase64,ativa,perguntas",
+    selectColumns: "id,nome,sigla,logoUrl,logo,ativa,perguntas",
     eq: { field: "ativa", value: true },
     maxResults,
     tenantId: scopedTenantId,

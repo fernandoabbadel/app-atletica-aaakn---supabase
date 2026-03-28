@@ -1,6 +1,9 @@
 ﻿import { getSupabaseClient } from "./supabase";
 import { isEventExpiredByGrace } from "./eventDateUtils";
 
+import { hydrateEventViewerState } from "./hotPathRelations";
+import { toggleEventLike as toggleEventLikeNative } from "./eventsNativeService";
+
 type CacheEntry<T> = { cachedAt: number; value: T };
 
 type Row = Record<string, unknown>;
@@ -14,15 +17,17 @@ const DASHBOARD_TREINOS_LIMIT = 4;
 const DASHBOARD_PARTNERS_LIMIT = 50;
 const DASHBOARD_LIGAS_DASHBOARD_LIMIT = 2;
 const DASHBOARD_TREINO_RSVPS_LIMIT = 12;
-const DASHBOARD_ALBUM_FALLBACK_LIMIT = 350;
 const DASHBOARD_LIKES_SAMPLE_PER_PRODUCT = 10;
 const DASHBOARD_USERS_IN_CHUNK = 10;
-const DASHBOARD_USERS_COUNT_FALLBACK_LIMIT = 2_000;
 const DASHBOARD_TOTAL_CACA_RPC = "dashboard_total_caca_calouros";
+const DASHBOARD_HOME_BUNDLE_RPC = "dashboard_public_home_bundle";
 const DASHBOARD_EVENT_GRACE_MS = 24 * 60 * 60 * 1000;
+const DASHBOARD_RPC_BREAKER_TTL_MS = 10 * 60 * 1000;
+const DASHBOARD_DEGRADED_PRODUCTS_LIMIT = 6;
+const DASHBOARD_DEGRADED_POSTS_LIMIT = 2;
 
 const DASHBOARD_EVENTS_SELECT =
-  "id,titulo,data,hora,local,imagem,tipo,status,likesList,interessados,imagePositionY,tenant_id";
+  "id,titulo,data,hora,local,imagem,tipo,status,stats,imagePositionY,tenant_id";
 const DASHBOARD_PRODUCTS_SELECT =
   "id,nome,preco,img,likes,active,aprovado,tenant_id";
 const DASHBOARD_PARTNERS_SELECT =
@@ -32,9 +37,10 @@ const DASHBOARD_LIGAS_SELECT =
 const DASHBOARD_POSTS_SELECT =
   "id,userId,userName,avatar,createdAt,texto,likes,tenant_id";
 const DASHBOARD_TREINOS_SELECT = "id,imagem,dia,createdAt,status,tenant_id";
-const DASHBOARD_ALBUM_FALLBACK_SELECT = "targetUserId";
 
 const dashboardCache = new Map<string, CacheEntry<DashboardBundle>>();
+let dashboardHomeBundleRpcUnavailableUntil = 0;
+let dashboardTotalCacaRpcUnavailableUntil = 0;
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -53,6 +59,7 @@ const asInteger = (value: unknown, fallback = 0): number => {
 };
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const normalizeIdList = (value: unknown): string[] =>
   Array.from(
     new Set(
@@ -61,6 +68,11 @@ const normalizeIdList = (value: unknown): string[] =>
         .filter((entry) => entry.length > 0)
     )
   );
+
+const isRpcCircuitOpen = (unavailableUntil: number): boolean =>
+  unavailableUntil > Date.now();
+
+const openRpcCircuit = (): number => Date.now() + DASHBOARD_RPC_BREAKER_TTL_MS;
 
 const toMillis = (value: unknown): number => {
   if (value instanceof Date) return value.getTime();
@@ -126,6 +138,18 @@ const getCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | 
 
 const setCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void => {
   cache.set(key, { cachedAt: Date.now(), value });
+};
+
+const isMissingRpcError = (error: { code?: string | null; message?: string | null }): boolean => {
+  const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "PGRST202" ||
+    code === "42883" ||
+    message.includes("could not find the function") ||
+    message.includes("schema cache") ||
+    (message.includes("function") && message.includes("does not exist"))
+  );
 };
 
 const chunkArray = <T>(rows: T[], chunkSize: number): T[][] => {
@@ -253,7 +277,7 @@ async function fetchRowsWithFallback(
   return [];
 }
 
-async function fetchDashboardEventRows(tenantId?: string): Promise<Row[]> {
+async function fetchDashboardEventRows(tenantId?: string, userId?: string): Promise<Row[]> {
   const supabase = getSupabaseClient();
   const scopedTenantId = asString(tenantId).trim();
   const attempts: Array<{ orderBy?: { column: string; ascending: boolean } }> = [
@@ -283,7 +307,10 @@ async function fetchDashboardEventRows(tenantId?: string): Promise<Row[]> {
 
       const { data, error } = await query;
       if (!error) {
-        return (data ?? []) as unknown as Row[];
+        return hydrateEventViewerState((data ?? []) as unknown as Row[], {
+          userId: userId || null,
+          tenantId: scopedTenantId || undefined,
+        });
       }
 
       const missingColumn = extractMissingSchemaColumn(error);
@@ -313,48 +340,45 @@ async function fetchDashboardEventRows(tenantId?: string): Promise<Row[]> {
 }
 
 async function fetchDashboardTotalCaca(tenantId?: string): Promise<number> {
+  if (isRpcCircuitOpen(dashboardTotalCacaRpcUnavailableUntil)) {
+    return 0;
+  }
+
   const supabase = getSupabaseClient();
   const scopedTenantId = asString(tenantId).trim();
   const { data, error } = await supabase.rpc(DASHBOARD_TOTAL_CACA_RPC, {
     p_tenant_id: scopedTenantId || null,
   });
   if (!error) {
+    dashboardTotalCacaRpcUnavailableUntil = 0;
     return Math.max(0, asInteger(data, 0));
   }
 
-  const albumRows = await fetchRowsWithFallback("album_captures", DASHBOARD_ALBUM_FALLBACK_SELECT, [
-    {
-      limit: DASHBOARD_ALBUM_FALLBACK_LIMIT * 4,
-      ...(scopedTenantId ? { eq: { tenant_id: scopedTenantId } } : {}),
-    },
-  ]);
-  return new Set(
-    albumRows
-      .map((row) => asString(row.targetUserId).trim())
-      .filter((targetUserId) => targetUserId.length > 0)
-  ).size;
+  if (isMissingRpcError(error)) {
+    dashboardTotalCacaRpcUnavailableUntil = openRpcCircuit();
+    return 0;
+  }
+
+  return 0;
 }
 
 async function safeUsersCount(tenantId?: string): Promise<number> {
   const supabase = getSupabaseClient();
   const scopedTenantId = asString(tenantId).trim();
-  try {
-    let query = supabase.from("users").select("uid", { count: "exact", head: true });
+  const countModes: Array<"planned" | "estimated"> = ["planned", "estimated"];
+
+  for (const countMode of countModes) {
+    let query = supabase.from("users").select("uid", { count: countMode, head: true });
     if (scopedTenantId) {
       query = query.eq("tenant_id", scopedTenantId);
     }
     const { count, error } = await query;
-    if (error) throw error;
-    return count ?? 0;
-  } catch {
-    let query = supabase.from("users").select("uid");
-    if (scopedTenantId) {
-      query = query.eq("tenant_id", scopedTenantId);
+    if (!error && typeof count === "number") {
+      return Math.max(0, count);
     }
-    const { data, error } = await query.limit(DASHBOARD_USERS_COUNT_FALLBACK_LIMIT);
-    if (error) throwSupabaseError(error);
-    return (data ?? []).length;
   }
+
+  return 0;
 }
 
 async function fetchUserExtra(userId?: string): Promise<Row | null> {
@@ -471,6 +495,16 @@ async function fetchDashboardTreinoRows(options: {
 const normalizeEvento = (id: string, raw: unknown): DashboardEvent | null => {
   const data = asObject(raw);
   if (!data) return null;
+  const stats = asObject(data.stats);
+  const viewerHasLiked =
+    typeof data.viewerHasLiked === "boolean"
+      ? data.viewerHasLiked
+      : false;
+  const viewerIsInterested =
+    typeof data.viewerIsInterested === "boolean"
+      ? data.viewerIsInterested
+      : false;
+
   return {
     id,
     titulo: asString(data.titulo, "Evento"),
@@ -480,23 +514,42 @@ const normalizeEvento = (id: string, raw: unknown): DashboardEvent | null => {
     imagem: asString(data.imagem),
     tipo: asString(data.tipo),
     status: asString(data.status, "ativo"),
-    likesList: asStringArray(data.likesList),
-    participantes: asStringArray(data.interessados ?? data.participantes),
+    likesCount: Math.max(0, asInteger(data.likesCount, asInteger(stats?.likes, 0))),
+    viewerHasLiked,
+    interessadosCount: Math.max(
+      0,
+      asInteger(
+        data.interessadosCount,
+        asInteger(stats?.confirmados, 0) + asInteger(stats?.talvez, 0)
+      )
+    ),
+    viewerIsInterested,
     imagePositionY: asNumber(data.imagePositionY, 50),
   };
 };
 
-const normalizeProduto = (id: string, raw: unknown): DashboardProduct | null => {
+const normalizeProduto = (
+  id: string,
+  raw: unknown,
+  viewerId?: string
+): DashboardProduct | null => {
   const data = asObject(raw);
   if (!data) return null;
   const precoRaw = data.preco;
   const preco: string | number = typeof precoRaw === "string" || typeof precoRaw === "number" ? precoRaw : 0;
+  const likes = asStringArray(data.likes);
+  const viewerHasLiked =
+    typeof data.viewerHasLiked === "boolean"
+      ? data.viewerHasLiked
+      : Boolean(viewerId && likes.includes(viewerId));
+
   return {
     id,
     nome: asString(data.nome, "Produto"),
     preco,
     img: asString(data.img),
-    likes: asStringArray(data.likes),
+    likesCount: Math.max(0, asInteger(data.likesCount, likes.length)),
+    viewerHasLiked,
   };
 };
 
@@ -525,7 +578,6 @@ const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
     sigla: asString(data.sigla),
     foto: asString(data.foto) || undefined,
     logoUrl,
-    logoBase64: logoUrl || logoLegacy,
     logo: logoLegacy || logoUrl,
     descricao: asString(data.descricao) || undefined,
     bizu: asString(data.bizu) || undefined,
@@ -538,9 +590,18 @@ const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
   };
 };
 
-const normalizePost = (id: string, raw: unknown): DashboardPost | null => {
+const normalizePost = (
+  id: string,
+  raw: unknown,
+  viewerId?: string
+): DashboardPost | null => {
   const data = asObject(raw);
   if (!data) return null;
+  const likes = asStringArray(data.likes);
+  const viewerHasLiked =
+    typeof data.viewerHasLiked === "boolean"
+      ? data.viewerHasLiked
+      : Boolean(viewerId && likes.includes(viewerId));
   return {
     id,
     userId: asString(data.userId),
@@ -548,9 +609,318 @@ const normalizePost = (id: string, raw: unknown): DashboardPost | null => {
     avatar: asString(data.avatar),
     createdAt: data.createdAt ?? null,
     texto: asString(data.texto) || asString(data.text),
-    likes: asStringArray(data.likes),
+    likesCount: Math.max(0, asInteger(data.likesCount, likes.length)),
+    viewerHasLiked,
   };
 };
+
+const normalizeDashboardTurmaStats = (value: unknown): DashboardTurmaStat[] =>
+  asArray(value)
+    .map((entry) => {
+      const row = asObject(entry);
+      if (!row) return null;
+      const turma = asString(row.turma).trim();
+      if (!turma) return null;
+      return {
+        turma,
+        count: Math.max(0, asInteger(row.count, 0)),
+      };
+    })
+    .filter((entry): entry is DashboardTurmaStat => entry !== null)
+    .slice(0, 3);
+
+async function fetchDashboardBundleViaRpc(options: {
+  tenantId?: string;
+  userId?: string;
+}): Promise<DashboardBundle | undefined> {
+  if (isRpcCircuitOpen(dashboardHomeBundleRpcUnavailableUntil)) {
+    return undefined;
+  }
+
+  const supabase = getSupabaseClient();
+  const cleanTenantId = asString(options.tenantId).trim();
+  const cleanUserId = asString(options.userId).trim();
+  const { data, error } = await supabase.rpc(DASHBOARD_HOME_BUNDLE_RPC, {
+    p_tenant_id: cleanTenantId || null,
+    p_user_id: cleanUserId || null,
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      dashboardHomeBundleRpcUnavailableUntil = openRpcCircuit();
+      return undefined;
+    }
+    throwSupabaseError(error);
+  }
+
+  dashboardHomeBundleRpcUnavailableUntil = 0;
+
+  const payload = asObject(data);
+  if (!payload) {
+    return undefined;
+  }
+
+  const rawProducts = asArray(payload.produtos);
+  const productTurmaStats = rawProducts.reduce<Record<string, DashboardTurmaStat[]>>(
+    (acc, entry) => {
+      const row = asObject(entry);
+      const id = asString(row?.id).trim();
+      if (!id) return acc;
+      acc[id] = normalizeDashboardTurmaStats(row?.topTurmas);
+      return acc;
+    },
+    {}
+  );
+
+  const events = asArray(payload.events)
+    .map((entry) => normalizeEvento(asString(asObject(entry)?.id), entry))
+    .filter((entry): entry is DashboardEvent => entry !== null)
+    .filter((event) => {
+      const normalizedStatus = asString(event.status, "ativo").toLowerCase().trim();
+      if (
+        normalizedStatus === "encerrado" ||
+        normalizedStatus === "cancelado" ||
+        normalizedStatus === "inativo"
+      ) {
+        return false;
+      }
+      return !isEventExpiredByGrace(event.data, event.hora, DASHBOARD_EVENT_GRACE_MS);
+    })
+    .slice(0, DASHBOARD_EVENTS_LIMIT);
+
+  const produtos = rawProducts
+    .map((entry) => normalizeProduto(asString(asObject(entry)?.id), entry, cleanUserId || undefined))
+    .filter((entry): entry is DashboardProduct => entry !== null);
+
+  const parceiros = asArray(payload.parceiros)
+    .map((entry) => normalizeParceiro(asString(asObject(entry)?.id), entry))
+    .filter((entry): entry is DashboardPartner => entry !== null)
+    .filter((partner) => (partner.status || "active") === "active");
+
+  const ligasBase = asArray(payload.ligas)
+    .map((entry) => normalizeLiga(asString(asObject(entry)?.id), entry))
+    .filter((entry): entry is DashboardLiga => entry !== null)
+    .filter((liga) => liga.visivel === true)
+    .sort((left, right) => (right.likes || 0) - (left.likes || 0));
+  const ligas =
+    ligasBase.length > DASHBOARD_LIGAS_DASHBOARD_LIMIT
+      ? seededShuffle(
+          ligasBase,
+          `${cleanUserId || "anon"}:${cleanTenantId || "default"}:${new Date().toISOString().slice(0, 10)}`
+        )
+          .slice(0, DASHBOARD_LIGAS_DASHBOARD_LIMIT)
+          .sort((left, right) => (right.likes || 0) - (left.likes || 0))
+      : ligasBase;
+
+  const mensagens = asArray(payload.mensagens)
+    .sort((left, right) => toMillis(asObject(right)?.createdAt) - toMillis(asObject(left)?.createdAt))
+    .map((entry) => normalizePost(asString(asObject(entry)?.id), entry, cleanUserId || undefined))
+    .filter((entry): entry is DashboardPost => entry !== null);
+
+  const treinos = asArray(payload.treinos)
+    .map((entry) => asString(entry).trim())
+    .filter((entry) => entry.length > 0);
+
+  return {
+    events,
+    produtos,
+    parceiros,
+    ligas,
+    mensagens,
+    treinos,
+    totalCaca: Math.max(0, asInteger(payload.totalCaca, 0)),
+    totalAlunos: Math.max(0, asInteger(payload.totalAlunos, 0)),
+    productTurmaStats,
+  };
+}
+
+async function fetchDashboardDegradedBundle(options: {
+  tenantId?: string;
+  userId?: string;
+}): Promise<DashboardBundle> {
+  const tenantId = asString(options.tenantId).trim();
+  const userId = asString(options.userId).trim();
+  const tenantFilter = tenantId ? { tenant_id: tenantId } : null;
+
+  const [eventRows, productRows, partnerRows, postRows, totalAlunos] = await Promise.all([
+    fetchDashboardEventRows(tenantId || undefined, userId || undefined),
+    fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [
+      {
+        limit: DASHBOARD_DEGRADED_PRODUCTS_LIMIT,
+        eq: {
+          active: true,
+          aprovado: true,
+          ...(tenantFilter ?? {}),
+        },
+      },
+    ]),
+    fetchRowsWithFallback("parceiros", DASHBOARD_PARTNERS_SELECT, [
+      {
+        eq: {
+          status: "active",
+          ...(tenantFilter ?? {}),
+        },
+        limit: DASHBOARD_PARTNERS_LIMIT,
+      },
+      { limit: DASHBOARD_PARTNERS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
+    ]),
+    fetchRowsWithFallback("posts", DASHBOARD_POSTS_SELECT, [
+      {
+        orderBy: { column: "createdAt", ascending: false },
+        limit: DASHBOARD_DEGRADED_POSTS_LIMIT,
+        ...(tenantFilter ? { eq: tenantFilter } : {}),
+      },
+      { limit: DASHBOARD_DEGRADED_POSTS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
+    ]),
+    safeUsersCount(tenantId || undefined),
+  ]);
+
+  const events = eventRows
+    .map((row) => normalizeEvento(asString(row.id), row))
+    .filter((row): row is DashboardEvent => row !== null)
+    .filter((event) => {
+      const normalizedStatus = asString(event.status, "ativo").toLowerCase().trim();
+      if (
+        normalizedStatus === "encerrado" ||
+        normalizedStatus === "cancelado" ||
+        normalizedStatus === "inativo"
+      ) {
+        return false;
+      }
+      return !isEventExpiredByGrace(event.data, event.hora, DASHBOARD_EVENT_GRACE_MS);
+    })
+    .slice(0, DASHBOARD_EVENTS_LIMIT);
+  const produtos = productRows
+    .map((row) => normalizeProduto(asString(row.id), row, userId || undefined))
+    .filter((row): row is DashboardProduct => row !== null);
+  const parceiros = partnerRows
+    .map((row) => normalizeParceiro(asString(row.id), row))
+    .filter((row): row is DashboardPartner => row !== null)
+    .filter((partner) => (partner.status || "active") === "active");
+  const mensagens = [...postRows]
+    .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt))
+    .map((row) => normalizePost(asString(row.id), row, userId || undefined))
+    .filter((row): row is DashboardPost => row !== null);
+
+  return {
+    events,
+    produtos,
+    parceiros,
+    ligas: [],
+    mensagens,
+    treinos: [],
+    totalCaca: 0,
+    totalAlunos,
+    productTurmaStats: {},
+  };
+}
+
+async function fetchDashboardLegacyFallbackBundle(options: {
+  tenantId?: string;
+  userId?: string;
+}): Promise<DashboardBundle> {
+  const tenantId = asString(options.tenantId).trim();
+  const userId = asString(options.userId).trim();
+  const tenantFilter = tenantId ? { tenant_id: tenantId } : null;
+
+  const [eventRows, productRows, partnerRows, ligaRows, postRows, treinoRows, totalAlunos, totalCaca] =
+    await Promise.all([
+      fetchDashboardEventRows(tenantId || undefined, userId || undefined),
+      fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [
+        {
+          limit: DASHBOARD_PRODUCTS_LIMIT,
+          eq: {
+            active: true,
+            aprovado: true,
+            ...(tenantFilter ?? {}),
+          },
+        },
+      ]),
+      fetchRowsWithFallback("parceiros", DASHBOARD_PARTNERS_SELECT, [
+        {
+          eq: {
+            status: "active",
+            ...(tenantFilter ?? {}),
+          },
+          limit: DASHBOARD_PARTNERS_LIMIT,
+        },
+        { limit: DASHBOARD_PARTNERS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
+      ]),
+      fetchDashboardLeagueRows({
+        tenantId: tenantId || undefined,
+        userId: userId || undefined,
+      }),
+      fetchRowsWithFallback("posts", DASHBOARD_POSTS_SELECT, [
+        {
+          orderBy: { column: "createdAt", ascending: false },
+          limit: DASHBOARD_POSTS_LIMIT,
+          ...(tenantFilter ? { eq: tenantFilter } : {}),
+        },
+        { limit: DASHBOARD_POSTS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
+      ]),
+      fetchDashboardTreinoRows({
+        tenantId: tenantId || undefined,
+        userId: userId || undefined,
+      }),
+      safeUsersCount(tenantId || undefined),
+      fetchDashboardTotalCaca(tenantId || undefined),
+    ]);
+
+  const events = eventRows
+    .map((row) => normalizeEvento(asString(row.id), row))
+    .filter((row): row is DashboardEvent => row !== null)
+    .filter((event) => {
+      const normalizedStatus = asString(event.status, "ativo").toLowerCase().trim();
+      if (
+        normalizedStatus === "encerrado" ||
+        normalizedStatus === "cancelado" ||
+        normalizedStatus === "inativo"
+      ) {
+        return false;
+      }
+      return !isEventExpiredByGrace(event.data, event.hora, DASHBOARD_EVENT_GRACE_MS);
+    })
+    .slice(0, DASHBOARD_EVENTS_LIMIT);
+  const produtos = productRows
+    .map((row) => normalizeProduto(asString(row.id), row, userId || undefined))
+    .filter((row): row is DashboardProduct => row !== null);
+  const parceiros = partnerRows
+    .map((row) => normalizeParceiro(asString(row.id), row))
+    .filter((row): row is DashboardPartner => row !== null)
+    .filter((partner) => (partner.status || "active") === "active");
+  const ligasBase = ligaRows
+    .map((row) => normalizeLiga(asString(row.id), row))
+    .filter((row): row is DashboardLiga => row !== null)
+    .filter((liga) => liga.visivel === true)
+    .sort((left, right) => (right.likes || 0) - (left.likes || 0));
+  const ligas =
+    ligasBase.length > DASHBOARD_LIGAS_DASHBOARD_LIMIT
+      ? seededShuffle(
+          ligasBase,
+          `${userId || "anon"}:${tenantId || "default"}:${new Date().toISOString().slice(0, 10)}`
+        )
+          .slice(0, DASHBOARD_LIGAS_DASHBOARD_LIMIT)
+          .sort((left, right) => (right.likes || 0) - (left.likes || 0))
+      : ligasBase;
+  const mensagens = [...postRows]
+    .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt))
+    .map((row) => normalizePost(asString(row.id), row, userId || undefined))
+    .filter((row): row is DashboardPost => row !== null);
+  const treinos = treinoRows.map((row) => asString(row.imagem)).filter((entry) => entry.length > 0);
+  const productTurmaStats = await buildProductTurmaStats(productRows, tenantId || undefined);
+
+  return {
+    events,
+    produtos,
+    parceiros,
+    ligas,
+    mensagens,
+    treinos,
+    totalCaca,
+    totalAlunos,
+    productTurmaStats,
+  };
+}
 
 const toTurmaKey = (raw: unknown): string | null => {
   const digits = asString(raw).replace(/\D/g, "");
@@ -590,15 +960,17 @@ async function fetchUsersTurmaMap(
 }
 
 async function buildProductTurmaStats(
-  products: DashboardProduct[],
+  products: Row[],
   tenantId?: string
 ): Promise<Record<string, DashboardTurmaStat[]>> {
   const likesByProduct = new Map<string, string[]>();
   const sampledUids: string[] = [];
 
   for (const product of products) {
-    const sampled = product.likes.slice(0, DASHBOARD_LIKES_SAMPLE_PER_PRODUCT);
-    likesByProduct.set(product.id, sampled);
+    const productId = asString(product.id).trim();
+    if (!productId) continue;
+    const sampled = asStringArray(product.likes).slice(0, DASHBOARD_LIKES_SAMPLE_PER_PRODUCT);
+    likesByProduct.set(productId, sampled);
     sampledUids.push(...sampled);
   }
 
@@ -665,8 +1037,10 @@ export interface DashboardEvent {
   imagem: string;
   tipo: string;
   status?: string;
-  likesList: string[];
-  participantes: string[];
+  likesCount: number;
+  viewerHasLiked: boolean;
+  interessadosCount: number;
+  viewerIsInterested: boolean;
   imagePositionY?: number;
 }
 
@@ -675,7 +1049,8 @@ export interface DashboardProduct {
   nome: string;
   preco: string | number;
   img: string;
-  likes: string[];
+  likesCount: number;
+  viewerHasLiked: boolean;
 }
 
 export interface DashboardLiga {
@@ -684,7 +1059,6 @@ export interface DashboardLiga {
   sigla: string;
   foto?: string;
   logoUrl?: string;
-  logoBase64?: string;
   logo?: string;
   descricao?: string;
   bizu?: string;
@@ -713,7 +1087,8 @@ export interface DashboardPost {
   avatar: string;
   createdAt?: unknown;
   texto: string;
-  likes: string[];
+  likesCount: number;
+  viewerHasLiked: boolean;
 }
 
 export interface DashboardBundle {
@@ -742,103 +1117,26 @@ export async function fetchDashboardBundle(options?: {
     if (cached) return cached;
   }
 
-  const tenantFilter = tenantId ? { tenant_id: tenantId } : null;
+  const rpcBundle = await fetchDashboardBundleViaRpc({
+    tenantId: tenantId || undefined,
+    userId: userId || undefined,
+  });
+  if (rpcBundle) {
+    setCachedValue(dashboardCache, cacheKey, rpcBundle);
+    return rpcBundle;
+  }
 
-  const [eventRows, productRows, partnerRows, ligaRows, postRows, treinoRows, totalAlunos, totalCaca] =
-    await Promise.all([
-      fetchDashboardEventRows(tenantId || undefined),
-      fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [
-        {
-          limit: DASHBOARD_PRODUCTS_LIMIT,
-          eq: {
-            active: true,
-            aprovado: true,
-            ...(tenantFilter ?? {}),
-          },
-        },
-      ]),
-      fetchRowsWithFallback("parceiros", DASHBOARD_PARTNERS_SELECT, [
-        {
-          eq: {
-            status: "active",
-            ...(tenantFilter ?? {}),
-          },
-          limit: DASHBOARD_PARTNERS_LIMIT,
-        },
-        { limit: DASHBOARD_PARTNERS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
-      ]),
-      fetchDashboardLeagueRows({
+  // Mantemos o rebuild legado apenas para refresh explicito/debug.
+  // O caminho publico normal degrada de forma barata quando a RPC estrutural nao existe.
+  const bundle = forceRefresh
+    ? await fetchDashboardLegacyFallbackBundle({
         tenantId: tenantId || undefined,
         userId: userId || undefined,
-      }),
-      fetchRowsWithFallback("posts", DASHBOARD_POSTS_SELECT, [
-        {
-          orderBy: { column: "createdAt", ascending: false },
-          limit: DASHBOARD_POSTS_LIMIT,
-          ...(tenantFilter ? { eq: tenantFilter } : {}),
-        },
-        { limit: DASHBOARD_POSTS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
-      ]),
-      fetchDashboardTreinoRows({
+      })
+    : await fetchDashboardDegradedBundle({
         tenantId: tenantId || undefined,
         userId: userId || undefined,
-      }),
-      safeUsersCount(tenantId || undefined),
-      fetchDashboardTotalCaca(tenantId || undefined),
-    ]);
-
-  const events = eventRows
-    .map((row) => normalizeEvento(asString(row.id), row))
-    .filter((row): row is DashboardEvent => row !== null)
-    .filter((event) => {
-      const normalizedStatus = asString(event.status, "ativo").toLowerCase().trim();
-      if (
-        normalizedStatus === "encerrado" ||
-        normalizedStatus === "cancelado" ||
-        normalizedStatus === "inativo"
-      ) {
-        return false;
-      }
-      return !isEventExpiredByGrace(event.data, event.hora, DASHBOARD_EVENT_GRACE_MS);
-    })
-    .slice(0, DASHBOARD_EVENTS_LIMIT);
-  const produtos = productRows.map((row) => normalizeProduto(asString(row.id), row)).filter((row): row is DashboardProduct => row !== null);
-  const parceiros = partnerRows
-    .map((row) => normalizeParceiro(asString(row.id), row))
-    .filter((row): row is DashboardPartner => row !== null)
-    .filter((partner) => (partner.status || "active") === "active");
-  const ligasBase = ligaRows
-    .map((row) => normalizeLiga(asString(row.id), row))
-    .filter((row): row is DashboardLiga => row !== null)
-    .filter((liga) => liga.visivel === true)
-    .sort((left, right) => (right.likes || 0) - (left.likes || 0));
-  const ligas =
-    ligasBase.length > DASHBOARD_LIGAS_DASHBOARD_LIMIT
-      ? seededShuffle(
-          ligasBase,
-          `${userId || "anon"}:${tenantId || "default"}:${new Date().toISOString().slice(0, 10)}`
-        )
-          .slice(0, DASHBOARD_LIGAS_DASHBOARD_LIMIT)
-          .sort((left, right) => (right.likes || 0) - (left.likes || 0))
-      : ligasBase;
-  const mensagens = [...postRows]
-    .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt))
-    .map((row) => normalizePost(asString(row.id), row))
-    .filter((row): row is DashboardPost => row !== null);
-  const treinos = treinoRows.map((row) => asString(row.imagem)).filter((entry) => entry.length > 0);
-  const productTurmaStats = await buildProductTurmaStats(produtos, tenantId || undefined);
-
-  const bundle: DashboardBundle = {
-    events,
-    produtos,
-    parceiros,
-    ligas,
-    mensagens,
-    treinos,
-    totalCaca,
-    totalAlunos,
-    productTurmaStats,
-  };
+      });
 
   setCachedValue(dashboardCache, cacheKey, bundle);
   return bundle;
@@ -848,7 +1146,11 @@ export async function toggleDashboardEventLike(payload: { eventId: string; userI
   const eventId = payload.eventId.trim();
   const userId = payload.userId.trim();
   if (!eventId || !userId) return;
-  await toggleArrayMembership({ table: "eventos", id: eventId, column: "likesList", userId, currentlyLiked: payload.currentlyLiked });
+  await toggleEventLikeNative({
+    eventId,
+    userId,
+    currentlyLiked: payload.currentlyLiked,
+  });
 }
 
 export async function toggleDashboardProductLike(payload: { productId: string; userId: string; currentlyLiked: boolean }): Promise<void> {

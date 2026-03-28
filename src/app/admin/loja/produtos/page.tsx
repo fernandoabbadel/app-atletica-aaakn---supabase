@@ -26,7 +26,12 @@ import { useToast } from "@/context/ToastContext";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { fetchPlanCatalog, type PlanRecord } from "@/lib/plansPublicService";
 import { logActivity } from "@/lib/logger";
-import { uploadImage } from "@/lib/upload";
+import {
+  buildDraftAssetFileName,
+  sanitizeStoragePathSegment,
+  uploadImage,
+  VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "@/lib/upload";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   hasValidPhoneLength,
@@ -499,7 +504,22 @@ export default function AdminLojaProdutosPage() {
 
     try {
       setUploadingCategoryCover(true);
-      const { url, error } = await uploadImage(file, "categorias");
+      const tenantScope = sanitizeStoragePathSegment(activeTenantId || "global");
+      const stableCategoryId = sanitizeStoragePathSegment(categoryName || "");
+      const isStableTarget = stableCategoryId.length > 0;
+      const { url, error } = await uploadImage(
+        file,
+        isStableTarget
+          ? `store/${tenantScope}/categorias/${stableCategoryId}`
+          : `store/${tenantScope}/categorias/drafts`,
+        {
+          fileName: isStableTarget ? "cover" : buildDraftAssetFileName("cover"),
+          upsert: isStableTarget,
+          versionStrategy: isStableTarget ? "file-metadata" : "none",
+          cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+          scopeKey: `store:category:${tenantScope}:${stableCategoryId || "draft"}`,
+        }
+      );
       if (error || !url) {
         addToast(error || "Erro ao subir capa da categoria.", "error");
         return;
@@ -521,7 +541,22 @@ export default function AdminLojaProdutosPage() {
 
     try {
       setUploadingProductImage(true);
-      const { url, error } = await uploadImage(file, "produtos");
+      const tenantScope = sanitizeStoragePathSegment(activeTenantId || "global");
+      const stableProductId = editingProductId?.trim() || "";
+      const isStableTarget = stableProductId.length > 0;
+      const { url, error } = await uploadImage(
+        file,
+        isStableTarget
+          ? `store/${tenantScope}/produtos/${sanitizeStoragePathSegment(stableProductId)}`
+          : `store/${tenantScope}/produtos/drafts`,
+        {
+          fileName: isStableTarget ? "produto" : buildDraftAssetFileName("produto"),
+          upsert: isStableTarget,
+          versionStrategy: isStableTarget ? "file-metadata" : "none",
+          cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+          scopeKey: `store:product:${tenantScope}:${stableProductId || "draft"}`,
+        }
+      );
       if (error || !url) {
         addToast(error || "Erro ao subir imagem do produto.", "error");
         return;

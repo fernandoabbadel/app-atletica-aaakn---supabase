@@ -19,6 +19,11 @@ import {
   normalizePlanPriceEntries,
 } from "./commerceCatalog";
 import { fetchCanonicalUserVisuals } from "./userVisualsService";
+import {
+  hydrateEventPollRows,
+  hydrateEventViewerState,
+  isMissingRelationError,
+} from "./hotPathRelations";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 
@@ -32,14 +37,16 @@ const DEFAULT_EVENT_DETAILS_RSVPS_LIMIT = 200;
 const DEFAULT_EVENT_DETAILS_COMMENTS_LIMIT = 100;
 const DEFAULT_EVENT_DETAILS_POLLS_LIMIT = 20;
 const DEFAULT_EVENT_DETAILS_PEDIDOS_LIMIT = 20;
+const EVENTOS_FEED_SELECT_COLUMNS =
+  "id,titulo,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,status,sale_status,isLowStock,stats,lotes,tenant_id,createdAt,updatedAt";
 const EVENTOS_SELECT_COLUMNS =
-  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,isLowStock,stats,lotes,interessados,likesList,tenant_id,createdAt,updatedAt";
+  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,isLowStock,stats,lotes,tenant_id,createdAt,updatedAt";
 const EVENTOS_RSVPS_SELECT_COLUMNS =
   "id,eventoId,userId,status,userName,userAvatar,userTurma,timestamp";
 const EVENTOS_COMENTARIOS_SELECT_COLUMNS =
   "id,eventoId,userId,userName,userAvatar,userTurma,role,userPlanoCor,userPlanoIcon,userPatente,userPatenteIcon,text,texto,likes,reports,hidden,createdAt,updatedAt";
 const EVENTOS_ENQUETES_SELECT_COLUMNS =
-  "id,eventoId,question,allowUserOptions,options,voters,userVotes,createdAt,updatedAt";
+  "id,eventoId,question,allowUserOptions,options,createdAt,updatedAt";
 const PATENTES_SELECT_COLUMNS = "id,titulo,minXp,cor,iconName,bg,border,text";
 const SOLICITACOES_INGRESSOS_SELECT_COLUMNS =
   "id,eventoId,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,payment_config,dataSolicitacao,dataAprovacao,aprovadoPor";
@@ -369,6 +376,48 @@ async function updateEventStatsAndLists(payload: {
   if (updateError) throwSupabaseError(updateError);
 }
 
+async function countTableRowsExact(
+  table: "eventos_likes" | "eventos_rsvps",
+  filters: Record<string, string>,
+  tenantId?: string | null
+): Promise<number> {
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveEventsTenantId(tenantId);
+  let query = supabase.from(table).select("id", { count: "exact", head: true });
+
+  Object.entries(filters).forEach(([column, value]) => {
+    query = query.eq(column, value);
+  });
+
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
+  const { count, error } = await query;
+  if (error) throw error;
+  return Math.max(0, count ?? 0);
+}
+
+async function refreshEventStatsFromRelations(eventId: string, tenantId?: string | null): Promise<void> {
+  const [likes, confirmados, talvez] = await Promise.all([
+    countTableRowsExact("eventos_likes", { eventoId: eventId }, tenantId),
+    countTableRowsExact("eventos_rsvps", { eventoId: eventId, status: "going" }, tenantId),
+    countTableRowsExact("eventos_rsvps", { eventoId: eventId, status: "maybe" }, tenantId),
+  ]);
+
+  await updateEventRow(
+    eventId,
+    {
+      stats: {
+        likes,
+        confirmados,
+        talvez,
+      },
+    },
+    resolveEventsTenantId(tenantId) || undefined
+  );
+}
+
 function parseOffsetCursor(cursorId?: string | null): number {
   if (!cursorId) return 0;
   const parsed = Number(cursorId);
@@ -385,14 +434,18 @@ export async function fetchEventsFeed(options?: {
   forceRefresh?: boolean;
   includeInactive?: boolean;
   includePast?: boolean;
+  includeFullData?: boolean;
+  userId?: string | null;
   tenantId?: string | null;
 }): Promise<Row[]> {
   const scopedTenantId = resolveEventsTenantId(options?.tenantId);
+  const viewerUserId = asString(options?.userId).trim();
   const maxResults = boundedLimit(options?.maxResults ?? 60, MAX_EVENTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const includeInactive = options?.includeInactive ?? false;
   const includePast = options?.includePast ?? false;
-  const cacheKey = `${scopedTenantId || "all"}:${maxResults}:${includeInactive ? "all" : "active"}:${includePast ? "past" : "future"}`;
+  const includeFullData = options?.includeFullData ?? false;
+  const cacheKey = `${scopedTenantId || "all"}:${viewerUserId || "anon"}:${maxResults}:${includeInactive ? "all" : "active"}:${includePast ? "past" : "future"}:${includeFullData ? "full" : "feed"}`;
 
   if (!forceRefresh) {
     const cached = getCache(feedCache, cacheKey);
@@ -454,6 +507,7 @@ export async function fetchEventsFeed(options?: {
   const fetchLimit = includePast ? maxResults : Math.min(MAX_EVENTS, Math.max(maxResults * 3, maxResults));
   try {
     rows = await selectRows("eventos", {
+      selectColumns: includeFullData ? EVENTOS_SELECT_COLUMNS : EVENTOS_FEED_SELECT_COLUMNS,
       eq: includeInactive ? undefined : { status: "ativo" },
       orderBy: { column: includePast ? "createdAt" : "data", ascending: includePast ? false : true },
       limit: fetchLimit,
@@ -486,8 +540,16 @@ export async function fetchEventsFeed(options?: {
     })
     .slice(0, maxResults);
 
-  setCache(feedCache, cacheKey, visibleRows);
-  return visibleRows;
+  const hydratedRows =
+    viewerUserId.length > 0
+      ? await hydrateEventViewerState(visibleRows, {
+          userId: viewerUserId,
+          tenantId: scopedTenantId,
+        })
+      : visibleRows;
+
+  setCache(feedCache, cacheKey, hydratedRows);
+  return hydratedRows;
 }
 
 async function fetchFinanceiroConfig(
@@ -797,13 +859,15 @@ export async function fetchAdminEventPolls(options: {
   eventId: string;
   maxResults?: number;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<Row[]> {
   const eventId = options.eventId.trim();
   if (!eventId) return [];
 
   const maxResults = boundedLimit(options.maxResults ?? 40, MAX_POLLS);
   const forceRefresh = options.forceRefresh ?? false;
-  const cacheKey = `${eventId}:${maxResults}`;
+  const scopedTenantId = resolveEventsTenantId(options.tenantId);
+  const cacheKey = `${scopedTenantId || "all"}:${eventId}:${maxResults}`;
 
   if (!forceRefresh) {
     const cached = getCache(adminPollsCache, cacheKey);
@@ -815,10 +879,12 @@ export async function fetchAdminEventPolls(options: {
       eq: { eventoId: eventId },
       orderBy: { column: "createdAt", ascending: false },
       limit: maxResults,
+      tenantId: scopedTenantId,
     })
   );
-  setCache(adminPollsCache, cacheKey, rows);
-  return rows;
+  const hydratedRows = await hydrateEventPollRows(rows, { tenantId: scopedTenantId });
+  setCache(adminPollsCache, cacheKey, hydratedRows);
+  return hydratedRows;
 }
 
 export interface EventDetailsBundle {
@@ -920,11 +986,16 @@ export async function fetchEventDetailsBundle(options: {
 
   const comentariosWithVisuals = await applyEventCommentAuthorVisuals(comentariosRaw);
 
+  const hydratedPolls = await hydrateEventPollRows(normalizeRows(enquetesRaw), {
+    viewerUserId: userId || null,
+    tenantId: scopedTenantId,
+  });
+
   const bundle: EventDetailsBundle = {
     evento,
     rsvps: normalizeRows(rsvpsRaw),
     comentarios: normalizeCommentRows(comentariosWithVisuals),
-    enquetes: normalizeRows(enquetesRaw),
+    enquetes: hydratedPolls,
     patentes: normalizeRows(patentesRaw),
     financeiro,
     meusPedidos: normalizeRows(meusPedidosRaw),
@@ -1119,8 +1190,6 @@ export async function createAdminEventPoll(payload: {
       question: payload.question.trim(),
       allowUserOptions: payload.allowUserOptions,
       options: [],
-      voters: [],
-      userVotes: {},
       createdAt: nowIso(),
       updatedAt: nowIso(),
     })
@@ -1192,24 +1261,72 @@ export async function toggleEventLike(payload: {
   const userId = payload.userId.trim();
   if (!eventId || !userId) return;
 
-  await updateEventStatsAndLists({
-    eventId,
-    tenantId: payload.tenantId,
-    mutate: ({ stats, likesList }) => {
-      const nextLikesList = toggleArrayValue(likesList, userId);
-      const currentLikes = asNum((stats as Row).likes, 0);
-      const nextLikes = Math.max(0, currentLikes + (nextLikesList.includes(userId) ? 1 : -1));
-      return {
-        likesList: nextLikesList,
-        stats: { ...stats, likes: nextLikes },
-      };
-    },
-  });
+  let becameLiked = !payload.currentlyLiked;
+
+  try {
+    const supabase = getSupabaseClient();
+    const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+    let existingQuery = supabase
+      .from("eventos_likes")
+      .select("id")
+      .eq("eventoId", eventId)
+      .eq("userId", userId);
+    if (scopedTenantId) {
+      existingQuery = existingQuery.eq("tenant_id", scopedTenantId);
+    }
+
+    const { data: existingLike, error: existingError } = await existingQuery.maybeSingle();
+    if (existingError) throw existingError;
+
+    if (existingLike?.id) {
+      becameLiked = false;
+      let deleteQuery = supabase
+        .from("eventos_likes")
+        .delete()
+        .eq("eventoId", eventId)
+        .eq("userId", userId);
+      if (scopedTenantId) {
+        deleteQuery = deleteQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { error: deleteError } = await deleteQuery;
+      if (deleteError) throw deleteError;
+    } else {
+      becameLiked = true;
+      const { error: insertError } = await supabase.from("eventos_likes").insert({
+        eventoId: eventId,
+        userId,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+        createdAt: nowIso(),
+      });
+      if (insertError) throw insertError;
+    }
+
+    await refreshEventStatsFromRelations(eventId, scopedTenantId);
+  } catch (error: unknown) {
+    if (!isMissingRelationError(error)) {
+      throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+    }
+
+    becameLiked = !payload.currentlyLiked;
+    await updateEventStatsAndLists({
+      eventId,
+      tenantId: payload.tenantId,
+      mutate: ({ stats, likesList }) => {
+        const nextLikesList = toggleArrayValue(likesList, userId);
+        const currentLikes = asNum((stats as Row).likes, 0);
+        const nextLikes = Math.max(0, currentLikes + (nextLikesList.includes(userId) ? 1 : -1));
+        return {
+          likesList: nextLikesList,
+          stats: { ...stats, likes: nextLikes },
+        };
+      },
+    });
+  }
 
   try {
     await incrementUserStats(
       userId,
-      { likesGiven: payload.currentlyLiked ? -1 : 1 },
+      { likesGiven: becameLiked ? 1 : -1 },
       { tenantId: payload.tenantId || undefined }
     );
   } catch (statsError: unknown) {
@@ -1268,21 +1385,6 @@ export async function setEventRsvpDetailed(payload: {
     }
     const { error: deleteError } = await deleteQuery;
     if (deleteError) throwSupabaseError(deleteError);
-
-    await updateEventStatsAndLists({
-      eventId,
-      tenantId: scopedTenantId,
-      mutate: ({ stats, interessados }) => ({
-        interessados: interessados.filter((entry) => entry !== userId),
-        stats: {
-          ...stats,
-          [payload.status === "going" ? "confirmados" : "talvez"]: Math.max(
-            0,
-            asNum((stats as Row)[payload.status === "going" ? "confirmados" : "talvez"], 0) - 1
-          ),
-        },
-      }),
-    });
   } else {
     const { error: upsertError } = await supabase.from("eventos_rsvps").upsert(
       {
@@ -1300,29 +1402,9 @@ export async function setEventRsvpDetailed(payload: {
       }
     );
     if (upsertError) throwSupabaseError(upsertError);
-
-    await updateEventStatsAndLists({
-      eventId,
-      tenantId: scopedTenantId,
-      mutate: ({ stats, interessados }) => {
-        const nextStats: Row = { ...stats };
-        if (oldStatus) {
-          const oldKey = oldStatus === "going" ? "confirmados" : "talvez";
-          nextStats[oldKey] = Math.max(0, asNum(nextStats[oldKey], 0) - 1);
-        }
-        const nextKey = payload.status === "going" ? "confirmados" : "talvez";
-        nextStats[nextKey] = asNum(nextStats[nextKey], 0) + 1;
-        const nextInteressados = interessados.includes(userId)
-          ? interessados
-          : [...interessados, userId];
-
-        return {
-          stats: nextStats,
-          interessados: nextInteressados,
-        };
-      },
-    });
   }
+
+  await refreshEventStatsFromRelations(eventId, scopedTenantId);
 
   if (isFirstGoingRsvp) {
     try {
@@ -1544,7 +1626,7 @@ export async function voteEventPollOption(payload: {
   const scopedTenantId = resolveEventsTenantId(payload.tenantId);
   let selectQuery = supabase
     .from("eventos_enquetes")
-    .select("options, userVotes, voters")
+    .select("options")
     .eq("id", payload.pollId)
     .eq("eventoId", payload.eventId);
   if (scopedTenantId) {
@@ -1560,56 +1642,121 @@ export async function voteEventPollOption(payload: {
     throw new Error("Opcao invalida");
   }
 
-  const userVotesMap =
-    asObject(pollRow.userVotes) ?? {};
-  const userVoteEntry = userVotesMap[payload.userId];
-  const myVotes = Array.isArray(userVoteEntry)
-    ? userVoteEntry.filter((v): v is number => typeof v === "number")
-    : [];
+  let shouldCountPollAnswer = false;
 
-  const optionObj = asObject(options[index]) ?? {};
-  const votesByTurma = asObject(optionObj.votesByTurma) ?? {};
-  const turmaKey = (payload.userTurma || "Geral").trim() || "Geral";
-
-  if (myVotes.includes(index)) {
-    optionObj.votes = Math.max(0, asNum(optionObj.votes, 0) - 1);
-    const turmaVotes = Math.max(0, asNum(votesByTurma[turmaKey], 0) - 1);
-    votesByTurma[turmaKey] = turmaVotes;
-    optionObj.votesByTurma = votesByTurma;
-    options[index] = optionObj;
-    userVotesMap[payload.userId] = myVotes.filter((v) => v !== index);
-  } else {
-    if (myVotes.length >= 3) {
-      throw new Error("Voce ja escolheu 3 opcoes!");
+  try {
+    let votesQuery = supabase
+      .from("eventos_enquete_votos")
+      .select("id, optionIndex")
+      .eq("enqueteId", payload.pollId)
+      .eq("userId", payload.userId);
+    if (scopedTenantId) {
+      votesQuery = votesQuery.eq("tenant_id", scopedTenantId);
     }
-    optionObj.votes = asNum(optionObj.votes, 0) + 1;
-    votesByTurma[turmaKey] = asNum(votesByTurma[turmaKey], 0) + 1;
-    optionObj.votesByTurma = votesByTurma;
-    options[index] = optionObj;
-    userVotesMap[payload.userId] = [...myVotes, index];
-  }
 
-  const voters = asStringArray(pollRow.voters);
-  const shouldCountPollAnswer =
-    !voters.includes(payload.userId) && !myVotes.includes(index);
-  const nextVoters = voters.includes(payload.userId) ? voters : [...voters, payload.userId];
+    const { data: currentVotesRows, error: currentVotesError } = await votesQuery;
+    if (currentVotesError) throw currentVotesError;
 
-  // Sem RPC/Edge Function, usamos read-modify-write no cliente para manter o plano free.
-  let updateQuery = supabase
-    .from("eventos_enquetes")
-    .update({
-      options,
-      userVotes: userVotesMap,
-      voters: nextVoters,
-      updatedAt: nowIso(),
-    })
-    .eq("id", payload.pollId)
-    .eq("eventoId", payload.eventId);
-  if (scopedTenantId) {
-    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+    const currentVotes = ((currentVotesRows ?? []) as Row[])
+      .map((entry) => Number(entry.optionIndex))
+      .filter((value) => Number.isFinite(value))
+      .map((value) => Math.floor(value));
+
+    if (currentVotes.includes(index)) {
+      let deleteQuery = supabase
+        .from("eventos_enquete_votos")
+        .delete()
+        .eq("enqueteId", payload.pollId)
+        .eq("userId", payload.userId)
+        .eq("optionIndex", index);
+      if (scopedTenantId) {
+        deleteQuery = deleteQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { error: deleteError } = await deleteQuery;
+      if (deleteError) throw deleteError;
+    } else {
+      if (currentVotes.length >= 3) {
+        throw new Error("Voce ja escolheu 3 opcoes!");
+      }
+
+      const { error: insertError } = await supabase.from("eventos_enquete_votos").insert({
+        enqueteId: payload.pollId,
+        eventoId: payload.eventId,
+        userId: payload.userId,
+        optionIndex: index,
+        userTurma: (payload.userTurma || "Geral").trim() || "Geral",
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+        createdAt: nowIso(),
+      });
+      if (insertError) throw insertError;
+      shouldCountPollAnswer = currentVotes.length === 0;
+    }
+  } catch (error: unknown) {
+    if (!isMissingRelationError(error)) {
+      if (error instanceof Error) throw error;
+      throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+    }
+
+    let legacyPollQuery = supabase
+      .from("eventos_enquetes")
+      .select("options, userVotes, voters")
+      .eq("id", payload.pollId)
+      .eq("eventoId", payload.eventId);
+    if (scopedTenantId) {
+      legacyPollQuery = legacyPollQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { data: legacyPollRow, error: legacySelectError } = await legacyPollQuery.maybeSingle();
+    if (legacySelectError) throwSupabaseError(legacySelectError);
+    if (!legacyPollRow) throw new Error("Enquete nao existe");
+
+    const legacyOptions = Array.isArray(legacyPollRow.options) ? [...legacyPollRow.options] : [];
+    const legacyUserVotesMap = asObject(legacyPollRow.userVotes) ?? {};
+    const legacyUserVoteEntry = legacyUserVotesMap[payload.userId];
+    const myVotes = Array.isArray(legacyUserVoteEntry)
+      ? legacyUserVoteEntry.filter((v): v is number => typeof v === "number")
+      : [];
+
+    const optionObj = asObject(legacyOptions[index]) ?? {};
+    const votesByTurma = asObject(optionObj.votesByTurma) ?? {};
+    const turmaKey = (payload.userTurma || "Geral").trim() || "Geral";
+
+    if (myVotes.includes(index)) {
+      optionObj.votes = Math.max(0, asNum(optionObj.votes, 0) - 1);
+      votesByTurma[turmaKey] = Math.max(0, asNum(votesByTurma[turmaKey], 0) - 1);
+      optionObj.votesByTurma = votesByTurma;
+      legacyOptions[index] = optionObj;
+      legacyUserVotesMap[payload.userId] = myVotes.filter((v) => v !== index);
+    } else {
+      if (myVotes.length >= 3) {
+        throw new Error("Voce ja escolheu 3 opcoes!");
+      }
+      optionObj.votes = asNum(optionObj.votes, 0) + 1;
+      votesByTurma[turmaKey] = asNum(votesByTurma[turmaKey], 0) + 1;
+      optionObj.votesByTurma = votesByTurma;
+      legacyOptions[index] = optionObj;
+      legacyUserVotesMap[payload.userId] = [...myVotes, index];
+    }
+
+    const voters = asStringArray(legacyPollRow.voters);
+    shouldCountPollAnswer = !voters.includes(payload.userId) && !myVotes.includes(index);
+    const nextVoters = voters.includes(payload.userId) ? voters : [...voters, payload.userId];
+
+    let updateQuery = supabase
+      .from("eventos_enquetes")
+      .update({
+        options: legacyOptions,
+        userVotes: legacyUserVotesMap,
+        voters: nextVoters,
+        updatedAt: nowIso(),
+      })
+      .eq("id", payload.pollId)
+      .eq("eventoId", payload.eventId);
+    if (scopedTenantId) {
+      updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { error: updateError } = await updateQuery;
+    if (updateError) throwSupabaseError(updateError);
   }
-  const { error: updateError } = await updateQuery;
-  if (updateError) throwSupabaseError(updateError);
 
   if (shouldCountPollAnswer) {
     try {

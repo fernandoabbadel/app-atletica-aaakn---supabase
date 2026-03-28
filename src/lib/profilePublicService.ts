@@ -1,9 +1,9 @@
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import {
-  fetchUserAchievementSnapshot,
   syncUserAchievementState,
 } from "./achievementsService";
 import { isTreinoDayExpired } from "./eventDateUtils";
+import { hydrateEventViewerState } from "./hotPathRelations";
 import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
@@ -13,13 +13,25 @@ const MAX_EVENT_RESULTS = 8;
 const MAX_TREINO_RESULTS = 8;
 const MAX_LIGA_RESULTS = 8;
 const MAX_FOLLOW_RESULTS = 260;
-const MAX_FOLLOW_SCAN_RESULTS = 5000;
+const MAX_FOLLOW_SCAN_RESULTS = 720;
+const FOLLOW_LIST_TENANT_FALLBACK_MULTIPLIER = 6;
+const PROFILE_PUBLIC_FALLBACK_POST_LIMIT = 6;
+const PROFILE_PUBLIC_FALLBACK_EVENT_LIMIT = 3;
+const PROFILE_PUBLIC_FALLBACK_TREINO_LIMIT = 3;
+const PROFILE_PUBLIC_FALLBACK_LIGA_LIMIT = 3;
+const PROFILE_RPC_BREAKER_TTL_MS = 10 * 60 * 1000;
+const PROFILE_PUBLIC_BUNDLE_RPC = "profile_public_bundle";
+const PROFILE_FOLLOW_LIST_PAGE_RPC = "profile_follow_list_page";
 const PROFILE_USER_SELECT_COLUMNS =
   "uid,nome,apelido,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,tenant_role,status,whatsappPublico,idadePublica,relacionamentoPublico,esportes,pets,statusRelacionamento,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,tier,level,xp,stats";
 
 const publicBundleCache = new Map<string, CacheEntry<PublicProfileBundle | null>>();
 const followListCache = new Map<string, CacheEntry<FollowListItem[]>>();
 const followCountsCache = new Map<string, CacheEntry<FollowCounts>>();
+let profilePublicBundleRpcAvailable: boolean | null = null;
+let profileFollowListPageRpcAvailable: boolean | null = null;
+let profilePublicBundleRpcUnavailableUntil = 0;
+let profileFollowListPageRpcUnavailableUntil = 0;
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -30,6 +42,9 @@ const asBoolean = (value: unknown, fallback = false): boolean =>
   typeof value === "boolean" ? value : fallback;
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+const asStoredCount = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
 
 const toMillis = (value: unknown): number => {
   if (value instanceof Date) return value.getTime();
@@ -68,12 +83,67 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
   cache.set(key, { cachedAt: Date.now(), value });
 };
 
+const isRpcCircuitOpen = (available: boolean | null, unavailableUntil: number): boolean =>
+  available === false && unavailableUntil > Date.now();
+
+const openRpcCircuit = (): number => Date.now() + PROFILE_RPC_BREAKER_TTL_MS;
+
 const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
   throw Object.assign(new Error(error.message), {
     code: error.code ?? `db/${error.name ?? "query-failed"}`,
     cause: error,
   });
 };
+
+const isMissingRpcError = (error: { code?: string | null; message?: string | null }): boolean => {
+  const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "PGRST202" ||
+    code === "42883" ||
+    message.includes("could not find the function") ||
+    message.includes("schema cache") ||
+    (message.includes("function") && message.includes("does not exist"))
+  );
+};
+
+const isMissingRelationError = (error: { code?: string | null; message?: string | null }): boolean => {
+  const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    (message.includes("relation") && message.includes("does not exist"))
+  );
+};
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
+  const message = [raw.message, raw.details, raw.hint]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!message) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
+    /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const extracted = match[2] ?? match[1];
+    if (extracted) return extracted;
+  }
+
+  return null;
+};
+
+const isMissingTenantIdColumn = (error: unknown): boolean =>
+  extractMissingSchemaColumn(error)?.trim().toLowerCase() === "tenant_id";
 
 const resolveProfileTenantId = (tenantId?: string | null): string =>
   resolveStoredTenantScopeId(tenantId);
@@ -109,6 +179,31 @@ const clearProfilePublicCachesForUser = (uid: string, tenantId?: string | null):
       followCountsCache.delete(key);
     }
   }
+};
+
+const findCachedPublicBundleCounts = (
+  targetUid: string,
+  tenantId?: string | null
+): FollowCounts | null => {
+  const cleanTargetUid = targetUid.trim();
+  if (!cleanTargetUid) return null;
+
+  const tenantSuffix = buildProfileTenantCacheSuffix(tenantId);
+  for (const key of publicBundleCache.keys()) {
+    const [cachedTargetUid, , cachedTenantSuffix] = key.split(":");
+    if (cachedTargetUid !== cleanTargetUid || cachedTenantSuffix !== tenantSuffix) {
+      continue;
+    }
+
+    const cached = getCache(publicBundleCache, key);
+    if (!cached) continue;
+    return {
+      followersCount: Math.max(0, cached.followersCount),
+      followingCount: Math.max(0, cached.followingCount),
+    };
+  }
+
+  return null;
 };
 
 const toUniqueUserIds = (values: string[]): string[] =>
@@ -176,7 +271,8 @@ export interface ProfilePostRecord {
   texto: string;
   imagem?: string;
   createdAt?: unknown;
-  likes: string[];
+  likesCount: number;
+  viewerHasLiked: boolean;
   comentarios: number;
   userId: string;
 }
@@ -188,6 +284,9 @@ export interface ProfileEventRecord {
   local?: string;
   imagem?: string;
   imagePositionY?: number;
+  likesCount?: number;
+  interessadosCount?: number;
+  viewerHasLiked?: boolean;
 }
 
 export interface ProfileTreinoRecord {
@@ -197,7 +296,7 @@ export interface ProfileTreinoRecord {
   horario?: string;
   imagem?: string;
   local?: string;
-  confirmados?: string[];
+  confirmadosCount?: number;
 }
 
 export interface ProfileLigaRecord {
@@ -206,7 +305,7 @@ export interface ProfileLigaRecord {
   sigla?: string;
   foto?: string;
   logo?: string;
-  logoBase64?: string;
+  membrosCount?: number;
 }
 
 export interface FollowListItem {
@@ -283,13 +382,15 @@ const normalizePost = (raw: unknown): ProfilePostRecord | null => {
   if (!data) return null;
   const id = asString(data.id);
   if (!id) return null;
+  const likes = asStringArray(data.likes);
   return {
     id,
     texto: asString(data.texto),
     imagem: asString(data.imagem) || undefined,
     createdAt: data.createdAt,
-    likes: asStringArray(data.likes),
-    comentarios: asNumber(data.comentarios, 0),
+    likesCount: Math.max(0, asNumber(data.likesCount, likes.length)),
+    viewerHasLiked: asBoolean(data.viewerHasLiked, false),
+    comentarios: asNumber(data.comentarios ?? data.commentsCount, 0),
     userId: asString(data.userId),
   };
 };
@@ -300,6 +401,7 @@ const normalizeEvent = (raw: unknown): ProfileEventRecord | null => {
   const id = asString(data.id);
   const titulo = asString(data.titulo);
   if (!id || !titulo) return null;
+  const stats = asObject(data.stats);
   return {
     id,
     titulo,
@@ -307,6 +409,12 @@ const normalizeEvent = (raw: unknown): ProfileEventRecord | null => {
     local: asString(data.local) || undefined,
     imagem: asString(data.imagem) || undefined,
     imagePositionY: asNumber(data.imagePositionY, 50),
+    likesCount: asNumber(data.likesCount, asNumber(stats?.likes, 0)),
+    interessadosCount: asNumber(
+      data.interessadosCount,
+      asNumber(stats?.confirmados, 0) + asNumber(stats?.talvez, 0)
+    ),
+    viewerHasLiked: asBoolean(data.viewerHasLiked, false),
   };
 };
 
@@ -323,7 +431,7 @@ const normalizeTreino = (raw: unknown): ProfileTreinoRecord | null => {
     horario: asString(data.horario) || undefined,
     imagem: asString(data.imagem) || undefined,
     local: asString(data.local) || undefined,
-    confirmados: asStringArray(data.confirmados),
+    confirmadosCount: asNumber(data.confirmadosCount, asNumber(data.confirmedCount, 0)),
   };
 };
 
@@ -332,15 +440,41 @@ const normalizeLiga = (raw: unknown): ProfileLigaRecord | null => {
   if (!data) return null;
   const id = asString(data.id);
   if (!id) return null;
+  const logoUrl = asString(data.logoUrl) || undefined;
+  const logo = asString(data.logo) || logoUrl;
   return {
     id,
     nome: asString(data.nome) || undefined,
     sigla: asString(data.sigla) || undefined,
     foto: asString(data.foto) || undefined,
-    logo: asString(data.logo) || undefined,
-    logoBase64: asString(data.logoBase64) || undefined,
+    logo,
+    membrosCount: asNumber(data.membrosCount, asNumber(data.membersCount, 0)),
   };
 };
+
+async function fetchStoredFollowCounts(
+  uid: string,
+  tenantId?: string | null
+): Promise<{ followersCount: number | null; followingCount: number | null } | null> {
+  const scopedTenantId = resolveProfileTenantId(tenantId);
+  const supabase = getSupabaseClient();
+  let query = supabase
+    .from("users")
+    .select("stats")
+    .eq("uid", uid);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) throwSupabaseError(error);
+  if (!data) return null;
+
+  const stats = asObject(data.stats);
+  return {
+    followersCount: asStoredCount(stats?.followersCount),
+    followingCount: asStoredCount(stats?.followingCount),
+  };
+}
 
 const normalizeFollowListItem = (raw: unknown): FollowListItem | null => {
   const data = asObject(raw);
@@ -387,9 +521,11 @@ async function fetchProfileById(
 
 async function fetchProfilePosts(
   uid: string,
-  tenantId?: string | null
+  tenantId?: string | null,
+  limit = MAX_POST_RESULTS
 ): Promise<ProfilePostRecord[]> {
   const supabase = getSupabaseClient();
+  const safeLimit = boundedLimit(limit, MAX_POST_RESULTS);
   let request = supabase
     .from("posts")
     .select("id,texto,imagem,likes,comentarios,userId,createdAt")
@@ -399,26 +535,54 @@ async function fetchProfilePosts(
   }
   const { data, error } = await request
     .order("createdAt", { ascending: false })
-    .limit(MAX_POST_RESULTS);
+    .limit(safeLimit);
   if (error) throwSupabaseError(error);
   return (data ?? []).map(normalizePost).filter((row): row is ProfilePostRecord => row !== null);
 }
 
 async function fetchProfileEvents(
   uid: string,
-  tenantId?: string | null
+  tenantId?: string | null,
+  viewerUid?: string | null,
+  limit = MAX_EVENT_RESULTS
 ): Promise<ProfileEventRecord[]> {
   const supabase = getSupabaseClient();
+  const safeLimit = boundedLimit(limit, MAX_EVENT_RESULTS);
+  let rsvpQuery = supabase
+    .from("eventos_rsvps")
+    .select("eventoId")
+    .eq("userId", uid);
+  if (tenantId?.trim()) {
+    rsvpQuery = rsvpQuery.eq("tenant_id", tenantId.trim());
+  }
+  const { data: rsvpData, error: rsvpError } = await rsvpQuery.limit(safeLimit * 4);
+  if (rsvpError) throwSupabaseError(rsvpError);
+
+  const eventIds = Array.from(
+    new Set(
+      ((rsvpData ?? []) as Record<string, unknown>[])
+        .map((row) => asString(row.eventoId).trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+  if (!eventIds.length) return [];
+
   let request = supabase
     .from("eventos")
-    .select("id,titulo,data,local,imagem,imagePositionY,interessados")
-    .contains("interessados", [uid]);
+    .select("id,titulo,data,local,imagem,imagePositionY,stats")
+    .in("id", eventIds);
   if (tenantId?.trim()) {
     request = request.eq("tenant_id", tenantId.trim());
   }
-  const { data, error } = await request.limit(MAX_EVENT_RESULTS);
+  const { data, error } = await request.limit(safeLimit);
   if (error) throwSupabaseError(error);
-  return (data ?? [])
+
+  const hydratedRows = await hydrateEventViewerState((data ?? []) as Record<string, unknown>[], {
+    userId: viewerUid || null,
+    tenantId,
+  });
+
+  return hydratedRows
     .map(normalizeEvent)
     .filter((row): row is ProfileEventRecord => row !== null)
     .sort((left, right) => toMillis(left.data) - toMillis(right.data));
@@ -426,17 +590,39 @@ async function fetchProfileEvents(
 
 async function fetchProfileTreinos(
   uid: string,
-  tenantId?: string | null
+  tenantId?: string | null,
+  limit = MAX_TREINO_RESULTS
 ): Promise<ProfileTreinoRecord[]> {
   const supabase = getSupabaseClient();
+  const safeLimit = boundedLimit(limit, MAX_TREINO_RESULTS);
+  let rsvpQuery = supabase
+    .from("treinos_rsvps")
+    .select("treinoId")
+    .eq("userId", uid)
+    .eq("status", "going");
+  if (tenantId?.trim()) {
+    rsvpQuery = rsvpQuery.eq("tenant_id", tenantId.trim());
+  }
+  const { data: rsvpData, error: rsvpError } = await rsvpQuery.limit(safeLimit * 4);
+  if (rsvpError) throwSupabaseError(rsvpError);
+
+  const treinoIds = Array.from(
+    new Set(
+      ((rsvpData ?? []) as Record<string, unknown>[])
+        .map((row) => asString(row.treinoId).trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+  if (!treinoIds.length) return [];
+
   let request = supabase
     .from("treinos")
-    .select("id,modalidade,dia,horario,imagem,local,confirmados")
-    .contains("confirmados", [uid]);
+    .select("id,modalidade,dia,horario,imagem,local,confirmedCount")
+    .in("id", treinoIds);
   if (tenantId?.trim()) {
     request = request.eq("tenant_id", tenantId.trim());
   }
-  const { data, error } = await request.limit(MAX_TREINO_RESULTS);
+  const { data, error } = await request.limit(safeLimit);
   if (error) throwSupabaseError(error);
   return (data ?? [])
     .map(normalizeTreino)
@@ -445,21 +631,69 @@ async function fetchProfileTreinos(
     .sort((left, right) => toMillis(right.dia) - toMillis(left.dia));
 }
 
-async function fetchProfileLigas(uid: string): Promise<ProfileLigaRecord[]> {
+async function fetchProfileLigas(
+  uid: string,
+  tenantId?: string | null,
+  limit = MAX_LIGA_RESULTS
+): Promise<ProfileLigaRecord[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  const safeLimit = boundedLimit(limit, MAX_LIGA_RESULTS);
+  let membershipQuery = supabase
+    .from("ligas_membros")
+    .select("ligaId")
+    .eq("userId", uid);
+  if (tenantId?.trim()) {
+    membershipQuery = membershipQuery.eq("tenant_id", tenantId.trim());
+  }
+  const { data: membershipData, error: membershipError } = await membershipQuery.limit(safeLimit * 4);
+  if (membershipError) throwSupabaseError(membershipError);
+
+  const leagueIds = Array.from(
+    new Set(
+      ((membershipData ?? []) as Record<string, unknown>[])
+        .map((row) => asString(row.ligaId).trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+  if (!leagueIds.length) return [];
+
+  let query = supabase
     .from("ligas_config")
-    .select("id,nome,sigla,foto,logo,logoBase64,membrosIds")
-    .contains("membrosIds", [uid])
-    .limit(MAX_LIGA_RESULTS);
+    .select("id,nome,sigla,foto,logo,logoUrl,membersCount")
+    .in("id", leagueIds);
+  if (tenantId?.trim()) {
+    query = query.eq("tenant_id", tenantId.trim());
+  }
+  const { data, error } = await query.limit(safeLimit);
   if (error) throwSupabaseError(error);
   return (data ?? []).map(normalizeLiga).filter((row): row is ProfileLigaRecord => row !== null);
 }
 
+const resolveFollowCountFallback = (
+  table: "users_followers" | "users_following",
+  uid: string,
+  tenantId?: string | null,
+  fallbackCount?: number | null
+): number => {
+  if (typeof fallbackCount === "number" && Number.isFinite(fallbackCount)) {
+    return Math.max(0, Math.floor(fallbackCount));
+  }
+
+  const cachedCounts = findCachedPublicBundleCounts(uid, tenantId);
+  if (cachedCounts) {
+    return table === "users_followers"
+      ? Math.max(0, cachedCounts.followersCount)
+      : Math.max(0, cachedCounts.followingCount);
+  }
+
+  return 0;
+};
+
 async function countFollowRows(
   table: "users_followers" | "users_following",
   uid: string,
-  tenantId?: string | null
+  tenantId?: string | null,
+  fallbackCount?: number | null
 ): Promise<number> {
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveProfileTenantId(tenantId);
@@ -468,24 +702,31 @@ async function countFollowRows(
       .from(table)
       .select("id", { count: "exact", head: true })
       .eq("userId", uid);
-    if (error) throwSupabaseError(error);
+    if (error) {
+      if (isMissingRelationError(error)) {
+        return resolveFollowCountFallback(table, uid, tenantId, fallbackCount);
+      }
+      throwSupabaseError(error);
+    }
     return count ?? 0;
   }
 
-  const { data, error } = await supabase
+  const scopedResult = await supabase
     .from(table)
-    .select("uid")
+    .select("id", { count: "exact", head: true })
     .eq("userId", uid)
-    .range(0, MAX_FOLLOW_SCAN_RESULTS - 1);
-  if (error) throwSupabaseError(error);
+    .eq("tenant_id", scopedTenantId);
+  if (!scopedResult.error) {
+    return scopedResult.count ?? 0;
+  }
+  if (!isMissingTenantIdColumn(scopedResult.error)) {
+    if (isMissingRelationError(scopedResult.error)) {
+      return resolveFollowCountFallback(table, uid, tenantId, fallbackCount);
+    }
+    throwSupabaseError(scopedResult.error);
+  }
 
-  const tenantUserIds = await fetchTenantUserIdSet(
-    (data ?? [])
-      .map((row) => asString(asObject(row)?.uid).trim())
-      .filter((value) => value.length > 0),
-    scopedTenantId
-  );
-  return tenantUserIds.size;
+  return resolveFollowCountFallback(table, uid, tenantId, fallbackCount);
 }
 
 async function checkIsFollowing(
@@ -500,14 +741,143 @@ async function checkIsFollowing(
   }
 
   const supabase = getSupabaseClient();
+  let scopedQuery = supabase
+    .from("users_followers")
+    .select("id")
+    .eq("userId", targetUid)
+    .eq("uid", viewerUid);
+  if (scopedTenantId) {
+    scopedQuery = scopedQuery.eq("tenant_id", scopedTenantId);
+  }
+
+  const scopedResult = await scopedQuery.maybeSingle();
+  if (!scopedResult.error) {
+    return Boolean(scopedResult.data);
+  }
+  if (isMissingRelationError(scopedResult.error)) {
+    return false;
+  }
+  if (!scopedTenantId || !isMissingTenantIdColumn(scopedResult.error)) {
+    throwSupabaseError(scopedResult.error);
+  }
+
   const { data, error } = await supabase
     .from("users_followers")
     .select("id")
     .eq("userId", targetUid)
     .eq("uid", viewerUid)
     .maybeSingle();
-  if (error) throwSupabaseError(error);
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return false;
+    }
+    throwSupabaseError(error);
+  }
   return Boolean(data);
+}
+
+async function fetchPublicProfileBundleViaRpc(
+  targetUid: string,
+  viewerUid: string,
+  tenantId?: string | null
+): Promise<PublicProfileBundle | null | undefined> {
+  if (isRpcCircuitOpen(profilePublicBundleRpcAvailable, profilePublicBundleRpcUnavailableUntil)) {
+    return undefined;
+  }
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveProfileTenantId(tenantId);
+  const { data, error } = await supabase.rpc(PROFILE_PUBLIC_BUNDLE_RPC, {
+    p_tenant_id: scopedTenantId || null,
+    p_target_user_id: targetUid,
+    p_viewer_user_id: viewerUid || null,
+    p_posts_limit: MAX_POST_RESULTS,
+    p_events_limit: MAX_EVENT_RESULTS,
+    p_treinos_limit: MAX_TREINO_RESULTS,
+    p_ligas_limit: MAX_LIGA_RESULTS,
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      profilePublicBundleRpcAvailable = false;
+      profilePublicBundleRpcUnavailableUntil = openRpcCircuit();
+      return undefined;
+    }
+    throwSupabaseError(error);
+  }
+
+  profilePublicBundleRpcAvailable = true;
+  profilePublicBundleRpcUnavailableUntil = 0;
+
+  if (data === null) {
+    return null;
+  }
+
+  const payload = asObject(data);
+  if (!payload) {
+    return undefined;
+  }
+
+  const profile = normalizeUserProfile(payload.profile);
+  if (!profile) {
+    return null;
+  }
+
+  return {
+    profile,
+    followersCount: Math.max(0, asNumber(payload.followersCount, 0)),
+    followingCount: Math.max(0, asNumber(payload.followingCount, 0)),
+    posts: asArray(payload.posts)
+      .map(normalizePost)
+      .filter((entry): entry is ProfilePostRecord => entry !== null),
+    events: asArray(payload.events)
+      .map(normalizeEvent)
+      .filter((entry): entry is ProfileEventRecord => entry !== null),
+    treinos: asArray(payload.treinos)
+      .map(normalizeTreino)
+      .filter((entry): entry is ProfileTreinoRecord => entry !== null),
+    ligas: asArray(payload.ligas)
+      .map(normalizeLiga)
+      .filter((entry): entry is ProfileLigaRecord => entry !== null),
+    isFollowing: asBoolean(payload.isFollowing, false),
+  };
+}
+
+async function fetchFollowListViaRpc(
+  uid: string,
+  type: "followers" | "following",
+  options?: { maxResults?: number; tenantId?: string | null }
+): Promise<FollowListItem[] | undefined> {
+  if (isRpcCircuitOpen(profileFollowListPageRpcAvailable, profileFollowListPageRpcUnavailableUntil)) {
+    return undefined;
+  }
+
+  const scopedTenantId = resolveProfileTenantId(options?.tenantId);
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc(PROFILE_FOLLOW_LIST_PAGE_RPC, {
+    p_tenant_id: scopedTenantId || null,
+    p_target_user_id: uid,
+    p_list_type: type,
+    p_limit: boundedLimit(options?.maxResults ?? 180, MAX_FOLLOW_RESULTS),
+    p_cursor_followed_at: null,
+    p_cursor_uid: null,
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      profileFollowListPageRpcAvailable = false;
+      profileFollowListPageRpcUnavailableUntil = openRpcCircuit();
+      return undefined;
+    }
+    throwSupabaseError(error);
+  }
+
+  profileFollowListPageRpcAvailable = true;
+  profileFollowListPageRpcUnavailableUntil = 0;
+
+  return asArray(asObject(data)?.rows)
+    .map(normalizeFollowListItem)
+    .filter((row): row is FollowListItem => row !== null);
 }
 
 export async function fetchPublicProfileBundle(
@@ -528,60 +898,59 @@ export async function fetchPublicProfileBundle(
     if (cached !== null || publicBundleCache.has(cacheKey)) return cached;
   }
 
-  const profile = await fetchProfileById(targetUid, tenantId);
-  if (!profile) {
+  const rpcBundle = await fetchPublicProfileBundleViaRpc(targetUid, viewerUid, tenantId);
+  const baseBundle =
+    rpcBundle !== undefined
+      ? rpcBundle
+      : await (async (): Promise<PublicProfileBundle | null> => {
+          const profile = await fetchProfileById(targetUid, tenantId);
+          if (!profile) {
+            return null;
+          }
+
+          const statsObj = asObject(profile.stats);
+          const followersCountRaw = statsObj?.followersCount;
+          const followingCountRaw = statsObj?.followingCount;
+
+          const [followersCount, followingCount, posts, events, treinos, ligas, isFollowing] =
+            await Promise.all([
+              typeof followersCountRaw === "number"
+                ? Math.max(0, Math.floor(followersCountRaw))
+                : countFollowRows("users_followers", targetUid, tenantId, null),
+              typeof followingCountRaw === "number"
+                ? Math.max(0, Math.floor(followingCountRaw))
+                : countFollowRows("users_following", targetUid, tenantId, null),
+              fetchProfilePosts(targetUid, tenantId, PROFILE_PUBLIC_FALLBACK_POST_LIMIT),
+              fetchProfileEvents(
+                targetUid,
+                tenantId,
+                viewerUid || null,
+                PROFILE_PUBLIC_FALLBACK_EVENT_LIMIT
+              ),
+              fetchProfileTreinos(targetUid, tenantId, PROFILE_PUBLIC_FALLBACK_TREINO_LIMIT),
+              fetchProfileLigas(targetUid, tenantId, PROFILE_PUBLIC_FALLBACK_LIGA_LIMIT),
+              viewerUid ? checkIsFollowing(targetUid, viewerUid, tenantId) : Promise.resolve(false),
+            ]);
+
+          return {
+            profile,
+            followersCount,
+            followingCount,
+            posts,
+            events,
+            treinos,
+            ligas,
+            isFollowing,
+          };
+        })();
+
+  if (!baseBundle) {
     setCache(publicBundleCache, cacheKey, null);
     return null;
   }
 
-  const achievementSnapshot = await fetchUserAchievementSnapshot({
-    userId: targetUid,
-    tenantId: tenantId || undefined,
-    fallbackStats: (asObject(profile.stats) ?? null) as Record<string, unknown> | null,
-    fallbackXp: asNumber(profile.xp, 0),
-  });
-  const profileWithGamification: ProfileUserRecord = {
-    ...profile,
-    stats: achievementSnapshot.stats,
-    xp: achievementSnapshot.displayXp,
-    patente: achievementSnapshot.patente?.titulo || asString(profile.patente) || undefined,
-    patente_icon:
-      achievementSnapshot.patente?.iconName || asString(profile.patente_icon) || undefined,
-    patente_cor:
-      achievementSnapshot.patente?.cor || asString(profile.patente_cor) || undefined,
-  };
-
-  const statsObj = tenantId ? null : asObject(profileWithGamification.stats);
-  const followersCountRaw = statsObj?.followersCount;
-  const followingCountRaw = statsObj?.followingCount;
-
-  const [followersCount, followingCount, posts, events, treinos, ligas, isFollowing] = await Promise.all([
-    typeof followersCountRaw === "number"
-      ? Math.max(0, Math.floor(followersCountRaw))
-      : countFollowRows("users_followers", targetUid, tenantId),
-    typeof followingCountRaw === "number"
-      ? Math.max(0, Math.floor(followingCountRaw))
-      : countFollowRows("users_following", targetUid, tenantId),
-    fetchProfilePosts(targetUid, tenantId),
-    fetchProfileEvents(targetUid, tenantId),
-    fetchProfileTreinos(targetUid, tenantId),
-    fetchProfileLigas(targetUid),
-    viewerUid ? checkIsFollowing(targetUid, viewerUid, tenantId) : Promise.resolve(false),
-  ]);
-
-  const bundle: PublicProfileBundle = {
-    profile: profileWithGamification,
-    followersCount,
-    followingCount,
-    posts,
-    events,
-    treinos,
-    ligas,
-    isFollowing,
-  };
-
-  setCache(publicBundleCache, cacheKey, bundle);
-  return bundle;
+  setCache(publicBundleCache, cacheKey, baseBundle);
+  return baseBundle;
 }
 
 export async function fetchFollowList(
@@ -603,28 +972,66 @@ export async function fetchFollowList(
     if (cached) return cached;
   }
 
+  const rpcRows = await fetchFollowListViaRpc(uid, type, {
+    maxResults,
+    tenantId,
+  });
+  if (rpcRows !== undefined) {
+    setCache(followListCache, cacheKey, rpcRows);
+    return rpcRows;
+  }
+
   const table = type === "followers" ? "users_followers" : "users_following";
-  let request = supabase
-    .from(table)
-    .select("uid,nome,foto,turma,followedAt")
-    .eq("userId", uid)
-    .order("followedAt", { ascending: false });
+  let scopedRows: FollowListItem[] = [];
+  let usedTenantScopedQuery = false;
 
-  request = tenantId
-    ? request.range(0, MAX_FOLLOW_SCAN_RESULTS - 1)
-    : request.limit(maxResults);
+  if (tenantId) {
+    const scopedResult = await supabase
+      .from(table)
+      .select("uid,nome,foto,turma,followedAt")
+      .eq("userId", uid)
+      .eq("tenant_id", tenantId)
+      .order("followedAt", { ascending: false })
+      .limit(maxResults);
 
-  const { data, error } = await request;
-  if (error) throwSupabaseError(error);
+    if (!scopedResult.error) {
+      usedTenantScopedQuery = true;
+      scopedRows = (scopedResult.data ?? [])
+        .map(normalizeFollowListItem)
+        .filter((row): row is FollowListItem => row !== null);
+    } else if (!isMissingTenantIdColumn(scopedResult.error)) {
+      throwSupabaseError(scopedResult.error);
+    }
+  }
 
-  const rows = await filterFollowRowsByTenant(
-    (data ?? [])
-      .map(normalizeFollowListItem)
-      .filter((row): row is FollowListItem => row !== null),
-    tenantId
-  );
+  if (!usedTenantScopedQuery) {
+    const tenantFallbackWindow = tenantId
+      ? Math.min(
+          MAX_FOLLOW_SCAN_RESULTS,
+          Math.max(maxResults, maxResults * FOLLOW_LIST_TENANT_FALLBACK_MULTIPLIER)
+        )
+      : maxResults;
+    let request = supabase
+      .from(table)
+      .select("uid,nome,foto,turma,followedAt")
+      .eq("userId", uid)
+      .order("followedAt", { ascending: false });
 
-  const scopedRows = rows.slice(0, maxResults);
+    request = request.limit(tenantFallbackWindow);
+
+    const { data, error } = await request;
+    if (error) throwSupabaseError(error);
+
+    const rows = await filterFollowRowsByTenant(
+      (data ?? [])
+        .map(normalizeFollowListItem)
+        .filter((row): row is FollowListItem => row !== null),
+      tenantId
+    );
+
+    scopedRows = rows.slice(0, maxResults);
+  }
+
   setCache(followListCache, cacheKey, scopedRows);
   return scopedRows;
 }
@@ -639,14 +1046,36 @@ export async function fetchFollowCounts(
   const forceRefresh = options?.forceRefresh ?? false;
   const tenantId = resolveProfileTenantId(options?.tenantId);
   const cacheKey = `${uid}:${tenantId || "global"}`;
+  const cachedBundleCounts = findCachedPublicBundleCounts(uid, tenantId);
+  if (cachedBundleCounts) {
+    setCache(followCountsCache, cacheKey, cachedBundleCounts);
+    return cachedBundleCounts;
+  }
+
   if (!forceRefresh) {
     const cached = getCache(followCountsCache, cacheKey);
     if (cached) return cached;
   }
 
+  const storedCounts = await fetchStoredFollowCounts(uid, tenantId);
+  if (storedCounts) {
+    const [followersCount, followingCount] = await Promise.all([
+      storedCounts.followersCount === null
+        ? countFollowRows("users_followers", uid, tenantId, storedCounts.followersCount)
+        : Promise.resolve(storedCounts.followersCount),
+      storedCounts.followingCount === null
+        ? countFollowRows("users_following", uid, tenantId, storedCounts.followingCount)
+        : Promise.resolve(storedCounts.followingCount),
+    ]);
+
+    const counts = { followersCount, followingCount };
+    setCache(followCountsCache, cacheKey, counts);
+    return counts;
+  }
+
   const [followersCount, followingCount] = await Promise.all([
-    countFollowRows("users_followers", uid, tenantId),
-    countFollowRows("users_following", uid, tenantId),
+    countFollowRows("users_followers", uid, tenantId, null),
+    countFollowRows("users_following", uid, tenantId, null),
   ]);
 
   const counts = { followersCount, followingCount };
@@ -693,31 +1122,121 @@ export async function toggleFollowProfile(payload: {
     turma: payload.targetData.turma.trim().slice(0, 40) || "Geral",
   };
 
-  const { data: existingFollower, error: existingError } = await supabase
+  let existingFollowerQuery = supabase
     .from("users_followers")
     .select("id")
     .eq("userId", targetUid)
-    .eq("uid", viewerUid)
-    .maybeSingle();
-  if (existingError) throwSupabaseError(existingError);
+    .eq("uid", viewerUid);
+  if (scopedTenantId) {
+    existingFollowerQuery = existingFollowerQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: existingFollower, error: existingError } =
+    await existingFollowerQuery.maybeSingle();
+  if (existingError) {
+    if (!scopedTenantId || !isMissingTenantIdColumn(existingError)) {
+      throwSupabaseError(existingError);
+    }
+
+    const fallbackExisting = await supabase
+      .from("users_followers")
+      .select("id")
+      .eq("userId", targetUid)
+      .eq("uid", viewerUid)
+      .maybeSingle();
+    if (fallbackExisting.error) throwSupabaseError(fallbackExisting.error);
+    const shouldUnfollow = payload.currentlyFollowing || Boolean(fallbackExisting.data);
+    return completeToggleFollowProfile({
+      supabase,
+      viewerUid,
+      targetUid,
+      viewerData,
+      targetData,
+      shouldUnfollow,
+      scopedTenantId,
+      tenantIdSupported: false,
+    });
+  }
 
   const shouldUnfollow = payload.currentlyFollowing || Boolean(existingFollower);
 
+  return completeToggleFollowProfile({
+    supabase,
+    viewerUid,
+    targetUid,
+    viewerData,
+    targetData,
+    shouldUnfollow,
+    scopedTenantId,
+    tenantIdSupported: true,
+  });
+}
+
+async function completeToggleFollowProfile(payload: {
+  supabase: ReturnType<typeof getSupabaseClient>;
+  viewerUid: string;
+  targetUid: string;
+  viewerData: FollowListItem;
+  targetData: FollowListItem;
+  shouldUnfollow: boolean;
+  scopedTenantId: string;
+  tenantIdSupported: boolean;
+}): Promise<{ isFollowing: boolean; followersCount: number; followingCount: number }> {
+  const {
+    supabase,
+    viewerUid,
+    targetUid,
+    viewerData,
+    targetData,
+    shouldUnfollow,
+    scopedTenantId,
+    tenantIdSupported,
+  } = payload;
+
   if (shouldUnfollow) {
     const [followersDelete, followingDelete] = await Promise.all([
-      supabase.from("users_followers").delete().eq("userId", targetUid).eq("uid", viewerUid),
-      supabase.from("users_following").delete().eq("userId", viewerUid).eq("uid", targetUid),
+      (() => {
+        let query = supabase
+          .from("users_followers")
+          .delete()
+          .eq("userId", targetUid)
+          .eq("uid", viewerUid);
+        if (tenantIdSupported && scopedTenantId) {
+          query = query.eq("tenant_id", scopedTenantId);
+        }
+        return query;
+      })(),
+      (() => {
+        let query = supabase
+          .from("users_following")
+          .delete()
+          .eq("userId", viewerUid)
+          .eq("uid", targetUid);
+        if (tenantIdSupported && scopedTenantId) {
+          query = query.eq("tenant_id", scopedTenantId);
+        }
+        return query;
+      })(),
     ]);
     if (followersDelete.error) throwSupabaseError(followersDelete.error);
     if (followingDelete.error) throwSupabaseError(followingDelete.error);
   } else {
     const [followersInsert, followingInsert] = await Promise.all([
       supabase.from("users_followers").upsert(
-        { userId: targetUid, ...viewerData, followedAt: new Date().toISOString() },
+        {
+          userId: targetUid,
+          ...viewerData,
+          ...(tenantIdSupported && scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+          followedAt: new Date().toISOString(),
+        },
         { onConflict: "userId,uid" }
       ),
       supabase.from("users_following").upsert(
-        { userId: viewerUid, ...targetData, followedAt: new Date().toISOString() },
+        {
+          userId: viewerUid,
+          ...targetData,
+          ...(tenantIdSupported && scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+          followedAt: new Date().toISOString(),
+        },
         { onConflict: "userId,uid" }
       ),
     ]);
@@ -737,8 +1256,18 @@ export async function toggleFollowProfile(payload: {
   }
 
   const [followersCount, followingCount, targetUserRes, viewerUserRes] = await Promise.all([
-    countFollowRows("users_followers", targetUid, scopedTenantId),
-    countFollowRows("users_following", viewerUid, scopedTenantId),
+    countFollowRows(
+      "users_followers",
+      targetUid,
+      tenantIdSupported ? scopedTenantId || undefined : undefined,
+      null
+    ),
+    countFollowRows(
+      "users_following",
+      viewerUid,
+      tenantIdSupported ? scopedTenantId || undefined : undefined,
+      null
+    ),
     (() => {
       let query = supabase
         .from("users")

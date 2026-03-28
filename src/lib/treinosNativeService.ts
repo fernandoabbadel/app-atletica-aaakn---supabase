@@ -12,6 +12,8 @@ import {
 import { buildTenantScopedRowId } from "./tenantScopedCatalog";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 
+type CacheEntry<T> = { cachedAt: number; value: T };
+
 const MAX_TREINOS_RESULTS = 260;
 const MAX_MONTH_RESULTS = 220;
 const MAX_USERS_RESULTS = 500;
@@ -20,6 +22,9 @@ const MAX_CHAMADA_RESULTS = 240;
 const MAX_MODALIDADES = 30;
 const MAX_RECURRING_WEEKS = 20;
 const USER_DIRECTORY_SEGMENT_SIZE = 30;
+const USER_DIRECTORY_COUNT_BATCH_SIZE = 500;
+const MAX_USER_DIRECTORY_COUNT_SCAN_RESULTS = 5_000;
+const TREINOS_DIRECTORY_CACHE_TTL_MS = 60_000;
 const DEFAULT_MODALIDADES = ["Futsal", "Volei"];
 const USER_DIRECTORY_SELECT_COLUMNS = "uid,nome,turma,foto,email";
 const USER_DIRECTORY_BASE_GROUPS = [
@@ -30,11 +35,16 @@ const USER_DIRECTORY_BASE_GROUPS = [
   ["U", "V", "W", "X", "Y", "Z"],
 ] as const;
 const TREINOS_SELECT_COLUMNS =
-  "id,modalidade,diaSemana,dia,horario,local,treinador,treinadorId,treinadorAvatar,descricao,imagem,ordemDia,status,confirmados,createdAt,updatedAt";
+  "id,modalidade,diaSemana,dia,horario,local,treinador,treinadorId,treinadorAvatar,descricao,imagem,ordemDia,status,confirmedCount,createdAt,updatedAt";
 const TREINOS_RSVPS_SELECT_COLUMNS =
   "id,treinoId,userId,userName,userAvatar,userTurma,status,timestamp";
 const TREINOS_CHAMADA_SELECT_COLUMNS =
   "id,treinoId,userId,nome,avatar,turma,status,origem,pagamento,timestamp,updatedAt";
+const DIRECTORY_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const directoryInitialCountsCache = new Map<string, CacheEntry<Record<string, number>>>();
+const directorySegmentsCache = new Map<string, CacheEntry<TreinoUserDirectorySegment[]>>();
+const directoryInitialCountsInflight = new Map<string, Promise<Record<string, number>>>();
+const directorySegmentsInflight = new Map<string, Promise<TreinoUserDirectorySegment[]>>();
 
 const nowIso = (): string => new Date().toISOString();
 const asNumber = (value: unknown, fallback = 0): number =>
@@ -46,6 +56,20 @@ const resolveTreinosSettingsIds = (tenantId?: string | null): string[] => {
   if (!scopedTenantId) return ["treinos"];
   return [buildTenantScopedRowId(scopedTenantId, "treinos")];
 };
+const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.cachedAt > TREINOS_DIRECTORY_CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void => {
+  cache.set(key, { cachedAt: Date.now(), value });
+};
+const buildDirectoryCacheKey = (...parts: Array<string | number | null | undefined>): string =>
+  parts.map((entry) => `${entry ?? "_"}`).join(":");
 
 const normalizeModalidades = (value: unknown): string[] => {
   const unique = new Set<string>();
@@ -101,6 +125,85 @@ const buildUserDirectorySegmentLabel = (
   const pageIndex = Math.floor(offset / limit) + 1;
   const totalPages = Math.max(1, Math.ceil(totalInGroup / limit));
   return `${baseLabel} ${pageIndex}/${totalPages}`;
+};
+
+const createEmptyDirectoryInitialCounts = (): Record<string, number> =>
+  DIRECTORY_LETTERS.reduce<Record<string, number>>((accumulator, letter) => {
+    accumulator[letter] = 0;
+    return accumulator;
+  }, {});
+
+const countUserDirectoryByLetters = (
+  letters: string[],
+  directoryInitialCounts: Record<string, number>
+): number =>
+  normalizeDirectoryLetters(letters).reduce(
+    (sum, letter) => sum + Math.max(0, asNumber(directoryInitialCounts[letter], 0)),
+    0
+  );
+
+const fetchUserDirectoryInitialCounts = async (options?: {
+  forceRefresh?: boolean;
+  tenantId?: string | null;
+}): Promise<Record<string, number>> => {
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
+  const forceRefresh = options?.forceRefresh ?? false;
+  const cacheKey = buildDirectoryCacheKey("initials", scopedTenantId || "all");
+
+  if (!forceRefresh) {
+    const cached = getCache(directoryInitialCountsCache, cacheKey);
+    if (cached) return cached;
+
+    const pending = directoryInitialCountsInflight.get(cacheKey);
+    if (pending) return pending;
+  }
+
+  const requestPromise = (async () => {
+    const supabase = getSupabaseClient();
+    const counts = createEmptyDirectoryInitialCounts();
+
+    for (
+      let from = 0;
+      from < MAX_USER_DIRECTORY_COUNT_SCAN_RESULTS;
+      from += USER_DIRECTORY_COUNT_BATCH_SIZE
+    ) {
+      let query = supabase
+        .from("users")
+        .select("nome")
+        .order("nome", { ascending: true })
+        .range(from, from + USER_DIRECTORY_COUNT_BATCH_SIZE - 1);
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+
+      const { data, error } = await query;
+      if (error) throwSupabaseError(error);
+
+      const rows = Array.isArray(data) ? (data as Row[]) : [];
+      rows.forEach((row) => {
+        const firstLetter = asString(asObject(row)?.nome).trim().slice(0, 1).toUpperCase();
+        if (/^[A-Z]$/.test(firstLetter)) {
+          counts[firstLetter] = (counts[firstLetter] ?? 0) + 1;
+        }
+      });
+
+      if (rows.length < USER_DIRECTORY_COUNT_BATCH_SIZE) {
+        break;
+      }
+    }
+
+    setCache(directoryInitialCountsCache, cacheKey, counts);
+    return counts;
+  })();
+
+  directoryInitialCountsInflight.set(cacheKey, requestPromise);
+  try {
+    return await requestPromise;
+  } finally {
+    if (directoryInitialCountsInflight.get(cacheKey) === requestPromise) {
+      directoryInitialCountsInflight.delete(cacheKey);
+    }
+  }
 };
 
 const normalizeModalidadeImagens = (
@@ -182,7 +285,7 @@ const normalizeTreino = (id: string, raw: unknown): TreinoRecord | null => {
     ...(imagem ? { imagem } : {}),
     ordemDia: Math.max(0, asNumber(data.ordemDia, 0)),
     status: normalizeStatus(asString(data.status, "ativo")),
-    confirmados: asStringArray(data.confirmados).slice(0, 600),
+    confirmedCount: Math.max(0, asNumber(data.confirmedCount, asStringArray(data.confirmados).length)),
   };
 };
 
@@ -277,7 +380,6 @@ const normalizeTreinoPayload = (
     ...(imagem ? { imagem } : {}),
     ordemDia,
     status: normalizeStatus(asString(payload.status, "ativo")),
-    confirmados: asStringArray(payload.confirmados).slice(0, 600),
   };
 };
 
@@ -295,7 +397,7 @@ export interface TreinoRecord {
   imagem?: string;
   ordemDia: number;
   status: "ativo" | "cancelado";
-  confirmados: string[];
+  confirmedCount?: number;
 }
 
 export interface TreinoRsvpRecord {
@@ -640,40 +742,15 @@ export async function fetchUserDirectory(options?: {
     .filter((entry): entry is TreinoUserDirectoryItem => entry !== null);
 }
 
-const countUserDirectoryByLetters = async (
-  letters: string[],
-  tenantId?: string | null
-): Promise<number> => {
-  const normalizedLetters = normalizeDirectoryLetters(letters);
-  if (normalizedLetters.length === 0) return 0;
-
-  const supabase = getSupabaseClient();
-  let query = supabase.from("users").select("uid", { count: "exact", head: true });
-  const scopedTenantId = resolveTreinosTenantId(tenantId);
-  if (scopedTenantId) {
-    query = query.eq("tenant_id", scopedTenantId);
-  }
-
-  if (normalizedLetters.length === 1) {
-    query = query.ilike("nome", `${normalizedLetters[0]}%`);
-  } else {
-    query = query.or(buildUserDirectoryInitialsClause(normalizedLetters));
-  }
-
-  const { count, error } = await query;
-  if (error) throwSupabaseError(error);
-  return Math.max(0, count ?? 0);
-};
-
 const expandUserDirectoryGroup = async (
   letters: string[],
-  tenantId: string,
+  directoryInitialCounts: Record<string, number>,
   maxUsersPerSegment: number
 ): Promise<TreinoUserDirectorySegment[]> => {
   const normalizedLetters = normalizeDirectoryLetters(letters);
   if (normalizedLetters.length === 0) return [];
 
-  const count = await countUserDirectoryByLetters(normalizedLetters, tenantId);
+  const count = countUserDirectoryByLetters(normalizedLetters, directoryInitialCounts);
   if (count === 0) return [];
 
   if (count <= maxUsersPerSegment) {
@@ -700,12 +777,12 @@ const expandUserDirectoryGroup = async (
     const [leftSegments, rightSegments] = await Promise.all([
       expandUserDirectoryGroup(
         normalizedLetters.slice(0, middleIndex),
-        tenantId,
+        directoryInitialCounts,
         maxUsersPerSegment
       ),
       expandUserDirectoryGroup(
         normalizedLetters.slice(middleIndex),
-        tenantId,
+        directoryInitialCounts,
         maxUsersPerSegment
       ),
     ]);
@@ -742,20 +819,50 @@ export async function fetchUserDirectorySegments(options?: {
   maxUsersPerSegment?: number;
   tenantId?: string | null;
 }): Promise<TreinoUserDirectorySegment[]> {
-  void options?.forceRefresh;
   const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
+  const forceRefresh = options?.forceRefresh ?? false;
   const maxUsersPerSegment = boundedLimit(
     options?.maxUsersPerSegment ?? USER_DIRECTORY_SEGMENT_SIZE,
     USER_DIRECTORY_SEGMENT_SIZE
   );
-
-  const groups = await Promise.all(
-    USER_DIRECTORY_BASE_GROUPS.map((letters) =>
-      expandUserDirectoryGroup([...letters], scopedTenantId, maxUsersPerSegment)
-    )
+  const cacheKey = buildDirectoryCacheKey(
+    "segments",
+    scopedTenantId || "all",
+    maxUsersPerSegment
   );
 
-  return groups.flat();
+  if (!forceRefresh) {
+    const cached = getCache(directorySegmentsCache, cacheKey);
+    if (cached) return cached;
+
+    const pending = directorySegmentsInflight.get(cacheKey);
+    if (pending) return pending;
+  }
+
+  const requestPromise = (async () => {
+    const directoryInitialCounts = await fetchUserDirectoryInitialCounts({
+      forceRefresh,
+      tenantId: scopedTenantId,
+    });
+    const groups = await Promise.all(
+      USER_DIRECTORY_BASE_GROUPS.map((letters) =>
+        expandUserDirectoryGroup([...letters], directoryInitialCounts, maxUsersPerSegment)
+      )
+    );
+
+    const result = groups.flat();
+    setCache(directorySegmentsCache, cacheKey, result);
+    return result;
+  })();
+
+  directorySegmentsInflight.set(cacheKey, requestPromise);
+  try {
+    return await requestPromise;
+  } finally {
+    if (directorySegmentsInflight.get(cacheKey) === requestPromise) {
+      directorySegmentsInflight.delete(cacheKey);
+    }
+  }
 }
 
 export async function fetchUserDirectorySegmentUsers(payload: {
@@ -1022,6 +1129,39 @@ export async function deleteTreino(
   const { error } = await query;
   if (error) throwSupabaseError(error);
 }
+
+async function refreshTreinoConfirmedCount(
+  treinoId: string,
+  tenantId?: string | null
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(tenantId);
+  let countQuery = supabase
+    .from("treinos_rsvps")
+    .select("id", { count: "exact", head: true })
+    .eq("treinoId", treinoId)
+    .eq("status", "going");
+  if (scopedTenantId) {
+    countQuery = countQuery.eq("tenant_id", scopedTenantId);
+  }
+
+  const { count, error: countError } = await countQuery;
+  if (countError) throwSupabaseError(countError);
+
+  let updateQuery = supabase
+    .from("treinos")
+    .update({
+      confirmedCount: Math.max(0, count ?? 0),
+      updatedAt: nowIso(),
+    })
+    .eq("id", treinoId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
+  if (updateError) throwSupabaseError(updateError);
+}
+
 export async function setTreinoRsvp(payload: {
   treinoId: string;
   userId: string;
@@ -1037,37 +1177,18 @@ export async function setTreinoRsvp(payload: {
 
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
-  const [{ data: treinoRow, error: treinoError }, { data: existing, error: existingError }] = await Promise.all([
-    (() => {
-      let query = supabase.from("treinos").select("confirmados").eq("id", treinoId);
-      if (scopedTenantId) {
-        query = query.eq("tenant_id", scopedTenantId);
-      }
-      return query.maybeSingle();
-    })(),
-    (() => {
-      let query = supabase
-        .from("treinos_rsvps")
-        .select("id")
-        .eq("treinoId", treinoId)
-        .eq("userId", userId);
-      if (scopedTenantId) {
-        query = query.eq("tenant_id", scopedTenantId);
-      }
-      return query.maybeSingle();
-    })(),
-  ]);
-  if (treinoError) throwSupabaseError(treinoError);
+  let existingQuery = supabase
+    .from("treinos_rsvps")
+    .select("id")
+    .eq("treinoId", treinoId)
+    .eq("userId", userId);
+  if (scopedTenantId) {
+    existingQuery = existingQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle();
   if (existingError) throwSupabaseError(existingError);
 
-  const currentConfirmados = asStringArray(treinoRow?.confirmados);
   const hadExistingRsvp = Boolean(existing?.id);
-  const nextConfirmados =
-    payload.status === "not_going"
-      ? currentConfirmados.filter((entry) => entry !== userId)
-      : currentConfirmados.includes(userId)
-      ? currentConfirmados
-      : [...currentConfirmados, userId];
 
   if (payload.status === "not_going") {
     let query = supabase.from("treinos_rsvps").delete().eq("treinoId", treinoId).eq("userId", userId);
@@ -1094,16 +1215,7 @@ export async function setTreinoRsvp(payload: {
     if (error) throwSupabaseError(error);
   }
 
-  // Atualizacao em duas etapas para evitar RPC/Edge Function no plano free.
-  let updateQuery = supabase
-    .from("treinos")
-    .update({ confirmados: nextConfirmados, updatedAt: nowIso() })
-    .eq("id", treinoId);
-  if (scopedTenantId) {
-    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
-  }
-  const { error: treinoUpdateError } = await updateQuery;
-  if (treinoUpdateError) throwSupabaseError(treinoUpdateError);
+  await refreshTreinoConfirmedCount(treinoId, scopedTenantId);
 
   if (!hadExistingRsvp && payload.status === "going") {
     try {
@@ -1261,5 +1373,8 @@ export async function addUserToChamada(payload: {
 }
 
 export function clearTreinosServiceCaches(): void {
-  void 0;
+  directoryInitialCountsCache.clear();
+  directorySegmentsCache.clear();
+  directoryInitialCountsInflight.clear();
+  directorySegmentsInflight.clear();
 }

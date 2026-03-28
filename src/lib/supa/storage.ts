@@ -10,6 +10,12 @@ export interface StorageReference {
   name: string;
 }
 
+export interface ParsedStorageUrl {
+  ref: StorageReference;
+  kind: "public" | "authenticated" | "signed";
+  versionToken: string | null;
+}
+
 export interface UploadResult {
   ref: StorageReference;
   metadata?: Record<string, unknown>;
@@ -101,12 +107,55 @@ export async function uploadBytes(
   };
 }
 
-export async function getDownloadURL(storageRef: StorageReference): Promise<string> {
-  const supabase = getSupabaseClient();
+const STORAGE_URL_PREFIXES: Array<{
+  prefix: string;
+  kind: ParsedStorageUrl["kind"];
+}> = [
+  { prefix: "/storage/v1/object/public/", kind: "public" },
+  { prefix: "/storage/v1/object/authenticated/", kind: "authenticated" },
+  { prefix: "/storage/v1/object/sign/", kind: "signed" },
+];
 
+export function getPublicObjectUrl(storageRef: StorageReference): string | null {
+  const supabase = getSupabaseClient();
   const publicUrl = supabase.storage
     .from(storageRef.bucket)
     .getPublicUrl(storageRef.fullPath).data.publicUrl;
+
+  return typeof publicUrl === "string" && publicUrl.trim().length > 0 ? publicUrl : null;
+}
+
+export function parseStorageUrl(url: string): ParsedStorageUrl | null {
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) return null;
+
+  try {
+    const parsedUrl = new URL(trimmedUrl);
+    const prefixMatch = STORAGE_URL_PREFIXES.find(({ prefix }) =>
+      parsedUrl.pathname.startsWith(prefix)
+    );
+    if (!prefixMatch) return null;
+
+    const relativePath = parsedUrl.pathname.slice(prefixMatch.prefix.length);
+    const [bucketSegment, ...pathSegments] = relativePath.split("/").filter(Boolean);
+    if (!bucketSegment || pathSegments.length === 0) return null;
+
+    const decodedPath = pathSegments.map((segment) => decodeURIComponent(segment)).join("/");
+    const storageRef = ref(getStorage(), `${decodeURIComponent(bucketSegment)}:${decodedPath}`);
+
+    return {
+      ref: storageRef,
+      kind: prefixMatch.kind,
+      versionToken: parsedUrl.searchParams.get("v"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function getDownloadURL(storageRef: StorageReference): Promise<string> {
+  const supabase = getSupabaseClient();
+  const publicUrl = getPublicObjectUrl(storageRef);
 
   if (publicUrl) {
     return publicUrl;
@@ -127,4 +176,23 @@ export async function getDownloadURL(storageRef: StorageReference): Promise<stri
   }
 
   return signed.data.signedUrl;
+}
+
+export async function removeObject(storageRef: StorageReference): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.storage.from(storageRef.bucket).remove([storageRef.fullPath]);
+
+  if (error) {
+    throw Object.assign(new Error(error.message), {
+      code: `storage/${error.name ?? "remove-failed"}`,
+      cause: error,
+    });
+  }
+}
+
+export async function removeObjectByUrl(url: string): Promise<boolean> {
+  const parsed = parseStorageUrl(url);
+  if (!parsed) return false;
+  await removeObject(parsed.ref);
+  return true;
 }

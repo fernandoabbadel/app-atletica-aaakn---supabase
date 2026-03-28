@@ -187,7 +187,7 @@ const loadLandingPayloadFallback = async (
   const tenant = tenantSlug ? await fetchTenantBySlug(tenantSlug) : null;
   const tenantId = tenant?.id?.trim() || "";
   const data = await fetchPublicLandingData({
-    forceRefresh: true,
+    forceRefresh: false,
     tenantId,
   });
 
@@ -274,7 +274,7 @@ export default function PublicLandingPage({
 
         try {
           const response = await fetch(`/api/public/landing${search}`, {
-            cache: "no-store",
+            cache: "force-cache",
           });
           if (!response.ok) {
             throw new Error(`Falha ao carregar landing: ${response.status}`);

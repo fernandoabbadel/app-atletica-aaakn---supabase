@@ -29,7 +29,7 @@ import {
   updateTurmaConfig,
   type TurmaConfig,
 } from "@/lib/turmasService";
-import { uploadImage } from "@/lib/upload";
+import { uploadImage, VERSIONED_PUBLIC_ASSET_CACHE_CONTROL } from "@/lib/upload";
 
 const MAX_TURMA_ID_LENGTH = 4;
 const MAX_TURMA_NAME_LENGTH = 60;
@@ -247,7 +247,8 @@ export default function AdminTurmaPage() {
           compressionMaxBytes: isLogo ? 140 * 1024 : 220 * 1024,
           fileName: `${normalizedId}-${field}`,
           upsert: true,
-          appendVersionQuery: true,
+          versionStrategy: "file-metadata",
+          cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
         }
       );
 

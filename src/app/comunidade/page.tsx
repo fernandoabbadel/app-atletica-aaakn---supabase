@@ -12,18 +12,23 @@ import { useAuth } from "../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../context/ToastContext";
 import { Security } from "../../lib/security";
-import { uploadImage, validateImageFile } from "../../lib/upload";
+import {
+  buildDraftAssetFileName,
+  sanitizeStoragePathSegment,
+  uploadImage,
+  validateImageFile,
+  VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "../../lib/upload";
 import {
   createCommunityComment,
   createCommunityPost,
   createCommunityReport,
+  fetchCommunityCategoryBadgeCounts,
   deleteCommunityComment,
   deleteCommunityPost,
   fetchCommunityComments,
   fetchCommunityConfig,
   fetchCommunityFeedByCategory,
-  fetchCommunityRecentCategoryCounts,
-  fetchCommunityUnreadCounts,
   markCommunityCategoryRead,
   setCommunityPostPatch,
   toggleCommunityCommentLike,
@@ -76,7 +81,6 @@ interface PostData {
     isTreinador?: boolean;
     commentsDisabled?: boolean;
     createdAt: DateLike | null;
-    isRecent?: boolean; 
 }
 
 interface CommentData {
@@ -290,7 +294,6 @@ export default function ComunidadePage() {
 
         if (!mounted) return;
 
-        const now = Date.now();
         const data = rows.map((row) => {
           const raw = row.data as Record<string, unknown>;
           const createdAt = isDateLike(raw.createdAt) ? raw.createdAt : null;
@@ -310,9 +313,6 @@ export default function ComunidadePage() {
             hype,
             comentarios: typeof raw.comentarios === "number" ? raw.comentarios : 0,
             denunciasCount: typeof raw.denunciasCount === "number" ? raw.denunciasCount : 0,
-            isRecent: createdAt
-              ? now - createdAt.toDate().getTime() < RECENT_BADGE_WINDOW_DAYS * 24 * 60 * 60 * 1000
-              : false,
           } as PostData;
         });
 
@@ -365,33 +365,16 @@ export default function ComunidadePage() {
     let mounted = true;
     const loadBadges = async () => {
       try {
-        const recentCountsPromise = fetchCommunityRecentCategoryCounts({
+        const badgeCounts = await fetchCommunityCategoryBadgeCounts({
+          userId: user?.uid,
           categorias: modalidades,
           includeBlocked: !!user?.role?.includes("admin"),
           windowDays: RECENT_BADGE_WINDOW_DAYS,
           tenantId: activeTenantId || user?.tenant_id || undefined,
         });
-        const unreadCountsPromise = user?.uid
-          ? fetchCommunityUnreadCounts({
-              userId: user.uid,
-              categorias: modalidades,
-              includeBlocked: !!user?.role?.includes("admin"),
-              tenantId: activeTenantId || user?.tenant_id || undefined,
-            })
-          : Promise.resolve(
-              modalidades.reduce<Record<string, number>>((acc, categoria) => {
-                acc[categoria] = 0;
-                return acc;
-              }, {})
-            );
-
-        const [recentCounts, unreadCounts] = await Promise.all([
-          recentCountsPromise,
-          unreadCountsPromise,
-        ]);
         if (!mounted) return;
-        setRecentByCategory(recentCounts);
-        setUnreadByCategory(unreadCounts);
+        setRecentByCategory(badgeCounts.recentCounts);
+        setUnreadByCategory(badgeCounts.unreadCounts);
       } catch (error: unknown) {
         console.error(error);
         if (mounted) addToast("Erro ao atualizar badges da comunidade.", "error");
@@ -520,8 +503,15 @@ export default function ComunidadePage() {
           return;
         }
 
-        const uploaded = await uploadImage(imageFile, "posts", {
-          scopeKey: `comunidade:post:${activeTab}`,
+        const tenantScope = sanitizeStoragePathSegment(activeTenantId || user?.tenant_id || "global");
+        const userScope = sanitizeStoragePathSegment(user.uid || "anon");
+        const uploaded = await uploadImage(
+          imageFile,
+          `posts/${tenantScope}/${userScope}/drafts/${sanitizeStoragePathSegment(activeTab || "geral")}`,
+          {
+          scopeKey: `comunidade:post:${tenantScope}:${activeTab}`,
+          fileName: buildDraftAssetFileName(activeTab || "post"),
+          cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
           maxBytes: 2 * 1024 * 1024,
           maxWidth: 2000,
           maxHeight: 2000,
@@ -583,7 +573,6 @@ export default function ComunidadePage() {
         blocked: false,
         commentsDisabled: false,
         createdAt: nowDateLike(),
-        isRecent: true,
       };
 
       setAllPostsRaw((prev) => [optimisticPost, ...prev]);

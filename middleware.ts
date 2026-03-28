@@ -11,6 +11,7 @@ import {
 } from "@/lib/tenantRouting";
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const TENANT_NATIVE_ROUTES = new Set(["/dashboard", "/eventos", "/loja"]);
 
 const setTenantSlugCookie = (response: NextResponse, tenantSlug: string): void => {
   const cleanSlug = tenantSlug.trim().toLowerCase();
@@ -37,6 +38,12 @@ export function middleware(request: NextRequest) {
   const parsed = parseTenantScopedPath(pathname);
   if (parsed.isTenantScoped) {
     if (parsed.scopedPath === "/") {
+      const response = NextResponse.next();
+      setTenantSlugCookie(response, parsed.tenantSlug);
+      return response;
+    }
+
+    if (TENANT_NATIVE_ROUTES.has(parsed.scopedPath)) {
       const response = NextResponse.next();
       setTenantSlugCookie(response, parsed.tenantSlug);
       return response;

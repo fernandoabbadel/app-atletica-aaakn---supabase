@@ -4,8 +4,9 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { functions } from "./backend";
 import { getBackendErrorCode } from "./backendErrors";
 import { isTreinoDayExpired } from "./eventDateUtils";
+import { resolveLeagueLogoSrc } from "./leagueMedia";
 import { incrementUserStats } from "./supabaseData";
-import { uploadImage } from "./upload";
+import { uploadImage, VERSIONED_PUBLIC_ASSET_CACHE_CONTROL } from "./upload";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -28,8 +29,8 @@ const PROFILE_USER_SELECT_COLUMNS =
   "uid,nome,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,status,pets,statusRelacionamento,esportes,whatsappPublico,idadePublica,relacionamentoPublico,stats";
 const PROFILE_POST_SELECT_COLUMNS = "id,texto,imagem,createdAt,likes,comentarios,userId";
 const PROFILE_EVENT_SELECT_COLUMNS = "id,titulo,data,local,imagem,imagePositionY";
-const PROFILE_TREINO_SELECT_COLUMNS = "id,modalidade,dia,horario,imagem,local,confirmados";
-const PROFILE_LIGA_SELECT_COLUMNS = "id,nome,sigla,foto,logo,logoBase64,membrosIds";
+const PROFILE_TREINO_SELECT_COLUMNS = "id,modalidade,dia,horario,imagem,local,confirmedCount";
+const PROFILE_LIGA_SELECT_COLUMNS = "id,nome,sigla,foto,logo,logoUrl,membersCount";
 const PROFILE_FOLLOW_SELECT_COLUMNS = "id,uid,nome,foto,turma,followedAt";
 
 const profileCache = new Map<string, CacheEntry<ProfileUserRecord | null>>();
@@ -339,7 +340,7 @@ export interface ProfileTreinoRecord {
   horario?: string;
   imagem?: string;
   local?: string;
-  confirmados?: string[];
+  confirmadosCount?: number;
 }
 
 export interface ProfileLigaRecord {
@@ -347,8 +348,9 @@ export interface ProfileLigaRecord {
   nome?: string;
   sigla?: string;
   foto?: string;
+  logoUrl?: string;
   logo?: string;
-  logoBase64?: string;
+  membersCount?: number;
 }
 
 export interface FollowListItem {
@@ -473,21 +475,23 @@ const normalizeTreino = (id: string, raw: unknown): ProfileTreinoRecord | null =
     horario: asString(data.horario) || undefined,
     imagem: asString(data.imagem) || undefined,
     local: asString(data.local) || undefined,
-    confirmados: asStringArray(data.confirmados),
+    confirmadosCount: asNumber(data.confirmedCount, asStringArray(data.confirmados).length),
   };
 };
 
 const normalizeLiga = (id: string, raw: unknown): ProfileLigaRecord | null => {
   const data = asObject(raw);
   if (!data) return null;
+  const logoUrl = resolveLeagueLogoSrc(data) || undefined;
+  const foto = asString(data.foto) || logoUrl || undefined;
 
   return {
     id,
     nome: asString(data.nome) || undefined,
     sigla: asString(data.sigla) || undefined,
-    foto: asString(data.foto) || undefined,
-    logo: asString(data.logo) || undefined,
-    logoBase64: asString(data.logoBase64) || undefined,
+    ...(foto ? { foto } : {}),
+    ...(logoUrl ? { logoUrl, logo: logoUrl } : {}),
+    membersCount: asNumber(data.membersCount, 0),
   };
 };
 
@@ -543,49 +547,58 @@ async function fetchProfilePosts(uid: string): Promise<ProfilePostRecord[]> {
 
 async function fetchProfileEvents(uid: string): Promise<ProfileEventRecord[]> {
   const supabase = getSupabaseClient();
-  try {
-    const { data, error } = await supabase
-      .from("eventos")
-      .select(PROFILE_EVENT_SELECT_COLUMNS)
-      .contains("interessados", [uid])
-      .limit(MAX_EVENT_RESULTS);
-    if (error) throw error;
+  const { data: rsvps, error: rsvpError } = await supabase
+    .from("eventos_rsvps")
+    .select("eventoId")
+    .eq("userId", uid)
+    .limit(MAX_EVENT_RESULTS * 4);
+  if (rsvpError) throwSupabaseError(rsvpError);
 
-    return (data ?? [])
-      .map((row) => normalizeEvent(asString((row as Record<string, unknown>).id), row))
-      .filter((row): row is ProfileEventRecord => row !== null)
-      .sort((left, right) => toMillis(left.data) - toMillis(right.data));
-  } catch (error: unknown) {
-    const missingColumn = extractMissingColumnFromSchemaError(error);
-    if (missingColumn?.toLowerCase() !== "interessados") {
-      if (
-        typeof (error as { message?: unknown })?.message === "string"
-      ) {
-        throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
-      }
-      throw error;
-    }
+  const eventIds = Array.from(
+    new Set(
+      ((rsvps ?? []) as Record<string, unknown>[])
+        .map((row) => asString(row.eventoId).trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+  if (!eventIds.length) return [];
 
-    const { data, error: fallbackError } = await supabase
-      .from("eventos")
-      .select(PROFILE_EVENT_SELECT_COLUMNS)
-      .contains("participantes", [uid])
-      .limit(MAX_EVENT_RESULTS);
-    if (fallbackError) throwSupabaseError(fallbackError);
+  const { data, error } = await supabase
+    .from("eventos")
+    .select(PROFILE_EVENT_SELECT_COLUMNS)
+    .in("id", eventIds)
+    .limit(MAX_EVENT_RESULTS);
+  if (error) throwSupabaseError(error);
 
-    return (data ?? [])
-      .map((row) => normalizeEvent(asString((row as Record<string, unknown>).id), row))
-      .filter((row): row is ProfileEventRecord => row !== null)
-      .sort((left, right) => toMillis(left.data) - toMillis(right.data));
-  }
+  return (data ?? [])
+    .map((row) => normalizeEvent(asString((row as Record<string, unknown>).id), row))
+    .filter((row): row is ProfileEventRecord => row !== null)
+    .sort((left, right) => toMillis(left.data) - toMillis(right.data));
 }
 
 async function fetchProfileTreinos(uid: string): Promise<ProfileTreinoRecord[]> {
   const supabase = getSupabaseClient();
+  const { data: rsvps, error: rsvpError } = await supabase
+    .from("treinos_rsvps")
+    .select("treinoId")
+    .eq("userId", uid)
+    .eq("status", "going")
+    .limit(MAX_TREINO_RESULTS * 4);
+  if (rsvpError) throwSupabaseError(rsvpError);
+
+  const treinoIds = Array.from(
+    new Set(
+      ((rsvps ?? []) as Record<string, unknown>[])
+        .map((row) => asString(row.treinoId).trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+  if (!treinoIds.length) return [];
+
   const { data, error } = await supabase
     .from("treinos")
     .select(PROFILE_TREINO_SELECT_COLUMNS)
-    .contains("confirmados", [uid])
+    .in("id", treinoIds)
     .limit(MAX_TREINO_RESULTS);
   if (error) throwSupabaseError(error);
 
@@ -598,10 +611,26 @@ async function fetchProfileTreinos(uid: string): Promise<ProfileTreinoRecord[]> 
 
 async function fetchProfileLigas(uid: string): Promise<ProfileLigaRecord[]> {
   const supabase = getSupabaseClient();
+  const { data: memberships, error: membershipError } = await supabase
+    .from("ligas_membros")
+    .select("ligaId")
+    .eq("userId", uid)
+    .limit(MAX_LIGA_RESULTS * 4);
+  if (membershipError) throwSupabaseError(membershipError);
+
+  const leagueIds = Array.from(
+    new Set(
+      ((memberships ?? []) as Record<string, unknown>[])
+        .map((row) => asString(row.ligaId).trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+  if (!leagueIds.length) return [];
+
   const { data, error } = await supabase
     .from("ligas_config")
     .select(PROFILE_LIGA_SELECT_COLUMNS)
-    .contains("membrosIds", [uid])
+    .in("id", leagueIds)
     .limit(MAX_LIGA_RESULTS);
   if (error) throwSupabaseError(error);
 
@@ -988,7 +1017,7 @@ export async function uploadProfileImage(payload: {
     scopeKey: `profile:${uid}:${payload.kind}`,
     fileName: prefix,
     upsert: true,
-    appendVersionQuery: true,
+    versionStrategy: "file-metadata",
     maxBytes: payload.kind === "capa" ? 3 * 1024 * 1024 : 2 * 1024 * 1024,
     maxWidth: payload.kind === "capa" ? 2400 : 1600,
     maxHeight: payload.kind === "capa" ? 1800 : 1600,
@@ -997,7 +1026,7 @@ export async function uploadProfileImage(payload: {
     compressionMaxHeight: payload.kind === "capa" ? 1200 : 1200,
     compressionMaxBytes: payload.kind === "capa" ? 200 * 1024 : 120 * 1024,
     quality: 0.82,
-    cacheControl: "86400",
+    cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
     rateLimitMax: 4,
   });
 

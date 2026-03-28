@@ -5,7 +5,11 @@ import {
   asString,
   throwSupabaseError,
 } from "./supabaseData";
-import { uploadImage } from "./upload";
+import {
+  buildDraftAssetFileName,
+  uploadImage,
+  VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "./upload";
 import { ACHIEVEMENTS_CATALOG } from "./achievements";
 import {
   normalizeTenantRole,
@@ -1807,7 +1811,8 @@ export async function uploadTenantLogo(payload: {
     compressionMaxBytes: 140 * 1024,
     fileName: `logo-${tenantId}`,
     upsert: true,
-    appendVersionQuery: true,
+    versionStrategy: "file-metadata",
+    cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
   });
   if (error || !url) {
     throw new Error(error || "Upload da logo concluido, mas sem URL publica retornada.");
@@ -1837,9 +1842,10 @@ export async function uploadTenantDraftLogo(payload: {
       compressionMaxWidth: 1200,
       compressionMaxHeight: 1200,
       compressionMaxBytes: 140 * 1024,
-      fileName: `logo-${Date.now()}`,
+      // Draft uploads keep a unique object name because the final tenant id does not exist yet.
+      fileName: buildDraftAssetFileName("logo"),
       upsert: true,
-      appendVersionQuery: true,
+      cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
     }
   );
 

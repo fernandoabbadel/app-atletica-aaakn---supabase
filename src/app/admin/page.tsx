@@ -131,6 +131,7 @@ export default function AdminDashboardPage() {
               className="object-contain p-2"
               unoptimized={(tenantLogoUrl || "").startsWith("http")}
               sizes="64px"
+              priority
             />
           </div>
           <div>

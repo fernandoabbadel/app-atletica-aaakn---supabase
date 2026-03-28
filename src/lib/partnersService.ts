@@ -4,7 +4,7 @@ import { getSupabaseClient } from "./supabase";
 import { functions } from "./backend";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { getBackendErrorCode } from "./backendErrors";
-import { uploadImage } from "./upload";
+import { uploadImage, VERSIONED_PUBLIC_ASSET_CACHE_CONTROL } from "./upload";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -91,13 +91,23 @@ export interface AdminPartnersTierCounts {
 }
 
 export type PartnerStorageImageKind = "logo" | "capa";
+export type AdminPartnersPageView = "summary" | "contact" | "editor";
 
 const READ_CACHE_TTL_MS = 30_000;
 const MAX_PARTNERS_RESULTS = 600;
 const MAX_SCANS_RESULTS = 1_200;
 const MAX_SCANNER_SAMPLE_DOCS = 80;
+const ADMIN_PARTNER_COUNTS_RPC = "admin_partner_counts_bundle";
+const ADMIN_PARTNER_PAGE_RPC = "admin_partner_page_bundle";
 const PARCEIROS_SELECT_COLUMNS: string =
   "id,nome,categoria,tier,status,cnpj,responsavel,email,telefone,descricao,endereco,horario,insta,site,whats,imgCapa,imgLogo,mensalidade,vendasTotal,totalScans,cupons,senha,createdAt";
+const PARCEIROS_PAGE_SUMMARY_SELECT_COLUMNS: string =
+  "id,nome,categoria,tier,status,imgCapa,imgLogo,totalScans,createdAt";
+const PARCEIROS_PAGE_CONTACT_SELECT_COLUMNS: string =
+  "id,nome,categoria,tier,status,responsavel,cnpj,telefone,email,createdAt";
+const PARCEIROS_PAGE_EDITOR_SELECT_COLUMNS: string =
+  "id,nome,categoria,tier,status,cnpj,responsavel,email,telefone,descricao,endereco,horario,insta,site,whats,imgCapa,imgLogo,totalScans,createdAt";
+const PARCEIROS_COUNT_FALLBACK_SELECT_COLUMNS = "id,status,tier";
 const SCANS_SELECT_COLUMNS: string =
   "id,empresaId,empresa,usuario,userId,cupom,valorEconomizado,data,hora,timestamp";
 const SCANNER_FALLBACK_COLUMNS_BY_TABLE: Record<string, string[]> = {
@@ -258,6 +268,18 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
 const isMissingTenantIdColumn = (error: unknown): boolean =>
   extractMissingSchemaColumn(error)?.trim().toLowerCase() === "tenant_id";
 
+const isMissingRpcError = (error: { code?: string | null; message?: string | null }): boolean => {
+  const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "PGRST202" ||
+    code === "42883" ||
+    message.includes("could not find the function") ||
+    message.includes("schema cache") ||
+    (message.includes("function") && message.includes("does not exist"))
+  );
+};
+
 const throwSupabaseError = (error: {
   message: string;
   code?: string | null;
@@ -415,6 +437,52 @@ const setMapCacheValue = <T>(
 ): void => {
   cache.set(key, { cachedAt: Date.now(), value });
 };
+
+const resolveAdminPartnersPageSelectColumns = (view: AdminPartnersPageView): string => {
+  if (view === "summary") return PARCEIROS_PAGE_SUMMARY_SELECT_COLUMNS;
+  if (view === "contact") return PARCEIROS_PAGE_CONTACT_SELECT_COLUMNS;
+  return PARCEIROS_PAGE_EDITOR_SELECT_COLUMNS;
+};
+
+async function fetchAdminPartnersPageViaRpc(options: {
+  pageSize: number;
+  cursorId?: string | null;
+  status: PartnerStatus | "all";
+  view: AdminPartnersPageView;
+  tenantId?: string | null;
+}): Promise<AdminPartnersPageResult | undefined> {
+  const scopedTenantId = resolvePartnersTenantId(options.tenantId);
+  if (!scopedTenantId) {
+    return { partners: [], hasMore: false, nextCursor: null };
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc(ADMIN_PARTNER_PAGE_RPC, {
+    p_tenant_id: scopedTenantId,
+    p_status: options.status,
+    p_limit: options.pageSize,
+    p_cursor_id: options.cursorId?.trim() || null,
+    p_view: options.view,
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      return undefined;
+    }
+    throwSupabaseError(error);
+  }
+
+  const payload = asObject(data) ?? {};
+  const partners = asArray(payload.partners)
+    .map((row) => normalizePartner(asString(asObject(row)?.id), row))
+    .filter((row): row is PartnerRecord => row !== null);
+
+  return {
+    partners,
+    hasMore: Boolean(payload.hasMore),
+    nextCursor: asString(payload.nextCursor).trim() || null,
+  };
+}
 
 const clearAdminPartnersCaches = (): void => {
   adminBundleCache.clear();
@@ -611,7 +679,7 @@ export async function uploadPartnerImageToStorage(options: {
     scopeKey: `parceiros:${partnerSegment}:${options.kind}`,
     fileName: options.kind,
     upsert: true,
-    appendVersionQuery: true,
+    versionStrategy: "file-metadata",
     maxBytes: options.kind === "capa" ? 3 * 1024 * 1024 : 2 * 1024 * 1024,
     maxWidth: options.kind === "capa" ? 2400 : 1400,
     maxHeight: options.kind === "capa" ? 1800 : 1400,
@@ -620,7 +688,7 @@ export async function uploadPartnerImageToStorage(options: {
     compressionMaxHeight: options.kind === "capa" ? 1200 : 1200,
     compressionMaxBytes: 200 * 1024,
     quality: 0.82,
-    cacheControl: "86400",
+    cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
   });
   if (!url || error) {
     throw new Error(error || "Falha ao subir imagem do parceiro.");
@@ -684,15 +752,17 @@ export async function fetchAdminPartnersPage(options?: {
   pageSize?: number;
   cursorId?: string | null;
   status?: PartnerStatus | "all";
+  view?: AdminPartnersPageView;
   forceRefresh?: boolean;
   tenantId?: string | null;
 }): Promise<AdminPartnersPageResult> {
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_PARTNERS_RESULTS);
   const cursorId = options?.cursorId?.trim() || "";
   const statusFilter = normalizeStatusFilter(options?.status);
+  const view = options?.view ?? "editor";
   const forceRefresh = options?.forceRefresh ?? false;
   const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
-  const cacheKey = `${scopedTenantId || "none"}:${statusFilter}:${pageSize}:${cursorId || "first"}`;
+  const cacheKey = `${scopedTenantId || "none"}:${view}:${statusFilter}:${pageSize}:${cursorId || "first"}`;
 
   if (forceRefresh) {
     clearAdminPartnersCaches();
@@ -709,12 +779,25 @@ export async function fetchAdminPartnersPage(options?: {
   }
 
   const requestPromise = (async () => {
+    const rpcResult = await fetchAdminPartnersPageViaRpc({
+      pageSize,
+      cursorId: cursorId || null,
+      status: statusFilter,
+      view,
+      tenantId: scopedTenantId,
+    });
+    if (rpcResult) {
+      setMapCacheValue(adminPartnersPageCache, cacheKey, rpcResult);
+      return rpcResult;
+    }
+
     const supabase = getSupabaseClient();
     const windowLimit = Math.min(MAX_PARTNERS_RESULTS, Math.max(pageSize * 12, 120));
+    const selectColumns = resolveAdminPartnersPageSelectColumns(view);
 
     let q = supabase
       .from("parceiros")
-      .select(PARCEIROS_SELECT_COLUMNS)
+      .select(selectColumns)
       .eq("tenant_id", scopedTenantId)
       .order("nome", { ascending: true })
       .limit(windowLimit);
@@ -877,17 +960,18 @@ export async function fetchAdminPartnersTierCounts(options?: {
   const forceRefresh = options?.forceRefresh ?? false;
   const scopedTenantId = resolvePartnersTenantId(options?.tenantId);
   const cacheKey = scopedTenantId || "none";
+  const emptyCounts: AdminPartnersTierCounts = {
+    total: 0,
+    ativos: 0,
+    pendentes: 0,
+    desativados: 0,
+    ouro: 0,
+    prata: 0,
+    standard: 0,
+  };
 
   if (!scopedTenantId) {
-    return {
-      total: 0,
-      ativos: 0,
-      pendentes: 0,
-      desativados: 0,
-      ouro: 0,
-      prata: 0,
-      standard: 0,
-    };
+    return emptyCounts;
   }
 
   if (forceRefresh) {
@@ -903,87 +987,65 @@ export async function fetchAdminPartnersTierCounts(options?: {
   const requestPromise = (async () => {
     try {
       const supabase = getSupabaseClient();
-      const [
-        totalSnap,
-        activeSnap,
-        pendingSnap,
-        disabledSnap,
-        ouroSnap,
-        prataSnap,
-        standardSnap,
-      ] = await Promise.all([
-        supabase
-          .from("parceiros")
-          .select("id", { count: "exact", head: true })
-          .eq("tenant_id", scopedTenantId),
-        supabase
-          .from("parceiros")
-          .select("id", { count: "exact", head: true })
-          .eq("tenant_id", scopedTenantId)
-          .eq("status", "active"),
-        supabase
-          .from("parceiros")
-          .select("id", { count: "exact", head: true })
-          .eq("tenant_id", scopedTenantId)
-          .eq("status", "pending"),
-        supabase
-          .from("parceiros")
-          .select("id", { count: "exact", head: true })
-          .eq("tenant_id", scopedTenantId)
-          .eq("status", "disabled"),
-        supabase
-          .from("parceiros")
-          .select("id", { count: "exact", head: true })
-          .eq("tenant_id", scopedTenantId)
-          .eq("status", "active")
-          .eq("tier", "ouro"),
-        supabase
-          .from("parceiros")
-          .select("id", { count: "exact", head: true })
-          .eq("tenant_id", scopedTenantId)
-          .eq("status", "active")
-          .eq("tier", "prata"),
-        supabase
-          .from("parceiros")
-          .select("id", { count: "exact", head: true })
-          .eq("tenant_id", scopedTenantId)
-          .eq("status", "active")
-          .eq("tier", "standard"),
-      ]);
-      if (totalSnap.error) throw totalSnap.error;
-      if (activeSnap.error) throw activeSnap.error;
-      if (pendingSnap.error) throw pendingSnap.error;
-      if (disabledSnap.error) throw disabledSnap.error;
-      if (ouroSnap.error) throw ouroSnap.error;
-      if (prataSnap.error) throw prataSnap.error;
-      if (standardSnap.error) throw standardSnap.error;
+      const { data: rpcData, error: rpcError } = await supabase.rpc(ADMIN_PARTNER_COUNTS_RPC, {
+        p_tenant_id: scopedTenantId,
+      });
+      if (!rpcError) {
+        const payload = asObject(rpcData) ?? {};
+        const rpcResult: AdminPartnersTierCounts = {
+          total: Math.max(0, asNumber(payload.total, 0)),
+          ativos: Math.max(0, asNumber(payload.ativos, 0)),
+          pendentes: Math.max(0, asNumber(payload.pendentes, 0)),
+          desativados: Math.max(0, asNumber(payload.desativados, 0)),
+          ouro: Math.max(0, asNumber(payload.ouro, 0)),
+          prata: Math.max(0, asNumber(payload.prata, 0)),
+          standard: Math.max(0, asNumber(payload.standard, 0)),
+        };
+        setMapCacheValue(adminTierCountsCache, cacheKey, rpcResult);
+        return rpcResult;
+      }
+      if (!isMissingRpcError(rpcError)) {
+        throw rpcError;
+      }
 
-      const result: AdminPartnersTierCounts = {
-        total: totalSnap.count ?? 0,
-        ativos: activeSnap.count ?? 0,
-        pendentes: pendingSnap.count ?? 0,
-        desativados: disabledSnap.count ?? 0,
-        ouro: ouroSnap.count ?? 0,
-        prata: prataSnap.count ?? 0,
-        standard: standardSnap.count ?? 0,
-      };
+      const { data: fallbackRows, error: fallbackError } = await supabase
+        .from("parceiros")
+        .select(PARCEIROS_COUNT_FALLBACK_SELECT_COLUMNS)
+        .eq("tenant_id", scopedTenantId)
+        .limit(MAX_PARTNERS_RESULTS);
+      if (fallbackError) throw fallbackError;
+
+      const result = ((fallbackRows ?? []) as Record<string, unknown>[]).reduce<AdminPartnersTierCounts>(
+        (accumulator, row) => {
+          accumulator.total += 1;
+
+          const status = normalizeStatus(asObject(row)?.status);
+          const tier = normalizeTier(asObject(row)?.tier);
+
+          if (status === "active") {
+            accumulator.ativos += 1;
+            if (tier === "ouro") accumulator.ouro += 1;
+            else if (tier === "prata") accumulator.prata += 1;
+            else accumulator.standard += 1;
+          } else if (status === "pending") {
+            accumulator.pendentes += 1;
+          } else {
+            accumulator.desativados += 1;
+          }
+
+          return accumulator;
+        },
+        { ...emptyCounts }
+      );
       setMapCacheValue(adminTierCountsCache, cacheKey, result);
       return result;
     } catch (error: unknown) {
-      if (!isIndexRequiredError(error)) {
-        throw error;
+      if (isMissingTenantIdColumn(error)) {
+        return emptyCounts;
       }
 
-      if (isMissingTenantIdColumn(error)) {
-        return {
-          total: 0,
-          ativos: 0,
-          pendentes: 0,
-          desativados: 0,
-          ouro: 0,
-          prata: 0,
-          standard: 0,
-        };
+      if (!isIndexRequiredError(error)) {
+        throw error;
       }
 
       const rows = await fetchRowsWithFallback("parceiros", [{ limit: MAX_PARTNERS_RESULTS }], {

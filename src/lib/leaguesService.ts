@@ -4,9 +4,11 @@ import { getBackendErrorCode } from "./backendErrors";
 import { clearDashboardCaches as clearAuthenticatedDashboardCaches } from "./dashboardService";
 import { clearDashboardCaches as clearPublicDashboardCaches } from "./dashboardPublicService";
 import { getSupabaseClient } from "./supabase";
-import { incrementUserStats } from "./supabaseData";
-import { uploadImage } from "./upload";
+import { incrementUserStats, type Row } from "./supabaseData";
+import { uploadImage, VERSIONED_PUBLIC_ASSET_CACHE_CONTROL } from "./upload";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { hydrateEventPollRows, isMissingRelationError } from "./hotPathRelations";
+import { resolveLeagueLogoSrc } from "./leagueMedia";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -45,7 +47,7 @@ const LEAGUES_SELECT_COLUMNS = [
   "senha",
   "foto",
   "logoUrl",
-  "logoBase64",
+  "logo",
   "visivel",
   "ativa",
   "membros",
@@ -53,7 +55,7 @@ const LEAGUES_SELECT_COLUMNS = [
   "perguntas",
   "bizu",
   "likes",
-  "membrosIds",
+  "membersCount",
   "status",
   "createdAt",
   "updatedAt",
@@ -71,6 +73,7 @@ const LEAGUE_SUMMARY_SELECT_COLUMNS = [
   "ativa",
   "bizu",
   "likes",
+  "membersCount",
   "status",
   "createdAt",
   "updatedAt",
@@ -84,8 +87,6 @@ const EVENT_POLLS_SELECT_COLUMNS = [
   "question",
   "options",
   "allowUserOptions",
-  "voters",
-  "userVotes",
   "creatorId",
   "isOfficial",
   "createdAt",
@@ -157,6 +158,16 @@ const clearUsersCache = (): void => {
   usersCache.clear();
 };
 
+const extractLeagueMemberIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      const member = asObject(entry);
+      return asString(member?.id).trim();
+    })
+    .filter((entry) => entry.length > 0);
+};
+
 const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
   throw Object.assign(new Error(error.message), {
     code: error.code ?? `db/${error.name ?? "query-failed"}`,
@@ -209,6 +220,86 @@ const removeMissingColumnFromPayload = (
 
 const nowIso = (): string => new Date().toISOString();
 
+export async function syncLeagueMembers(payload: {
+  leagueId: string;
+  members: LeagueMemberRecord[];
+  tenantId?: string | null;
+}): Promise<void> {
+  const leagueId = payload.leagueId.trim();
+  if (!leagueId) return;
+
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  const nextMembers = Array.isArray(payload.members) ? payload.members : [];
+  const nextMemberIds = Array.from(
+    new Set(
+      nextMembers
+        .map((member) => asString(member.id).trim())
+        .filter((memberId) => memberId.length > 0)
+    )
+  );
+
+  const supabase = getSupabaseClient();
+  let existingQuery = supabase
+    .from("ligas_membros")
+    .select("id, userId")
+    .eq("ligaId", leagueId);
+  if (scopedTenantId) {
+    existingQuery = existingQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { data: existingRows, error: existingError } = await existingQuery;
+  if (existingError) throw existingError;
+
+  const existingMemberIds = new Set(
+    ((existingRows ?? []) as Record<string, unknown>[])
+      .map((row) => asString(row.userId).trim())
+      .filter((value) => value.length > 0)
+  );
+
+  const membersToUpsert = nextMembers
+    .filter((member) => nextMemberIds.includes(asString(member.id).trim()))
+    .map((member) => ({
+      ligaId: leagueId,
+      userId: asString(member.id).trim(),
+      cargo: asString(member.cargo, "Membro").trim().slice(0, 80) || "Membro",
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+      joinedAt: nowIso(),
+    }));
+
+  if (membersToUpsert.length > 0) {
+    const { error: upsertError } = await supabase.from("ligas_membros").upsert(membersToUpsert, {
+      onConflict: "ligaId,userId",
+    });
+    if (upsertError) throw upsertError;
+  }
+
+  const removedMemberIds = Array.from(existingMemberIds).filter((memberId) => !nextMemberIds.includes(memberId));
+  if (removedMemberIds.length > 0) {
+    let deleteQuery = supabase
+      .from("ligas_membros")
+      .delete()
+      .eq("ligaId", leagueId)
+      .in("userId", removedMemberIds);
+    if (scopedTenantId) {
+      deleteQuery = deleteQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { error: deleteError } = await deleteQuery;
+    if (deleteError) throw deleteError;
+  }
+
+  let updateQuery = supabase
+    .from("ligas_config")
+    .update({
+      membersCount: nextMemberIds.length,
+      updatedAt: nowIso(),
+    })
+    .eq("id", leagueId);
+  if (scopedTenantId) {
+    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+  }
+  const { error: updateError } = await updateQuery;
+  if (updateError) throw updateError;
+}
+
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
@@ -244,8 +335,6 @@ export interface LeagueQuestionRecord {
   id: string;
   texto: string;
   imageUrl?: string;
-  // Compatibilidade temporaria com dados legados enquanto as telas migram.
-  imagemBase64?: string;
   alternativas: string[];
   correta: number;
 }
@@ -291,8 +380,6 @@ export interface LeagueRecord {
   senha: string;
   foto: string;
   logoUrl?: string;
-  // Compatibilidade temporaria com dados legados enquanto as telas migram.
-  logoBase64?: string;
   visivel?: boolean;
   ativa?: boolean;
   membros: LeagueMemberRecord[];
@@ -301,6 +388,7 @@ export interface LeagueRecord {
   bizu: string;
   likes: number;
   membrosIds?: string[];
+  membersCount?: number;
 }
 
 export interface LeagueUserRecord {
@@ -384,12 +472,11 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
                 (item): item is string => typeof item === "string"
               )
             : [];
-          const imageUrl =
-            asString(question.imageUrl) || asString(question.imagemBase64) || undefined;
+          const imageUrl = asString(question.imageUrl) || undefined;
           return {
             id: asString(question.id),
             texto: asString(question.texto),
-            ...(imageUrl ? { imageUrl, imagemBase64: imageUrl } : {}),
+            ...(imageUrl ? { imageUrl } : {}),
             alternativas: alternatives.slice(0, 4),
             correta: Math.max(0, Math.min(3, asNumber(question.correta, 0))),
           } as LeagueQuestionRecord;
@@ -446,11 +533,8 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
         .filter((row): row is LeagueEventRecord => row !== null)
     : [];
 
-  const membrosIds = Array.isArray(data.membrosIds)
-    ? data.membrosIds.filter((item): item is string => typeof item === "string")
-    : undefined;
-
-  const logoUrl = asString(data.logoUrl) || asString(data.logoBase64) || undefined;
+  const logoUrl = resolveLeagueLogoSrc(data) || undefined;
+  const foto = asString(data.foto) || logoUrl || "";
 
   return {
     id,
@@ -459,8 +543,8 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     presidente: asString(data.presidente),
     descricao: asString(data.descricao),
     senha: asString(data.senha),
-    foto: asString(data.foto),
-    ...(logoUrl ? { logoUrl, logoBase64: logoUrl } : {}),
+    foto,
+    ...(logoUrl ? { logoUrl } : {}),
     visivel: asBoolean(data.visivel, false),
     ativa: asBoolean(data.ativa, false),
     membros,
@@ -468,7 +552,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     perguntas,
     bizu: asString(data.bizu),
     likes: Math.max(0, asNumber(data.likes, 0)),
-    membrosIds,
+    membersCount: Math.max(0, asNumber(data.membersCount, membros.length)),
   };
 };
 
@@ -520,14 +604,21 @@ const normalizePoll = (id: string, raw: unknown): LeaguePollRecord | null => {
 const normalizeLeaguePayload = (
   payload: Partial<LeagueRecord>
 ): Record<string, unknown> => {
-  const logoUrl = asString(payload.logoUrl) || asString(payload.logoBase64) || undefined;
+  const logoUrl = resolveLeagueLogoSrc(payload) || undefined;
+  const foto = asString(payload.foto) || logoUrl || "";
   const perguntas = Array.isArray(payload.perguntas)
     ? payload.perguntas.map((question) => {
-        const imageUrl =
-          asString(question.imageUrl) || asString(question.imagemBase64) || undefined;
+        const imageUrl = asString(question.imageUrl) || undefined;
         return {
-          ...question,
-          ...(imageUrl ? { imageUrl, imagemBase64: imageUrl } : {}),
+          id: asString(question.id),
+          texto: asString(question.texto),
+          ...(imageUrl ? { imageUrl } : {}),
+          alternativas: Array.isArray(question.alternativas)
+            ? question.alternativas
+                .filter((item): item is string => typeof item === "string")
+                .slice(0, 4)
+            : [],
+          correta: Math.max(0, Math.min(3, asNumber(question.correta, 0))),
         };
       })
     : [];
@@ -538,7 +629,7 @@ const normalizeLeaguePayload = (
     presidente: asString(payload.presidente).trim().slice(0, 120),
     descricao: asString(payload.descricao).slice(0, 4_000),
     senha: asString(payload.senha).slice(0, 120),
-    foto: asString(payload.foto),
+    foto,
     ...(logoUrl ? { logoUrl, logo: logoUrl } : { logoUrl: undefined, logo: undefined }),
     visivel: Boolean(payload.visivel),
     ativa: Boolean(payload.ativa),
@@ -547,9 +638,13 @@ const normalizeLeaguePayload = (
     perguntas,
     bizu: asString(payload.bizu).slice(0, 500),
     likes: Math.max(0, asNumber(payload.likes, 0)),
-    membrosIds: Array.isArray(payload.membrosIds)
-      ? payload.membrosIds.filter((item): item is string => typeof item === "string")
-      : undefined,
+    membersCount: Math.max(
+      0,
+      asNumber(
+        payload.membersCount,
+        Array.isArray(payload.membros) ? payload.membros.length : 0
+      )
+    ),
   };
 };
 
@@ -609,7 +704,7 @@ export async function uploadLeagueImageToStorage(options: {
     scopeKey: `ligas:${leagueSegment}:${options.kind}:${options.entityId || "root"}`,
     fileName,
     upsert: true,
-    appendVersionQuery: true,
+    versionStrategy: "file-metadata",
     maxBytes: sourceMaxBytes,
     maxWidth: sourceMaxWidth,
     maxHeight: sourceMaxHeight,
@@ -619,7 +714,7 @@ export async function uploadLeagueImageToStorage(options: {
     compressionMaxBytes: compressedMaxBytes,
     allowOriginalOnCompressionFail: true,
     quality: 0.82,
-    cacheControl: "86400",
+    cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
   });
   if (!url || error) {
     throw new Error(error || "Falha ao subir imagem da liga.");
@@ -843,20 +938,11 @@ export async function saveLeagueConfig(payload: {
   const id = payload.id?.trim() || "";
   const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
   const actorUserId = payload.actorUserId?.trim() || "";
-  const extractMemberIds = (value: unknown): string[] => {
-    if (!Array.isArray(value)) return [];
-    return value
-      .map((entry) => {
-        const member = asObject(entry);
-        return asString(member?.id).trim();
-      })
-      .filter((entry) => entry.length > 0);
-  };
   const nextMemberIds = Array.from(
     new Set([
-      ...extractMemberIds(normalizedData.membros),
-      ...(Array.isArray(normalizedData.membrosIds)
-        ? normalizedData.membrosIds
+      ...extractLeagueMemberIds(normalizedData.membros),
+      ...(Array.isArray(payload.data.membrosIds)
+        ? payload.data.membrosIds
             .filter((entry): entry is string => typeof entry === "string")
             .map((entry) => entry.trim())
             .filter((entry) => entry.length > 0)
@@ -878,7 +964,7 @@ export async function saveLeagueConfig(payload: {
     if (previousError) throwSupabaseError(previousError);
     const previous = asObject(previousRow) ?? {};
     previousMemberIds = new Set([
-      ...extractMemberIds(previous.membros),
+      ...extractLeagueMemberIds(previous.membros),
       ...(
         Array.isArray(previous.membrosIds)
           ? previous.membrosIds
@@ -931,6 +1017,43 @@ export async function saveLeagueConfig(payload: {
       return { id: asString((data as Record<string, unknown> | null)?.id) };
     }
   );
+
+  const savedLeagueId = result.id || id;
+  const membersForSync = Array.isArray(payload.data.membros)
+    ? payload.data.membros.filter((member): member is LeagueMemberRecord => {
+        const memberId = asString(member?.id).trim();
+        return memberId.length > 0;
+      })
+    : [];
+
+  if (savedLeagueId) {
+    try {
+      await syncLeagueMembers({
+        leagueId: savedLeagueId,
+        members: membersForSync,
+        tenantId: scopedTenantId,
+      });
+    } catch (error: unknown) {
+      if (!isMissingRelationError(error)) {
+        throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+      }
+
+      const supabase = getSupabaseClient();
+      let legacyQuery = supabase
+        .from("ligas_config")
+        .update({
+          membrosIds: nextMemberIds,
+          membersCount: nextMemberIds.length,
+          updatedAt: nowIso(),
+        })
+        .eq("id", savedLeagueId);
+      if (scopedTenantId) {
+        legacyQuery = legacyQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { error: legacyUpdateError } = await legacyQuery;
+      if (legacyUpdateError) throwSupabaseError(legacyUpdateError);
+    }
+  }
 
   const membershipPromises = nextMemberIds
     .filter((memberId) => !previousMemberIds.has(memberId))
@@ -1168,7 +1291,10 @@ export async function fetchEventPolls(
     }
     const { data, error } = await query;
     if (!error) {
-      polls = (data ?? [])
+      const hydratedRows = await hydrateEventPollRows((data ?? []) as unknown as Row[], {
+        tenantId: scopedTenantId,
+      });
+      polls = hydratedRows
         .map((row) => normalizePoll(rowIdFromUnknown(row), row))
         .filter((row): row is LeaguePollRecord => row !== null);
       break;
@@ -1215,8 +1341,6 @@ export async function createEventPoll(payload: {
         question: requestPayload.question,
         allowUserOptions: requestPayload.allowUserOptions,
         options: [],
-        voters: [],
-        userVotes: {},
         creatorId: requestPayload.creatorId || null,
         ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         isOfficial: true,

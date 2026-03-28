@@ -12,6 +12,7 @@ import {
 // import { useToast } from "../../context/ToastContext"; 
 import { fetchStoreCategories, fetchStoreProductsPage } from "../../lib/storePublicService";
 import { useAuth } from "@/context/AuthContext";
+import { ClientCache } from "@/lib/clientCache";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useCart } from "@/context/CartContext";
 import { resolveTenantBrandLabel } from "@/lib/tenantBranding";
@@ -53,7 +54,7 @@ export interface Produto {
   } | null;
 }
 
-type StoreCategory = {
+export type StoreCategory = {
   id: string;
   nome: string;
   cover_img?: string;
@@ -64,6 +65,7 @@ type StoreCategory = {
 };
 
 const STORE_PAGE_SIZE = 20;
+const STORE_CLIENT_CACHE_TTL_MS = 2 * 60 * 1000;
 
 // Helper de Cores para as Tags
 const getTagColorClass = (color?: string) => {
@@ -123,25 +125,33 @@ interface LojaClientPageProps {
   initialProducts: Produto[];
   initialCategories: StoreCategory[];
   initialHasMore: boolean;
-  initialHydrated: boolean;
+  initialProductsHydrated: boolean;
+  initialCategoriesHydrated: boolean;
+  initialPlanScopeKey?: string;
 }
 
 export default function LojaClientPage({
   initialProducts,
   initialCategories,
   initialHasMore,
-  initialHydrated,
+  initialProductsHydrated,
+  initialCategoriesHydrated,
+  initialPlanScopeKey = "",
 }: LojaClientPageProps) {
   const { user } = useAuth();
   const { tenantId: activeTenantId, tenantSigla, tenantName, tenantSlug, tenantLogoUrl, palette } = useTenantTheme();
   const { itemCount: cartCount } = useCart();
-  const skipInitialCategoryFetch = useRef(initialHydrated && initialCategories.length > 0);
-  const skipInitialProductsFetch = useRef(initialHydrated);
   const brandLabel = resolveTenantBrandLabel(tenantSigla, tenantName);
   const { userPlanNames, userPlanIds } = useMemo(
     () => collectUserPlanScope(user),
     [user]
   );
+  const currentPlanScopeKey = useMemo(
+    () => [...userPlanNames].sort((left, right) => left.localeCompare(right, "pt-BR")).join("|"),
+    [userPlanNames]
+  );
+  const skipInitialCategoryFetch = useRef(initialCategoriesHydrated && initialCategories.length > 0);
+  const skippedInitialProductsFetch = useRef(false);
   const dashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
   const pedidosHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/configuracoes/pedidos")
@@ -149,7 +159,7 @@ export default function LojaClientPage({
 
   // Estados
   const [produtos, setProdutos] = useState<Produto[]>(initialProducts);
-  const [loading, setLoading] = useState(!initialHydrated);
+  const [loading, setLoading] = useState(!initialProductsHydrated);
   const [loadingMore, setLoadingMore] = useState(false);
   const [busca, setBusca] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState("Todos");
@@ -168,11 +178,16 @@ export default function LojaClientPage({
 
     const loadCategories = async () => {
       try {
-        const rows = await fetchStoreCategories({
-          maxResults: 120,
-          forceRefresh: false,
-          tenantId: activeTenantId || undefined,
-        });
+        const rows = await ClientCache.getOrSet(
+          `store:categories:${activeTenantId || "all"}`,
+          () =>
+            fetchStoreCategories({
+              maxResults: 120,
+              forceRefresh: false,
+              tenantId: activeTenantId || undefined,
+            }),
+          STORE_CLIENT_CACHE_TTL_MS
+        );
         if (!mounted) return;
         setCategoriasCatalogo(rows as StoreCategory[]);
       } catch (error: unknown) {
@@ -188,8 +203,13 @@ export default function LojaClientPage({
 
   // 2. CARREGAR PRODUTOS POR PAGINA/CATEGORIA (reduz over-fetch no plano free)
   useEffect(() => {
-    if (skipInitialProductsFetch.current && filtroCategoria === "Todos") {
-      skipInitialProductsFetch.current = false;
+    const canReuseInitialProducts =
+      initialProductsHydrated &&
+      filtroCategoria === "Todos" &&
+      initialPlanScopeKey === currentPlanScopeKey;
+
+    if (!skippedInitialProductsFetch.current && canReuseInitialProducts) {
+      skippedInitialProductsFetch.current = true;
       return;
     }
 
@@ -198,15 +218,31 @@ export default function LojaClientPage({
     const loadFirstPage = async () => {
       setLoading(true);
       try {
-        const page = await fetchStoreProductsPage({
-          page: 1,
-          pageSize: STORE_PAGE_SIZE,
-          category: filtroCategoria,
-          forceRefresh: false,
-          tenantId: activeTenantId || undefined,
-          userPlanNames,
-          userPlanIds,
-        });
+        const planIdsKey = [...userPlanIds]
+          .sort((left, right) => left.localeCompare(right))
+          .join("|");
+        const page = await ClientCache.getOrSet(
+          [
+            "store:products",
+            activeTenantId || "all",
+            filtroCategoria || "Todos",
+            currentPlanScopeKey || "_",
+            planIdsKey || "_",
+            "1",
+            String(STORE_PAGE_SIZE),
+          ].join(":"),
+          () =>
+            fetchStoreProductsPage({
+              page: 1,
+              pageSize: STORE_PAGE_SIZE,
+              category: filtroCategoria,
+              forceRefresh: false,
+              tenantId: activeTenantId || undefined,
+              userPlanNames,
+              userPlanIds,
+            }),
+          STORE_CLIENT_CACHE_TTL_MS
+        );
         if (!mounted) return;
         setProdutos(page.products as unknown as Produto[]);
         setHasMore(page.hasMore);
@@ -222,7 +258,7 @@ export default function LojaClientPage({
     return () => {
       mounted = false;
     };
-  }, [activeTenantId, filtroCategoria, userPlanIds, userPlanNames]);
+  }, [activeTenantId, currentPlanScopeKey, filtroCategoria, initialPlanScopeKey, initialProductsHydrated, userPlanIds, userPlanNames]);
 
   const handleLoadMore = async () => {
     if (loading || loadingMore || !hasMore) return;

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useRef, useEffect, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, 
   Image as ImageIcon, X, Tag, Users, 
@@ -12,7 +13,12 @@ import Image from "next/image";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
-import { uploadImage } from "../../../lib/upload";
+import {
+  buildDraftAssetFileName,
+  sanitizeStoragePathSegment,
+  uploadImage,
+  VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "../../../lib/upload";
 import { logActivity } from "../../../lib/logger";
 import { isEventExpiredByGrace } from "../../../lib/eventDateUtils";
 import {
@@ -33,6 +39,7 @@ import {
 } from "../../../lib/eventsNativeService";
 import { fetchPlanCatalog, type PlanRecord } from "../../../lib/plansPublicService";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const EVENT_DASHBOARD_GRACE_MS = 24 * 60 * 60 * 1000;
 const EVENT_TITLE_MAX_LENGTH = 120;
@@ -73,7 +80,6 @@ interface Poll {
   question: string;
   options: PollOption[];
   allowUserOptions: boolean;
-  voters: string[];
 }
 
 interface Participante {
@@ -171,9 +177,11 @@ const buildLotePlanPrices = (
 };
 
 export default function AdminEventosPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { addToast } = useToast();
   const { user: currentUser } = useAuth(); 
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [planCatalog, setPlanCatalog] = useState<PlanRecord[]>([]);
   
@@ -250,6 +258,7 @@ export default function AdminEventosPage() {
               forceRefresh,
               includeInactive: true,
               includePast: true,
+              includeFullData: true,
               tenantId: activeTenantId || undefined,
           });
           setEventos(rows.map((row) => mapEventRow(row)));
@@ -359,11 +368,6 @@ export default function AdminEventosPage() {
               question: String(row.question || ""),
               options: (Array.isArray(row.options) ? row.options : []) as PollOption[],
               allowUserOptions: Boolean(row.allowUserOptions),
-              voters: Array.isArray(row.voters)
-                ? row.voters
-                    .map((entry) => String(entry || ""))
-                    .filter((entry) => entry.length > 0)
-                : [],
             }))
           );
       } catch (error: unknown) {
@@ -424,6 +428,29 @@ export default function AdminEventosPage() {
           ),
       [eventos]
   );
+  const adminHomeHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+  const adminEventosHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/eventos") : "/admin/eventos";
+  const adminEventosEncerradosHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/eventos/encerrados")
+    : "/admin/eventos/encerrados";
+  const clearEventModalQuery = useCallback(() => {
+      const currentQuery = searchParams.toString();
+      if (!currentQuery) return;
+
+      const nextParams = new URLSearchParams(currentQuery);
+      let changed = false;
+      ["edit", "novo"].forEach((key) => {
+          if (!nextParams.has(key)) return;
+          nextParams.delete(key);
+          changed = true;
+      });
+      if (!changed) return;
+
+      const nextQuery = nextParams.toString();
+      router.replace(nextQuery ? `${adminEventosHref}?${nextQuery}` : adminEventosHref, {
+          scroll: false,
+      });
+  }, [adminEventosHref, router, searchParams]);
 
   // --- ACTIONS ---
 
@@ -435,9 +462,10 @@ export default function AdminEventosPage() {
       setEditingId(null);
       setIsEditing(false);
       setShowModal(true);
+      clearEventModalQuery();
   };
 
-  const handleOpenEdit = (evento: Evento) => {
+  const handleOpenEdit = useCallback((evento: Evento) => {
       const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(evento.data);
       const isValidTime = /^\d{2}:\d{2}$/.test(evento.hora);
       setNovoEvento({ 
@@ -456,7 +484,15 @@ export default function AdminEventosPage() {
       setEditingId(evento.id);
       setIsEditing(true);
       setShowModal(true);
-  };
+  }, [addToast]);
+
+  useEffect(() => {
+      const requestedEditId = searchParams.get("edit")?.trim() || "";
+      if (!requestedEditId || showModal) return;
+      const targetEvent = eventos.find((evento) => evento.id === requestedEditId);
+      if (!targetEvent) return;
+      handleOpenEdit(targetEvent);
+  }, [eventos, handleOpenEdit, searchParams, showModal]);
 
   const handleSave = async () => {
     if (!novoEvento.titulo?.trim()) return addToast("Titulo obrigatorio!", "error");
@@ -527,12 +563,13 @@ export default function AdminEventosPage() {
         }
 
         setShowModal(false);
+        clearEventModalQuery();
         await loadEventos(true);
-    } catch (error: unknown) {
-        console.error(error);
-        addToast("Erro ao salvar.", "error");
-    }
-  };
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Erro ao salvar.", "error");
+      }
+    };
 
   const handleDelete = async (id: string) => {
     if (confirm("Excluir evento permanentemente?")) {
@@ -614,8 +651,18 @@ export default function AdminEventosPage() {
 
     setUploading(true);
     try {
-        const { url, error } = await uploadImage(file, "eventos", {
-            scopeKey: "admin:eventos:capa",
+        const tenantScope = sanitizeStoragePathSegment(activeTenantId || "global");
+        const eventId = editingId?.trim() || "";
+        const isStableTarget = eventId.length > 0;
+        const objectDir = isStableTarget
+            ? `eventos/${tenantScope}/${sanitizeStoragePathSegment(eventId)}`
+            : `eventos/${tenantScope}/drafts`;
+        const { url, error } = await uploadImage(file, objectDir, {
+            scopeKey: `admin:eventos:capa:${tenantScope}:${eventId || "draft"}`,
+            fileName: isStableTarget ? "capa" : buildDraftAssetFileName("capa"),
+            upsert: isStableTarget,
+            versionStrategy: isStableTarget ? "file-metadata" : "none",
+            cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
             maxBytes: 3 * 1024 * 1024,
             maxWidth: 2400,
             maxHeight: 1800,
@@ -814,15 +861,15 @@ export default function AdminEventosPage() {
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-32">
       <header className="p-6 sticky top-0 z-30 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/admin" className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400" /></Link>
-          <h1 className="text-lg font-black text-white uppercase tracking-tighter">Gestão de Eventos</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/admin/eventos/encerrados"
-            className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-zinc-200 transition hover:border-emerald-500/40 hover:text-emerald-300"
-          >
-            Encerrados ({eventosArquivados.length})
+            <Link href={adminHomeHref} className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400" /></Link>
+            <h1 className="text-lg font-black text-white uppercase tracking-tighter">Gestão de Eventos</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              href={adminEventosEncerradosHref}
+              className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-zinc-200 transition hover:border-emerald-500/40 hover:text-emerald-300"
+            >
+              Encerrados ({eventosArquivados.length})
           </Link>
           <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
             <Plus size={16} /> Novo Evento
@@ -887,7 +934,7 @@ export default function AdminEventosPage() {
                             ))}
                         </div>
                         <div className="flex gap-2 pt-3 border-t border-white/5 mt-auto">
-                            <Link href={`/admin/eventos/lista/${evento.id}`} className="flex-1 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-black transition flex justify-center items-center gap-2 text-xs font-bold uppercase"><Users size={14}/> Lista</Link>
+                              <Link href={`${adminEventosHref}/lista/${evento.id}`} className="flex-1 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-black transition flex justify-center items-center gap-2 text-xs font-bold uppercase"><Users size={14}/> Lista</Link>
                             <button onClick={() => setShowPollModal(evento)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-purple-400 transition" title="Enquetes"><MessageCircle size={16}/></button>
                             <button onClick={() => handleOpenEdit(evento)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition"><Edit size={16}/></button>
                             <button onClick={() => toggleEventoStatus(evento)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-yellow-500 transition" title={evento.status === 'ativo' ? 'Encerrar' : 'Reativar'}>{evento.status === 'ativo' ? <Lock size={16}/> : <CheckCircle size={16}/>}</button>
@@ -1006,8 +1053,9 @@ export default function AdminEventosPage() {
 
       {/* MODAL CRIAR/EDITAR - ATUALIZADO COM FINANCEIRO */}
       {showModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-zinc-950 w-full max-w-lg rounded-2xl border border-zinc-800 p-6 space-y-4 my-10 animate-in zoom-in-95">
+        <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/80 p-4 backdrop-blur-sm">
+          <div className="flex min-h-full items-start justify-center py-4">
+            <div className="bg-zinc-950 w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-zinc-800 p-6 space-y-4 animate-in zoom-in-95 custom-scrollbar">
             <h2 className="font-bold text-white text-lg flex items-center gap-2"><Calendar size={20} className="text-emerald-500"/> {isEditing ? "Editar" : "Criar"} Evento</h2>
             <div className="space-y-3">
                 {/* UPLOAD IMAGEM */}
@@ -1121,8 +1169,9 @@ export default function AdminEventosPage() {
             <div><label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Descrição Completa</label><textarea maxLength={EVENT_DESCRIPTION_MAX_LENGTH} className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" value={novoEvento.descricao} onChange={(e) => setNovoEvento({ ...novoEvento, descricao: e.target.value.slice(0, EVENT_DESCRIPTION_MAX_LENGTH) })}></textarea></div>
 
             <div className="flex gap-3 pt-2 border-t border-zinc-800">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-400 font-bold text-xs uppercase hover:bg-zinc-800 transition">Cancelar</button>
+              <button onClick={() => { setShowModal(false); clearEventModalQuery(); }} className="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-400 font-bold text-xs uppercase hover:bg-zinc-800 transition">Cancelar</button>
               <button onClick={handleSave} className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold text-xs uppercase hover:bg-emerald-500 shadow-lg shadow-emerald-900/20 transition">{isEditing ? "Atualizar Evento" : "Criar Evento"}</button>
+            </div>
             </div>
           </div>
         </div>

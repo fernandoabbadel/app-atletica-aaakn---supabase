@@ -21,10 +21,12 @@ import {
   fetchLeagueById,
   fetchLeagueSummaries,
   fetchLeagueUsers,
+  syncLeagueMembers,
   uploadLeagueImageToStorage,
   updateEventPollOptions,
   type LeaguePollRecord,
 } from "../../lib/leaguesService";
+import { resolveLeagueLogoSrc } from "../../lib/leagueMedia";
 
 // --- TIPAGEM ESTRITA (Sem 'any') ---
 
@@ -39,7 +41,6 @@ interface PerguntaLiga {
     id: string; 
     texto: string; 
     imageUrl?: string;
-    imagemBase64?: string; 
     alternativas: string[]; 
     correta: number; 
 }
@@ -102,13 +103,14 @@ interface LigaData {
     bizu?: string; 
     likes?: number; 
     senha: string; 
+    foto?: string;
     logoUrl?: string;
-    logoBase64?: string;
     ativa?: boolean; 
     perguntas: PerguntaLiga[]; 
     membros?: Member[]; 
     eventos?: LeagueEvent[];
     membrosIds?: string[];
+    membersCount?: number;
 }
 
 interface LigaEditorDraftSnapshot {
@@ -213,6 +215,27 @@ const clearLigaEditorDraft = (ligaId: string, tenantScopeId?: string | null): vo
 };
 
 const nowIso = (): string => new Date().toISOString();
+
+const sanitizeQuestionDrafts = (questions: PerguntaLiga[]): PerguntaLiga[] =>
+    questions.map((question) => {
+        const imageUrl =
+            typeof question.imageUrl === "string" && question.imageUrl.trim()
+                ? question.imageUrl.trim()
+                : undefined;
+
+        return {
+            id: question.id,
+            texto: question.texto,
+            ...(imageUrl ? { imageUrl } : {}),
+            alternativas: Array.isArray(question.alternativas)
+                ? question.alternativas.map((entry) => String(entry))
+                : ["", "", "", ""],
+            correta:
+                typeof question.correta === "number" && Number.isFinite(question.correta)
+                    ? Math.max(0, Math.min(3, Math.floor(question.correta)))
+                    : 0,
+        };
+    });
 
 const extractMissingSchemaColumn = (error: unknown): string | null => {
     if (!error || typeof error !== "object") return null;
@@ -483,13 +506,13 @@ export default function LigasAdminPage() {
                   bizu: target.bizu || "",
                   likes: target.likes || 0,
                   senha: target.senha,
-                  logoUrl: target.logoUrl || target.logoBase64,
-                  logoBase64: target.logoBase64 || target.logoUrl,
+                  foto: target.foto || resolveLeagueLogoSrc(target) || "",
+                  logoUrl: resolveLeagueLogoSrc(target) || undefined,
                   ativa: target.ativa,
-                  perguntas: (target.perguntas || []) as PerguntaLiga[],
+                  perguntas: sanitizeQuestionDrafts((target.perguntas || []) as PerguntaLiga[]),
                   membros: (target.membros || []) as Member[],
                   eventos: (target.eventos || []) as LeagueEvent[],
-                  membrosIds: target.membrosIds,
+                  membersCount: target.membersCount,
               };
               const restoredDraft = readLigaEditorDraft(target.id, tenantScopeId);
               const mergedLigaData: LigaData = restoredDraft
@@ -606,11 +629,10 @@ export default function LigasAdminPage() {
           });
 
           if (type === 'logo') {
-              setLigaData({ ...ligaData, logoUrl: imageUrl, logoBase64: undefined });
+              setLigaData({ ...ligaData, foto: imageUrl, logoUrl: imageUrl });
           } else if (type === 'pergunta' && index !== undefined) {
               const novas = [...ligaData.perguntas];
               novas[index].imageUrl = imageUrl;
-              novas[index].imagemBase64 = imageUrl;
               setLigaData({ ...ligaData, perguntas: novas });
           } else if (type === 'membro' && index !== undefined && ligaData.membros) {
               const novos = [...ligaData.membros];
@@ -746,11 +768,12 @@ export default function LigasAdminPage() {
           const timestamp = nowIso();
           const actorTenantId =
               typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
+          const leagueLogoUrl = resolveLeagueLogoSrc(ligaData) || "";
+          const sanitizedQuestions = sanitizeQuestionDrafts(ligaData.perguntas);
 
-          // 1. Cria array auxiliar de IDs para busca
-          const membrosIds = ligaData.membros?.map(m => m.id) || [];
+          const membersCount = ligaData.membros?.length || 0;
 
-          // 2. Atualiza Config Liga (COM membrosIds)
+          // 2. Atualiza Config Liga sem duplicar membership em array quente
           const ligaUpdatePayload: Record<string, unknown> = {
               nome: ligaData.nome,
               sigla: ligaData.sigla,
@@ -758,13 +781,14 @@ export default function LigasAdminPage() {
               bizu: ligaData.bizu || "",
               likes: Number.isFinite(Number(ligaData.likes)) ? Number(ligaData.likes) : 0,
               senha: ligaData.senha,
-              logoUrl: ligaData.logoUrl || null,
-              logo: ligaData.logoUrl || null,
+              foto: leagueLogoUrl || null,
+              logoUrl: leagueLogoUrl || null,
+              logo: leagueLogoUrl || null,
               ativa: Boolean(ligaData.ativa),
-              perguntas: ligaData.perguntas,
+              perguntas: sanitizedQuestions,
               membros: ligaData.membros || [],
               eventos: ligaData.eventos || [],
-              membrosIds,
+              membersCount,
               updatedAt: timestamp,
           };
 
@@ -773,6 +797,12 @@ export default function LigasAdminPage() {
             .update(ligaUpdatePayload)
             .eq("id", ligaData.id);
           if (ligaUpdateError) throw new Error(extractErrorMessage(ligaUpdateError));
+
+          await syncLeagueMembers({
+              leagueId: ligaData.id,
+              members: ligaData.membros || [],
+              tenantId: actorTenantId || undefined,
+          });
 
           // 3. Sincroniza Eventos (Cria/Atualiza no Global)
           if (ligaData.eventos && ligaData.eventos.length > 0) {
@@ -790,7 +820,7 @@ export default function LigasAdminPage() {
                       local: ev.local,
                       tipo: "Liga", 
                       destaque: ev.destaque,
-                      imagem: ev.imagem || ligaData.logoUrl || "",
+                      imagem: ev.imagem || leagueLogoUrl || "",
                       imagePositionY: ev.imagePositionY,
                       lotes: ev.lotes,
                       descricao: ev.descricao, 
@@ -824,8 +854,6 @@ export default function LigasAdminPage() {
                           eventoId: eventId,
                           question: ev.pollQuestion,
                           options: [],
-                          voters: [],
-                          userVotes: {},
                           allowUserOptions: true,
                           createdAt: timestamp,
                           updatedAt: timestamp,
@@ -985,9 +1013,9 @@ export default function LigasAdminPage() {
                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Logo da Liga</label>
                       <div className="flex items-center gap-4 mt-2">
                           <label className="w-20 h-20 bg-black rounded-xl border-2 border-dashed border-zinc-700 flex items-center justify-center cursor-pointer hover:border-emerald-500 overflow-hidden relative group transition-colors">
-                              {ligaData.logoUrl || ligaData.logoBase64 ? (
+                              {resolveLeagueLogoSrc(ligaData) ? (
                                 <Image
-                                  src={ligaData.logoUrl || ligaData.logoBase64 || ""}
+                                  src={resolveLeagueLogoSrc(ligaData)}
                                   alt="Logo"
                                   fill
                                   sizes="80px"
@@ -1064,7 +1092,7 @@ export default function LigasAdminPage() {
                   </div>
                   <div className="space-y-3">
                       {ligaData.eventos?.map((ev, idx) => {
-                          const eventImage = ev.imagem || ligaData.logoUrl || ligaData.logoBase64;
+                          const eventImage = ev.imagem || resolveLeagueLogoSrc(ligaData);
                           return (
                               <div key={idx} className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 relative flex flex-col md:flex-row gap-4 items-start md:items-center">
                                   <button onClick={() => {const n=[...ligaData.eventos!]; n.splice(idx,1); setLigaData({...ligaData, eventos:n})}} className="absolute top-2 right-2 text-zinc-600 hover:text-red-500"><Trash2 size={14}/></button>

@@ -17,6 +17,7 @@ import { useToast } from "../../../context/ToastContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
   fetchCarteirinhaConfig,
+  resolveCarteirinhaBackgroundUrl,
   saveCarteirinhaConfig,
   uploadCarteirinhaBackground,
   type CarteirinhaConfig,
@@ -31,6 +32,7 @@ import { withTenantSlug } from "@/lib/tenantRouting";
 const DEFAULT_CONFIG: CarteirinhaConfig = {
   validade: "DEZ/2026",
   backgrounds: {},
+  backgroundAssets: {},
   backgroundOpacity: 60,
 };
 
@@ -75,15 +77,23 @@ export default function AdminCarteirinhaPage() {
   const handleImageUpload = async (turma: string, file: File) => {
     setUploadingTurma(turma);
     try {
-      const url = await uploadCarteirinhaBackground(turma, file, {
+      const assetRef = await uploadCarteirinhaBackground(turma, file, {
         tenantId: activeTenantId || undefined,
       });
+      const url = resolveCarteirinhaBackgroundUrl(assetRef);
+      if (!url) {
+        throw new Error("Upload concluido, mas nao foi possivel resolver a imagem.");
+      }
 
       setConfig((prev) => ({
         ...prev,
         backgrounds: {
           ...prev.backgrounds,
           [turma]: url,
+        },
+        backgroundAssets: {
+          ...prev.backgroundAssets,
+          [turma]: assetRef,
         },
       }));
 

@@ -148,7 +148,7 @@ begin
     '[]'::jsonb,
     '[]'::jsonb,
     0,
-    '[]'::jsonb,
+    array[]::text[],
     'ativa',
     src.bizu,
     now_utc,

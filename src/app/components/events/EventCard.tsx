@@ -38,7 +38,7 @@ interface EventData {
   data: string;
   imagem?: string;
   tipo: string;
-  likesList?: string[];
+  viewerHasLiked?: boolean;
   lotes?: Lote[];
   stats?: EventStats;
 }
@@ -73,14 +73,10 @@ export function EventCard({ evento }: EventCardProps) {
   );
 
   useEffect(() => {
-    const currentUserId = user?.uid || "";
-    setIsLiked(
-      currentUserId.length > 0 &&
-        Boolean(evento.likesList?.includes(currentUserId))
-    );
+    setIsLiked(Boolean(evento.viewerHasLiked));
     setLikesCount(evento.stats?.likes || 0);
     setConfirmedCount(evento.stats?.confirmados || 0);
-  }, [evento.likesList, evento.stats?.likes, evento.stats?.confirmados, user?.uid]);
+  }, [evento.stats?.likes, evento.stats?.confirmados, evento.viewerHasLiked]);
 
   useEffect(() => {
     let isMounted = true;

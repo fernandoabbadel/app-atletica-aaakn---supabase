@@ -12,7 +12,10 @@ import Image from "next/image";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useToast } from "../../../context/ToastContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
-import { uploadImage } from "../../../lib/upload";
+import {
+    uploadImage,
+    VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+} from "../../../lib/upload";
 import { isPermissionError } from "@/lib/backendErrors";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import {
@@ -432,7 +435,7 @@ export default function AdminTreinosPage() {
               scopeKey: `admin:treinos:categoria:${categoriaKey}`,
               fileName: categoriaKey,
               upsert: true,
-              appendVersionQuery: true,
+              versionStrategy: "file-metadata",
               maxBytes: 2 * 1024 * 1024,
               maxWidth: 1800,
               maxHeight: 1800,
@@ -441,7 +444,7 @@ export default function AdminTreinosPage() {
               compressionMaxHeight: 1400,
               compressionMaxBytes: 150 * 1024,
               quality: 0.82,
-              cacheControl: "86400",
+              cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
               rateLimitMax: 4,
           });
           if (error) {

@@ -1,5 +1,12 @@
-import DashboardPage from "../../dashboard/page";
+import { DashboardPageContent } from "../../dashboard/DashboardPageContent";
 
-export default function TenantDashboardPage() {
-  return <DashboardPage />;
+interface TenantDashboardPageProps {
+  params: Promise<{
+    tenant: string;
+  }>;
+}
+
+export default async function TenantDashboardPage({ params }: TenantDashboardPageProps) {
+  const { tenant } = await params;
+  return <DashboardPageContent tenantSlugOverride={tenant} />;
 }

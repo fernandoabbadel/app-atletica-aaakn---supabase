@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 
+import { QueryMonitor } from "@/lib/queryMonitor";
 import { cleanupExpiredRateLimitBuckets, consumeRateLimit } from "@/lib/rateLimiter";
+import { ServerCache } from "@/lib/serverCache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const revalidate = 300;
 
 const MAX_PUBLIC_TENANTS_LIMIT = 60;
+const TENANTS_SERVER_CACHE_TTL_MS = 5 * 60 * 1000;
+const TENANTS_ENDPOINT = "/api/public/tenants";
 
 const resolveRequestIp = (request: Request): string => {
   const forwardedFor = request.headers.get("x-forwarded-for") || "";
@@ -42,6 +46,14 @@ type PublicTenantDirectoryEntry = {
   status: "active" | "inactive" | "blocked";
   createdAt: string;
   updatedAt: string;
+};
+
+const measurePayloadBytes = (payload: unknown): number => {
+  try {
+    return new TextEncoder().encode(JSON.stringify(payload)).length;
+  } catch {
+    return 0;
+  }
 };
 
 const parseTenantStatus = (
@@ -87,6 +99,7 @@ const parseTenantEntry = (row: Record<string, unknown>): PublicTenantDirectoryEn
 };
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   const url = new URL(request.url);
   const requestedLimit = Number.parseInt(url.searchParams.get("limit") || "60", 10);
   const requestedSlug = url.searchParams.get("slug")?.trim().toLowerCase() || "";
@@ -98,19 +111,27 @@ export async function GET(request: Request) {
     : consumeRateLimit(resolveRequestIp(request), "/api/public/tenants");
 
   if (!rateLimit.allowed) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded. Try again in 1 minute." },
-      {
-        status: 429,
-        headers: {
-          "Cache-Control": "no-store",
-          "Retry-After": String(
-            Math.max(1, Math.ceil((rateLimit.resetAt - Date.now()) / 1000))
-          ),
-          "X-RateLimit-Remaining": "0",
-        },
-      }
-    );
+    const payload = { error: "Rate limit exceeded. Try again in 1 minute." };
+    QueryMonitor.recordQuery({
+      endpoint: TENANTS_ENDPOINT,
+      method: "GET",
+      durationMs: Date.now() - startedAt,
+      payloadBytes: measurePayloadBytes(payload),
+      cacheHit: false,
+      statusCode: 429,
+      tenantId: requestedSlug || "directory",
+      error: payload.error,
+    });
+    return NextResponse.json(payload, {
+      status: 429,
+      headers: {
+        "Cache-Control": "no-store",
+        "Retry-After": String(
+          Math.max(1, Math.ceil((rateLimit.resetAt - Date.now()) / 1000))
+        ),
+        "X-RateLimit-Remaining": "0",
+      },
+    });
   }
 
   if (Math.random() < 0.02) {
@@ -126,19 +147,50 @@ export async function GET(request: Request) {
       .eq("status", "active");
 
     if (requestedSlug) {
-      const { data, error } = await baseQuery.eq("slug", requestedSlug).maybeSingle();
-      if (error) {
-        throw error;
-      }
+      const cacheKey = `public:tenants:slug:${requestedSlug}`;
+      const cachedTenant = ServerCache.get<PublicTenantDirectoryEntry>(cacheKey);
+      const cacheHit = cachedTenant !== null;
+      const tenant =
+        cachedTenant ??
+        (await (async (): Promise<PublicTenantDirectoryEntry | null> => {
+          const { data, error } = await baseQuery.eq("slug", requestedSlug).maybeSingle();
+          if (error) {
+            throw error;
+          }
 
-      const tenant = parseTenantEntry((data || {}) as Record<string, unknown>);
+          const parsed = parseTenantEntry((data || {}) as Record<string, unknown>);
+          if (parsed && parsed.status === "active") {
+            ServerCache.set(cacheKey, parsed, TENANTS_SERVER_CACHE_TTL_MS);
+          }
+          return parsed;
+        })());
       if (!tenant || tenant.status !== "active") {
+        const payload = { error: "Atletica nao encontrada." };
+        QueryMonitor.recordQuery({
+          endpoint: TENANTS_ENDPOINT,
+          method: "GET",
+          durationMs: Date.now() - startedAt,
+          payloadBytes: measurePayloadBytes(payload),
+          cacheHit,
+          statusCode: 404,
+          tenantId: requestedSlug,
+          error: payload.error,
+        });
         return NextResponse.json(
-          { error: "Atletica nao encontrada." },
+          payload,
           { status: 404 }
         );
       }
 
+      QueryMonitor.recordQuery({
+        endpoint: TENANTS_ENDPOINT,
+        method: "GET",
+        durationMs: Date.now() - startedAt,
+        payloadBytes: measurePayloadBytes(tenant),
+        cacheHit,
+        statusCode: 200,
+        tenantId: tenant.id,
+      });
       return NextResponse.json(tenant, {
         headers: {
           "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
@@ -147,22 +199,40 @@ export async function GET(request: Request) {
       });
     }
 
-    const { data, error } = await baseQuery
-      .eq("visible_in_directory", true)
-      .order("nome", { ascending: true })
-      .limit(limit);
+    const cacheKey = `public:tenants:list:${limit}`;
+    const cachedTenants = ServerCache.get<PublicTenantDirectoryEntry[]>(cacheKey);
+    const cacheHit = cachedTenants !== null;
+    const tenants =
+      cachedTenants ??
+      (await (async (): Promise<PublicTenantDirectoryEntry[]> => {
+        const { data, error } = await baseQuery
+          .eq("visible_in_directory", true)
+          .order("nome", { ascending: true })
+          .limit(limit);
 
-    if (error) {
-      throw error;
-    }
+        if (error) {
+          throw error;
+        }
 
-    const tenants = (Array.isArray(data) ? data : [])
-      .map((row) => parseTenantEntry((row || {}) as Record<string, unknown>))
-      .filter(
-        (row): row is PublicTenantDirectoryEntry =>
-          row !== null && row.status === "active"
-      );
+        const parsed = (Array.isArray(data) ? data : [])
+          .map((row) => parseTenantEntry((row || {}) as Record<string, unknown>))
+          .filter(
+            (row): row is PublicTenantDirectoryEntry =>
+              row !== null && row.status === "active"
+          );
+        ServerCache.set(cacheKey, parsed, TENANTS_SERVER_CACHE_TTL_MS);
+        return parsed;
+      })());
 
+    QueryMonitor.recordQuery({
+      endpoint: TENANTS_ENDPOINT,
+      method: "GET",
+      durationMs: Date.now() - startedAt,
+      payloadBytes: measurePayloadBytes(tenants),
+      cacheHit,
+      statusCode: 200,
+      tenantId: "directory",
+    });
     return NextResponse.json(tenants, {
       headers: {
         "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
@@ -171,9 +241,17 @@ export async function GET(request: Request) {
     });
   } catch (error: unknown) {
     console.error("Falha ao carregar diretorio publico de atleticas:", error);
-    return NextResponse.json(
-      { error: "Falha ao carregar as atleticas publicas." },
-      { status: 500 }
-    );
+    const payload = { error: "Falha ao carregar as atleticas publicas." };
+    QueryMonitor.recordQuery({
+      endpoint: TENANTS_ENDPOINT,
+      method: "GET",
+      durationMs: Date.now() - startedAt,
+      payloadBytes: measurePayloadBytes(payload),
+      cacheHit: false,
+      statusCode: 500,
+      tenantId: requestedSlug || "directory",
+      error: error instanceof Error ? error.message : payload.error,
+    });
+    return NextResponse.json(payload, { status: 500 });
   }
 }

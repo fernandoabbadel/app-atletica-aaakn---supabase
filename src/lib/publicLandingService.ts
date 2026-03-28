@@ -12,6 +12,7 @@ type CacheEntry<T> = {
 
 const READ_CACHE_TTL_MS = 12 * 60 * 60_000;
 const COUNT_FALLBACK_LIMIT = 2_000;
+const LIGHTWEIGHT_COUNT_MODES = ["planned", "estimated"] as const;
 
 const publicLandingCache = new Map<string, CacheEntry<PublicLandingData>>();
 
@@ -43,8 +44,8 @@ async function fetchCountFromTable(
   const supabase = getSupabaseClient();
   let lastError: unknown = null;
 
-  // No plano free, tentamos contagem de metadata antes de usar exact count.
-  for (const mode of ["planned", "estimated", "exact"] as const) {
+  // No plano free, evitamos exact count e priorizamos metadata barata.
+  for (const mode of LIGHTWEIGHT_COUNT_MODES) {
     const { count, error } = await supabase
       .from(tableName)
       .select(countColumn, { count: mode, head: true });
@@ -109,11 +110,13 @@ export async function fetchPublicLandingData(options?: {
   forceRefresh?: boolean;
   fallbackConfig?: LandingConfig;
   tenantId?: string | null;
+  prefetchedConfig?: LandingConfig;
 }): Promise<PublicLandingData> {
   const forceRefresh = options?.forceRefresh ?? false;
   const tenantId = options?.tenantId?.trim() || "";
   const cacheKey = tenantId || "default";
   const fallbackConfig = options?.fallbackConfig ?? DEFAULT_LANDING_CONFIG;
+  const prefetchedConfig = options?.prefetchedConfig;
 
   if (!forceRefresh) {
     const cached = getCachedValue(publicLandingCache, cacheKey);
@@ -122,18 +125,20 @@ export async function fetchPublicLandingData(options?: {
 
   const [configResult, usersCountResult, tenantsCountResult, partnersCountResult] =
     await Promise.allSettled([
-    fetchLandingConfig({
-      forceRefresh,
-      fallbackConfig,
-      tenantId,
-    }),
-    fetchCountFromCandidates([{ tableName: "users", countColumn: "uid" }]),
-    fetchCountFromCandidates([{ tableName: "tenants", countColumn: "id" }]),
-    fetchCountFromCandidates([
-      { tableName: "parceiros", countColumn: "id" },
-      { tableName: "partners", countColumn: "id" },
-    ]),
-  ]);
+      prefetchedConfig
+        ? Promise.resolve(prefetchedConfig)
+        : fetchLandingConfig({
+            forceRefresh,
+            fallbackConfig,
+            tenantId,
+          }),
+      fetchCountFromCandidates([{ tableName: "users", countColumn: "uid" }]),
+      fetchCountFromCandidates([{ tableName: "tenants", countColumn: "id" }]),
+      fetchCountFromCandidates([
+        { tableName: "parceiros", countColumn: "id" },
+        { tableName: "partners", countColumn: "id" },
+      ]),
+    ]);
 
   const config = configResult.status === "fulfilled"
     ? configResult.value
