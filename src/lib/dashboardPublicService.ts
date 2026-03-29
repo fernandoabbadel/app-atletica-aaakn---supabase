@@ -16,6 +16,7 @@ const DASHBOARD_POSTS_LIMIT = 2;
 const DASHBOARD_TREINOS_LIMIT = 4;
 const DASHBOARD_PARTNERS_LIMIT = 50;
 const DASHBOARD_LIGAS_DASHBOARD_LIMIT = 2;
+const DASHBOARD_LIGAS_QUERY_WINDOW = 6;
 const DASHBOARD_TREINO_RSVPS_LIMIT = 12;
 const DASHBOARD_LIKES_SAMPLE_PER_PRODUCT = 10;
 const DASHBOARD_USERS_IN_CHUNK = 10;
@@ -339,15 +340,108 @@ async function fetchDashboardEventRows(tenantId?: string, userId?: string): Prom
   return [];
 }
 
-async function fetchDashboardTotalCaca(tenantId?: string): Promise<number> {
-  if (isRpcCircuitOpen(dashboardTotalCacaRpcUnavailableUntil)) {
+async function safeDashboardUserBaseTotal(
+  tenantId?: string,
+  userId?: string
+): Promise<number> {
+  const cleanUserId = asString(userId).trim();
+  if (!cleanUserId) return 0;
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = asString(tenantId).trim();
+  let query = supabase.from("users").select("uid").eq("uid", cleanUserId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) return 0;
+  return data ? 1 : 0;
+}
+
+async function safeDashboardTotalCacaFallback(
+  tenantId?: string,
+  userId?: string
+): Promise<number> {
+  const cleanUserId = asString(userId).trim();
+  if (!cleanUserId) return 0;
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = asString(tenantId).trim();
+  const baseTotal = await safeDashboardUserBaseTotal(tenantId, userId);
+
+  let capturesQuery = supabase
+    .from("album_captures")
+    .select("targetUserId")
+    .eq("collectorUserId", cleanUserId);
+  if (scopedTenantId) {
+    capturesQuery = capturesQuery.eq("tenant_id", scopedTenantId);
+  }
+
+  const { data: captureRows, error: captureError } = await capturesQuery;
+  if (!captureError) {
+    const targetIds = Array.from(
+      new Set(
+        ((captureRows ?? []) as Row[])
+          .map((row) => asString(row.targetUserId).trim())
+          .filter((entry) => entry.length > 0)
+      )
+    );
+
+    if (targetIds.length === 0) {
+      return baseTotal;
+    }
+
+    let validTargetsQuery = supabase.from("users").select("uid").in("uid", targetIds);
+    if (scopedTenantId) {
+      validTargetsQuery = validTargetsQuery.eq("tenant_id", scopedTenantId);
+    }
+
+    const { data: validTargets, error: validTargetsError } = await validTargetsQuery.limit(
+      targetIds.length
+    );
+    if (!validTargetsError) {
+      return Math.max(baseTotal, (validTargets ?? []).length);
+    }
+  }
+
+  let summaryQuery = supabase
+    .from("album_summary")
+    .select("totalCollected")
+    .eq("userId", cleanUserId);
+  if (scopedTenantId) {
+    summaryQuery = summaryQuery.eq("tenant_id", scopedTenantId);
+  }
+
+  const { data: summaryData, error: summaryError } = await summaryQuery.maybeSingle();
+  if (!summaryError && summaryData) {
+    return Math.max(
+      baseTotal,
+      asInteger((summaryData as Record<string, unknown>).totalCollected, 0)
+    );
+  }
+
+  return baseTotal;
+}
+
+async function fetchDashboardTotalCaca(
+  tenantId?: string,
+  userId?: string
+): Promise<number> {
+  const cleanUserId = asString(userId).trim();
+  if (!cleanUserId) {
     return 0;
+  }
+
+  if (isRpcCircuitOpen(dashboardTotalCacaRpcUnavailableUntil)) {
+    return safeDashboardTotalCacaFallback(tenantId, cleanUserId);
   }
 
   const supabase = getSupabaseClient();
   const scopedTenantId = asString(tenantId).trim();
   const { data, error } = await supabase.rpc(DASHBOARD_TOTAL_CACA_RPC, {
     p_tenant_id: scopedTenantId || null,
+    p_user_id: cleanUserId,
   });
   if (!error) {
     dashboardTotalCacaRpcUnavailableUntil = 0;
@@ -356,10 +450,10 @@ async function fetchDashboardTotalCaca(tenantId?: string): Promise<number> {
 
   if (isMissingRpcError(error)) {
     dashboardTotalCacaRpcUnavailableUntil = openRpcCircuit();
-    return 0;
+    return safeDashboardTotalCacaFallback(tenantId, cleanUserId);
   }
 
-  return 0;
+  return safeDashboardTotalCacaFallback(tenantId, cleanUserId);
 }
 
 async function safeUsersCount(tenantId?: string): Promise<number> {
@@ -410,13 +504,20 @@ async function fetchDashboardLeagueRows(options: {
     cleanTenantId || undefined
   );
   if (!followedLeagueIds.length) return [];
+  const queryLeagueIds =
+    followedLeagueIds.length > DASHBOARD_LIGAS_QUERY_WINDOW
+      ? seededShuffle(
+          followedLeagueIds,
+          `${cleanUserId || "anon"}:${cleanTenantId || "default"}:${new Date().toISOString().slice(0, 10)}`
+        ).slice(0, DASHBOARD_LIGAS_QUERY_WINDOW)
+      : followedLeagueIds;
 
   const supabase = getSupabaseClient();
   let query = supabase
     .from("ligas_config")
     .select(DASHBOARD_LIGAS_SELECT)
-    .in("id", followedLeagueIds)
-    .limit(followedLeagueIds.length);
+    .in("id", queryLeagueIds)
+    .limit(queryLeagueIds.length);
   if (cleanTenantId) {
     query = query.eq("tenant_id", cleanTenantId);
   }
@@ -720,6 +821,9 @@ async function fetchDashboardBundleViaRpc(options: {
   const treinos = asArray(payload.treinos)
     .map((entry) => asString(entry).trim())
     .filter((entry) => entry.length > 0);
+  const resolvedTotalCaca = cleanUserId
+    ? await fetchDashboardTotalCaca(cleanTenantId || undefined, cleanUserId)
+    : 0;
 
   return {
     events,
@@ -728,7 +832,7 @@ async function fetchDashboardBundleViaRpc(options: {
     ligas,
     mensagens,
     treinos,
-    totalCaca: Math.max(0, asInteger(payload.totalCaca, 0)),
+    totalCaca: resolvedTotalCaca,
     totalAlunos: Math.max(0, asInteger(payload.totalAlunos, 0)),
     productTurmaStats,
   };
@@ -742,7 +846,7 @@ async function fetchDashboardDegradedBundle(options: {
   const userId = asString(options.userId).trim();
   const tenantFilter = tenantId ? { tenant_id: tenantId } : null;
 
-  const [eventRows, productRows, partnerRows, postRows, totalAlunos] = await Promise.all([
+  const [eventRows, productRows, partnerRows, postRows, totalAlunos, totalCaca] = await Promise.all([
     fetchDashboardEventRows(tenantId || undefined, userId || undefined),
     fetchRowsWithFallback("produtos", DASHBOARD_PRODUCTS_SELECT, [
       {
@@ -773,6 +877,7 @@ async function fetchDashboardDegradedBundle(options: {
       { limit: DASHBOARD_DEGRADED_POSTS_LIMIT, ...(tenantFilter ? { eq: tenantFilter } : {}) },
     ]),
     safeUsersCount(tenantId || undefined),
+    fetchDashboardTotalCaca(tenantId || undefined, userId || undefined),
   ]);
 
   const events = eventRows
@@ -809,7 +914,7 @@ async function fetchDashboardDegradedBundle(options: {
     ligas: [],
     mensagens,
     treinos: [],
-    totalCaca: 0,
+    totalCaca,
     totalAlunos,
     productTurmaStats: {},
   };
@@ -863,7 +968,7 @@ async function fetchDashboardLegacyFallbackBundle(options: {
         userId: userId || undefined,
       }),
       safeUsersCount(tenantId || undefined),
-      fetchDashboardTotalCaca(tenantId || undefined),
+      fetchDashboardTotalCaca(tenantId || undefined, userId || undefined),
     ]);
 
   const events = eventRows

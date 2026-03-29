@@ -4,7 +4,7 @@ import React, { useState, useEffect, Suspense } from "react";
 import { ArrowLeft, MessageCircle, Loader2, Copy, Ticket, Minus, Plus, Wallet, Clock } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // Importando Image
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import { createEventTicketRequest, fetchEventCheckoutData } from "../../../lib/eventsService";
@@ -40,6 +40,7 @@ interface PixData {
 
 // Componente interno que usa useSearchParams
 function CompraContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { addToast } = useToast();
   const { user } = useAuth();
@@ -288,7 +289,7 @@ function CompraContent() {
                     </div>
                 </div>
 
-                <button onClick={() => window.location.href = eventosHref} className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition active:scale-95 border border-zinc-700">
+                <button onClick={() => router.push(eventosHref)} className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition active:scale-95 border border-zinc-700">
                     Voltar ao Menu
                 </button>
             </div>

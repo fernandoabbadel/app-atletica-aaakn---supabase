@@ -23,7 +23,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { TENANT_SLUG_COOKIE_NAME } from "@/lib/tenantRouting";
 import { cookies } from "next/headers";
 
-export const revalidate = 43200; // 12h
+export const dynamic = "force-dynamic";
 const LANDING_ROUTE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const LANDING_SERVER_CACHE_TTL_MS = 10 * 60 * 1000;
 const LANDING_ENDPOINT = "/api/public/landing";
@@ -172,9 +172,13 @@ const extractConfigPayload = (raw: unknown): unknown => {
 };
 
 const fetchLandingConfigWithAdmin = async (
-  tenantId?: string
+  tenantId?: string,
+  forceRefresh = false
 ): Promise<LandingConfig> => {
   const cacheKey = (tenantId || "").trim() || "default";
+  if (forceRefresh) {
+    landingConfigCache.delete(cacheKey);
+  }
   const cached = getRouteCacheValue(landingConfigCache, cacheKey);
   if (cached) return cached;
 
@@ -205,6 +209,7 @@ export async function GET(request: Request) {
   const queryTenantSlug = (requestUrl.searchParams.get("tenant") || "")
     .trim()
     .toLowerCase();
+  const shouldRefresh = requestUrl.searchParams.get("refresh") === "1";
   const rateLimit = consumeRateLimit(resolveRequestIp(request), "/api/public/landing");
 
   if (!rateLimit.allowed) {
@@ -242,7 +247,10 @@ export async function GET(request: Request) {
       .toLowerCase();
     const tenantSlug = scope === "platform" ? "" : queryTenantSlug || cookieTenantSlug;
     const cacheKey = `public:landing:${scope || "default"}:${tenantSlug || "platform"}`;
-    const cachedPayload = ServerCache.get<PublicLandingPayload>(cacheKey);
+    if (shouldRefresh) {
+      ServerCache.delete(cacheKey);
+    }
+    const cachedPayload = shouldRefresh ? null : ServerCache.get<PublicLandingPayload>(cacheKey);
     const cacheHit = cachedPayload !== null;
     const payload =
       cachedPayload ??
@@ -251,10 +259,10 @@ export async function GET(request: Request) {
         const brand =
           tenant?.brand ??
           (tenantSlug ? buildTenantFallbackBrand(tenantSlug) : DEFAULT_PLATFORM_BRAND);
-        const config = await fetchLandingConfigWithAdmin(tenant?.tenantId || "");
+        const config = await fetchLandingConfigWithAdmin(tenant?.tenantId || "", shouldRefresh);
 
         const data = await fetchPublicLandingData({
-          forceRefresh: false,
+          forceRefresh: shouldRefresh,
           fallbackConfig: DEFAULT_LANDING_CONFIG,
           prefetchedConfig: config,
           tenantId: tenant?.tenantId || "",
@@ -282,7 +290,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(payload, {
       headers: {
-        "Cache-Control": "public, s-maxage=43200, stale-while-revalidate=86400",
+        "Cache-Control": "no-store",
         "X-RateLimit-Remaining": String(rateLimit.remaining),
       },
     });
@@ -304,7 +312,7 @@ export async function GET(request: Request) {
     });
     return NextResponse.json(payload, {
       headers: {
-        "Cache-Control": "public, s-maxage=43200, stale-while-revalidate=86400",
+        "Cache-Control": "no-store",
         "X-RateLimit-Remaining": String(rateLimit.remaining),
       },
     });

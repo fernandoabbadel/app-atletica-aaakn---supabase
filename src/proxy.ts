@@ -11,7 +11,7 @@ import {
 } from "./lib/tenantRouting";
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
-const TENANT_NATIVE_ROUTES = new Set(["/dashboard", "/eventos", "/loja"]);
+const TENANT_NATIVE_ROUTES = new Set(["/dashboard", "/eventos", "/landing", "/loja"]);
 
 const setTenantSlugCookie = (response: NextResponse, tenantSlug: string): void => {
   const cleanSlug = tenantSlug.trim().toLowerCase();

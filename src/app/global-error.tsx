@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { AlertTriangle, RefreshCcw } from "lucide-react";
 
 type GlobalErrorPageProps = {
@@ -79,12 +80,12 @@ export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) 
               <RefreshCcw size={16} /> Tentar de novo
             </button>
 
-            <button
-              onClick={() => window.location.assign("/dashboard")}
+            <Link
+              href="/dashboard"
               className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 font-black text-xs uppercase transition"
             >
               Ir para dashboard
-            </button>
+            </Link>
           </div>
         </div>
 

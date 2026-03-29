@@ -6,7 +6,6 @@ import Image from "next/image";
 import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import {
   DEFAULT_LANDING_CONFIG,
-  fetchLandingConfig,
   getStoredLandingConfigSnapshot,
 } from "@/lib/adminLandingService";
 import { readTenantBrandSnapshot } from "@/lib/tenantBrandSnapshot";
@@ -62,29 +61,6 @@ export default function Loading() {
     if (storedConfig?.loadingPhrases?.length) {
       setPhrases(storedConfig.loadingPhrases);
     }
-
-    let mounted = true;
-    if (!nextBrand.tenantId) {
-      return () => {
-        mounted = false;
-      };
-    }
-
-    void fetchLandingConfig({
-      tenantId: nextBrand.tenantId,
-      fallbackConfig: DEFAULT_LANDING_CONFIG,
-    })
-      .then((config) => {
-        if (!mounted || !config.loadingPhrases.length) return;
-        setPhrases(config.loadingPhrases);
-      })
-      .catch(() => {
-        // mantem o fallback em memoria/localStorage
-      });
-
-    return () => {
-      mounted = false;
-    };
   }, []);
 
   useEffect(() => {

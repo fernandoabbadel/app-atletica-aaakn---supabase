@@ -321,6 +321,7 @@ async function saveLandingConfigRow(
   const { error } = await supabase.from(SITE_CONFIG_TABLE).upsert(
     {
       id: buildLandingRowId(tenantId),
+      tenant_id: tenantId?.trim() || null,
       data: normalized,
       updated_at: nowIso,
     },

@@ -10,13 +10,13 @@ const GLOBAL_ONLY_PREFIXES = [
   "/master",
   "/recuperar-senha",
   "/admin/master",
-  "/admin/landing",
   "/auth",
 ];
 
 const AUTO_SCOPE_PREFIXES = [
   "/dashboard",
   "/admin",
+  "/landing",
   "/perfil",
   "/eventos",
   "/loja",
@@ -69,6 +69,7 @@ const RESERVED_ROOT_SEGMENTS = new Set([
   "guia",
   "gym",
   "historico",
+  "landing",
   "ligas",
   "ligas_usc",
   "ligas_unitau",

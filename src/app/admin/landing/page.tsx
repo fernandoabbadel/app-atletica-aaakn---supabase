@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useEffect } from "react";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { 
   Save, LayoutTemplate, Palette, Users, 
   MessageSquare, MapPin, Share2, Plus, Trash2,
@@ -26,7 +26,8 @@ import {
 } from "@/lib/adminLandingService";
 import { logActivity } from "@/lib/logger"; 
 import { isPermissionError } from "@/lib/backendErrors";
-import { parseTenantScopedPath } from "@/lib/tenantRouting";
+import { isPlatformMaster } from "@/lib/roles";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import {
   EMAIL_MAX_LENGTH,
   hasValidPhoneLength,
@@ -82,20 +83,27 @@ const MASTER_INITIAL_CONFIG: LandingConfig = {
 };
 
 export default function AdminLandingPage() {
+  const router = useRouter();
   const pathname = usePathname() || "/admin/landing";
   const { user } = useAuth();
   const {
     tenantId: activeTenantId,
     tenantSigla,
     tenantName,
+    tenantSlug,
     tenantLogoUrl,
     palette,
+    loading: tenantThemeLoading,
   } = useTenantTheme();
   const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const currentPath = parseTenantScopedPath(pathname).scopedPath;
+  const pathInfo = useMemo(() => parseTenantScopedPath(pathname), [pathname]);
+  const currentPath = pathInfo.scopedPath;
+  const routeTenantSlug = pathInfo.tenantSlug.trim().toLowerCase();
+  const normalizedTenantSlug = tenantSlug.trim().toLowerCase();
   const isMasterScope = currentPath === "/master/landing";
+  const isPlatformMasterUser = isPlatformMaster(user);
   const fallbackConfig = useMemo(
     () => (isMasterScope ? MASTER_INITIAL_CONFIG : TENANT_INITIAL_CONFIG),
     [isMasterScope]
@@ -105,6 +113,30 @@ export default function AdminLandingPage() {
   const contextLabel = isMasterScope
     ? "USC • Landing global"
     : `${tenantSigla || tenantName || "Tenant atual"} • Landing do tenant`;
+
+  useEffect(() => {
+    if (tenantThemeLoading) return;
+    if (isMasterScope || routeTenantSlug) return;
+
+    if (normalizedTenantSlug) {
+      router.replace(withTenantSlug(normalizedTenantSlug, "/admin/landing"));
+      return;
+    }
+
+    if (isPlatformMasterUser) {
+      router.replace("/master/landing");
+      return;
+    }
+
+    router.replace("/admin");
+  }, [
+    isMasterScope,
+    isPlatformMasterUser,
+    normalizedTenantSlug,
+    routeTenantSlug,
+    router,
+    tenantThemeLoading,
+  ]);
 
   // CARREGAR DADOS (COM BLINDAGEM ANTI-CRASH)
   useEffect(() => {
@@ -149,6 +181,21 @@ export default function AdminLandingPage() {
     setSaving(true);
     try {
       await saveLandingConfig(config, { tenantId: targetTenantId });
+
+      const refreshParams = new URLSearchParams({ refresh: "1" });
+      if (isMasterScope) {
+        refreshParams.set("scope", "platform");
+      } else if (tenantSlug.trim()) {
+        refreshParams.set("tenant", tenantSlug.trim().toLowerCase());
+      }
+
+      try {
+        await fetch(`/api/public/landing?${refreshParams.toString()}`, {
+          cache: "no-store",
+        });
+      } catch (refreshError: unknown) {
+        console.warn("Falha ao atualizar cache publico da landing.", refreshError);
+      }
 
       if (user) {
         await logActivity(
@@ -312,7 +359,7 @@ export default function AdminLandingPage() {
           </h2>
           <p className="mt-1 text-xs text-zinc-400">
             {isMasterScope
-              ? "Essa identidade aparece na landing publica de localhost:3000."
+              ? "Essa identidade aparece na landing publica da plataforma."
               : "Essa identidade aparece na landing publica do tenant."}
           </p>
         </div>

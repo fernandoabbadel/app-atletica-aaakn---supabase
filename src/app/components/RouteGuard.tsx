@@ -104,7 +104,8 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   );
   const currentPath = routePathInfo.scopedPath;
   const routeTenantSlug = routePathInfo.tenantSlug;
-  const isTenantLandingRoot = routeTenantSlug.length > 0 && currentPath === "/";
+  const isTenantLandingPublicPath =
+    routeTenantSlug.length > 0 && (currentPath === "/" || currentPath === "/landing");
   const tenantNotFoundPath = routeTenantSlug
     ? withTenantSlug(routeTenantSlug, "/nao-encontrado")
     : activeTenantSlug.trim()
@@ -283,26 +284,28 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       };
     }
 
-    setRulesLoading(true);
+    let hasCachedRules = false;
 
-    const fetchRules = async () => {
-      let hasCachedRules = false;
-
-      const cachedRules = localStorage.getItem(permissionStorageKey);
-      if (cachedRules) {
-        try {
-          const parsed = normalizePermissionMatrix(JSON.parse(cachedRules));
-          if (parsed && isMounted) {
-            hasCachedRules = true;
-            setPermissionMatrix(parsed);
-            setRulesLoading(false);
-          }
-        } catch {
+    const cachedRules = localStorage.getItem(permissionStorageKey);
+    if (cachedRules) {
+      try {
+        const parsed = normalizePermissionMatrix(JSON.parse(cachedRules));
+        if (parsed) {
+          hasCachedRules = true;
+          setPermissionMatrix(parsed);
+        } else {
           localStorage.removeItem(permissionStorageKey);
           clearLegacyPermissionMatrixStorage();
         }
+      } catch {
+        localStorage.removeItem(permissionStorageKey);
+        clearLegacyPermissionMatrixStorage();
       }
+    }
 
+    setRulesLoading(!hasCachedRules);
+
+    const fetchRules = async () => {
       try {
         const liveRules = currentPath.startsWith("/admin")
           ? await fetchEffectivePermissionMatrix({
@@ -424,7 +427,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
           : "/sem-permissao";
 
     const isPublic =
-      isTenantLandingRoot ||
+      isTenantLandingPublicPath ||
       PUBLIC_PATHS.some(
         (path) => currentPath === path || currentPath.startsWith("/public")
       );
@@ -670,7 +673,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     routeTenantSlug,
     rawCurrentPath,
     currentPath,
-    isTenantLandingRoot,
+    isTenantLandingPublicPath,
     activeTenantSlug,
     authenticatedTenantId,
     tenantNotFoundPath,
@@ -680,7 +683,8 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     setAuthorizedSafe,
   ]);
 
-  const isPublicRenderCheck = isTenantLandingRoot || PUBLIC_PATHS.includes(currentPath);
+  const isPublicRenderCheck =
+    isTenantLandingPublicPath || PUBLIC_PATHS.includes(currentPath);
 
   if (isPublicRenderCheck) return <>{children}</>;
   if (authLoading || rulesLoading || modulesLoading || tenantThemeLoading || routeTenantLoading) return <SharkLoader />;

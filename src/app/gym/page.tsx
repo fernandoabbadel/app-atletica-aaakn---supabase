@@ -8,6 +8,7 @@ import {
   Camera, Heart, Tag, Info, X
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import { fetchGymFeed, toggleGymPostLike } from "../../lib/gymService";
@@ -44,6 +45,7 @@ const ACTIVE_CHALLENGE = {
 export default function GymPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
+  const router = useRouter();
   
   const [activeView, setActiveView] = useState<"feed" | "ranking" | "stats">("feed");
   const [posts, setPosts] = useState<Post[]>([]);
@@ -76,7 +78,7 @@ export default function GymPage() {
       if (activeView !== "feed") {
           setActiveView("feed");
       } else {
-          window.location.href = "/dashboard"; 
+          router.push("/dashboard");
       }
   };
 

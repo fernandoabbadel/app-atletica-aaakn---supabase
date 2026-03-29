@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
+import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
   PLATFORM_BRAND_NAME,
@@ -212,9 +213,11 @@ export default function PublicLandingPage({
 }: PublicLandingPageProps) {
   const router = useRouter();
   const { user, loginAsGuest, loginGoogle, loading: authLoading } = useAuth();
+  const { tenantSlug: activeTenantSlug } = useTenantTheme();
   const { addToast } = useToast();
 
   const tenantSlug = tenantSlugOverride.trim().toLowerCase();
+  const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
   const isTenantLanding = tenantSlug.length > 0;
 
   const [config, setConfig] = useState<LandingConfig>(DEFAULT_CONFIG);
@@ -244,23 +247,37 @@ export default function PublicLandingPage({
     if (isPlatformMaster(user)) {
       return "/master";
     }
+    if (normalizedActiveTenantSlug) {
+      return withTenantSlug(normalizedActiveTenantSlug, "/");
+    }
     return "/dashboard";
-  }, [isTenantLanding, tenantSlug, user]);
+  }, [isTenantLanding, normalizedActiveTenantSlug, tenantSlug, user]);
 
-  const adminPath = useMemo(
-    () => (isTenantLanding ? withTenantSlug(tenantSlug, "/admin") : "/admin"),
-    [isTenantLanding, tenantSlug]
-  );
+  const adminTenantSlug = isTenantLanding ? tenantSlug : normalizedActiveTenantSlug;
+  const adminPath = useMemo(() => {
+    if (adminTenantSlug) {
+      return withTenantSlug(adminTenantSlug, "/admin");
+    }
+    return isPlatformMaster(user) ? "/master" : "/admin";
+  }, [adminTenantSlug, user]);
+
+  const authenticatedActionLabel = useMemo(() => {
+    if (isTenantLanding) {
+      return user?.isAnonymous ? "Abrir como visitante" : "Abrir dashboard";
+    }
+    if (user?.isAnonymous) {
+      return "Abrir como visitante";
+    }
+    if (isPlatformMaster(user)) {
+      return "Abrir painel master";
+    }
+    if (normalizedActiveTenantSlug) {
+      return "Abrir minha atletica";
+    }
+    return "Abrir dashboard";
+  }, [isTenantLanding, normalizedActiveTenantSlug, user]);
 
   const canOpenAdmin = Boolean(user && !user.isAnonymous && hasAdminPanelAccess(user));
-
-  useEffect(() => {
-    if (!isTenantLanding) return;
-    if (authLoading) return;
-    if (!user || user.isAnonymous) return;
-
-    router.replace(authenticatedPath);
-  }, [authLoading, authenticatedPath, isTenantLanding, router, user]);
 
   useEffect(() => {
     let mounted = true;
@@ -274,7 +291,7 @@ export default function PublicLandingPage({
 
         try {
           const response = await fetch(`/api/public/landing${search}`, {
-            cache: "force-cache",
+            cache: "no-store",
           });
           if (!response.ok) {
             throw new Error(`Falha ao carregar landing: ${response.status}`);
@@ -553,11 +570,7 @@ export default function PublicLandingPage({
                   className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-black text-zinc-900 transition-all hover:bg-zinc-200"
                 >
                   <LayoutDashboard size={18} />
-                  {isTenantLanding
-                    ? user.isAnonymous
-                      ? "Abrir como visitante"
-                      : "Abrir dashboard"
-                    : "Escolher atletica"}
+                  {authenticatedActionLabel}
                 </button>
                 {canOpenAdmin && (
                   <button

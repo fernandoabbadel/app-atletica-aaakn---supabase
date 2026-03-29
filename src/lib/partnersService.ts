@@ -505,6 +505,14 @@ const isIndexRequiredError = (error: unknown): boolean => {
   return false;
 };
 
+const parseOffsetCursor = (cursorId?: string | null): number => {
+  const parsed = Number(cursorId ?? "");
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+};
+
+const nextOffsetCursor = (offset: number, pageSize: number, hasMore: boolean): string | null =>
+  hasMore ? String(offset + pageSize) : null;
+
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
   if (!code) return true;
@@ -792,9 +800,55 @@ export async function fetchAdminPartnersPage(options?: {
     }
 
     const supabase = getSupabaseClient();
-    const windowLimit = Math.min(MAX_PARTNERS_RESULTS, Math.max(pageSize * 12, 120));
     const selectColumns = resolveAdminPartnersPageSelectColumns(view);
+    const offset = parseOffsetCursor(cursorId);
 
+    const runPagedQuery = async () => {
+      let q = supabase
+        .from("parceiros")
+        .select(selectColumns)
+        .eq("tenant_id", scopedTenantId)
+        .order("nome", { ascending: true })
+        .range(offset, offset + pageSize);
+      if (statusFilter !== "all") {
+        q = q.eq("status", statusFilter);
+      }
+      return q;
+    };
+
+    try {
+      const { data, error } = await runPagedQuery();
+      if (error) {
+        if (isMissingTenantIdColumn(error)) {
+          return { partners: [], hasMore: false, nextCursor: null };
+        }
+        throw error;
+      }
+
+      const rows = (((data as unknown as Record<string, unknown>[] | null) ?? [])
+        .map((row) => normalizePartner(asString((row as Record<string, unknown>).id), row))
+        .filter((row): row is PartnerRecord => row !== null));
+      const hasMore = rows.length > pageSize;
+      const result: AdminPartnersPageResult = {
+        partners: rows.slice(0, pageSize),
+        hasMore,
+        nextCursor: nextOffsetCursor(offset, pageSize, hasMore),
+      };
+      setMapCacheValue(adminPartnersPageCache, cacheKey, result);
+      return result;
+    } catch (error: unknown) {
+      if (isMissingTenantIdColumn(error)) {
+        return { partners: [], hasMore: false, nextCursor: null };
+      }
+      if (!isIndexRequiredError(error)) {
+        if (typeof (error as { message?: unknown })?.message === "string") {
+          throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+        }
+        throw error;
+      }
+    }
+
+    const windowLimit = Math.min(MAX_PARTNERS_RESULTS, Math.max(pageSize * 12, 120));
     let q = supabase
       .from("parceiros")
       .select(selectColumns)
@@ -814,14 +868,9 @@ export async function fetchAdminPartnersPage(options?: {
     }
 
     const rawRows = (data as unknown as Record<string, unknown>[] | null) ?? [];
-    let rows = rawRows
+    const rows = rawRows
       .map((row) => normalizePartner(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is PartnerRecord => row !== null);
-
-    if (statusFilter !== "all") {
-      rows = rows.filter((row) => row.status === statusFilter);
-    }
-
     const cursorIndex = cursorId ? rows.findIndex((row) => row.id === cursorId) : -1;
     const slicedRows = cursorIndex >= 0 ? rows.slice(cursorIndex + 1) : rows;
     const pageRows = slicedRows.slice(0, pageSize);
@@ -872,9 +921,58 @@ export async function fetchAdminPartnerScansPage(options?: {
 
   const requestPromise = (async () => {
     const supabase = getSupabaseClient();
+    const offset = parseOffsetCursor(cursorId);
+
+    const runPagedQuery = async (orderColumn: "timestamp" | "data" | null) => {
+      let q = supabase
+        .from("scans")
+        .select(SCANS_SELECT_COLUMNS)
+        .eq("tenant_id", scopedTenantId)
+        .range(offset, offset + pageSize);
+      if (partnerId) {
+        q = q.eq("empresaId", partnerId);
+      }
+      if (orderColumn) {
+        q = q.order(orderColumn, { ascending: false });
+      }
+      return q;
+    };
+
+    try {
+      const { data: orderedRows, error } = await runPagedQuery("timestamp");
+      if (error) {
+        if (isMissingTenantIdColumn(error)) {
+          return { scans: [], hasMore: false, nextCursor: null };
+        }
+        throw error;
+      }
+
+      const rows = (((orderedRows as unknown as Record<string, unknown>[] | null) ?? [])
+        .map((row) => normalizeScan(asString((row as Record<string, unknown>).id), row))
+        .filter((row): row is PartnerScanRecord => row !== null));
+      const hasMore = rows.length > pageSize;
+      const result: AdminPartnerScansPageResult = {
+        scans: rows.slice(0, pageSize),
+        hasMore,
+        nextCursor: nextOffsetCursor(offset, pageSize, hasMore),
+      };
+      setMapCacheValue(adminScansPageCache, cacheKey, result);
+      return result;
+    } catch (error: unknown) {
+      if (isMissingTenantIdColumn(error)) {
+        return { scans: [], hasMore: false, nextCursor: null };
+      }
+      if (!isIndexRequiredError(error)) {
+        if (typeof (error as { message?: unknown })?.message === "string") {
+          throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+        }
+        throw error;
+      }
+    }
+
     const windowLimit = Math.min(MAX_SCANS_RESULTS, Math.max(pageSize * 12, 120));
 
-    const runQuery = async (orderColumn: "timestamp" | "data" | null) => {
+    const runFallbackWindowQuery = async (orderColumn: "timestamp" | "data" | null) => {
       let q = supabase
         .from("scans")
         .select(SCANS_SELECT_COLUMNS)
@@ -891,7 +989,7 @@ export async function fetchAdminPartnerScansPage(options?: {
 
     let data: Record<string, unknown>[] = [];
     try {
-      const { data: orderedRows, error } = await runQuery("timestamp");
+      const { data: orderedRows, error } = await runFallbackWindowQuery("timestamp");
       if (error) {
         if (isMissingTenantIdColumn(error)) {
           return { scans: [], hasMore: false, nextCursor: null };
@@ -910,12 +1008,12 @@ export async function fetchAdminPartnerScansPage(options?: {
         throw error;
       }
 
-      const { data: fallbackRows, error: fallbackError } = await runQuery("data");
+      const { data: fallbackRows, error: fallbackError } = await runFallbackWindowQuery("data");
       if (fallbackError) {
         if (isMissingTenantIdColumn(fallbackError)) {
           return { scans: [], hasMore: false, nextCursor: null };
         }
-        const { data: noOrderRows, error: noOrderError } = await runQuery(null);
+        const { data: noOrderRows, error: noOrderError } = await runFallbackWindowQuery(null);
         if (noOrderError) {
           if (isMissingTenantIdColumn(noOrderError)) {
             return { scans: [], hasMore: false, nextCursor: null };

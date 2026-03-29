@@ -84,11 +84,7 @@ const shouldFallbackToClientWrites = (error: unknown): boolean => {
 };
 
 const shouldUseCallable = (): boolean => {
-  if (typeof window === "undefined") return true;
-  if (process.env.NEXT_PUBLIC_FORCE_CALLABLES === "true") return true;
-
-  const host = window.location.hostname.toLowerCase();
-  return host !== "localhost" && host !== "127.0.0.1";
+  return process.env.NEXT_PUBLIC_FORCE_CALLABLES === "true";
 };
 
 const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
@@ -326,33 +322,67 @@ const normalizeActivityLogRow = (
   };
 };
 
+const parseOffsetCursor = (cursorId?: string | null): number => {
+  const parsed = Number(cursorId ?? "");
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+};
+
+const nextOffsetCursor = (offset: number, pageSize: number, hasMore: boolean): string | null =>
+  hasMore ? String(offset + pageSize) : null;
+
 export async function fetchAdminActivityLogsPage(options?: {
   pageSize?: number;
   cursorId?: string | null;
   forceRefresh?: boolean;
+  tenantId?: string | null;
 }): Promise<AdminActivityLogsPageResult> {
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_ACTIVITY_LOG_RESULTS);
-  const cursorId = options?.cursorId?.trim() || "";
-  const forceRefresh = options?.forceRefresh ?? false;
+  const offset = parseOffsetCursor(options?.cursorId);
+  const scopedTenantId = resolveAdminSecurityTenantId(options?.tenantId);
+  const supabase = getSupabaseClient();
 
-  const allLogs = await fetchAdminActivityLogs({
-    maxResults: MAX_ACTIVITY_LOG_RESULTS,
-    forceRefresh,
-  });
+  const runQuery = async (withOrder: boolean) => {
+    let query = supabase
+      .from("activity_logs")
+      .select("id,userId,userName,action,resource,details,timestamp")
+      .range(offset, offset + pageSize);
 
-  let startIndex = 0;
-  if (cursorId) {
-    const cursorIndex = allLogs.findIndex((row) => row.id === cursorId);
-    if (cursorIndex >= 0) {
-      startIndex = cursorIndex + 1;
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
     }
+
+    if (withOrder) {
+      query = query.order("timestamp", { ascending: false });
+    }
+    return query;
+  };
+
+  let rows: AdminActivityLogRecord[] = [];
+  try {
+    const { data, error } = await runQuery(true);
+    if (error) throw error;
+    rows = (data ?? [])
+      .map((row) => normalizeActivityLogRow(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is AdminActivityLogRecord => row !== null);
+  } catch (error: unknown) {
+    if (!asString(extractMissingSchemaColumn(error))) {
+      throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+    }
+
+    const { data, error: fallbackError } = await runQuery(false);
+    if (fallbackError) throwSupabaseError(fallbackError);
+    rows = (data ?? [])
+      .map((row) => normalizeActivityLogRow(asString((row as Record<string, unknown>).id), row))
+      .filter((row): row is AdminActivityLogRecord => row !== null)
+      .sort((left, right) => toMillis(right.timestamp) - toMillis(left.timestamp));
   }
 
-  const logs = allLogs.slice(startIndex, startIndex + pageSize);
-  const hasMore = startIndex + pageSize < allLogs.length;
-  const nextCursor = logs.length > 0 ? logs[logs.length - 1].id : null;
-
-  return { logs, nextCursor, hasMore };
+  const hasMore = rows.length > pageSize;
+  return {
+    logs: rows.slice(0, pageSize),
+    hasMore,
+    nextCursor: nextOffsetCursor(offset, pageSize, hasMore),
+  };
 }
 
 export async function fetchAdminActivityLogs(options?: {
@@ -376,16 +406,19 @@ export async function fetchAdminActivityLogs(options?: {
   const supabase = getSupabaseClient();
   let rowsResult: AdminActivityLogRecord[] = [];
 
-  const primary = await supabase
+  let primaryQuery = supabase
     .from("activity_logs")
     .select("id,userId,userName,action,resource,details,timestamp")
-    .eq("tenant_id", scopedTenantId || "")
     .order("timestamp", { ascending: false })
     .limit(maxResults);
+  if (scopedTenantId) {
+    primaryQuery = primaryQuery.eq("tenant_id", scopedTenantId);
+  }
+  const primary = await primaryQuery;
 
   if (!primary.error) {
     rowsResult = (primary.data ?? [])
-      .map((row) => normalizeActivityLogRow(asString((row as Record<string, unknown>).id), row))
+      .map((row: unknown) => normalizeActivityLogRow(asString((row as Record<string, unknown>).id), row))
       .filter((row): row is AdminActivityLogRecord => row !== null);
   } else if (asString(extractMissingSchemaColumn(primary.error))) {
     let fallback = supabase

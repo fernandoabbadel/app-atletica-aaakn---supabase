@@ -264,11 +264,7 @@ const setCached = (value: SharkroundAppConfig, tenantId?: string | null): void =
 };
 
 const shouldUseCallable = (): boolean => {
-  if (typeof window === "undefined") return true;
-  if (process.env.NEXT_PUBLIC_FORCE_CALLABLES === "true") return true;
-
-  const host = window.location.hostname.toLowerCase();
-  return host !== "localhost" && host !== "127.0.0.1";
+  return process.env.NEXT_PUBLIC_FORCE_CALLABLES === "true";
 };
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {

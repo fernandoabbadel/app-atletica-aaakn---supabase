@@ -32,6 +32,7 @@ const ADMIN_USERS_DELETE_CALLABLE = "adminUsersDelete";
 const usersListCache = new Map<string, CacheEntry<AdminUserListItem[]>>();
 const userProfileCache = new Map<string, CacheEntry<AdminUserProfileRecord | null>>();
 const userDossierCache = new Map<string, CacheEntry<AdminUserDossier | null>>();
+const tenantUserIdsCache = new Map<string, CacheEntry<string[]>>();
 const usersPageInflight = new Map<string, Promise<AdminUsersPageResult>>();
 const userProfileInflight = new Map<string, Promise<AdminUserProfileRecord | null>>();
 const userDossierInflight = new Map<string, Promise<AdminUserDossier | null>>();
@@ -107,11 +108,7 @@ const shouldFallbackToClientWrites = (error: unknown): boolean => {
 };
 
 const shouldUseCallable = (): boolean => {
-  if (typeof window === "undefined") return true;
-  if (process.env.NEXT_PUBLIC_FORCE_CALLABLES === "true") return true;
-
-  const host = window.location.hostname.toLowerCase();
-  return host !== "localhost" && host !== "127.0.0.1";
+  return process.env.NEXT_PUBLIC_FORCE_CALLABLES === "true";
 };
 
 const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
@@ -189,6 +186,14 @@ const rowIdFromUnknown = (row: unknown, fallback = ""): string => {
   return asString(obj.uid, asString(obj.id, fallback));
 };
 
+const parseOffsetCursor = (cursorId?: string | null): number => {
+  const parsed = Number(cursorId ?? "");
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+};
+
+const nextOffsetCursor = (offset: number, pageSize: number, hasMore: boolean): string | null =>
+  hasMore ? String(offset + pageSize) : null;
+
 async function callCallableWithFallback<TReq, TRes>(
   callableName: string,
   payload: TReq,
@@ -212,10 +217,31 @@ export const clearAdminUsersCache = (): void => {
   usersListCache.clear();
   userProfileCache.clear();
   userDossierCache.clear();
+  tenantUserIdsCache.clear();
   usersPageInflight.clear();
   userProfileInflight.clear();
   userDossierInflight.clear();
 };
+
+const USER_LIST_SELECT_COLUMNS = [
+  "uid",
+  "nome",
+  "email",
+  "telefone",
+  "turma",
+  "matricula",
+  "status",
+  "tier",
+  "foto",
+  "xp",
+  "role",
+  "tenant_id",
+  "tenant_role",
+  "tenant_status",
+  "extra",
+];
+
+const TENANT_DIRECTORY_STATUSES = ["approved", "pending", "disabled"];
 
 const USER_RELATED_TABLE_SELECT_COLUMNS: Record<string, string[]> = {
   posts: ["id", "userId", "texto", "likes", "comentarios", "createdAt"],
@@ -560,6 +586,58 @@ const normalizeDirectoryAdminUserProfile = (
   };
 };
 
+const normalizeTenantScopedAdminUserListItem = (
+  tenantId: string,
+  raw: unknown,
+  membership?: { role?: unknown } | null
+): AdminUserListItem | null => {
+  const base = normalizeAdminUserListItem(rowIdFromUnknown(raw), raw);
+  if (!base) return null;
+
+  const membershipRole = asString(membership?.role).trim();
+  return {
+    ...base,
+    role: membershipRole || base.role,
+    tenantId,
+  };
+};
+
+const fetchTenantUserIds = async (
+  tenantId: string,
+  forceRefresh: boolean
+): Promise<string[]> => {
+  const cacheKey = tenantId.trim();
+  if (!cacheKey) return [];
+
+  if (!forceRefresh) {
+    const cached = getCachedValue(tenantUserIdsCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const supabase = getSupabaseClient();
+  let request = supabase
+    .from("tenant_memberships")
+    .select("user_id")
+    .eq("tenant_id", cacheKey)
+    .limit(MAX_USERS_RESULTS);
+
+  request = request.in("status", TENANT_DIRECTORY_STATUSES);
+
+  const { data, error } = await request;
+  if (error) throwSupabaseError(error);
+
+  const userIds = Array.from(
+    new Set(
+      (data ?? [])
+        .map((row) => asString(asObject(row)?.user_id).trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+
+  setCachedValue(tenantUserIdsCache, cacheKey, userIds);
+  return userIds;
+};
+
 const normalizePost = (id: string, raw: unknown): AdminUserPostRecord | null => {
   const data = asObject(raw);
   if (!data) return null;
@@ -651,23 +729,7 @@ export async function fetchAdminUsersList(options?: {
   }
 
   const supabase = getSupabaseClient();
-  let selectColumns = [
-    "uid",
-    "nome",
-    "email",
-    "telefone",
-    "turma",
-    "matricula",
-    "status",
-    "tier",
-    "foto",
-    "xp",
-    "role",
-    "tenant_id",
-    "tenant_role",
-    "tenant_status",
-    "extra",
-  ];
+  let selectColumns = [...USER_LIST_SELECT_COLUMNS];
   let rows: AdminUserListItem[] = [];
 
   while (selectColumns.length > 0) {
@@ -712,10 +774,10 @@ export async function fetchAdminUsersPage(options?: {
   tenantId?: string | null;
 }): Promise<AdminUsersPageResult> {
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_USERS_RESULTS);
-  const cursorId = options?.cursorId?.trim() || "";
+  const offset = parseOffsetCursor(options?.cursorId);
   const forceRefresh = options?.forceRefresh ?? false;
   const tenantId = options?.tenantId?.trim() || "";
-  const inflightKey = `${pageSize}:${cursorId || "first"}:${tenantId || "all"}`;
+  const inflightKey = `${pageSize}:${offset}:${tenantId || "all"}`;
 
   if (forceRefresh) {
     clearAdminUsersCache();
@@ -725,24 +787,117 @@ export async function fetchAdminUsersPage(options?: {
   }
 
   const requestPromise = (async () => {
-    const allUsers = await fetchAdminUsersList({
-      maxResults: MAX_USERS_RESULTS,
-      forceRefresh,
-      tenantId,
-    });
+    const supabase = getSupabaseClient();
 
-    let startIndex = 0;
-    if (cursorId) {
-      const cursorIndex = allUsers.findIndex((row) => row.id === cursorId);
-      if (cursorIndex >= 0) {
-        startIndex = cursorIndex + 1;
+    if (tenantId) {
+      const candidateUserIds = await fetchTenantUserIds(tenantId, forceRefresh);
+      if (candidateUserIds.length === 0) {
+        return { users: [], nextCursor: null, hasMore: false };
       }
+
+      let selectColumns = [...USER_LIST_SELECT_COLUMNS];
+      let pageRows: AdminUserListItem[] = [];
+
+      while (selectColumns.length > 0) {
+        const request = supabase
+          .from("users")
+          .select(selectColumns.join(","))
+          .in("uid", candidateUserIds)
+          .order("nome", { ascending: true })
+          .order("uid", { ascending: true })
+          .range(offset, offset + pageSize);
+
+        const { data, error } = await request;
+        if (!error) {
+          const rawRows = (data ?? []) as unknown as Record<string, unknown>[];
+          const pageUserIds = rawRows
+            .map((row) => rowIdFromUnknown(row))
+            .filter((value) => value.length > 0);
+
+          if (pageUserIds.length === 0) {
+            return { users: [], nextCursor: null, hasMore: false };
+          }
+
+          const { data: membershipRows, error: membershipError } = await supabase
+            .from("tenant_memberships")
+            .select("user_id,role")
+            .eq("tenant_id", tenantId)
+            .in("status", TENANT_DIRECTORY_STATUSES)
+            .in("user_id", pageUserIds)
+            .limit(pageUserIds.length);
+          if (membershipError) throwSupabaseError(membershipError);
+
+          const membershipMap = new Map<string, { role?: unknown }>();
+          (membershipRows ?? []).forEach((row) => {
+            const userId = asString(asObject(row)?.user_id).trim();
+            if (!userId) return;
+            membershipMap.set(userId, { role: asObject(row)?.role });
+          });
+
+          pageRows = rawRows
+            .map((row) =>
+              normalizeTenantScopedAdminUserListItem(
+                tenantId,
+                row,
+                membershipMap.get(rowIdFromUnknown(row)) ?? null
+              )
+            )
+            .filter((row): row is AdminUserListItem => row !== null);
+          break;
+        }
+
+        const missingColumn = asString(extractMissingSchemaColumn(error));
+        if (!missingColumn) throwSupabaseError(error);
+        const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+        if (!nextColumns.length) throwSupabaseError(error);
+        selectColumns = nextColumns;
+      }
+
+      const hasMore = pageRows.length > pageSize;
+      return {
+        users: pageRows.slice(0, pageSize),
+        hasMore,
+        nextCursor: nextOffsetCursor(offset, pageSize, hasMore),
+      };
     }
 
-    const users = allUsers.slice(startIndex, startIndex + pageSize);
-    const hasMore = startIndex + pageSize < allUsers.length;
-    const nextCursor = users.length > 0 ? users[users.length - 1].id : null;
-    return { users, nextCursor, hasMore };
+    let selectColumns = [...USER_LIST_SELECT_COLUMNS];
+    let pageRows: AdminUserListItem[] = [];
+
+    while (selectColumns.length > 0) {
+      const request = supabase
+        .from("users")
+        .select(selectColumns.join(","))
+        .order("nome", { ascending: true })
+        .order("uid", { ascending: true })
+        .range(offset, offset + pageSize);
+
+      const { data, error } = await request;
+      if (!error) {
+        pageRows = (data ?? [])
+          .map((row) =>
+            normalizeAdminUserListItem(
+              rowIdFromUnknown(row),
+              row
+            )
+          )
+          .filter((row): row is AdminUserListItem => row !== null);
+        break;
+      }
+
+      const missingColumn = asString(extractMissingSchemaColumn(error));
+      if (!missingColumn) throwSupabaseError(error);
+      const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+      if (!nextColumns.length) throwSupabaseError(error);
+      selectColumns = nextColumns;
+    }
+
+    const hasMore = pageRows.length > pageSize;
+    return {
+      users: pageRows.slice(0, pageSize),
+      hasMore,
+      nextCursor: nextOffsetCursor(offset, pageSize, hasMore),
+    };
   })();
 
   usersPageInflight.set(inflightKey, requestPromise);

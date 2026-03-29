@@ -74,8 +74,8 @@ export default function LoginPageClient() {
   const isApprovedTenant =
     normalizedTenantId.length > 0 &&
     (normalizedTenantStatus === "" || normalizedTenantStatus === "approved");
-  const tenantScopedDashboardPath = normalizedActiveTenantSlug
-    ? withTenantSlug(normalizedActiveTenantSlug, "/dashboard")
+  const tenantScopedLandingPath = normalizedActiveTenantSlug
+    ? withTenantSlug(normalizedActiveTenantSlug, "/")
     : "/dashboard";
   const tenantScopedPendingPath = normalizedActiveTenantSlug
     ? withTenantSlug(normalizedActiveTenantSlug, "/aguardando-aprovacao")
@@ -115,7 +115,7 @@ export default function LoginPageClient() {
         : isPendingTenant
           ? tenantScopedPendingPath
           : isApprovedTenant
-            ? tenantScopedDashboardPath
+            ? tenantScopedLandingPath
             : tenantScopedCadastroPath;
 
     const candidateTargets = [
@@ -151,7 +151,7 @@ export default function LoginPageClient() {
     isPlatformMasterUser,
     normalizedActiveTenantSlug,
     tenantScopedCadastroPath,
-    tenantScopedDashboardPath,
+    tenantScopedLandingPath,
     tenantScopedPendingPath,
     user,
   ]);
