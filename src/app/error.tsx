@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { AlertTriangle, ArrowLeft, RefreshCcw } from "lucide-react";
@@ -14,6 +14,21 @@ type ErrorPageProps = {
 
 export default function ErrorPage({ error, reset }: ErrorPageProps) {
   const { tenantLogoUrl, tenantName } = useTenantTheme();
+  const logoSrc = tenantLogoUrl || "/logo.png";
+  const isChunkLoadError = useMemo(
+    () => /chunkloaderror|loading chunk/i.test(error.message || ""),
+    [error.message]
+  );
+  const isRemoteLogo = /^https?:\/\//i.test(logoSrc);
+
+  const handleRetry = useCallback(() => {
+    if (isChunkLoadError && typeof window !== "undefined") {
+      window.location.reload();
+      return;
+    }
+
+    reset();
+  }, [isChunkLoadError, reset]);
 
   useEffect(() => {
     console.error("App route error:", error);
@@ -27,12 +42,13 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
         <div className="relative w-40 h-40 rounded-full border-4 border-orange-500/40 overflow-hidden bg-black shadow-[0_0_70px_rgba(251,146,60,0.25)] mb-8 flex items-center justify-center">
           <div className="relative z-20 w-24 h-24 flex items-center justify-center">
             <Image
-              src={tenantLogoUrl || "/logo.png"}
+              src={logoSrc}
               alt={`Logo ${tenantName || "Tenant"}`}
               fill
               sizes="96px"
               className="object-contain drop-shadow-2xl"
               priority
+              unoptimized={isRemoteLogo}
             />
           </div>
 
@@ -47,15 +63,17 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
           <AlertTriangle size={24} /> Erro no App
         </h1>
         <p className="text-zinc-300 text-sm mb-8">
-          A tela encontrou um erro inesperado. Tente novamente.
+          {isChunkLoadError
+            ? "Os arquivos da rota demoraram para carregar. Vamos tentar recarregar a aplicacao."
+            : "A tela encontrou um erro inesperado. Tente novamente."}
         </p>
 
         <div className="flex flex-wrap items-center justify-center gap-3">
           <button
-            onClick={() => reset()}
+            onClick={handleRetry}
             className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-black font-black text-xs uppercase transition"
           >
-            <RefreshCcw size={16} /> Tentar de novo
+            <RefreshCcw size={16} /> {isChunkLoadError ? "Recarregar app" : "Tentar de novo"}
           </button>
 
           <Link

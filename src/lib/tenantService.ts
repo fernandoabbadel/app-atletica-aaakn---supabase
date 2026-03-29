@@ -567,6 +567,99 @@ const shouldFallbackMissingColumns = (
   return columns.some((column) => message.includes(column.toLowerCase()));
 };
 
+const getSupabaseErrorText = (error: unknown): string => {
+  const raw = asObject(error);
+  return [
+    error instanceof Error ? error.message : "",
+    asString(raw?.message),
+    asString(raw?.details),
+    asString(raw?.hint),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" ")
+    .toLowerCase();
+};
+
+const shouldFallbackDirectInviteInsert = (
+  error: unknown,
+  functionName: string
+): boolean => {
+  const message = getSupabaseErrorText(error);
+  return (
+    isRpcFunctionSignatureError(error, functionName) ||
+    (message.includes("gen_random_bytes") && message.includes("does not exist"))
+  );
+};
+
+const buildLocalInviteToken = (): string => {
+  const randomPart =
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+      ? globalThis.crypto.randomUUID().replace(/-/g, "")
+      : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 18)}`;
+
+  return `i${Date.now().toString(36)}${randomPart}`;
+};
+
+const insertTenantInviteDirect = async (payload: {
+  supabase: ReturnType<typeof getSupabaseClient>;
+  tenantId: string;
+  roleToAssign: TenantInviteRole;
+  maxUses: number;
+  expiresInHours: number;
+  requiresApproval: boolean;
+}): Promise<TenantInvite> => {
+  const {
+    data: sessionData,
+    error: sessionError,
+  } = await payload.supabase.auth.getSession();
+  if (sessionError) throwSupabaseError(sessionError);
+
+  const createdBy = asString(sessionData.session?.user?.id).trim();
+  if (!createdBy) {
+    throw new Error("Sessao invalida para criar convite.");
+  }
+
+  const expiresAt = new Date(
+    Date.now() + payload.expiresInHours * 60 * 60 * 1000
+  ).toISOString();
+  const token = buildLocalInviteToken();
+
+  const { data, error } = await payload.supabase
+    .from("tenant_invites")
+    .insert({
+      tenant_id: payload.tenantId,
+      token,
+      role_to_assign: toLegacyTenantRole(payload.roleToAssign),
+      requires_approval: payload.requiresApproval,
+      max_uses: payload.maxUses,
+      uses_count: 0,
+      expires_at: expiresAt,
+      is_active: true,
+      created_by: createdBy,
+    })
+    .select(TENANT_INVITE_SELECT_COLUMNS)
+    .single();
+  if (error) throwSupabaseError(error);
+
+  const parsedInvite = parseInvite(data);
+  if (parsedInvite) return parsedInvite;
+
+  return {
+    id: `tmp-${Date.now()}`,
+    tenantId: payload.tenantId,
+    token,
+    roleToAssign: payload.roleToAssign,
+    requiresApproval: payload.requiresApproval,
+    maxUses: payload.maxUses,
+    usesCount: 0,
+    expiresAt,
+    isActive: true,
+    createdBy,
+    createdAt: new Date().toISOString(),
+  };
+};
+
 export async function fetchTenantPlatformConfig(): Promise<TenantPlatformConfig> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
@@ -1110,6 +1203,16 @@ export async function createTenantInvite(payload: {
     p_expires_in_hours: expiresInHours,
     p_requires_approval: requiresApproval,
   });
+  if (error && shouldFallbackDirectInviteInsert(error, "tenant_create_invite")) {
+    return insertTenantInviteDirect({
+      supabase,
+      tenantId: cleanTenantId,
+      roleToAssign,
+      maxUses,
+      expiresInHours,
+      requiresApproval,
+    });
+  }
   if (error) throwSupabaseError(error);
 
   const rawResult = Array.isArray(data) ? asObject(data[0]) : asObject(data);

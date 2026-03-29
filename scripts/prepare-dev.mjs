@@ -1,7 +1,14 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 
-const targets = [".next/dev", ".next/cache"];
+const shouldClearNextCache =
+  process.env.CLEAR_NEXT_CACHE === "1" ||
+  process.env.CLEAR_NEXT_CACHE === "true";
+const targets = [".next/dev"];
+
+if (shouldClearNextCache) {
+  targets.push(".next/cache");
+}
 
 for (const target of targets) {
   rmSync(join(process.cwd(), target), {
@@ -10,4 +17,8 @@ for (const target of targets) {
   });
 }
 
-console.log("[prepare-dev] cache de desenvolvimento limpo.");
+console.log(
+  shouldClearNextCache
+    ? "[prepare-dev] .next/dev e .next/cache limpos."
+    : "[prepare-dev] .next/dev limpo; preservando .next/cache para acelerar o webpack."
+);

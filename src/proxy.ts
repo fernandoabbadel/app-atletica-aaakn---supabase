@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 import {
   isGlobalOnlyPath,
@@ -10,6 +11,7 @@ import {
 } from "./lib/tenantRouting";
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const TENANT_NATIVE_ROUTES = new Set(["/dashboard", "/eventos", "/loja"]);
 
 const setTenantSlugCookie = (response: NextResponse, tenantSlug: string): void => {
   const cleanSlug = tenantSlug.trim().toLowerCase();
@@ -36,6 +38,12 @@ export function proxy(request: NextRequest): NextResponse {
   const parsed = parseTenantScopedPath(pathname);
   if (parsed.isTenantScoped) {
     if (parsed.scopedPath === "/") {
+      const response = NextResponse.next();
+      setTenantSlugCookie(response, parsed.tenantSlug);
+      return response;
+    }
+
+    if (TENANT_NATIVE_ROUTES.has(parsed.scopedPath)) {
       const response = NextResponse.next();
       setTenantSlugCookie(response, parsed.tenantSlug);
       return response;
@@ -70,5 +78,7 @@ export function proxy(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: "/:path*",
+  matcher: [
+    "/((?!api|_next/static|_next/image|_vercel|.*\\..*).*)",
+  ],
 };
