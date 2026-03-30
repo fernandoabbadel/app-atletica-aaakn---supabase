@@ -20,6 +20,7 @@ const SITE_CONFIG_TABLE = "site_config";
 const LANDING_CONFIG_ROW_ID = "landing_page";
 const LANDING_ROW_SELECT_CANDIDATES = ["id,data", "id,config", "id,payload", "*"] as const;
 const LANDING_CONFIG_STORAGE_KEY_PREFIX = "usc:landing-config:";
+export const LANDING_CONFIG_SNAPSHOT_UPDATED_EVENT = "usc:landing-config-snapshot-updated";
 
 const landingConfigCache = new Map<string, CacheEntry<LandingConfig>>();
 
@@ -79,11 +80,32 @@ export const DEFAULT_LOADING_PHRASES = [
   "Abrindo seu painel com seguranca.",
 ] as const;
 
-export const DEFAULT_LANDING_CONFIG: LandingConfig = {
+export const DEFAULT_TENANT_LANDING_CONFIG: LandingConfig = {
   tagline: "Gestao Esportiva 2.0",
-  taglineColor: "#60a5fa",
+  taglineColor: "#10b981",
   heroTitle: "SEJA UM",
   heroSubtitle: "Centralize sua vida universitaria. Carteirinha, Loja e Eventos.",
+  heroHighlight: "SUA ATLETICA",
+  titleColor: "#ffffff",
+  gradientStart: "#34d399",
+  gradientEnd: "#10b981",
+  statUsers: 120,
+  statPosts: 340,
+  statPartners: 12,
+  address: "Campus principal",
+  phone: "",
+  whatsapp: "",
+  email: "",
+  loadingPhrases: [...DEFAULT_LOADING_PHRASES],
+  socialLinks: [],
+  reviews: [],
+};
+
+export const DEFAULT_PLATFORM_LANDING_CONFIG: LandingConfig = {
+  tagline: "Gestao Esportiva 2.0",
+  taglineColor: "#60a5fa",
+  heroTitle: "ENTRE PARA",
+  heroSubtitle: "Plataforma oficial multi-atleticas.",
   heroHighlight: "SPOT CONNECT",
   titleColor: "#ffffff",
   gradientStart: "#93c5fd",
@@ -99,6 +121,8 @@ export const DEFAULT_LANDING_CONFIG: LandingConfig = {
   socialLinks: [],
   reviews: [],
 };
+
+export const DEFAULT_LANDING_CONFIG = DEFAULT_PLATFORM_LANDING_CONFIG;
 
 const asObject = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== "object" || value === null) return null;
@@ -281,20 +305,28 @@ const buildLandingRowId = (tenantId?: string | null): string => {
 const getLandingStorageKey = (tenantId?: string | null): string =>
   `${LANDING_CONFIG_STORAGE_KEY_PREFIX}${getLandingCacheKey(tenantId)}`;
 
-const persistLandingSnapshot = (
+export function storeLandingConfigSnapshot(
   config: LandingConfig,
   tenantId?: string | null
-): void => {
+): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
       getLandingStorageKey(tenantId),
       JSON.stringify(config)
     );
+    window.dispatchEvent(
+      new CustomEvent(LANDING_CONFIG_SNAPSHOT_UPDATED_EVENT, {
+        detail: {
+          tenantId: tenantId?.trim() || "",
+          config,
+        },
+      })
+    );
   } catch {
     // ignora falha de storage
   }
-};
+}
 
 export function getStoredLandingConfigSnapshot(options?: {
   tenantId?: string | null;
@@ -500,7 +532,7 @@ export async function fetchLandingConfig(options?: {
     cachedAt: Date.now(),
     value: normalized,
   });
-  persistLandingSnapshot(normalized, options?.tenantId);
+  storeLandingConfigSnapshot(normalized, options?.tenantId);
 
   return normalized;
 }
@@ -518,7 +550,7 @@ export async function saveLandingConfig(
     cachedAt: Date.now(),
     value: normalized,
   });
-  persistLandingSnapshot(normalized, options?.tenantId);
+  storeLandingConfigSnapshot(normalized, options?.tenantId);
 }
 
 export function clearAdminLandingCache(): void {

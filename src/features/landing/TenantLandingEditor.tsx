@@ -210,11 +210,13 @@ export default function TenantLandingEditor({
       brandName={
         tenantName || tenantSigla || normalizedRouteTenantSlug.toUpperCase() || "Tenant atual"
       }
-      brandDescription="Essa identidade aparece na landing publica do tenant."
+      brandDescription="Esse bloco vem do branding do tenant e nao dos campos de conteudo da landing."
       brandLogoUrl={tenantLogoUrl || "/logo.png"}
       brandLogoAlt={`Logo ${tenantSigla || tenantName || normalizedRouteTenantSlug || "Tenant"}`}
       brandLogoUnoptimized={(tenantLogoUrl || "").startsWith("http")}
       accentColor={palette.primary}
+      brandManagePath={withTenantSlug(normalizedRouteTenantSlug, "/admin/atletica")}
+      brandManageLabel="Editar marca da atletica"
     />
   );
 }

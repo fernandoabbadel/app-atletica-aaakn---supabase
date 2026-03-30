@@ -9,9 +9,15 @@ import {
   Users,
   MapPin,
   Mail,
+  MessageCircle,
   Phone,
+  Globe,
   Instagram,
+  Linkedin,
+  Music2,
   Star,
+  Twitter,
+  Youtube,
   Crown,
   Eye,
   Building2,
@@ -30,7 +36,9 @@ import {
   PLATFORM_LOGO_URL,
 } from "@/constants/platformBrand";
 import {
-  DEFAULT_LOADING_PHRASES,
+  DEFAULT_PLATFORM_LANDING_CONFIG,
+  DEFAULT_TENANT_LANDING_CONFIG,
+  storeLandingConfigSnapshot,
   type LandingConfig,
 } from "@/lib/adminLandingService";
 import {
@@ -40,28 +48,6 @@ import {
 import { hasAdminPanelAccess, isPlatformMaster } from "@/lib/roles";
 import { fetchTenantBySlug } from "@/lib/tenantService";
 import { withTenantSlug } from "@/lib/tenantRouting";
-
-const DEFAULT_CONFIG: LandingConfig = {
-  heroTitle: "BEM-VINDO AO",
-  heroSubtitle:
-    "Plataforma multi-atleticas para eventos, comunidade, loja e gestao esportiva.",
-  heroHighlight: "SPOT CONNECT",
-  tagline: "USC - UNIVERSIDADE SPOT CONNECT",
-  taglineColor: "#60a5fa",
-  titleColor: "#ffffff",
-  gradientStart: "#93c5fd",
-  gradientEnd: "#2563eb",
-  statUsers: 120,
-  statPosts: 12,
-  statPartners: 12,
-  address: "Campus Medicina - Bloco C",
-  phone: "(12) 99999-9999",
-  whatsapp: "5512999999999",
-  email: "suporte@spotconnect.app",
-  loadingPhrases: [...DEFAULT_LOADING_PHRASES],
-  socialLinks: [],
-  reviews: [],
-};
 
 type BrandState = {
   sigla: string;
@@ -104,11 +90,34 @@ const normalizeUscPalette = (config: LandingConfig): LandingConfig => {
   const colorStart = config.gradientStart.trim().toLowerCase();
   const colorEnd = config.gradientEnd.trim().toLowerCase();
 
-  if (colorTagline === "#10b981") normalized.taglineColor = DEFAULT_CONFIG.taglineColor;
-  if (colorStart === "#34d399") normalized.gradientStart = DEFAULT_CONFIG.gradientStart;
-  if (colorEnd === "#10b981") normalized.gradientEnd = DEFAULT_CONFIG.gradientEnd;
+  if (colorTagline === "#10b981") {
+    normalized.taglineColor = DEFAULT_PLATFORM_LANDING_CONFIG.taglineColor;
+  }
+  if (colorStart === "#34d399") {
+    normalized.gradientStart = DEFAULT_PLATFORM_LANDING_CONFIG.gradientStart;
+  }
+  if (colorEnd === "#10b981") {
+    normalized.gradientEnd = DEFAULT_PLATFORM_LANDING_CONFIG.gradientEnd;
+  }
 
   return normalized;
+};
+
+const resolveSocialIcon = (platform: string) => {
+  switch (platform) {
+    case "instagram":
+      return <Instagram size={14} />;
+    case "tiktok":
+      return <Music2 size={14} />;
+    case "twitter":
+      return <Twitter size={14} />;
+    case "linkedin":
+      return <Linkedin size={14} />;
+    case "youtube":
+      return <Youtube size={14} />;
+    default:
+      return <Globe size={14} />;
+  }
 };
 
 const useCounter = (end: number, duration = 2000) => {
@@ -187,8 +196,12 @@ const loadLandingPayloadFallback = async (
 ): Promise<Partial<PublicLandingPayload>> => {
   const tenant = tenantSlug ? await fetchTenantBySlug(tenantSlug) : null;
   const tenantId = tenant?.id?.trim() || "";
+  const fallbackConfig = tenantSlug
+    ? DEFAULT_TENANT_LANDING_CONFIG
+    : DEFAULT_PLATFORM_LANDING_CONFIG;
   const data = await fetchPublicLandingData({
     forceRefresh: true,
+    fallbackConfig,
     tenantId,
   });
 
@@ -219,8 +232,11 @@ export default function PublicLandingPage({
   const tenantSlug = tenantSlugOverride.trim().toLowerCase();
   const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
   const isTenantLanding = tenantSlug.length > 0;
+  const fallbackConfig = isTenantLanding
+    ? DEFAULT_TENANT_LANDING_CONFIG
+    : DEFAULT_PLATFORM_LANDING_CONFIG;
 
-  const [config, setConfig] = useState<LandingConfig>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<LandingConfig>(fallbackConfig);
   const [realStats, setRealStats] = useState({
     users: 0,
     tenants: 0,
@@ -314,7 +330,7 @@ export default function PublicLandingPage({
         const rawConfig =
           data.config && typeof data.config === "object"
             ? (data.config as LandingConfig)
-            : DEFAULT_CONFIG;
+            : fallbackConfig;
         const nextConfig = isTenantLanding ? rawConfig : normalizeUscPalette(rawConfig);
         const nextBrand =
           data.brand && typeof data.brand === "object"
@@ -342,6 +358,7 @@ export default function PublicLandingPage({
 
         if (!mounted) return;
 
+        storeLandingConfigSnapshot(nextConfig, typeof data.tenantId === "string" ? data.tenantId : "");
         setConfig(nextConfig);
         setBrand(nextBrand);
         setRealStats({
@@ -365,7 +382,7 @@ export default function PublicLandingPage({
     return () => {
       mounted = false;
     };
-  }, [isTenantLanding, tenantSlug]);
+  }, [fallbackConfig, isTenantLanding, tenantSlug]);
 
   const handleGoogleLogin = async () => {
     try {
@@ -678,15 +695,40 @@ export default function PublicLandingPage({
             <div>
               <h4 className="mb-4 text-xs font-bold uppercase tracking-wider text-white">Suporte</h4>
               <ul className="space-y-3 text-xs text-zinc-500">
-                <li className="flex items-center gap-2">
-                  <MapPin size={14} className="text-brand" /> {config.address}
-                </li>
-                <li className="flex items-center gap-2">
-                  <Mail size={14} className="text-brand" /> {config.email}
-                </li>
-                <li className="flex items-center gap-2">
-                  <Phone size={14} className="text-brand" /> {config.phone}
-                </li>
+                {config.address.trim() ? (
+                  <li className="flex items-center gap-2">
+                    <MapPin size={14} className="text-brand" /> {config.address}
+                  </li>
+                ) : null}
+                {config.email.trim() ? (
+                  <li className="flex items-center gap-2">
+                    <Mail size={14} className="text-brand" />
+                    <a href={`mailto:${config.email}`} className="hover:text-brand-accent">
+                      {config.email}
+                    </a>
+                  </li>
+                ) : null}
+                {config.phone.trim() ? (
+                  <li className="flex items-center gap-2">
+                    <Phone size={14} className="text-brand" />
+                    <a href={`tel:${config.phone}`} className="hover:text-brand-accent">
+                      {config.phone}
+                    </a>
+                  </li>
+                ) : null}
+                {config.whatsapp.trim() ? (
+                  <li className="flex items-center gap-2">
+                    <MessageCircle size={14} className="text-brand" />
+                    <a
+                      href={`https://wa.me/${config.whatsapp}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-brand-accent"
+                    >
+                      WhatsApp: {config.whatsapp}
+                    </a>
+                  </li>
+                ) : null}
                 {(config.socialLinks || []).map((social) => (
                   <li key={social.id} className="pt-2">
                     <a
@@ -695,7 +737,7 @@ export default function PublicLandingPage({
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 font-bold capitalize text-brand-accent hover:text-brand"
                     >
-                      <Instagram size={14} /> {social.platform}
+                      {resolveSocialIcon(social.platform)} {social.platform}
                     </a>
                   </li>
                 ))}

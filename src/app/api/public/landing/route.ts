@@ -1,7 +1,9 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
 import {
   DEFAULT_LANDING_CONFIG,
+  DEFAULT_TENANT_LANDING_CONFIG,
   sanitizeLandingConfig,
   type LandingConfig,
 } from "@/lib/adminLandingService";
@@ -67,6 +69,24 @@ const fallbackPayload = (
   partnersCount: 0,
   brand,
 });
+
+const resolveLandingFallbackConfig = (tenantScope: boolean): LandingConfig =>
+  tenantScope ? DEFAULT_TENANT_LANDING_CONFIG : DEFAULT_LANDING_CONFIG;
+
+const revalidateLandingPaths = (scope: string, tenantSlug: string): void => {
+  try {
+    if (scope === "platform" || !tenantSlug.trim()) {
+      revalidatePath("/");
+      return;
+    }
+
+    const cleanTenantSlug = tenantSlug.trim().toLowerCase();
+    revalidatePath(`/${cleanTenantSlug}`);
+    revalidatePath(`/${cleanTenantSlug}/landing`);
+  } catch (error) {
+    console.warn("Falha ao revalidar paths da landing publica.", error);
+  }
+};
 
 const measurePayloadBytes = (payload: unknown): number => {
   try {
@@ -241,10 +261,14 @@ const extractConfigPayload = (raw: unknown): unknown => {
 
 const fetchLandingConfigWithAdmin = async (
   tenantId?: string,
-  forceRefresh = false
+  forceRefresh = false,
+  tenantScopedFallback = false
 ): Promise<LandingConfig> => {
-  const cacheKey = (tenantId || "").trim() || "default";
   const cleanTenantId = (tenantId || "").trim();
+  const cacheKey = cleanTenantId || (tenantScopedFallback ? "tenant-default" : "default");
+  const fallbackConfig = resolveLandingFallbackConfig(
+    cleanTenantId.length > 0 || tenantScopedFallback
+  );
   if (forceRefresh) {
     landingConfigCache.delete(cacheKey);
   }
@@ -312,15 +336,15 @@ const fetchLandingConfigWithAdmin = async (
   for (const attempt of attempts) {
     const data = await attempt();
     if (data) {
-      return setRouteCacheValue(
-        landingConfigCache,
-        cacheKey,
-        sanitizeLandingConfig(extractConfigPayload(data), DEFAULT_LANDING_CONFIG)
-      );
+        return setRouteCacheValue(
+          landingConfigCache,
+          cacheKey,
+          sanitizeLandingConfig(extractConfigPayload(data), fallbackConfig)
+        );
+      }
     }
-  }
 
-  return setRouteCacheValue(landingConfigCache, cacheKey, DEFAULT_LANDING_CONFIG);
+  return setRouteCacheValue(landingConfigCache, cacheKey, fallbackConfig);
 };
 
 export async function GET(request: Request) {
@@ -369,6 +393,7 @@ export async function GET(request: Request) {
     const tenantSlug = scope === "platform" ? "" : queryTenantSlug || cookieTenantSlug;
     const cacheKey = `public:landing:${scope || "default"}:${tenantSlug || "platform"}`;
     if (shouldRefresh) {
+      revalidateLandingPaths(scope, tenantSlug);
       ServerCache.delete(cacheKey);
     }
     const cachedPayload = shouldRefresh ? null : ServerCache.get<PublicLandingPayload>(cacheKey);
@@ -380,11 +405,15 @@ export async function GET(request: Request) {
         const brand =
           tenant?.brand ??
           (tenantSlug ? buildTenantFallbackBrand(tenantSlug) : DEFAULT_PLATFORM_BRAND);
-        const config = await fetchLandingConfigWithAdmin(tenant?.tenantId || "", shouldRefresh);
+        const config = await fetchLandingConfigWithAdmin(
+          tenant?.tenantId || "",
+          shouldRefresh,
+          Boolean(tenantSlug)
+        );
 
         const data = await fetchPublicLandingData({
           forceRefresh: shouldRefresh,
-          fallbackConfig: DEFAULT_LANDING_CONFIG,
+          fallbackConfig: resolveLandingFallbackConfig(Boolean(tenant?.tenantId || tenantSlug)),
           prefetchedConfig: config,
           tenantId: tenant?.tenantId || "",
         });
@@ -420,7 +449,10 @@ export async function GET(request: Request) {
     const fallbackBrand = queryTenantSlug
       ? buildTenantFallbackBrand(queryTenantSlug)
       : DEFAULT_PLATFORM_BRAND;
-    const payload = fallbackPayload(DEFAULT_LANDING_CONFIG, fallbackBrand);
+    const payload = fallbackPayload(
+      resolveLandingFallbackConfig(queryTenantSlug.length > 0),
+      fallbackBrand
+    );
     QueryMonitor.recordQuery({
       endpoint: LANDING_ENDPOINT,
       method: "GET",

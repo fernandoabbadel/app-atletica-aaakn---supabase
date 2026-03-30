@@ -2,6 +2,7 @@
 
 import React from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   Building2,
   Globe,
@@ -53,6 +54,8 @@ type LandingEditorShellProps = {
   brandLogoAlt: string;
   brandLogoUnoptimized?: boolean;
   accentColor: string;
+  brandManagePath?: string;
+  brandManageLabel?: string;
 };
 
 const updateReviewField = (
@@ -79,6 +82,8 @@ export default function LandingEditorShell({
   brandLogoAlt,
   brandLogoUnoptimized = false,
   accentColor,
+  brandManagePath = "",
+  brandManageLabel = "",
 }: LandingEditorShellProps) {
   const { addToast } = useToast();
   const isPlatform = scope === "platform";
@@ -262,6 +267,14 @@ export default function LandingEditorShell({
             {brandName}
           </h2>
           <p className="mt-1 text-xs text-zinc-400">{brandDescription}</p>
+          {brandManagePath ? (
+            <Link
+              href={brandManagePath}
+              className="mt-3 inline-flex rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300 transition hover:border-emerald-500 hover:text-white"
+            >
+              {brandManageLabel || "Editar marca"}
+            </Link>
+          ) : null}
         </div>
       </section>
 
@@ -493,7 +506,23 @@ export default function LandingEditorShell({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
+                    Telefone
+                  </label>
+                  <input
+                    maxLength={PHONE_MAX_LENGTH}
+                    value={config.phone}
+                    onChange={(event) =>
+                      setConfig((current) => ({
+                        ...current,
+                        phone: normalizePhoneInput(event.target.value),
+                      }))
+                    }
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
                 <div>
                   <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
                     E-mail

@@ -1,5 +1,6 @@
 import {
   DEFAULT_LANDING_CONFIG,
+  DEFAULT_TENANT_LANDING_CONFIG,
   fetchLandingConfig,
   type LandingConfig,
 } from "./adminLandingService";
@@ -115,7 +116,9 @@ export async function fetchPublicLandingData(options?: {
   const forceRefresh = options?.forceRefresh ?? false;
   const tenantId = options?.tenantId?.trim() || "";
   const cacheKey = tenantId || "default";
-  const fallbackConfig = options?.fallbackConfig ?? DEFAULT_LANDING_CONFIG;
+  const fallbackConfig =
+    options?.fallbackConfig ??
+    (tenantId ? DEFAULT_TENANT_LANDING_CONFIG : DEFAULT_LANDING_CONFIG);
   const prefetchedConfig = options?.prefetchedConfig;
 
   if (!forceRefresh) {

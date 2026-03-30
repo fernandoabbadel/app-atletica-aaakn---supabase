@@ -6,6 +6,7 @@ import Image from "next/image";
 import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import {
   DEFAULT_LANDING_CONFIG,
+  DEFAULT_TENANT_LANDING_CONFIG,
   getStoredLandingConfigSnapshot,
 } from "@/lib/adminLandingService";
 import { readTenantBrandSnapshot } from "@/lib/tenantBrandSnapshot";
@@ -54,12 +55,17 @@ export default function Loading() {
 
     setBrand(nextBrand);
 
+    const fallbackConfig = nextBrand.tenantId
+      ? DEFAULT_TENANT_LANDING_CONFIG
+      : DEFAULT_LANDING_CONFIG;
     const storedConfig = getStoredLandingConfigSnapshot({
       tenantId: nextBrand.tenantId,
-      fallbackConfig: DEFAULT_LANDING_CONFIG,
+      fallbackConfig,
     });
     if (storedConfig?.loadingPhrases?.length) {
       setPhrases(storedConfig.loadingPhrases);
+    } else {
+      setPhrases(fallbackConfig.loadingPhrases);
     }
   }, []);
 

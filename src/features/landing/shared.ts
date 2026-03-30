@@ -1,35 +1,18 @@
 import {
-  DEFAULT_LANDING_CONFIG,
+  DEFAULT_PLATFORM_LANDING_CONFIG,
   DEFAULT_LOADING_PHRASES,
+  DEFAULT_TENANT_LANDING_CONFIG,
   type LandingConfig,
 } from "@/lib/adminLandingService";
 
 export const TENANT_INITIAL_LANDING_CONFIG: LandingConfig = {
-  tagline: "Gestao Esportiva 2.0",
-  taglineColor: "#10b981",
-  heroTitle: "SEJA UM",
-  heroSubtitle: "Centralize sua vida universitaria. Carteirinha, Loja e Eventos.",
-  heroHighlight: "SUA ATLETICA",
-  titleColor: "#ffffff",
-  gradientStart: "#34d399",
-  gradientEnd: "#10b981",
-  statUsers: 120,
-  statPosts: 340,
-  statPartners: 12,
-  address: "Campus principal",
-  phone: "",
-  whatsapp: "",
-  email: "",
+  ...DEFAULT_TENANT_LANDING_CONFIG,
   loadingPhrases: [...DEFAULT_LOADING_PHRASES],
-  socialLinks: [],
-  reviews: [],
 };
 
 export const PLATFORM_INITIAL_LANDING_CONFIG: LandingConfig = {
-  ...DEFAULT_LANDING_CONFIG,
-  heroTitle: "ENTRE PARA",
-  heroHighlight: "SPOT CONNECT",
-  heroSubtitle: "Plataforma oficial multi-atleticas.",
+  ...DEFAULT_PLATFORM_LANDING_CONFIG,
+  loadingPhrases: [...DEFAULT_LOADING_PHRASES],
 };
 
 export const mergeLandingConfig = (

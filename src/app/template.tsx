@@ -6,28 +6,55 @@ import Image from "next/image";
 
 import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import {
+  DEFAULT_LANDING_CONFIG,
+  DEFAULT_TENANT_LANDING_CONFIG,
+  getStoredLandingConfigSnapshot,
+  LANDING_CONFIG_SNAPSHOT_UPDATED_EVENT,
+} from "@/lib/adminLandingService";
+import { readTenantBrandSnapshot } from "@/lib/tenantBrandSnapshot";
+
+const pickRandomPhrase = (phrases: string[], previous?: string): string => {
+  const pool = phrases.filter((entry) => entry.trim().length > 0);
+  if (pool.length === 0) return "Carregando...";
+  if (pool.length === 1) return pool[0];
+
+  const available = pool.filter((entry) => entry !== previous);
+  const source = available.length > 0 ? available : pool;
+  const randomIndex = Math.floor(Math.random() * source.length);
+  return source[randomIndex] || pool[0];
+};
 
 export default function Template({ children }: { children: React.ReactNode }) {
-  const { tenantLogoUrl, tenantName } = useTenantTheme();
+  const { tenantId, tenantLogoUrl, tenantName } = useTenantTheme();
   const [loading, setLoading] = useState(true);
   const [frase, setFrase] = useState("");
   const pathname = usePathname();
+  const snapshot = readTenantBrandSnapshot();
+  const resolvedTenantName = tenantName || snapshot?.tenantName || snapshot?.tenantSigla || "USC";
+  const resolvedTenantLogo =
+    tenantLogoUrl || snapshot?.tenantLogoUrl || PLATFORM_LOGO_URL;
 
   const resolvedLogo =
-    !tenantName || tenantName.trim().toUpperCase() === "USC"
+    !resolvedTenantName || resolvedTenantName.trim().toUpperCase() === "USC"
       ? PLATFORM_LOGO_URL
-      : tenantLogoUrl || PLATFORM_LOGO_URL;
+      : resolvedTenantLogo;
 
   useEffect(() => {
-    const frases = [
-      "Preparando a proxima tela.",
-      "Sincronizando as informacoes da pagina.",
-      "Conferindo o contexto da atletica.",
-      "Aplicando a identidade visual.",
-      "Quase tudo pronto por aqui.",
-    ];
+    const snapshotTenantId = snapshot?.tenantId || tenantId;
+    const fallbackConfig = snapshotTenantId
+      ? DEFAULT_TENANT_LANDING_CONFIG
+      : DEFAULT_LANDING_CONFIG;
+    const storedConfig = getStoredLandingConfigSnapshot({
+      tenantId: snapshotTenantId,
+      fallbackConfig,
+    });
+    const nextPhrases =
+      storedConfig?.loadingPhrases?.length
+        ? storedConfig.loadingPhrases
+        : fallbackConfig.loadingPhrases;
 
-    setFrase(frases[Math.floor(Math.random() * frases.length)]);
+    setFrase((previous) => pickRandomPhrase(nextPhrases, previous));
     setLoading(true);
 
     const timer = setTimeout(() => {
@@ -35,7 +62,37 @@ export default function Template({ children }: { children: React.ReactNode }) {
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, [pathname]);
+  }, [pathname, snapshot?.tenantId, tenantId]);
+
+  useEffect(() => {
+    const handleSnapshotUpdate = () => {
+      const snapshotTenantId = readTenantBrandSnapshot()?.tenantId || tenantId;
+      const fallbackConfig = snapshotTenantId
+        ? DEFAULT_TENANT_LANDING_CONFIG
+        : DEFAULT_LANDING_CONFIG;
+      const storedConfig = getStoredLandingConfigSnapshot({
+        tenantId: snapshotTenantId,
+        fallbackConfig,
+      });
+      const nextPhrases =
+        storedConfig?.loadingPhrases?.length
+          ? storedConfig.loadingPhrases
+          : fallbackConfig.loadingPhrases;
+
+      setFrase((previous) => pickRandomPhrase(nextPhrases, previous));
+    };
+
+    window.addEventListener(
+      LANDING_CONFIG_SNAPSHOT_UPDATED_EVENT,
+      handleSnapshotUpdate as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        LANDING_CONFIG_SNAPSHOT_UPDATED_EVENT,
+        handleSnapshotUpdate as EventListener
+      );
+    };
+  }, [tenantId]);
 
   if (loading) {
     return (
@@ -47,7 +104,7 @@ export default function Template({ children }: { children: React.ReactNode }) {
           <div className="relative z-20 w-28 h-28 flex items-center justify-center">
             <Image
               src={resolvedLogo}
-              alt={`Logo ${tenantName || "Plataforma"}`}
+              alt={`Logo ${resolvedTenantName || "Plataforma"}`}
               fill
               sizes="112px"
               className="object-contain drop-shadow-2xl"
