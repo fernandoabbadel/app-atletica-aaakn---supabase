@@ -49,6 +49,13 @@ type RouteCacheEntry<T> = {
 
 const tenantBrandCache = new Map<string, RouteCacheEntry<TenantPublicBrand | null>>();
 const landingConfigCache = new Map<string, RouteCacheEntry<LandingConfig>>();
+const TENANT_BRAND_SELECT_CANDIDATES = [
+  "id,nome,sigla,slug,faculdade,curso,logo_url,status",
+  "id,nome,sigla,slug,faculdade,logo_url,status",
+  "id,nome,sigla,slug,logo_url,status",
+  "*",
+] as const;
+const LANDING_CONFIG_SELECT_CANDIDATES = ["id,data", "id,config", "id,payload", "*"] as const;
 
 const fallbackPayload = (
   config: LandingConfig = DEFAULT_LANDING_CONFIG,
@@ -112,6 +119,32 @@ const resolveRequestIp = (request: Request): string => {
   return "unknown";
 };
 
+const getSupabaseErrorText = (error: unknown): string => {
+  if (!error || typeof error !== "object") {
+    return error instanceof Error ? error.message.toLowerCase() : "";
+  }
+
+  const raw = error as Record<string, unknown>;
+  return [
+    error instanceof Error ? error.message : "",
+    typeof raw.message === "string" ? raw.message : "",
+    typeof raw.details === "string" ? raw.details : "",
+    typeof raw.hint === "string" ? raw.hint : "",
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" ")
+    .toLowerCase();
+};
+
+const shouldFallbackMissingColumns = (
+  error: unknown,
+  columns: readonly string[]
+): boolean => {
+  const message = getSupabaseErrorText(error);
+  if (!message.includes("column") || !message.includes("does not exist")) return false;
+  return columns.some((column) => message.includes(column.toLowerCase()));
+};
+
 const resolveTenantPublicBrand = async (
   tenantSlug: string
 ): Promise<TenantPublicBrand | null> => {
@@ -123,30 +156,71 @@ const resolveTenantPublicBrand = async (
     return cached;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("tenants")
-    .select("id,nome,sigla,slug,faculdade,curso,logo_url,status")
-    .eq("status", "active")
-    .ilike("slug", cleanTenantSlug)
-    .maybeSingle();
+  let row: Record<string, unknown> | null = null;
+  let lastSchemaError: unknown = null;
+  let shouldFilterActiveStatus = true;
 
-  if (error) {
+  for (const selectColumns of TENANT_BRAND_SELECT_CANDIDATES) {
+    let query = supabaseAdmin
+      .from("tenants")
+      .select(selectColumns)
+      .ilike("slug", cleanTenantSlug);
+
+    if (shouldFilterActiveStatus) {
+      query = query.eq("status", "active");
+    }
+
+    const { data, error } = await query.maybeSingle();
+
+    if (!error) {
+      row =
+        data && typeof data === "object"
+          ? (data as Record<string, unknown>)
+          : null;
+      break;
+    }
+
+    if (
+      shouldFallbackMissingColumns(error, [
+        "faculdade",
+        "curso",
+        "logo_url",
+      ])
+    ) {
+      lastSchemaError = error;
+      continue;
+    }
+
+    if (shouldFilterActiveStatus && shouldFallbackMissingColumns(error, ["status"])) {
+      shouldFilterActiveStatus = false;
+      lastSchemaError = error;
+      continue;
+    }
+
     throw error;
   }
 
-  if (!data || typeof data.id !== "string" || !data.id.trim()) {
+  if (!row || typeof row.id !== "string" || !row.id.trim()) {
+    if (lastSchemaError) {
+      console.warn("Landing publica: fallback de schema ao resolver tenant.", lastSchemaError);
+    }
     return setRouteCacheValue(tenantBrandCache, cleanTenantSlug, null);
   }
 
-  const slug = typeof data.slug === "string" ? data.slug.trim() : "";
-  const sigla = typeof data.sigla === "string" ? data.sigla.trim() : "";
-  const nome = typeof data.nome === "string" ? data.nome.trim() : "";
-  const curso = typeof data.curso === "string" ? data.curso.trim() : "";
-  const faculdade = typeof data.faculdade === "string" ? data.faculdade.trim() : "";
-  const logoUrl = typeof data.logo_url === "string" ? data.logo_url.trim() : "";
+  const slug = typeof row.slug === "string" ? row.slug.trim() : "";
+  const sigla = typeof row.sigla === "string" ? row.sigla.trim() : "";
+  const nome = typeof row.nome === "string" ? row.nome.trim() : "";
+  const curso = typeof row.curso === "string" ? row.curso.trim() : "";
+  const faculdade = typeof row.faculdade === "string" ? row.faculdade.trim() : "";
+  const logoUrl =
+    typeof row.logo_url === "string"
+      ? row.logo_url.trim()
+      : typeof row.logoUrl === "string"
+        ? row.logoUrl.trim()
+        : "";
 
   return setRouteCacheValue(tenantBrandCache, cleanTenantSlug, {
-    tenantId: data.id.trim(),
+    tenantId: row.id.trim(),
     brand: {
       sigla: sigla || slug.toUpperCase() || "TENANT",
       nome: nome || sigla || slug.toUpperCase() || "TENANT",
@@ -181,20 +255,45 @@ const fetchLandingConfigWithAdmin = async (
     rowId: string,
     scope: "tenant" | "global" | "any"
   ): Promise<unknown> => {
-    let query = supabaseAdmin
-      .from(SITE_CONFIG_TABLE)
-      .select("id,data,updated_at")
-      .eq("id", rowId);
+    let lastSchemaError: unknown = null;
 
-    if (scope === "tenant" && cleanTenantId) {
-      query = query.eq("tenant_id", cleanTenantId);
-    } else if (scope === "global") {
-      query = query.is("tenant_id", null);
+    for (const selectColumns of LANDING_CONFIG_SELECT_CANDIDATES) {
+      let query = supabaseAdmin
+        .from(SITE_CONFIG_TABLE)
+        .select(selectColumns)
+        .eq("id", rowId);
+
+      if (scope === "tenant" && cleanTenantId) {
+        query = query.eq("tenant_id", cleanTenantId);
+      } else if (scope === "global") {
+        query = query.is("tenant_id", null);
+      }
+
+      const { data, error } = await query.maybeSingle();
+      if (!error) return data;
+
+      if (
+        (scope === "tenant" || scope === "global") &&
+        shouldFallbackMissingColumns(error, ["tenant_id"])
+      ) {
+        return null;
+      }
+
+      if (
+        shouldFallbackMissingColumns(error, ["data", "config", "payload"]) ||
+        shouldFallbackMissingColumns(error, ["updated_at"])
+      ) {
+        lastSchemaError = error;
+        continue;
+      }
+
+      throw error;
     }
 
-    const { data, error } = await query.maybeSingle();
-    if (error) throw error;
-    return data;
+    if (lastSchemaError) {
+      console.warn("Landing publica: fallback de schema ao ler config.", lastSchemaError);
+    }
+    return null;
   };
 
   const attempts: Array<() => Promise<unknown>> = cleanTenantId

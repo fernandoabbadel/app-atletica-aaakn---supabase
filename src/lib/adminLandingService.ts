@@ -18,7 +18,7 @@ const MAX_STAT_VALUE = 9_999_999;
 // Tabela/linha padrao para guardar JSON de configuracao no Supabase.
 const SITE_CONFIG_TABLE = "site_config";
 const LANDING_CONFIG_ROW_ID = "landing_page";
-const LANDING_ROW_SELECT_COLUMNS = "id,data,updated_at";
+const LANDING_ROW_SELECT_CANDIDATES = ["id,data", "id,config", "id,payload", "*"] as const;
 const LANDING_CONFIG_STORAGE_KEY_PREFIX = "usc:landing-config:";
 
 const landingConfigCache = new Map<string, CacheEntry<LandingConfig>>();
@@ -189,6 +189,28 @@ const normalizeLoadingPhrases = (
   return normalized.length > 0 ? normalized : [...fallback];
 };
 
+const getSupabaseErrorText = (error: unknown): string => {
+  const raw = asObject(error);
+  return [
+    error instanceof Error ? error.message : "",
+    asString(raw?.message),
+    asString(raw?.details),
+    asString(raw?.hint),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" ")
+    .toLowerCase();
+};
+
+const shouldFallbackMissingColumns = (
+  error: unknown,
+  columns: readonly string[]
+): boolean => {
+  const message = getSupabaseErrorText(error);
+  if (!message.includes("column") || !message.includes("does not exist")) return false;
+  return columns.some((column) => message.includes(column.toLowerCase()));
+};
+
 // Aceita tanto linha flat quanto JSON em colunas data/config/payload.
 const extractPayloadData = (raw: unknown): unknown => {
   const obj = asObject(raw);
@@ -300,20 +322,43 @@ async function fetchLandingConfigRow(tenantId?: string | null): Promise<unknown>
     rowId: string,
     scope: "tenant" | "global" | "any"
   ): Promise<unknown> => {
-    let query = supabase
-      .from(SITE_CONFIG_TABLE)
-      .select(LANDING_ROW_SELECT_COLUMNS)
-      .eq("id", rowId);
+    let lastSchemaError: unknown = null;
 
-    if (scope === "tenant" && cleanTenantId) {
-      query = query.eq("tenant_id", cleanTenantId);
-    } else if (scope === "global") {
-      query = query.is("tenant_id", null);
+    for (const selectColumns of LANDING_ROW_SELECT_CANDIDATES) {
+      let query = supabase
+        .from(SITE_CONFIG_TABLE)
+        .select(selectColumns)
+        .eq("id", rowId);
+
+      if (scope === "tenant" && cleanTenantId) {
+        query = query.eq("tenant_id", cleanTenantId);
+      } else if (scope === "global") {
+        query = query.is("tenant_id", null);
+      }
+
+      const { data, error } = await query.maybeSingle();
+      if (!error) return data;
+
+      if (
+        (scope === "tenant" || scope === "global") &&
+        shouldFallbackMissingColumns(error, ["tenant_id"])
+      ) {
+        return null;
+      }
+
+      if (
+        shouldFallbackMissingColumns(error, ["data", "config", "payload"]) ||
+        shouldFallbackMissingColumns(error, ["updated_at"])
+      ) {
+        lastSchemaError = error;
+        continue;
+      }
+
+      throw error;
     }
 
-    const { data, error } = await query.maybeSingle();
-    if (error) throw error;
-    return data;
+    if (lastSchemaError) return null;
+    return null;
   };
 
   const attempts: Array<() => Promise<unknown>> = cleanTenantId
@@ -343,17 +388,95 @@ async function saveLandingConfigRow(
 ): Promise<void> {
   const supabase = getSupabaseClient();
   const nowIso = new Date().toISOString();
-  const { error } = await supabase.from(SITE_CONFIG_TABLE).upsert(
+  const cleanTenantId = tenantId?.trim() || "";
+  const rowId = buildLandingRowId(cleanTenantId);
+  const payloadCandidates: Array<Record<string, unknown>> = [
     {
-      id: buildLandingRowId(tenantId),
-      tenant_id: tenantId?.trim() || null,
+      id: rowId,
+      tenant_id: cleanTenantId || null,
       data: normalized,
       updated_at: nowIso,
     },
-    { onConflict: "id" }
-  );
+    {
+      id: rowId,
+      data: normalized,
+      updated_at: nowIso,
+    },
+    {
+      id: rowId,
+      tenant_id: cleanTenantId || null,
+      config: normalized,
+      updated_at: nowIso,
+    },
+    {
+      id: rowId,
+      config: normalized,
+      updated_at: nowIso,
+    },
+    {
+      id: rowId,
+      tenant_id: cleanTenantId || null,
+      payload: normalized,
+      updated_at: nowIso,
+    },
+    {
+      id: rowId,
+      payload: normalized,
+      updated_at: nowIso,
+    },
+    {
+      id: rowId,
+      tenant_id: cleanTenantId || null,
+      data: normalized,
+    },
+    {
+      id: rowId,
+      data: normalized,
+    },
+    {
+      id: rowId,
+      tenant_id: cleanTenantId || null,
+      config: normalized,
+    },
+    {
+      id: rowId,
+      config: normalized,
+    },
+    {
+      id: rowId,
+      tenant_id: cleanTenantId || null,
+      payload: normalized,
+    },
+    {
+      id: rowId,
+      payload: normalized,
+    },
+  ];
 
-  if (error) throw error;
+  let lastSchemaError: unknown = null;
+  for (const payload of payloadCandidates) {
+    const { error } = await supabase.from(SITE_CONFIG_TABLE).upsert(payload, {
+      onConflict: "id",
+    });
+    if (!error) return;
+
+    if (
+      shouldFallbackMissingColumns(error, [
+        "tenant_id",
+        "data",
+        "config",
+        "payload",
+        "updated_at",
+      ])
+    ) {
+      lastSchemaError = error;
+      continue;
+    }
+
+    throw error;
+  }
+
+  if (lastSchemaError) throw lastSchemaError;
 }
 
 export async function fetchLandingConfig(options?: {
