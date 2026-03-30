@@ -14,6 +14,7 @@ import {
   getDefaultBoardroundAppConfig,
   getBoardroundDisplayName,
 } from "../../../lib/boardroundConfigService";
+import { resolveEffectiveAccessRole } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
@@ -25,8 +26,7 @@ export default function BoardroundRankingPage() {
   const router = useRouter();
   const baseHref = tenantSlug ? withTenantSlug(tenantSlug, "/boardround") : "/boardround";
   const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
-  const userRole =
-    typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
+  const userRole = resolveEffectiveAccessRole(user);
   const canAccessBoardround = SHARKROUND_ALLOWED_ROLES.has(userRole);
 
   const [rows, setRows] = useState<BoardroundTubasRankingRecord[]>([]);

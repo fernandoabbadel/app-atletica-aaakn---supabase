@@ -19,6 +19,7 @@ import {
   toggleFollowProfile
 } from "../../../lib/profilePublicService";
 import { getBackendErrorCode } from "@/lib/backendErrors";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import Link from "next/link";
 import { getTurmaImage } from "../../../constants/turmaImages";
 import { resolvePlanIcon, resolvePlanTheme, resolveUserPlanIcon } from "../../../constants/planVisuals";
@@ -421,8 +422,8 @@ export default function PerfilPublicoPage() {
             <div className="text-center space-y-1 mb-4">
                 <h1 className="text-2xl font-black text-white uppercase italic tracking-tighter flex items-center justify-center gap-2">
                     {profile.apelido || profile.nome.split(" ")[0]}
-                    {(profile.role === 'master' || String(profile.role || '').includes('admin')) && <ShieldCheck size={18} className="text-red-500" />}
-                    {profile.role !== 'master' && !String(profile.role || '').includes('admin') && profile.tenant_role === 'mini_vendor' && <Store size={18} className="text-blue-400" />}
+                    {isAdminLikeRole(resolveEffectiveAccessRole(profile)) && <ShieldCheck size={18} className="text-red-500" />}
+                    {!isAdminLikeRole(resolveEffectiveAccessRole(profile)) && profile.tenant_role === 'mini_vendor' && <Store size={18} className="text-blue-400" />}
                 </h1>
                 <p className="text-zinc-400 text-xs font-bold uppercase tracking-widest">{profile.nome}</p>
                 

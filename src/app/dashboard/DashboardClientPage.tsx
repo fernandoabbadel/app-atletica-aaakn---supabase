@@ -36,6 +36,7 @@ import {
   fetchBoardroundAppConfig,
   getBoardroundDisplayName,
 } from "@/lib/boardroundConfigService";
+import { resolveEffectiveAccessRole } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- INTERFACES ESTRITAS ---
@@ -593,8 +594,7 @@ export default function DashboardClientPage({
   }
 
   const userData = user as unknown as UserData; 
-  const userRoleNormalized =
-    typeof userData?.role === "string" ? userData.role.toLowerCase().trim() : "guest";
+  const userRoleNormalized = resolveEffectiveAccessRole(userData);
   const tenantLogoFallback = tenantLogoUrl || "/logo.png";
   const tenantPath = (path: string): string =>
     effectiveTenantSlug ? withTenantSlug(effectiveTenantSlug, path) : path;

@@ -30,6 +30,7 @@ import { useTenantTheme } from "../../../context/TenantThemeContext";
 import { useToast } from "../../../context/ToastContext";
 import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../../constants/planVisuals";
 import { resolvePlanScopedPrice } from "../../../lib/commerceCatalog";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "../../../lib/roles";
 import { withTenantSlug } from "../../../lib/tenantRouting";
 import { collectUserPlanScope } from "../../../lib/userPlanScope";
 
@@ -220,7 +221,7 @@ function EventCountdown({ dateStr, timeStr }: { dateStr: string, timeStr: string
 
 // --- BADGES DO USUARIO ---
 const UserBadges = ({ data, patentesConfig }: { data: Comentario, patentesConfig: PatenteConfig[] }) => {
-    const isAdminUser = data.role === "admin_geral" || data.role === "master";
+    const isAdminUser = isAdminLikeRole(data.role);
     const normalizeLabel = (value: string | undefined): string =>
       String(value || "")
         .trim()
@@ -416,7 +417,7 @@ export default function DetalhesEventoPage() {
           userPlanoCor: typeof user.plano_cor === "string" ? user.plano_cor : undefined,
           userPlanoIcon: typeof user.plano_icon === "string" ? user.plano_icon : undefined,
           userPatente: typeof user.patente === "string" ? user.patente : undefined,
-          role: user.role || "user",
+          role: resolveEffectiveAccessRole(user),
           likes: [], reports: [], hidden: false
       };
       try {

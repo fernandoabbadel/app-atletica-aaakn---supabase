@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { resolveEffectiveAccessRole } from "./roles";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -354,7 +355,7 @@ const normalizeRecentUser = (
     email: asString(data.email, "---"),
     foto: asString(data.foto, "https://github.com/shadcn.png"),
     turma: asString(data.turma, "---"),
-    role: asString(data.role, "atleta"),
+    role: resolveEffectiveAccessRole(data),
     createdAt: data.data_adesao ?? data.createdAt ?? null,
   };
 };
@@ -406,7 +407,7 @@ export async function fetchAdminDashboardBundle(options?: {
       fetchRowsWithOrderFallback({
         tableName: "users",
         selectColumns:
-          "id,uid,nome,email,foto,turma,role,data_adesao,createdAt,created_at",
+          "id,uid,nome,email,foto,turma,role,tenant_role,tenant_status,data_adesao,createdAt,created_at",
         maxResults: usersLimit,
         orderFields: ["data_adesao", "createdAt", "created_at"],
         tenantId,

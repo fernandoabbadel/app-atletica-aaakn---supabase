@@ -48,6 +48,23 @@ export const ADMIN_PANEL_FALLBACK_ROLES = new Set<string>([
   "treinador",
 ]);
 
+const ROLE_LABELS: Record<string, string> = {
+  guest: "Visitante",
+  visitante: "Visitante",
+  user: "Membro",
+  mini_vendor: "Mini Vendor",
+  treinador: "Treinador",
+  empresa: "Empresa",
+  admin_treino: "Admin Treino",
+  admin_geral: "Admin Geral",
+  admin_gestor: "Admin Gestor",
+  master_tenant: "Master Tenant",
+  master: "Master",
+  vendas: "Vendas",
+  inactive: "Inativo",
+  banned: "Banido",
+};
+
 export const TENANT_MANAGER_ROLES = new Set<TenantScopedRole>([
   "master_tenant",
   "admin_geral",
@@ -58,6 +75,13 @@ const MASTER_ONLY_ADMIN_PREFIXES = ["/admin/master", "/master"];
 
 const toRoleString = (value: unknown): string =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const toTitleCaseLabel = (value: string): string =>
+  value
+    .split(/[_\s]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 
 export const isMasterOnlyAdminPath = (path: string): boolean => {
   const normalizedPath = path.trim().toLowerCase();
@@ -85,6 +109,21 @@ export const normalizeTenantRole = (
   }
   if (role === "guest") return "visitante";
   return "";
+};
+
+export const getRoleLabel = (roleRaw: unknown): string => {
+  const normalized = normalizeTenantRole(roleRaw) || toRoleString(roleRaw);
+  if (!normalized) return "Visitante";
+  return ROLE_LABELS[normalized] || toTitleCaseLabel(normalized);
+};
+
+export const isAdminLikeRole = (roleRaw: unknown): boolean => {
+  const normalized = normalizeTenantRole(roleRaw) || toRoleString(roleRaw);
+  return (
+    normalized === "master" ||
+    normalized === "master_tenant" ||
+    normalized.includes("admin")
+  );
 };
 
 export const toLegacyTenantRole = (

@@ -497,7 +497,7 @@ const normalizeAdminUserProfile = (
       ? statusRaw
       : "ativo";
 
-  const role = asString(data.role) || undefined;
+  const role = resolveEffectiveAccessRole(data) || undefined;
   const foto = asString(data.foto) || undefined;
 
   return {
@@ -1127,6 +1127,8 @@ export async function fetchAdminUserProfile(
       "patente",
       "createdAt",
       "role",
+      "tenant_role",
+      "tenant_status",
     ];
 
     while (selectColumns.length > 0) {

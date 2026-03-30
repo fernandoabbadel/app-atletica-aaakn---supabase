@@ -24,6 +24,7 @@ import {
   getDefaultSharkroundAppConfig,
   type SharkroundAppConfig,
 } from "../../lib/sharkroundConfigService";
+import { resolveEffectiveAccessRole } from "@/lib/roles";
 import { resolveLeagueLogoSrc } from "../../lib/leagueMedia";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
@@ -108,8 +109,7 @@ export default function BoardRoundPage() {
     [tenantId, tenantSlug]
   );
   const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
-  const userRole =
-    typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
+  const userRole = resolveEffectiveAccessRole(user);
   const canAccessSharkround = SHARKROUND_ALLOWED_ROLES.has(userRole);
 
   useEffect(() => {

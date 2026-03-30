@@ -11,6 +11,7 @@ import {
   getDefaultBoardroundAppConfig,
   getBoardroundDisplayName,
 } from "../../../lib/boardroundConfigService";
+import { resolveEffectiveAccessRole } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 interface BoardroundStats {
@@ -29,8 +30,7 @@ export default function BoardroundEstatisticasPage() {
   const boardroundStatsStorageKey = `${SHARKROUND_STATS_STORAGE_KEY}:${tenantId || tenantSlug || "default"}`;
   const boardroundHref = tenantSlug ? withTenantSlug(tenantSlug, "/boardround") : "/boardround";
   const emBreveHref = tenantSlug ? withTenantSlug(tenantSlug, "/em-breve") : "/em-breve";
-  const userRole =
-    typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
+  const userRole = resolveEffectiveAccessRole(user);
   const canAccessBoardround = SHARKROUND_ALLOWED_ROLES.has(userRole);
 
   useEffect(() => {

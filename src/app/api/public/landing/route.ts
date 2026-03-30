@@ -156,12 +156,6 @@ const resolveTenantPublicBrand = async (
   });
 };
 
-const buildLandingRowIds = (tenantId?: string): string[] => {
-  const cleanTenantId = (tenantId || "").trim();
-  if (!cleanTenantId) return [LANDING_CONFIG_ROW_ID];
-  return [`${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`, LANDING_CONFIG_ROW_ID];
-};
-
 const extractConfigPayload = (raw: unknown): unknown => {
   if (!raw || typeof raw !== "object") return raw;
   const record = raw as Record<string, unknown>;
@@ -176,20 +170,48 @@ const fetchLandingConfigWithAdmin = async (
   forceRefresh = false
 ): Promise<LandingConfig> => {
   const cacheKey = (tenantId || "").trim() || "default";
+  const cleanTenantId = (tenantId || "").trim();
   if (forceRefresh) {
     landingConfigCache.delete(cacheKey);
   }
   const cached = getRouteCacheValue(landingConfigCache, cacheKey);
   if (cached) return cached;
 
-  for (const rowId of buildLandingRowIds(tenantId)) {
-    const { data, error } = await supabaseAdmin
+  const fetchRowAttempt = async (
+    rowId: string,
+    scope: "tenant" | "global" | "any"
+  ): Promise<unknown> => {
+    let query = supabaseAdmin
       .from(SITE_CONFIG_TABLE)
       .select("id,data,updated_at")
-      .eq("id", rowId)
-      .maybeSingle();
+      .eq("id", rowId);
 
+    if (scope === "tenant" && cleanTenantId) {
+      query = query.eq("tenant_id", cleanTenantId);
+    } else if (scope === "global") {
+      query = query.is("tenant_id", null);
+    }
+
+    const { data, error } = await query.maybeSingle();
     if (error) throw error;
+    return data;
+  };
+
+  const attempts: Array<() => Promise<unknown>> = cleanTenantId
+    ? [
+        () => fetchRowAttempt(`${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`, "tenant"),
+        () => fetchRowAttempt(`${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`, "any"),
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "tenant"),
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "global"),
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "any"),
+      ]
+    : [
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "global"),
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "any"),
+      ];
+
+  for (const attempt of attempts) {
+    const data = await attempt();
     if (data) {
       return setRouteCacheValue(
         landingConfigCache,

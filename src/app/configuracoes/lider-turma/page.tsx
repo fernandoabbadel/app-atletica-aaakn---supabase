@@ -9,7 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import { buildLoginPath } from "@/lib/authRedirect";
-import { resolveEffectiveAccessRole } from "@/lib/roles";
+import { isPlatformMaster, resolveEffectiveAccessRole } from "@/lib/roles";
 import {
   fetchTurmaLeaderPendingRequests,
   reviewTurmaLeaderPendingRequest,
@@ -37,7 +37,7 @@ export default function ConfiguracoesLiderTurmaPage() {
   const isTurmaLeader = extra.turmaLeader === true;
   const effectiveAccessRole = resolveEffectiveAccessRole(user);
   const canManageAllByRole =
-    user?.role === "master" ||
+    isPlatformMaster(user) ||
     effectiveAccessRole === "master_tenant" ||
     effectiveAccessRole === "admin_geral" ||
     effectiveAccessRole === "admin_gestor";

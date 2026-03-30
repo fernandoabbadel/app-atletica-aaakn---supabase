@@ -747,11 +747,12 @@ async function fetchDashboardBundleViaRpc(options: {
   });
 
   if (error) {
+    dashboardHomeBundleRpcUnavailableUntil = openRpcCircuit();
+    console.warn("[dashboard] RPC indisponivel, usando fallback degradado.", error);
     if (isMissingRpcError(error)) {
-      dashboardHomeBundleRpcUnavailableUntil = openRpcCircuit();
       return undefined;
     }
-    throwSupabaseError(error);
+    return undefined;
   }
 
   dashboardHomeBundleRpcUnavailableUntil = 0;

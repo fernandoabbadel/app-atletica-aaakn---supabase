@@ -15,7 +15,11 @@ import {
 } from "@/lib/adminDashboardService";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
-import { isPlatformMaster, resolveEffectiveAccessRole } from "@/lib/roles";
+import {
+  getRoleLabel,
+  isPlatformMaster,
+  resolveEffectiveAccessRole,
+} from "@/lib/roles";
 
 // --- INTERFACES (FIM DO ANY) ---
 type DashboardStats = AdminDashboardStats;
@@ -219,7 +223,9 @@ export default function AdminDashboardPage() {
                               </div>
                               <div>
                                   <p className="font-bold text-white text-sm transition group-hover:opacity-90" style={{ color: "var(--tenant-accent)" }}>{user.nome}</p>
-                                  <p className="text-[10px] text-zinc-500 uppercase font-bold">{user.turma} - {user.role}</p>
+                                  <p className="text-[10px] text-zinc-500 uppercase font-bold">
+                                    {user.turma} - {getRoleLabel(user.role)}
+                                  </p>
                               </div>
                           </div>
                           <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-1 rounded font-mono">

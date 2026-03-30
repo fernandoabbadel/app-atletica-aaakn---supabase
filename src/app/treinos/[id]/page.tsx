@@ -18,6 +18,7 @@ import {
   setTreinoRsvp
 } from "../../../lib/treinosNativeService";
 import { getTurmaImage } from "../../../constants/turmaImages";
+import { resolveEffectiveAccessRole } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGENS (O Escudo do Código) ---
@@ -92,8 +93,7 @@ export default function TreinoDetalhesPage() {
   // 1. CARREGAR DADOS (TREINO + RSVPS + CHAMADA OFICIAL)
   const treinoId = typeof params.id === "string" ? params.id : "";
   const userId = user?.uid ?? null;
-  const userRole =
-    typeof user?.role === "string" ? user.role.toLowerCase().trim() : "guest";
+  const userRole = resolveEffectiveAccessRole(user);
   const canAccessExpiredTreino = TREINO_HISTORICO_ALLOWED_ROLES.has(userRole);
 
   useEffect(() => {

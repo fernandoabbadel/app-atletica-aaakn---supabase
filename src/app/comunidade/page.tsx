@@ -40,6 +40,7 @@ import {
   normalizeCommunityCategories,
 } from "../../constants/communityCategories";
 import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../constants/planVisuals";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGEM ---
@@ -135,7 +136,7 @@ const formatCustomDate = (timestamp: DateLike | null | undefined) => {
 
 // UserBadges tipado corretamente (fim do any)
 const UserBadges = ({ userData }: { userData: Partial<PostData | CommentData> }) => {
-    const isAdmin = userData?.role?.includes("admin") || userData?.role === "master";
+    const isAdmin = isAdminLikeRole(resolveEffectiveAccessRole(userData));
     const isMiniVendor = userData?.tenant_role === "mini_vendor" && !isAdmin;
     const normalizeIcon = (value: string | undefined) =>
       String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -192,6 +193,8 @@ export default function ComunidadePage() {
   const { user } = useAuth();
   const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
+  const effectiveUserRole = resolveEffectiveAccessRole(user);
+  const isAdminModerator = isAdminLikeRole(effectiveUserRole);
   
   const [activeTab, setActiveTab] = useState(DEFAULT_COMMUNITY_CATEGORIES[0] || "Geral");
   const [activeFilter, setActiveFilter] = useState<"recent" | "likes" | "comments" | "hype">("recent");
@@ -288,7 +291,7 @@ export default function ComunidadePage() {
         const rows = await fetchCommunityFeedByCategory({
           categoria: activeTab,
           maxResults: 120,
-          includeBlocked: !!user?.role?.includes("admin"),
+          includeBlocked: isAdminModerator,
           tenantId: activeTenantId || user?.tenant_id || undefined,
         });
 
@@ -329,7 +332,7 @@ export default function ComunidadePage() {
     return () => {
       mounted = false;
     };
-  }, [activeTab, activeTenantId, user?.role, user?.tenant_id, addToast]);
+  }, [activeTab, activeTenantId, addToast, isAdminModerator, user?.tenant_id]);
 
   useEffect(() => {
     const ordered = [...allPostsRaw];
@@ -368,7 +371,7 @@ export default function ComunidadePage() {
         const badgeCounts = await fetchCommunityCategoryBadgeCounts({
           userId: user?.uid,
           categorias: modalidades,
-          includeBlocked: !!user?.role?.includes("admin"),
+          includeBlocked: isAdminModerator,
           windowDays: RECENT_BADGE_WINDOW_DAYS,
           tenantId: activeTenantId || user?.tenant_id || undefined,
         });
@@ -385,7 +388,7 @@ export default function ComunidadePage() {
     return () => {
       mounted = false;
     };
-  }, [modalidades, user?.uid, user?.role, user?.tenant_id, addToast, countsRefreshToken, activeTenantId]);
+  }, [activeTenantId, addToast, countsRefreshToken, isAdminModerator, modalidades, user?.tenant_id, user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -489,7 +492,7 @@ export default function ComunidadePage() {
         post.createdAt.toDate().getTime() > oneDayAgo
     );
 
-    if (userPostsToday.length > 0 && !user.role?.includes("admin")) {
+    if (userPostsToday.length > 0 && !isAdminModerator) {
       return addToast(`Você já postou em "${activeTab}" hoje. Volte amanhã!`, "error");
     }
 
@@ -541,7 +544,7 @@ export default function ComunidadePage() {
         patente_icon: typeof user.patente_icon === "string" ? user.patente_icon : undefined,
         patente_cor: typeof user.patente_cor === "string" ? user.patente_cor : undefined,
 
-        role: user.role ? String(user.role) : "user",
+        role: effectiveUserRole,
         tenant_role: user.tenant_role ? String(user.tenant_role) : "",
       };
 
@@ -604,7 +607,7 @@ export default function ComunidadePage() {
               comment.createdAt.toDate().getTime() > oneDayAgo
       );
 
-      if (myCommentsToday.length > 0 && !user.role?.includes("admin")) {
+      if (myCommentsToday.length > 0 && !isAdminModerator) {
           return addToast("Você já comentou neste post hoje.", "error");
       }
 
@@ -621,7 +624,7 @@ export default function ComunidadePage() {
               patente_icon: typeof user.patente_icon === "string" ? user.patente_icon : undefined,
               patente_cor: typeof user.patente_cor === "string" ? user.patente_cor : undefined,
 
-              role: user.role ? String(user.role) : "user",
+              role: effectiveUserRole,
               tenant_role: user.tenant_role ? String(user.tenant_role) : "",
           };
 
@@ -668,7 +671,7 @@ export default function ComunidadePage() {
 
   const handleDeletePost = async (post: PostData) => {
       if (!user) return;
-      if (post.userId !== user.uid && !user.role?.includes("admin")) return;
+      if (post.userId !== user.uid && !isAdminModerator) return;
       if (!confirm("Tem certeza que quer apagar essa mensagem?")) return;
 
       try {
@@ -750,7 +753,7 @@ export default function ComunidadePage() {
   };
 
   const handleTogglePin = async (post: PostData) => {
-      if (!user?.role?.includes("admin")) return;
+      if (!isAdminModerator) return;
 
       try {
           const nextStatus = !post.fixado;
@@ -948,8 +951,8 @@ export default function ComunidadePage() {
                                 <button onClick={() => setMenuOpen(menuOpen === post.id ? null : post.id)} className="text-zinc-600 hover:text-white p-1"><MoreHorizontal size={16}/></button>
                                 {menuOpen === post.id && (
                                     <div className="absolute right-4 top-8 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl z-10 overflow-hidden min-w-[140px]">
-                                            {user?.role?.includes('admin') && <button onClick={() => handleTogglePin(post)} className="w-full text-left px-4 py-3 text-xs font-bold text-white hover:bg-zinc-800 flex items-center gap-2"><Pin size={14}/> {post.fixado ? 'Desafixar' : 'Fixar'}</button>}
-                                            {(user?.uid === post.userId || user?.role?.includes('admin')) && (
+                                            {isAdminModerator && <button onClick={() => handleTogglePin(post)} className="w-full text-left px-4 py-3 text-xs font-bold text-white hover:bg-zinc-800 flex items-center gap-2"><Pin size={14}/> {post.fixado ? 'Desafixar' : 'Fixar'}</button>}
+                                            {(user?.uid === post.userId || isAdminModerator) && (
                                                 <button onClick={() => handleDeletePost(post)} className="w-full text-left px-4 py-3 text-xs font-bold text-red-500 hover:bg-zinc-800 flex items-center gap-2"><Trash2 size={14}/> Excluir</button>
                                             )}
                                             <button onClick={() => {setReportModal(post.id); setReportTargetType("post"); setMenuOpen(null)}} className="w-full text-left px-4 py-3 text-xs font-bold text-yellow-500 hover:bg-zinc-800 flex items-center gap-2"><Flag size={14}/> Denunciar</button>
@@ -1024,7 +1027,7 @@ export default function ComunidadePage() {
 
                                   {commentMenuOpen === comment.id && (
                                       <div className="absolute ml-8 -mt-8 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl z-20 overflow-hidden min-w-[120px]">
-                                          {(user?.uid === comment.userId || user?.role?.includes('admin')) && (
+                                          {(user?.uid === comment.userId || isAdminModerator) && (
                                               <button onClick={() => handleDeleteComment(comment.id)} className="w-full text-left px-3 py-2 text-[10px] font-bold text-red-500 hover:bg-zinc-800 flex items-center gap-2"><Trash2 size={12}/> Excluir</button>
                                           )}
                                           <button onClick={() => {setReportModal(comment.id); setReportTargetType("comment"); setCommentMenuOpen(null)}} className="w-full text-left px-3 py-2 text-[10px] font-bold text-yellow-500 hover:bg-zinc-800 flex items-center gap-2"><Flag size={12}/> Denunciar</button>

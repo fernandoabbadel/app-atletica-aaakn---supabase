@@ -188,7 +188,7 @@ const loadLandingPayloadFallback = async (
   const tenant = tenantSlug ? await fetchTenantBySlug(tenantSlug) : null;
   const tenantId = tenant?.id?.trim() || "";
   const data = await fetchPublicLandingData({
-    forceRefresh: false,
+    forceRefresh: true,
     tenantId,
   });
 

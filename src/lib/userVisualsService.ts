@@ -5,6 +5,7 @@ import {
   throwSupabaseError,
   type Row,
 } from "./supabaseData";
+import { resolveEffectiveAccessRole } from "./roles";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 
@@ -461,7 +462,10 @@ const toCanonicalVisual = (
     apelido: raw.apelido,
     foto: raw.foto,
     turma: raw.turma,
-    role: raw.role,
+    role: resolveEffectiveAccessRole({
+      role: raw.role,
+      tenant_role: raw.tenant_role,
+    }),
     tenant_role: raw.tenant_role,
     plano: planVisual.planName,
     plano_cor: planVisual.planColor,

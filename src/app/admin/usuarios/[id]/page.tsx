@@ -23,6 +23,7 @@ import {
   updateAdminUser,
   type AdminUserProfileRecord,
 } from "@/lib/adminUsersService";
+import { getRoleLabel } from "@/lib/roles";
 import {
   hasValidPhoneLength,
   normalizePhoneInput,
@@ -242,7 +243,7 @@ export default function AdminUsuarioDetalhePage() {
           <div className="text-right">
             <p className="text-xs text-zinc-400">{profile.email || "sem email"}</p>
             <p className="text-[11px] uppercase font-black text-zinc-500">
-              role: {profile.role || "user"}
+              role: {getRoleLabel(profile.role)}
             </p>
           </div>
         </div>

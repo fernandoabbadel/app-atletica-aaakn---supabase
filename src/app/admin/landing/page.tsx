@@ -182,11 +182,12 @@ export default function AdminLandingPage() {
     try {
       await saveLandingConfig(config, { tenantId: targetTenantId });
 
+      const refreshTenantSlug = routeTenantSlug || tenantSlug.trim().toLowerCase();
       const refreshParams = new URLSearchParams({ refresh: "1" });
       if (isMasterScope) {
         refreshParams.set("scope", "platform");
-      } else if (tenantSlug.trim()) {
-        refreshParams.set("tenant", tenantSlug.trim().toLowerCase());
+      } else if (refreshTenantSlug) {
+        refreshParams.set("tenant", refreshTenantSlug);
       }
 
       try {
@@ -211,6 +212,7 @@ export default function AdminLandingPage() {
         isMasterScope ? "Landing USC atualizada com sucesso." : "Landing do tenant atualizada com sucesso.",
         "success"
       );
+      router.refresh();
     } catch (error: unknown) {
       if (isPermissionError(error)) {
         addToast("Sem permissão para salvar a landing.", "error");

@@ -22,6 +22,7 @@ import { fetchCurrentMiniVendorProfile } from "@/lib/miniVendorService";
 import { getTurmaImage } from "../../constants/turmaImages";
 import { resolvePlanTheme, resolveUserPlanIcon } from "../../constants/planVisuals";
 import { buildLoginPath } from "@/lib/authRedirect";
+import { getRoleLabel, resolveEffectiveAccessRole } from "@/lib/roles";
 import {
   createDefaultTenantAppModulesConfig,
   fetchEffectiveTenantAppModulesConfig,
@@ -196,7 +197,7 @@ export default function SettingsPage() {
     ? (user.extra as Record<string, unknown>)
     : {};
   const isTurmaLeader = extra.turmaLeader === true;
-  const roleLabel = user.role === "user" ? "Membro" : String(user.role || "Membro");
+  const roleLabel = getRoleLabel(resolveEffectiveAccessRole(user));
   const rawPlanLabel =
     (typeof user.plano === "string" && user.plano.trim()) ||
     (typeof user.plano_badge === "string" && user.plano_badge.trim()) ||

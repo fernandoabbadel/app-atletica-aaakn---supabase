@@ -38,7 +38,11 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { logActivity } from "../../lib/logger";
-import { isPlatformMaster, resolveEffectiveAccessRole } from "@/lib/roles";
+import {
+  getRoleLabel,
+  isPlatformMaster,
+  resolveEffectiveAccessRole,
+} from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import { usePermission } from "@/hooks/usePermission";
 import {
@@ -86,6 +90,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const isPlatformMasterUser = isPlatformMaster(user);
   const effectiveAccessRole = resolveEffectiveAccessRole(user);
   const canViewMasterLink = isPlatformMasterUser && effectiveAccessRole === "master";
+  const canAuditAdminSession =
+    Boolean(user) &&
+    (isPlatformMasterUser ||
+      effectiveAccessRole === "master_tenant" ||
+      effectiveAccessRole.includes("admin"));
   const sidebarTenantSlug = pathInfo.tenantSlug || activeTenantSlug.trim();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
   const [sidebarProfilesConfig, setSidebarProfilesConfig] = React.useState(
@@ -112,10 +121,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     const userId = typeof user?.uid === "string" ? user.uid : "";
-    const userRole = typeof user?.role === "string" ? user.role.toLowerCase() : "";
     if (!userId) return;
     if (loginAuditRef.current) return;
-    if (!(userRole === "master" || userRole.includes("admin"))) return;
+    if (!canAuditAdminSession) return;
 
     const sessionKey = `audit:admin:painel:${userId}`;
     if (typeof window !== "undefined" && sessionStorage.getItem(sessionKey)) {
@@ -135,7 +143,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       "Admin/Painel",
       `Acessou a base gate em ${pathname || "/admin"}`
     );
-  }, [currentPath, pathname, user?.nome, user?.role, user?.uid]);
+  }, [canAuditAdminSession, currentPath, pathname, user?.nome, user?.uid]);
 
   useEffect(() => {
     let mounted = true;
@@ -311,7 +319,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   {user?.nome ? user.nome.split(" ")[0] : "Admin"}
                 </p>
                 <span className="block truncate text-[8px] font-black uppercase tracking-widest text-red-500">
-                  {typeof user?.role === "string" ? user.role.replace("admin_", "").replace("_", " ") : "MASTER"}
+                  {getRoleLabel(effectiveAccessRole)}
                 </span>
               </div>
             )}

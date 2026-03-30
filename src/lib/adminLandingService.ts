@@ -294,18 +294,43 @@ export function getStoredLandingConfigSnapshot(options?: {
 
 async function fetchLandingConfigRow(tenantId?: string | null): Promise<unknown> {
   const supabase = getSupabaseClient();
-  const rowIds = Array.from(
-    new Set([buildLandingRowId(tenantId), LANDING_CONFIG_ROW_ID])
-  );
+  const cleanTenantId = tenantId?.trim() || "";
 
-  for (const rowId of rowIds) {
-    const { data, error } = await supabase
+  const fetchRowAttempt = async (
+    rowId: string,
+    scope: "tenant" | "global" | "any"
+  ): Promise<unknown> => {
+    let query = supabase
       .from(SITE_CONFIG_TABLE)
       .select(LANDING_ROW_SELECT_COLUMNS)
-      .eq("id", rowId)
-      .maybeSingle();
+      .eq("id", rowId);
 
+    if (scope === "tenant" && cleanTenantId) {
+      query = query.eq("tenant_id", cleanTenantId);
+    } else if (scope === "global") {
+      query = query.is("tenant_id", null);
+    }
+
+    const { data, error } = await query.maybeSingle();
     if (error) throw error;
+    return data;
+  };
+
+  const attempts: Array<() => Promise<unknown>> = cleanTenantId
+    ? [
+        () => fetchRowAttempt(buildLandingRowId(cleanTenantId), "tenant"),
+        () => fetchRowAttempt(buildLandingRowId(cleanTenantId), "any"),
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "tenant"),
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "global"),
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "any"),
+      ]
+    : [
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "global"),
+        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "any"),
+      ];
+
+  for (const attempt of attempts) {
+    const data = await attempt();
     if (data) return data;
   }
 
