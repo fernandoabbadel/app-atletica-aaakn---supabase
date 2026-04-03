@@ -9,6 +9,7 @@ import {
   normalizePlanVisibilityEntries,
   normalizeSellerSnapshot,
   resolvePlanScopedPrice,
+  resolvePlanScopedPriceInfo,
 } from "./commerceCatalog";
 import {
   fetchApprovedMiniVendorIds,
@@ -208,12 +209,13 @@ const normalizeProductRow = (
 
   return {
     ...normalizeRowTimestamps(row),
-    preco: resolvePlanScopedPrice({
+    preco_base: asNum(row.preco, 0),
+    preco: resolvePlanScopedPriceInfo({
       basePrice: asNum(row.preco, 0),
       entries: normalizePlanPriceEntries(row.plan_prices),
       userPlanIds,
       userPlanNames,
-    }),
+    }).finalPrice,
     status: normalizeAvailabilityStatus(row.status, row.active === false ? "esgotado" : "ativo"),
     plan_prices: normalizePlanPriceEntries(row.plan_prices),
     plan_visibility: planVisibility,

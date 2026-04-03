@@ -678,7 +678,7 @@ export default function MiniVendorProductsPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-black uppercase text-white">Preco e Visibilidade por Plano</h3>
-                    <p className="text-[11px] text-zinc-500">Novos planos entram aqui automaticamente.</p>
+                    <p className="text-[11px] text-zinc-500">So preencha quem tiver preco especial. Em branco, o plano usa o preco geral do produto.</p>
                   </div>
                   <button type="button" onClick={() => setIsPlanModalOpen(false)} className="rounded-lg border border-zinc-700 bg-zinc-900 p-2 hover:bg-zinc-800">
                     <X size={14} />
@@ -689,9 +689,12 @@ export default function MiniVendorProductsPage() {
                     <div key={entry.planId} className="grid grid-cols-1 gap-3 rounded-xl border border-zinc-800 bg-black/30 p-3 md:grid-cols-[1.2fr_1fr_auto]">
                       <div>
                         <p className="text-sm font-bold text-white">{entry.planName}</p>
-                        <p className="text-[10px] uppercase tracking-wide text-zinc-500">{entry.planId}</p>
+                        <p className="text-[10px] text-zinc-500">
+                          Em branco: usa o preco geral
+                          {productForm.preco.trim() ? ` (R$ ${productForm.preco.trim()})` : "."}
+                        </p>
                       </div>
-                      <input value={entry.price} onChange={(event) => setProductForm((previous) => ({ ...previous, planScopeRows: previous.planScopeRows.map((row) => row.planId === entry.planId ? { ...row, price: event.target.value } : row) }))} placeholder={`Preco ${entry.planName}`} inputMode="decimal" className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
+                      <input value={entry.price} onChange={(event) => setProductForm((previous) => ({ ...previous, planScopeRows: previous.planScopeRows.map((row) => row.planId === entry.planId ? { ...row, price: event.target.value } : row) }))} placeholder={`Preco especial para ${entry.planName}`} inputMode="decimal" className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
                       <label className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-[11px] font-black uppercase text-zinc-300">
                         <input type="checkbox" checked={entry.visible} onChange={(event) => setProductForm((previous) => ({ ...previous, planScopeRows: previous.planScopeRows.map((row) => row.planId === entry.planId ? { ...row, visible: event.target.checked } : row) }))} className="accent-emerald-500" />
                         Visivel

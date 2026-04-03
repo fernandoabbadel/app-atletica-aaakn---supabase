@@ -1184,7 +1184,7 @@ export default function AdminEventosPage() {
               <div>
                 <h3 className="text-sm font-black uppercase text-white">Preco do Lote por Plano</h3>
                 <p className="text-[11px] text-zinc-500">
-                  Todo plano novo aparece automaticamente aqui.
+                  So ajuste quem tiver desconto especifico. Se deixar em branco, o plano usa o valor geral do lote.
                 </p>
               </div>
               <button onClick={() => setShowLotePlanModal(null)} className="rounded-lg border border-zinc-700 bg-zinc-900 p-2 hover:bg-zinc-800">
@@ -1197,12 +1197,17 @@ export default function AdminEventosPage() {
                 <div key={entry.planId} className="grid grid-cols-1 md:grid-cols-[1.2fr_1fr] gap-3 rounded-xl border border-zinc-800 bg-black/30 p-3">
                   <div>
                     <p className="text-sm font-bold text-white">{entry.planName}</p>
-                    <p className="text-[10px] uppercase tracking-wide text-zinc-500">{entry.planId}</p>
+                    <p className="text-[10px] text-zinc-500">
+                      Em branco: usa o preco do lote
+                      {novoEvento.lotes?.find((l) => l.id === showLotePlanModal)?.preco
+                        ? ` (R$ ${novoEvento.lotes?.find((l) => l.id === showLotePlanModal)?.preco})`
+                        : "."}
+                    </p>
                   </div>
                   <input
                     value={entry.price}
                     onChange={(e) => updateLotePlanPrice(showLotePlanModal, entry.planId, e.target.value)}
-                    placeholder={`Preco ${entry.planName}`}
+                    placeholder={`Preco especial para ${entry.planName}`}
                     inputMode="decimal"
                     className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
                   />

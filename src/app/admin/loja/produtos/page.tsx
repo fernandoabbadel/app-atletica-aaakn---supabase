@@ -1142,7 +1142,7 @@ export default function AdminLojaProdutosPage() {
                 <div>
                   <h3 className="text-sm font-black uppercase text-white">Preco e Visibilidade por Plano</h3>
                   <p className="text-[11px] text-zinc-500">
-                    Novos planos entram aqui automaticamente quando forem criados.
+                    So preencha quem tiver preco especial. Em branco, o plano usa o preco geral do produto.
                   </p>
                 </div>
                 <button
@@ -1159,7 +1159,10 @@ export default function AdminLojaProdutosPage() {
                   <div key={entry.planId} className="grid grid-cols-1 md:grid-cols-[1.2fr_1fr_auto] gap-3 rounded-xl border border-zinc-800 bg-black/30 p-3">
                     <div>
                       <p className="text-sm font-bold text-white">{entry.planName}</p>
-                      <p className="text-[10px] uppercase tracking-wide text-zinc-500">{entry.planId}</p>
+                      <p className="text-[10px] text-zinc-500">
+                        Em branco: usa o preco geral
+                        {form.preco.trim() ? ` (R$ ${form.preco.trim()})` : "."}
+                      </p>
                     </div>
                     <input
                       value={entry.price}
@@ -1171,7 +1174,7 @@ export default function AdminLojaProdutosPage() {
                           ),
                         }))
                       }
-                      placeholder={`Preco ${entry.planName}`}
+                      placeholder={`Preco especial para ${entry.planName}`}
                       inputMode="decimal"
                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
                     />

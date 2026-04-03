@@ -407,21 +407,21 @@ export async function fetchAdminDashboardBundle(options?: {
       fetchRowsWithOrderFallback({
         tableName: "users",
         selectColumns:
-          "id,uid,nome,email,foto,turma,role,tenant_role,tenant_status,data_adesao,createdAt,created_at",
+          "uid,nome,email,foto,turma,role,tenant_role,tenant_status,data_adesao,createdAt",
         maxResults: usersLimit,
-        orderFields: ["data_adesao", "createdAt", "created_at"],
+        orderFields: ["data_adesao", "createdAt"],
         tenantId,
       }),
       fetchRowsWithOrderFallback({
         tableName: "activity_logs",
-        selectColumns: "id,userName,action,resource,timestamp,createdAt,created_at",
+        selectColumns: "id,userName,action,resource,timestamp,createdAt",
         maxResults: logsLimit,
-        orderFields: ["timestamp", "createdAt", "created_at"],
+        orderFields: ["timestamp", "createdAt"],
         tenantId,
       }),
     ]);
 
-  const recentUsers = sortRowsByDateCandidatesDesc(usersRows, ["data_adesao", "createdAt", "created_at"])
+  const recentUsers = sortRowsByDateCandidatesDesc(usersRows, ["data_adesao", "createdAt"])
     .map((row) => normalizeRecentUser(asString(row.id) || asString(row.uid), row))
     .filter((row): row is AdminDashboardRecentUser => row !== null);
 

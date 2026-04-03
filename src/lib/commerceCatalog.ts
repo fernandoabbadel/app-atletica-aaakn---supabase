@@ -9,6 +9,12 @@ export interface CommercePlanPriceEntry extends CommercePlanEntry {
   price: number;
 }
 
+export interface CommerceResolvedPlanPrice {
+  basePrice: number;
+  finalPrice: number;
+  matchedEntry: CommercePlanPriceEntry | null;
+}
+
 export interface CommercePlanVisibilityEntry extends CommercePlanEntry {
   visible: boolean;
 }
@@ -163,12 +169,12 @@ const matchesPlanEntry = (
   );
 };
 
-export const resolvePlanScopedPrice = (options: {
+export const resolvePlanScopedPriceInfo = (options: {
   basePrice: number;
   entries: CommercePlanPriceEntry[];
   userPlanIds?: string[];
   userPlanNames?: string[];
-}): number => {
+}): CommerceResolvedPlanPrice => {
   const userPlanIds = (options.userPlanIds ?? [])
     .map((entry) => normalizeString(entry).toLowerCase())
     .filter((entry) => entry.length > 0);
@@ -180,7 +186,20 @@ export const resolvePlanScopedPrice = (options: {
     matchesPlanEntry(entry, userPlanIds, normalizedPlanNames)
   );
 
-  return match ? match.price : options.basePrice;
+  return {
+    basePrice: options.basePrice,
+    finalPrice: match ? match.price : options.basePrice,
+    matchedEntry: match ?? null,
+  };
+};
+
+export const resolvePlanScopedPrice = (options: {
+  basePrice: number;
+  entries: CommercePlanPriceEntry[];
+  userPlanIds?: string[];
+  userPlanNames?: string[];
+}): number => {
+  return resolvePlanScopedPriceInfo(options).finalPrice;
 };
 
 export const canAccessCommerceItem = (options: {

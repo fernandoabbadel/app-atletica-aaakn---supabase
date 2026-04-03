@@ -49,6 +49,7 @@ interface Produto {
   id: string;
   nome: string;
   preco: number;
+  preco_base?: number;
   precoAntigo?: number;
   img: string;
   descricao: string;
@@ -533,6 +534,9 @@ export default function DetalheProdutoPage() {
   }
 
   const isLiked = produto.likes?.includes(user?.uid || "");
+  const basePrice = Number(produto.preco_base ?? produto.preco);
+  const finalPrice = Number(produto.preco);
+  const hasPlanBenefit = finalPrice < basePrice;
 
   return (
     <div className="min-h-screen bg-[#050505] text-white pb-10 font-sans selection:bg-emerald-500/30">
@@ -604,7 +608,17 @@ export default function DetalheProdutoPage() {
             </div>
           </div>
           <div className="text-right">
-            <p className="text-3xl font-black text-emerald-400">R$ {Number(produto.preco).toFixed(2)}</p>
+            {hasPlanBenefit ? (
+              <p className="text-xs font-bold uppercase text-zinc-500 line-through">
+                R$ {basePrice.toFixed(2)}
+              </p>
+            ) : null}
+            <p className="text-3xl font-black text-emerald-400">R$ {finalPrice.toFixed(2)}</p>
+            {hasPlanBenefit ? (
+              <p className="mt-1 text-[10px] font-black uppercase text-emerald-300">
+                Beneficio {userPlanNames[0]?.trim() || "do seu plano"}
+              </p>
+            ) : null}
             <span className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvailabilityClass(saleStatus)}`}>
               {getAvailabilityLabel(saleStatus)}
             </span>

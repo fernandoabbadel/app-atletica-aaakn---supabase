@@ -29,7 +29,7 @@ import { useAuth } from "../../../context/AuthContext";
 import { useTenantTheme } from "../../../context/TenantThemeContext";
 import { useToast } from "../../../context/ToastContext";
 import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../../constants/planVisuals";
-import { resolvePlanScopedPrice } from "../../../lib/commerceCatalog";
+import { resolvePlanScopedPriceInfo } from "../../../lib/commerceCatalog";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "../../../lib/roles";
 import { withTenantSlug } from "../../../lib/tenantRouting";
 import { collectUserPlanScope } from "../../../lib/userPlanScope";
@@ -304,10 +304,10 @@ export default function DetalhesEventoPage() {
   const { userPlanNames, userPlanIds } = useMemo(() => collectUserPlanScope(user), [user]);
 
   const eventId = typeof params.id === "string" ? params.id : "";
-  const resolveLotePrice = useCallback(
-      (lote: Lote): string => {
+  const resolveLotePriceInfo = useCallback(
+      (lote: Lote) => {
           const basePrice = Number.parseFloat(String(lote.preco || "0").replace(",", ".")) || 0;
-          const resolvedPrice = resolvePlanScopedPrice({
+          const priceInfo = resolvePlanScopedPriceInfo({
               basePrice,
               entries: Array.isArray(lote.planPrices)
                   ? lote.planPrices.map((entry) => ({
@@ -322,7 +322,10 @@ export default function DetalhesEventoPage() {
               userPlanIds,
               userPlanNames,
           });
-          return resolvedPrice.toFixed(2).replace(".", ",");
+          return {
+            ...priceInfo,
+            displayPrice: priceInfo.finalPrice.toFixed(2).replace(".", ","),
+          };
       },
       [userPlanIds, userPlanNames]
   );
@@ -704,7 +707,25 @@ export default function DetalhesEventoPage() {
                 <div key={i} className={`flex justify-between items-center gap-3 p-4 rounded-xl border ${l.status === 'ativo' && eventoSaleStatus === 'ativo' ? 'bg-zinc-900 border-emerald-500/50' : 'bg-black border-zinc-800 opacity-70'}`}>
                     <div>
                         <p className="text-xs font-black text-white uppercase">{l.nome}</p>
-                        <p className="text-emerald-400 font-bold">R$ {resolveLotePrice(l)}</p>
+                        {(() => {
+                          const priceInfo = resolveLotePriceInfo(l);
+                          const hasDiscount = priceInfo.finalPrice < priceInfo.basePrice;
+                          return (
+                            <div>
+                              {hasDiscount ? (
+                                <p className="text-[10px] font-bold uppercase text-zinc-500 line-through">
+                                  R$ {priceInfo.basePrice.toFixed(2).replace(".", ",")}
+                                </p>
+                              ) : null}
+                              <p className="text-emerald-400 font-bold">R$ {priceInfo.displayPrice}</p>
+                              {hasDiscount ? (
+                                <p className="text-[10px] font-black uppercase text-emerald-300">
+                                  Beneficio {userPlanNames[0]?.trim() || "do seu plano"}
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                     </div>
                     {l.status === 'ativo' && eventoSaleStatus === 'ativo' ? 
                         // ID 4: Link atualizado para a nova pagina de compra com query params

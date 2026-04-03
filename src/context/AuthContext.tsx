@@ -545,9 +545,9 @@ const hasMissingVisualMetadata = (user: User): boolean =>
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const USER_SESSION_SELECT_COLUMNS =
-  "uid,nome,email,foto,role,status,saved_role,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,stats,sharkCoins,selos,matricula,turma,telefone,dataNascimento,apelido,cidadeOrigem,estadoOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,desconto_loja,nivel_prioridade,isAnonymous";
+  "uid,nome,email,foto,role,status,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,stats,sharkCoins,selos,matricula,turma,telefone,dataNascimento,apelido,cidadeOrigem,estadoOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,desconto_loja,nivel_prioridade,isAnonymous";
 const USER_PROFILE_SELECT_COLUMNS =
-  "uid,nome,email,foto,role,status,saved_role,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,estadoOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,desconto_loja,nivel_prioridade,isAnonymous,turmaPhoto,capa,extra,createdAt";
+  "uid,nome,email,foto,role,status,tenant_id,tenant_role,tenant_status,ultimoLoginDiario,data_adesao,level,xp,xpMultiplier,stats,sharkCoins,selos,matricula,turma,telefone,instagram,bio,whatsappPublico,statusRelacionamento,relacionamentoPublico,dataNascimento,esportes,pets,apelido,idadePublica,cidadeOrigem,estadoOrigem,plano,patente,patente_icon,patente_cor,tier,plano_badge,plano_cor,plano_icon,plano_status,desconto_loja,nivel_prioridade,isAnonymous,capa,extra,createdAt";
 const USER_SESSION_SELECT_COLUMNS_LIST = USER_SESSION_SELECT_COLUMNS.split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);
@@ -635,6 +635,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const lastVisualMaintenanceAtRef = useRef(0);
   const syncingAuthUidRef = useRef<string | null>(null);
   const authSyncFallbackUidRef = useRef<string | null>(null);
+  const currentUserUidRef = useRef<string | null>(null);
 
   const router = useRouter();
   const pathnameRaw = usePathname();
@@ -673,6 +674,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    currentUserUidRef.current = user?.uid || null;
+  }, [user?.uid]);
 
   // Helper: Calcula Patente
   const calculatePatenteData = useCallback((xp: number, patentes: PatenteConfig[]) => {
@@ -896,7 +901,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (authUser) {
-        setLoading(true);
+        const isSameAuthenticatedUser = currentUserUidRef.current === authUser.id;
+        if (!isSameAuthenticatedUser) {
+          setLoading(true);
+        }
         await syncAuthenticatedUser(authUser);
         return;
       }

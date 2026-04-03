@@ -39,10 +39,8 @@ import {
 
 const FOCUS_REFETCH_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
-const shouldEnableFocusRefetch = (): boolean => {
-  if (typeof window === "undefined") return false;
-  return process.env.NEXT_PUBLIC_ENABLE_FOCUS_REFETCH === "true";
-};
+// Evita refetch automatico ao voltar para a aba, o que gerava a percepcao de reload completo.
+const shouldEnableFocusRefetch = (): boolean => false;
 
 // --- ðŸ¦ˆ UTILITÁRIO LOCAL ---
 function cn(...classes: (string | undefined | null | false)[]) {

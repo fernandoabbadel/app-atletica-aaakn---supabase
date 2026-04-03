@@ -84,7 +84,10 @@ const shouldFallbackMissingColumns = (
   columns: readonly string[]
 ): boolean => {
   const message = getSupabaseErrorText(error);
-  if (!message.includes("column") || !message.includes("does not exist")) return false;
+  const isMissingColumnError =
+    (message.includes("column") && message.includes("does not exist")) ||
+    message.includes("could not find the");
+  if (!isMissingColumnError) return false;
   return columns.some((column) => message.includes(column.toLowerCase()));
 };
 

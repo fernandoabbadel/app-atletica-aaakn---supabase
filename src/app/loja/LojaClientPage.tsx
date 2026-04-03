@@ -34,6 +34,7 @@ export interface Produto {
   descricao: string;
   img: string; 
   preco: number;
+  preco_base?: number;
   precoAntigo?: number;
   estoque: number;
   lote: string;
@@ -360,16 +361,34 @@ export default function LojaClientPage({
         });
       });
 
-      return Array.from(categoriesByName.values()).sort((left, right) =>
-        left.nome.localeCompare(right.nome, "pt-BR")
-      );
+      return Array.from(categoriesByName.values()).sort((left, right) => {
+        const leftMiniVendor = left.seller_type === "mini_vendor";
+        const rightMiniVendor = right.seller_type === "mini_vendor";
+        if (leftMiniVendor !== rightMiniVendor) {
+          return leftMiniVendor ? 1 : -1;
+        }
+        return left.nome.localeCompare(right.nome, "pt-BR");
+      });
   }, [categoriasCatalogo, palette.primary, produtos, tenantLogoUrl]);
 
-  const produtosFiltrados = produtos.filter(p => {
-      const matchNome = p.nome.toLowerCase().includes(busca.toLowerCase());
-      const matchCat = filtroCategoria === "Todos" || p.categoria === filtroCategoria;
-      return matchNome && matchCat;
-  });
+  const produtosFiltrados = useMemo(
+    () =>
+      produtos
+        .filter((product) => {
+          const matchNome = product.nome.toLowerCase().includes(busca.toLowerCase());
+          const matchCat = filtroCategoria === "Todos" || product.categoria === filtroCategoria;
+          return matchNome && matchCat;
+        })
+        .sort((left, right) => {
+          const leftMiniVendor = left.seller?.type === "mini_vendor";
+          const rightMiniVendor = right.seller?.type === "mini_vendor";
+          if (leftMiniVendor !== rightMiniVendor) {
+            return leftMiniVendor ? 1 : -1;
+          }
+          return left.nome.localeCompare(right.nome, "pt-BR");
+        }),
+    [busca, filtroCategoria, produtos]
+  );
   const selectedCategory = useMemo(
     () =>
       filtroCategoria === "Todos"
@@ -575,6 +594,9 @@ export default function LojaClientPage({
                     const estoqueTotal = temVariantes 
                         ? prod.variantes.reduce((acc, v) => acc + Number(v.estoque), 0) 
                         : Number(prod.estoque);
+                    const basePrice = Number(prod.preco_base ?? prod.preco);
+                    const finalPrice = Number(prod.preco);
+                    const hasPlanBenefit = finalPrice < basePrice;
                     const allColors = getProductColorPreview(prod);
                     const colorPreview = allColors.slice(0, 3);
                     const status = prod.status || (estoqueTotal > 0 ? "ativo" : "esgotado");
@@ -701,10 +723,20 @@ export default function LojaClientPage({
                                           {prod.precoAntigo && prod.precoAntigo > prod.preco && (
                                               <p className="text-[10px] text-zinc-500 line-through font-bold">R$ {Number(prod.precoAntigo).toFixed(2)}</p>
                                           )}
-                                          <p className="text-xl font-black text-emerald-400">R$ {Number(prod.preco).toFixed(2)}</p>
+                                          {hasPlanBenefit ? (
+                                            <p className="text-[10px] text-zinc-500 line-through font-bold">
+                                              R$ {basePrice.toFixed(2)}
+                                            </p>
+                                          ) : null}
+                                          <p className="text-xl font-black text-emerald-400">R$ {finalPrice.toFixed(2)}</p>
                                           <p className="mt-1 text-[10px] font-bold uppercase text-zinc-500">
                                             {status === "em_breve" ? "Liberacao antecipada por plano" : "Compra por pedido"}
                                           </p>
+                                          {hasPlanBenefit ? (
+                                            <p className="mt-1 text-[10px] font-black uppercase text-emerald-300">
+                                              Beneficio {userPlanNames[0]?.trim() || "do seu plano"}
+                                            </p>
+                                          ) : null}
                                       </div>
                                       
                                       {!isDisabledSale && estoqueTotal > 0 ? (

@@ -13,7 +13,7 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../context/ToastContext";
 import { fetchEventsFeed, toggleEventLike } from "../../lib/eventsNativeService";
 import { getTurmaImage } from "../../constants/turmaImages";
-import { resolvePlanScopedPrice } from "../../lib/commerceCatalog";
+import { resolvePlanScopedPriceInfo } from "../../lib/commerceCatalog";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { collectUserPlanScope } from "@/lib/userPlanScope";
 import {
@@ -244,8 +244,8 @@ function EventCard({
   }, [ev.stats?.likes, ev.viewerHasLiked]);
 
   const loteAtivo = ev.lotes?.find((l) => l.status === 'ativo');
-  const precoDisplay = loteAtivo
-    ? `R$ ${resolvePlanScopedPrice({
+  const lotPriceInfo = loteAtivo
+    ? resolvePlanScopedPriceInfo({
         basePrice: Number.parseFloat(String(loteAtivo.preco || "0").replace(",", ".")) || 0,
         entries: Array.isArray(loteAtivo.planPrices)
           ? loteAtivo.planPrices.map((entry) => ({
@@ -259,7 +259,13 @@ function EventCard({
           : [],
         userPlanIds,
         userPlanNames,
-      }).toFixed(2).replace(".", ",")}`
+      })
+    : null;
+  const hasPlanDiscount =
+    lotPriceInfo !== null && lotPriceInfo.finalPrice < lotPriceInfo.basePrice;
+  const planBenefitLabel = userPlanNames[0]?.trim() || "seu plano";
+  const precoDisplay = lotPriceInfo
+    ? `R$ ${lotPriceInfo.finalPrice.toFixed(2).replace(".", ",")}`
     : (saleStatus === "em_breve" ? "Em breve" : ev.lotes && ev.lotes.length > 0 ? "Esgotado" : "Em breve");
 
   const handleLike = async (e: React.MouseEvent) => {
@@ -358,7 +364,17 @@ function EventCard({
                 {/* Preco */}
                 <div>
                     <p className="text-[10px] text-zinc-500 font-bold uppercase">A partir de</p>
+                    {hasPlanDiscount && lotPriceInfo ? (
+                      <p className="text-[10px] font-bold uppercase text-zinc-500 line-through">
+                        R$ {lotPriceInfo.basePrice.toFixed(2).replace(".", ",")}
+                      </p>
+                    ) : null}
                     <p className={`text-lg font-black ${loteAtivo ? 'text-white' : 'text-zinc-600'}`}>{precoDisplay}</p>
+                    {hasPlanDiscount && (
+                      <p className="mt-1 text-[10px] font-black uppercase text-emerald-300">
+                        Beneficio {planBenefitLabel}
+                      </p>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -507,7 +523,19 @@ export default function EventosClientPage({
 
   const visibleEvents = useMemo(
     () =>
-      ligasModuleEnabled ? activeEvents : activeEvents.filter((event) => !isLeagueEvent(event)),
+      (ligasModuleEnabled ? activeEvents : activeEvents.filter((event) => !isLeagueEvent(event))).sort(
+        (left, right) => {
+          const leftLeague = isLeagueEvent(left);
+          const rightLeague = isLeagueEvent(right);
+          if (leftLeague !== rightLeague) {
+            return leftLeague ? 1 : -1;
+          }
+
+          const leftDate = parseEventDate(left.data, left.hora)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+          const rightDate = parseEventDate(right.data, right.hora)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+          return leftDate - rightDate;
+        }
+      ),
     [activeEvents, ligasModuleEnabled]
   );
 

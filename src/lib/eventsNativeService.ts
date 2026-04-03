@@ -1036,8 +1036,16 @@ export async function upsertAdminEvent(payload: {
   const actorUserId = payload.actorUserId?.trim() || "";
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveEventsTenantId(payload.tenantId);
-  const lotes = Array.isArray(payload.data.lotes)
-    ? payload.data.lotes.map((entry) => {
+  const rawData = { ...payload.data };
+  const saleStatus =
+    rawData.sale_status !== undefined ? rawData.sale_status : rawData.saleStatus;
+  const paymentConfigSource =
+    rawData.payment_config !== undefined ? rawData.payment_config : rawData.paymentConfig;
+  delete rawData.saleStatus;
+  delete rawData.paymentConfig;
+
+  const lotes = Array.isArray(rawData.lotes)
+    ? rawData.lotes.map((entry: unknown) => {
         const lote = asObject(entry) ?? {};
         return {
           ...lote,
@@ -1048,11 +1056,11 @@ export async function upsertAdminEvent(payload: {
         };
       })
     : [];
-  const paymentConfig = normalizePaymentConfig(payload.data.payment_config);
+  const paymentConfig = normalizePaymentConfig(paymentConfigSource);
   const normalizedPayload: Row = {
-    ...payload.data,
+    ...rawData,
     lotes,
-    sale_status: normalizeAvailabilityStatus(payload.data.sale_status, "ativo"),
+    sale_status: normalizeAvailabilityStatus(saleStatus, "ativo"),
     payment_config: paymentConfig,
     ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
   };
