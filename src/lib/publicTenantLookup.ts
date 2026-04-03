@@ -13,6 +13,18 @@ const pendingLookups = new Map<string, Promise<TenantSummary | null>>();
 const normalizeTenantSlug = (tenantSlug: string): string =>
   tenantSlug.trim().toLowerCase();
 
+export const clearPublicTenantLookupCache = (tenantSlugRaw?: string): void => {
+  const tenantSlug = normalizeTenantSlug(tenantSlugRaw || "");
+  if (!tenantSlug) {
+    tenantCache.clear();
+    pendingLookups.clear();
+    return;
+  }
+
+  tenantCache.delete(tenantSlug);
+  pendingLookups.delete(tenantSlug);
+};
+
 const getCachedTenant = (tenantSlug: string): TenantSummary | null | undefined => {
   const cached = tenantCache.get(tenantSlug);
   if (!cached) return undefined;
@@ -86,7 +98,7 @@ const fetchTenantFromPublicApi = async (
 ): Promise<TenantSummary | null> => {
   const response = await fetch(
     `/api/public/tenants?slug=${encodeURIComponent(tenantSlug)}`,
-    { cache: "force-cache" }
+    { cache: "no-store" }
   );
 
   if (response.status === 404) return null;
@@ -146,4 +158,3 @@ export async function fetchPublicTenantIdBySlugCached(
   const tenant = await fetchPublicTenantBySlugCached(tenantSlug);
   return tenant?.id?.trim() || "";
 }
-

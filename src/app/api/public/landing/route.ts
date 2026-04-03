@@ -19,6 +19,10 @@ import {
   PLATFORM_LOGO_URL,
 } from "@/constants/platformBrand";
 import { QueryMonitor } from "@/lib/queryMonitor";
+import {
+  fetchPublicTenantBySlugWithAdmin,
+  type PublicTenantDirectoryEntry,
+} from "@/lib/publicTenantDirectoryService";
 import { cleanupExpiredRateLimitBuckets, consumeRateLimit } from "@/lib/rateLimiter";
 import { ServerCache } from "@/lib/serverCache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -51,12 +55,6 @@ type RouteCacheEntry<T> = {
 
 const tenantBrandCache = new Map<string, RouteCacheEntry<TenantPublicBrand | null>>();
 const landingConfigCache = new Map<string, RouteCacheEntry<LandingConfig>>();
-const TENANT_BRAND_SELECT_CANDIDATES = [
-  "id,nome,sigla,slug,faculdade,curso,logo_url,status",
-  "id,nome,sigla,slug,faculdade,logo_url,status",
-  "id,nome,sigla,slug,logo_url,status",
-  "*",
-] as const;
 const LANDING_CONFIG_SELECT_CANDIDATES = ["id,data", "id,config", "id,payload", "*"] as const;
 
 const fallbackPayload = (
@@ -165,89 +163,44 @@ const shouldFallbackMissingColumns = (
   return columns.some((column) => message.includes(column.toLowerCase()));
 };
 
+const mapTenantEntryToBrand = (
+  tenant: PublicTenantDirectoryEntry
+): TenantPublicBrand => ({
+  tenantId: tenant.id.trim(),
+  brand: {
+    sigla: tenant.sigla || tenant.slug.toUpperCase() || "TENANT",
+    nome: tenant.nome || tenant.sigla || tenant.slug.toUpperCase() || "TENANT",
+    subtitle: tenant.curso || tenant.faculdade || "Landing oficial da atletica.",
+    logoUrl: tenant.logoUrl || PLATFORM_LOGO_URL,
+  },
+});
+
 const resolveTenantPublicBrand = async (
-  tenantSlug: string
+  tenantSlug: string,
+  forceRefresh = false
 ): Promise<TenantPublicBrand | null> => {
   const cleanTenantSlug = tenantSlug.trim().toLowerCase();
   if (!cleanTenantSlug) return null;
+
+  if (forceRefresh) {
+    tenantBrandCache.delete(cleanTenantSlug);
+  }
 
   const cached = getRouteCacheValue(tenantBrandCache, cleanTenantSlug);
   if (cached !== null || tenantBrandCache.has(cleanTenantSlug)) {
     return cached;
   }
 
-  let row: Record<string, unknown> | null = null;
-  let lastSchemaError: unknown = null;
-  let shouldFilterActiveStatus = true;
-
-  for (const selectColumns of TENANT_BRAND_SELECT_CANDIDATES) {
-    let query = supabaseAdmin
-      .from("tenants")
-      .select(selectColumns)
-      .ilike("slug", cleanTenantSlug);
-
-    if (shouldFilterActiveStatus) {
-      query = query.eq("status", "active");
-    }
-
-    const { data, error } = await query.maybeSingle();
-
-    if (!error) {
-      row =
-        data && typeof data === "object"
-          ? (data as Record<string, unknown>)
-          : null;
-      break;
-    }
-
-    if (
-      shouldFallbackMissingColumns(error, [
-        "faculdade",
-        "curso",
-        "logo_url",
-      ])
-    ) {
-      lastSchemaError = error;
-      continue;
-    }
-
-    if (shouldFilterActiveStatus && shouldFallbackMissingColumns(error, ["status"])) {
-      shouldFilterActiveStatus = false;
-      lastSchemaError = error;
-      continue;
-    }
-
-    throw error;
-  }
-
-  if (!row || typeof row.id !== "string" || !row.id.trim()) {
-    if (lastSchemaError) {
-      console.warn("Landing publica: fallback de schema ao resolver tenant.", lastSchemaError);
-    }
+  const tenant = await fetchPublicTenantBySlugWithAdmin(cleanTenantSlug);
+  if (!tenant) {
     return setRouteCacheValue(tenantBrandCache, cleanTenantSlug, null);
   }
 
-  const slug = typeof row.slug === "string" ? row.slug.trim() : "";
-  const sigla = typeof row.sigla === "string" ? row.sigla.trim() : "";
-  const nome = typeof row.nome === "string" ? row.nome.trim() : "";
-  const curso = typeof row.curso === "string" ? row.curso.trim() : "";
-  const faculdade = typeof row.faculdade === "string" ? row.faculdade.trim() : "";
-  const logoUrl =
-    typeof row.logo_url === "string"
-      ? row.logo_url.trim()
-      : typeof row.logoUrl === "string"
-        ? row.logoUrl.trim()
-        : "";
-
-  return setRouteCacheValue(tenantBrandCache, cleanTenantSlug, {
-    tenantId: row.id.trim(),
-    brand: {
-      sigla: sigla || slug.toUpperCase() || "TENANT",
-      nome: nome || sigla || slug.toUpperCase() || "TENANT",
-      subtitle: curso || faculdade || "Landing oficial da atletica.",
-      logoUrl: logoUrl || PLATFORM_LOGO_URL,
-    },
-  });
+  return setRouteCacheValue(
+    tenantBrandCache,
+    cleanTenantSlug,
+    mapTenantEntryToBrand(tenant)
+  );
 };
 
 const extractConfigPayload = (raw: unknown): unknown => {
@@ -395,28 +348,56 @@ export async function GET(request: Request) {
     if (shouldRefresh) {
       revalidateLandingPaths(scope, tenantSlug);
       ServerCache.delete(cacheKey);
+      if (tenantSlug) {
+        tenantBrandCache.delete(tenantSlug);
+      }
     }
     const cachedPayload = shouldRefresh ? null : ServerCache.get<PublicLandingPayload>(cacheKey);
     const cacheHit = cachedPayload !== null;
     const payload =
       cachedPayload ??
       (await (async (): Promise<PublicLandingPayload> => {
-        const tenant = tenantSlug ? await resolveTenantPublicBrand(tenantSlug) : null;
+        let tenant: TenantPublicBrand | null = null;
+        if (tenantSlug) {
+          try {
+            tenant = await resolveTenantPublicBrand(tenantSlug, shouldRefresh);
+          } catch (tenantError: unknown) {
+            console.warn("Landing publica: falha ao resolver marca do tenant.", tenantError);
+          }
+        }
+
         const brand =
           tenant?.brand ??
           (tenantSlug ? buildTenantFallbackBrand(tenantSlug) : DEFAULT_PLATFORM_BRAND);
-        const config = await fetchLandingConfigWithAdmin(
-          tenant?.tenantId || "",
-          shouldRefresh,
-          Boolean(tenantSlug)
+        const fallbackConfig = resolveLandingFallbackConfig(
+          Boolean(tenant?.tenantId || tenantSlug)
         );
 
-        const data = await fetchPublicLandingData({
-          forceRefresh: shouldRefresh,
-          fallbackConfig: resolveLandingFallbackConfig(Boolean(tenant?.tenantId || tenantSlug)),
-          prefetchedConfig: config,
-          tenantId: tenant?.tenantId || "",
-        });
+        let config = fallbackConfig;
+        try {
+          config = await fetchLandingConfigWithAdmin(
+            tenant?.tenantId || "",
+            shouldRefresh,
+            Boolean(tenantSlug)
+          );
+        } catch (configError: unknown) {
+          console.warn("Landing publica: falha ao carregar config da landing.", configError);
+        }
+
+        let data = fallbackPayload(config, brand);
+        try {
+          data = {
+            ...(await fetchPublicLandingData({
+              forceRefresh: shouldRefresh,
+              fallbackConfig,
+              prefetchedConfig: config,
+              tenantId: tenant?.tenantId || "",
+            })),
+            brand,
+          };
+        } catch (dataError: unknown) {
+          console.warn("Landing publica: falha ao montar dados publicos da landing.", dataError);
+        }
 
         const nextPayload = {
           ...data,

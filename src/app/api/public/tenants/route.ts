@@ -3,19 +3,17 @@ import { NextResponse } from "next/server";
 import { QueryMonitor } from "@/lib/queryMonitor";
 import { cleanupExpiredRateLimitBuckets, consumeRateLimit } from "@/lib/rateLimiter";
 import { ServerCache } from "@/lib/serverCache";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  PUBLIC_TENANT_DIRECTORY_LIMIT_MAX,
+  fetchPublicTenantBySlugWithAdmin,
+  fetchPublicTenantDirectoryEntries,
+  type PublicTenantDirectoryEntry,
+} from "@/lib/publicTenantDirectoryService";
 
 export const revalidate = 300;
 
-const MAX_PUBLIC_TENANTS_LIMIT = 60;
 const TENANTS_SERVER_CACHE_TTL_MS = 5 * 60 * 1000;
 const TENANTS_ENDPOINT = "/api/public/tenants";
-const PUBLIC_TENANT_SELECT_CANDIDATES = [
-  "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,contato_email,contato_telefone,logo_url,palette_key,visible_in_directory,allow_public_signup,status,created_at,updated_at",
-  "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,logo_url,palette_key,status,created_at,updated_at",
-  "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,logo_url,status,created_at,updated_at",
-  "*",
-] as const;
 
 const resolveRequestIp = (request: Request): string => {
   const forwardedFor = request.headers.get("x-forwarded-for") || "";
@@ -33,27 +31,6 @@ const isLocalDevelopmentRequest = (request: Request): boolean => {
   return host.startsWith("localhost:") || host.startsWith("127.0.0.1:");
 };
 
-type PublicTenantDirectoryEntry = {
-  id: string;
-  nome: string;
-  sigla: string;
-  slug: string;
-  faculdade: string;
-  cidade: string;
-  curso: string;
-  area: string;
-  cnpj: string;
-  contatoEmail: string;
-  contatoTelefone: string;
-  logoUrl: string;
-  paletteKey: string;
-  visibleInDirectory: boolean;
-  allowPublicSignup: boolean;
-  status: "active" | "inactive" | "blocked";
-  createdAt: string;
-  updatedAt: string;
-};
-
 const measurePayloadBytes = (payload: unknown): number => {
   try {
     return new TextEncoder().encode(JSON.stringify(payload)).length;
@@ -62,212 +39,18 @@ const measurePayloadBytes = (payload: unknown): number => {
   }
 };
 
-const getSupabaseErrorText = (error: unknown): string => {
-  if (!error || typeof error !== "object") {
-    return error instanceof Error ? error.message.toLowerCase() : "";
-  }
-
-  const raw = error as Record<string, unknown>;
-  return [
-    error instanceof Error ? error.message : "",
-    typeof raw.message === "string" ? raw.message : "",
-    typeof raw.details === "string" ? raw.details : "",
-    typeof raw.hint === "string" ? raw.hint : "",
-  ]
-    .filter((entry) => entry.length > 0)
-    .join(" ")
-    .toLowerCase();
-};
-
-const shouldFallbackMissingColumns = (
-  error: unknown,
-  columns: readonly string[]
-): boolean => {
-  const message = getSupabaseErrorText(error);
-  const isMissingColumnError =
-    (message.includes("column") && message.includes("does not exist")) ||
-    message.includes("could not find the");
-  if (!isMissingColumnError) return false;
-  return columns.some((column) => message.includes(column.toLowerCase()));
-};
-
-const parseTenantStatus = (
-  value: unknown
-): "active" | "inactive" | "blocked" => {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (normalized === "inactive" || normalized === "blocked") {
-    return normalized;
-  }
-  return "active";
-};
-
-const parseTenantEntry = (row: Record<string, unknown>): PublicTenantDirectoryEntry | null => {
-  const id = typeof row.id === "string" ? row.id.trim() : "";
-  const slug = typeof row.slug === "string" ? row.slug.trim().toLowerCase() : "";
-  if (!id || !slug) return null;
-
-  return {
-    id,
-    nome: typeof row.nome === "string" ? row.nome.trim() : "",
-    sigla: typeof row.sigla === "string" ? row.sigla.trim() : "",
-    slug,
-    faculdade: typeof row.faculdade === "string" ? row.faculdade.trim() : "",
-    cidade: typeof row.cidade === "string" ? row.cidade.trim() : "",
-    curso: typeof row.curso === "string" ? row.curso.trim() : "",
-    area: typeof row.area === "string" ? row.area.trim() : "",
-    cnpj: typeof row.cnpj === "string" ? row.cnpj.trim() : "",
-    contatoEmail:
-      typeof row.contato_email === "string"
-        ? row.contato_email.trim()
-        : typeof row.contatoEmail === "string"
-          ? row.contatoEmail.trim()
-          : "",
-    contatoTelefone:
-      typeof row.contato_telefone === "string"
-        ? row.contato_telefone.trim()
-        : typeof row.contatoTelefone === "string"
-          ? row.contatoTelefone.trim()
-          : "",
-    logoUrl:
-      typeof row.logo_url === "string"
-        ? row.logo_url.trim()
-        : typeof row.logoUrl === "string"
-          ? row.logoUrl.trim()
-          : "",
-    paletteKey:
-      typeof row.palette_key === "string"
-        ? row.palette_key.trim()
-        : typeof row.paletteKey === "string" && row.paletteKey.trim()
-          ? row.paletteKey.trim()
-          : "green",
-    visibleInDirectory:
-      typeof row.visible_in_directory === "boolean"
-        ? row.visible_in_directory
-        : typeof row.visibleInDirectory === "boolean"
-          ? row.visibleInDirectory
-          : true,
-    allowPublicSignup:
-      typeof row.allow_public_signup === "boolean"
-        ? row.allow_public_signup
-        : typeof row.allowPublicSignup === "boolean"
-          ? row.allowPublicSignup
-          : true,
-    status: parseTenantStatus(row.status),
-    createdAt: typeof row.created_at === "string" ? row.created_at : "",
-    updatedAt: typeof row.updated_at === "string" ? row.updated_at : "",
-  };
-};
-
-const fetchTenantRowsWithFallback = async (
-  requestedSlug: string
-): Promise<Record<string, unknown>[]> => {
-  let lastSchemaError: unknown = null;
-  let shouldFilterActiveStatus = true;
-  let shouldFilterDirectoryVisibility = requestedSlug.length === 0;
-
-  for (const selectColumns of PUBLIC_TENANT_SELECT_CANDIDATES) {
-    let query = supabaseAdmin
-      .from("tenants")
-      .select(selectColumns);
-
-    if (shouldFilterActiveStatus) {
-      query = query.eq("status", "active");
-    }
-
-    if (requestedSlug) {
-      query = query.eq("slug", requestedSlug);
-      const { data, error } = await query.maybeSingle();
-      if (!error) {
-        if (!data || typeof data !== "object") return [];
-        return [data as Record<string, unknown>];
-      }
-
-      if (
-        shouldFallbackMissingColumns(error, [
-          "contato_email",
-          "contato_telefone",
-          "visible_in_directory",
-          "allow_public_signup",
-          "palette_key",
-          "logo_url",
-          "updated_at",
-          "created_at",
-        ])
-      ) {
-        lastSchemaError = error;
-        continue;
-      }
-
-      if (shouldFilterActiveStatus && shouldFallbackMissingColumns(error, ["status"])) {
-        shouldFilterActiveStatus = false;
-        lastSchemaError = error;
-        continue;
-      }
-
-      throw error;
-    }
-
-    if (shouldFilterDirectoryVisibility) {
-      query = query.eq("visible_in_directory", true);
-    }
-
-    const { data, error } = await query.order("nome", { ascending: true }).limit(MAX_PUBLIC_TENANTS_LIMIT);
-
-    if (!error) {
-      return (Array.isArray(data) ? data : []) as unknown as Record<string, unknown>[];
-    }
-
-    if (
-      shouldFallbackMissingColumns(error, [
-        "visible_in_directory",
-        "contato_email",
-        "contato_telefone",
-        "allow_public_signup",
-        "palette_key",
-        "logo_url",
-        "updated_at",
-        "created_at",
-      ])
-    ) {
-      lastSchemaError = error;
-      continue;
-    }
-
-    if (shouldFilterActiveStatus && shouldFallbackMissingColumns(error, ["status"])) {
-      shouldFilterActiveStatus = false;
-      lastSchemaError = error;
-      continue;
-    }
-
-    if (
-      shouldFilterDirectoryVisibility &&
-      shouldFallbackMissingColumns(error, ["visible_in_directory"])
-    ) {
-      shouldFilterDirectoryVisibility = false;
-      lastSchemaError = error;
-      continue;
-    }
-
-    throw error;
-  }
-
-  if (lastSchemaError) {
-    console.warn("Diretorio publico de tenants: fallback de schema.", lastSchemaError);
-  }
-  return [];
-};
-
 export async function GET(request: Request) {
   const startedAt = Date.now();
   const url = new URL(request.url);
   const requestedLimit = Number.parseInt(url.searchParams.get("limit") || "60", 10);
   const requestedSlug = url.searchParams.get("slug")?.trim().toLowerCase() || "";
+  const shouldRefresh = url.searchParams.get("refresh") === "1";
   const limit = Number.isFinite(requestedLimit)
-    ? Math.max(1, Math.min(MAX_PUBLIC_TENANTS_LIMIT, requestedLimit))
-    : 60;
+    ? Math.max(1, Math.min(PUBLIC_TENANT_DIRECTORY_LIMIT_MAX, requestedLimit))
+    : PUBLIC_TENANT_DIRECTORY_LIMIT_MAX;
   const rateLimit = isLocalDevelopmentRequest(request)
     ? { allowed: true, remaining: 9999, resetAt: Date.now() + 60_000 }
-    : consumeRateLimit(resolveRequestIp(request), "/api/public/tenants");
+    : consumeRateLimit(resolveRequestIp(request), TENANTS_ENDPOINT);
 
   if (!rateLimit.allowed) {
     const payload = { error: "Rate limit exceeded. Try again in 1 minute." };
@@ -300,19 +83,25 @@ export async function GET(request: Request) {
   try {
     if (requestedSlug) {
       const cacheKey = `public:tenants:slug:${requestedSlug}`;
-      const cachedTenant = ServerCache.get<PublicTenantDirectoryEntry>(cacheKey);
+      if (shouldRefresh) {
+        ServerCache.delete(cacheKey);
+      }
+
+      const cachedTenant = shouldRefresh
+        ? null
+        : ServerCache.get<PublicTenantDirectoryEntry>(cacheKey);
       const cacheHit = cachedTenant !== null;
       const tenant =
         cachedTenant ??
         (await (async (): Promise<PublicTenantDirectoryEntry | null> => {
-          const rows = await fetchTenantRowsWithFallback(requestedSlug);
-          const parsed = parseTenantEntry((rows?.[0] || {}) as Record<string, unknown>);
-          if (parsed && parsed.status === "active") {
-            ServerCache.set(cacheKey, parsed, TENANTS_SERVER_CACHE_TTL_MS);
+          const entry = await fetchPublicTenantBySlugWithAdmin(requestedSlug);
+          if (entry) {
+            ServerCache.set(cacheKey, entry, TENANTS_SERVER_CACHE_TTL_MS);
           }
-          return parsed;
+          return entry;
         })());
-      if (!tenant || tenant.status !== "active") {
+
+      if (!tenant) {
         const payload = { error: "Atletica nao encontrada." };
         QueryMonitor.recordQuery({
           endpoint: TENANTS_ENDPOINT,
@@ -324,10 +113,7 @@ export async function GET(request: Request) {
           tenantId: requestedSlug,
           error: payload.error,
         });
-        return NextResponse.json(
-          payload,
-          { status: 404 }
-        );
+        return NextResponse.json(payload, { status: 404 });
       }
 
       QueryMonitor.recordQuery({
@@ -348,21 +134,20 @@ export async function GET(request: Request) {
     }
 
     const cacheKey = `public:tenants:list:${limit}`;
-    const cachedTenants = ServerCache.get<PublicTenantDirectoryEntry[]>(cacheKey);
+    if (shouldRefresh) {
+      ServerCache.delete(cacheKey);
+    }
+
+    const cachedTenants = shouldRefresh
+      ? null
+      : ServerCache.get<PublicTenantDirectoryEntry[]>(cacheKey);
     const cacheHit = cachedTenants !== null;
     const tenants =
       cachedTenants ??
-        (await (async (): Promise<PublicTenantDirectoryEntry[]> => {
-          const rows = await fetchTenantRowsWithFallback("");
-          const parsed = rows
-          .slice(0, limit)
-          .map((row) => parseTenantEntry((row || {}) as Record<string, unknown>))
-          .filter(
-            (row): row is PublicTenantDirectoryEntry =>
-              row !== null && row.status === "active"
-          );
-        ServerCache.set(cacheKey, parsed, TENANTS_SERVER_CACHE_TTL_MS);
-        return parsed;
+      (await (async (): Promise<PublicTenantDirectoryEntry[]> => {
+        const entries = await fetchPublicTenantDirectoryEntries(limit);
+        ServerCache.set(cacheKey, entries, TENANTS_SERVER_CACHE_TTL_MS);
+        return entries;
       })());
 
     QueryMonitor.recordQuery({

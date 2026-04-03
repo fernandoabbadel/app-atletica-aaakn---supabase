@@ -12,6 +12,7 @@ import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { TENANT_AREA_OPTIONS } from "@/constants/tenantAreas";
 import { fetchFinanceiroConfig, saveFinanceiroConfig } from "@/lib/eventsService";
 import { canManageTenant } from "@/lib/roles";
+import { clearPublicTenantLookupCache } from "@/lib/publicTenantLookup";
 import {
   fetchTenantById,
   type TenantPaletteKey,
@@ -90,7 +91,7 @@ const extractErrorMessage = (error: unknown): string => {
 export default function AdminAtleticaPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
-  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug, refreshTenantTheme } = useTenantTheme();
 
   const canAccess = canManageTenant(user);
   const tenantId = activeTenantId.trim();
@@ -223,6 +224,33 @@ export default function AdminAtleticaPage() {
         visibleInDirectory: form.visibleInDirectory,
         allowPublicSignup: form.allowPublicSignup,
       });
+
+      const publicTenantSlug = (form.slug.trim() || tenantSlug.trim()).toLowerCase();
+      if (publicTenantSlug) {
+        clearPublicTenantLookupCache(publicTenantSlug);
+        try {
+          const refreshTenantParams = new URLSearchParams({
+            slug: publicTenantSlug,
+            refresh: "1",
+          });
+          const refreshLandingParams = new URLSearchParams({
+            tenant: publicTenantSlug,
+            refresh: "1",
+          });
+          await Promise.all([
+            fetch(`/api/public/tenants?${refreshTenantParams.toString()}`, {
+              cache: "no-store",
+            }),
+            fetch(`/api/public/landing?${refreshLandingParams.toString()}`, {
+              cache: "no-store",
+            }),
+          ]);
+        } catch (refreshError: unknown) {
+          console.warn("Falha ao atualizar cache publico da atletica.", refreshError);
+        }
+      }
+
+      refreshTenantTheme();
       addToast("Dados da atletica atualizados.", "success");
     } catch (error: unknown) {
       addToast(extractErrorMessage(error), "error");

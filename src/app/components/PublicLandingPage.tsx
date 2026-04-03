@@ -226,7 +226,13 @@ export default function PublicLandingPage({
 }: PublicLandingPageProps) {
   const router = useRouter();
   const { user, loginAsGuest, loginGoogle, loading: authLoading } = useAuth();
-  const { tenantSlug: activeTenantSlug } = useTenantTheme();
+  const {
+    tenantSlug: activeTenantSlug,
+    tenantName: themedTenantName,
+    tenantSigla: themedTenantSigla,
+    tenantCourse: themedTenantCourse,
+    tenantLogoUrl: themedTenantLogoUrl,
+  } = useTenantTheme();
   const { addToast } = useToast();
 
   const tenantSlug = tenantSlugOverride.trim().toLowerCase();
@@ -245,6 +251,33 @@ export default function PublicLandingPage({
   const [brand, setBrand] = useState<BrandState>(DEFAULT_BRAND);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"aluno" | "empresa">("aluno");
+
+  const themedTenantBrand = useMemo<BrandState | null>(() => {
+    if (!isTenantLanding) return null;
+    if (normalizedActiveTenantSlug && normalizedActiveTenantSlug !== tenantSlug) return null;
+
+    const sigla = themedTenantSigla.trim();
+    const nome = themedTenantName.trim();
+    const subtitle = themedTenantCourse.trim();
+    const logoUrl = themedTenantLogoUrl.trim();
+
+    if (!sigla && !nome && !subtitle && !logoUrl) return null;
+
+    return {
+      sigla: sigla || tenantSlug.toUpperCase() || "TENANT",
+      nome: nome || sigla || tenantSlug.toUpperCase() || "TENANT",
+      subtitle: subtitle || "Landing oficial da atletica.",
+      logoUrl: logoUrl || "/logo.png",
+    };
+  }, [
+    isTenantLanding,
+    normalizedActiveTenantSlug,
+    tenantSlug,
+    themedTenantCourse,
+    themedTenantLogoUrl,
+    themedTenantName,
+    themedTenantSigla,
+  ]);
 
   const guestPath = useMemo(() => {
     if (!isTenantLanding) {
@@ -355,12 +388,20 @@ export default function PublicLandingPage({
             : isTenantLanding
               ? resolveFallbackBrand(tenantSlug)
               : DEFAULT_BRAND;
+        const shouldUseThemedTenantBrand =
+          Boolean(themedTenantBrand) &&
+          isTenantLanding &&
+          nextBrand.nome.trim().toLowerCase() === tenantSlug &&
+          nextBrand.sigla.trim().toLowerCase() === tenantSlug &&
+          nextBrand.logoUrl.trim() === PLATFORM_LOGO_URL;
+        const resolvedBrand =
+          shouldUseThemedTenantBrand && themedTenantBrand ? themedTenantBrand : nextBrand;
 
         if (!mounted) return;
 
         storeLandingConfigSnapshot(nextConfig, typeof data.tenantId === "string" ? data.tenantId : "");
         setConfig(nextConfig);
-        setBrand(nextBrand);
+        setBrand(resolvedBrand);
         setRealStats({
           users: typeof data.usersCount === "number" ? data.usersCount : 0,
           tenants: typeof data.tenantsCount === "number" ? data.tenantsCount : 0,
@@ -369,7 +410,7 @@ export default function PublicLandingPage({
       } catch (error: unknown) {
         console.error("Erro ao carregar landing:", error);
         if (mounted) {
-          setBrand(isTenantLanding ? resolveFallbackBrand(tenantSlug) : DEFAULT_BRAND);
+          setBrand(themedTenantBrand ?? (isTenantLanding ? resolveFallbackBrand(tenantSlug) : DEFAULT_BRAND));
         }
       } finally {
         if (mounted) {
@@ -382,7 +423,7 @@ export default function PublicLandingPage({
     return () => {
       mounted = false;
     };
-  }, [fallbackConfig, isTenantLanding, tenantSlug]);
+  }, [fallbackConfig, isTenantLanding, tenantSlug, themedTenantBrand]);
 
   const handleGoogleLogin = async () => {
     try {
@@ -462,10 +503,10 @@ export default function PublicLandingPage({
           />
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest text-zinc-300">
-              {brand.sigla}
+              {brand.nome}
             </p>
             <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
-              {brand.nome}
+              {brand.sigla}
             </p>
           </div>
         </div>

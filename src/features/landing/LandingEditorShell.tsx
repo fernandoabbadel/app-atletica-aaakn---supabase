@@ -26,6 +26,15 @@ import {
 
 import { useToast } from "@/context/ToastContext";
 import {
+  LANDING_ADDRESS_MAX_LENGTH,
+  LANDING_HERO_HIGHLIGHT_MAX_LENGTH,
+  LANDING_HERO_SUBTITLE_MAX_LENGTH,
+  LANDING_HERO_TITLE_MAX_LENGTH,
+  LANDING_REVIEW_NAME_MAX_LENGTH,
+  LANDING_REVIEW_PROFILE_URL_MAX_LENGTH,
+  LANDING_REVIEW_ROLE_MAX_LENGTH,
+  LANDING_REVIEW_TEXT_MAX_LENGTH,
+  LANDING_TAGLINE_MAX_LENGTH,
   LOADING_PHRASE_MAX_LENGTH,
   MAX_LOADING_PHRASES,
   type LandingConfig,
@@ -67,6 +76,21 @@ const updateReviewField = (
   reviews.map((review, reviewIndex) =>
     reviewIndex === index ? { ...review, [field]: value } : review
   );
+
+const clampText = (value: string, maxLength: number): string =>
+  value.slice(0, maxLength);
+
+const FieldLengthHint = ({
+  currentLength,
+  maxLength,
+}: {
+  currentLength: number;
+  maxLength: number;
+}) => (
+  <p className="mt-1 text-right text-[10px] font-medium text-zinc-500">
+    {currentLength}/{maxLength}
+  </p>
+);
 
 export default function LandingEditorShell({
   scope,
@@ -292,14 +316,19 @@ export default function LandingEditorShell({
                   Tagline (Badge)
                 </label>
                 <input
+                  maxLength={LANDING_TAGLINE_MAX_LENGTH}
                   value={config.tagline}
                   onChange={(event) =>
                     setConfig((current) => ({
                       ...current,
-                      tagline: event.target.value,
+                      tagline: clampText(event.target.value, LANDING_TAGLINE_MAX_LENGTH),
                     }))
                   }
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-white outline-none focus:border-emerald-500"
+                />
+                <FieldLengthHint
+                  currentLength={config.tagline.length}
+                  maxLength={LANDING_TAGLINE_MAX_LENGTH}
                 />
               </div>
               <div>
@@ -327,14 +356,22 @@ export default function LandingEditorShell({
                 Titulo Principal
               </label>
               <input
+                maxLength={LANDING_HERO_TITLE_MAX_LENGTH}
                 value={config.heroTitle}
                 onChange={(event) =>
                   setConfig((current) => ({
                     ...current,
-                    heroTitle: event.target.value,
+                    heroTitle: clampText(
+                      event.target.value,
+                      LANDING_HERO_TITLE_MAX_LENGTH
+                    ),
                   }))
                 }
                 className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-white outline-none focus:border-emerald-500"
+              />
+              <FieldLengthHint
+                currentLength={config.heroTitle.length}
+                maxLength={LANDING_HERO_TITLE_MAX_LENGTH}
               />
             </div>
 
@@ -343,14 +380,22 @@ export default function LandingEditorShell({
                 Destaque principal
               </label>
               <input
+                maxLength={LANDING_HERO_HIGHLIGHT_MAX_LENGTH}
                 value={config.heroHighlight}
                 onChange={(event) =>
                   setConfig((current) => ({
                     ...current,
-                    heroHighlight: event.target.value,
+                    heroHighlight: clampText(
+                      event.target.value,
+                      LANDING_HERO_HIGHLIGHT_MAX_LENGTH
+                    ),
                   }))
                 }
                 className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-black tracking-wider text-white outline-none focus:border-emerald-500"
+              />
+              <FieldLengthHint
+                currentLength={config.heroHighlight.length}
+                maxLength={LANDING_HERO_HIGHLIGHT_MAX_LENGTH}
               />
             </div>
 
@@ -359,15 +404,23 @@ export default function LandingEditorShell({
                 Subtitulo
               </label>
               <textarea
+                maxLength={LANDING_HERO_SUBTITLE_MAX_LENGTH}
                 value={config.heroSubtitle}
                 onChange={(event) =>
                   setConfig((current) => ({
                     ...current,
-                    heroSubtitle: event.target.value,
+                    heroSubtitle: clampText(
+                      event.target.value,
+                      LANDING_HERO_SUBTITLE_MAX_LENGTH
+                    ),
                   }))
                 }
                 rows={3}
                 className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-zinc-300 outline-none focus:border-emerald-500"
+              />
+              <FieldLengthHint
+                currentLength={config.heroSubtitle.length}
+                maxLength={LANDING_HERO_SUBTITLE_MAX_LENGTH}
               />
             </div>
 
@@ -437,6 +490,8 @@ export default function LandingEditorShell({
                 </label>
                 <input
                   type="number"
+                  min={0}
+                  max={9999999}
                   value={config.statUsers}
                   onChange={(event) =>
                     setConfig((current) => ({
@@ -453,6 +508,8 @@ export default function LandingEditorShell({
                 </label>
                 <input
                   type="number"
+                  min={0}
+                  max={9999999}
                   value={config.statPosts}
                   onChange={(event) =>
                     setConfig((current) => ({
@@ -469,6 +526,8 @@ export default function LandingEditorShell({
                 </label>
                 <input
                   type="number"
+                  min={0}
+                  max={9999999}
                   value={config.statPartners}
                   onChange={(event) =>
                     setConfig((current) => ({
@@ -495,14 +554,19 @@ export default function LandingEditorShell({
                   Endereco
                 </label>
                 <input
+                  maxLength={LANDING_ADDRESS_MAX_LENGTH}
                   value={config.address}
                   onChange={(event) =>
                     setConfig((current) => ({
                       ...current,
-                      address: event.target.value,
+                      address: clampText(event.target.value, LANDING_ADDRESS_MAX_LENGTH),
                     }))
                   }
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-white outline-none focus:border-emerald-500"
+                />
+                <FieldLengthHint
+                  currentLength={config.address.length}
+                  maxLength={LANDING_ADDRESS_MAX_LENGTH}
                 />
               </div>
 
@@ -600,7 +664,7 @@ export default function LandingEditorShell({
                         value={social.url}
                         placeholder="URL Completa"
                         onChange={(event) =>
-                          updateSocial(index, "url", event.target.value)
+                          updateSocial(index, "url", clampText(event.target.value, 400))
                         }
                         className="flex-1 rounded border border-zinc-800 bg-zinc-950 px-2 text-xs text-white outline-none focus:border-emerald-500"
                       />
@@ -683,10 +747,15 @@ export default function LandingEditorShell({
 
         <section className="space-y-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6 lg:col-span-2">
           <div className="flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-xl font-bold text-white">
-              <MessageSquare className="text-purple-400" size={20} />
-              Depoimentos
-            </h2>
+            <div>
+              <h2 className="flex items-center gap-2 text-xl font-bold text-white">
+                <MessageSquare className="text-purple-400" size={20} />
+                Depoimentos
+              </h2>
+              <p className="mt-1 text-xs text-zinc-500">
+                Os cards continuam editaveis depois de salvos.
+              </p>
+            </div>
             <button
               onClick={addReview}
               className="flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-white transition hover:bg-zinc-700"
@@ -710,8 +779,12 @@ export default function LandingEditorShell({
                 </button>
 
                 <div className="mt-2 space-y-3">
+                  <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500">
+                    Nome
+                  </label>
                   <input
                     placeholder="Nome"
+                    maxLength={LANDING_REVIEW_NAME_MAX_LENGTH}
                     value={review.name}
                     onChange={(event) =>
                       setConfig((current) => ({
@@ -720,14 +793,22 @@ export default function LandingEditorShell({
                           current.reviews,
                           index,
                           "name",
-                          event.target.value
+                          clampText(event.target.value, LANDING_REVIEW_NAME_MAX_LENGTH)
                         ),
                       }))
                     }
                     className="w-full border-b border-zinc-800 bg-transparent text-sm font-bold text-white outline-none focus:border-emerald-500"
                   />
+                  <FieldLengthHint
+                    currentLength={review.name.length}
+                    maxLength={LANDING_REVIEW_NAME_MAX_LENGTH}
+                  />
+                  <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500">
+                    Cargo
+                  </label>
                   <input
                     placeholder="Cargo (ex: T5 Medicina)"
+                    maxLength={LANDING_REVIEW_ROLE_MAX_LENGTH}
                     value={review.role}
                     onChange={(event) =>
                       setConfig((current) => ({
@@ -736,17 +817,22 @@ export default function LandingEditorShell({
                           current.reviews,
                           index,
                           "role",
-                          event.target.value
+                          clampText(event.target.value, LANDING_REVIEW_ROLE_MAX_LENGTH)
                         ),
                       }))
                     }
                     className="w-full border-b border-zinc-800 bg-transparent text-xs text-zinc-400 outline-none focus:border-emerald-500"
+                  />
+                  <FieldLengthHint
+                    currentLength={review.role.length}
+                    maxLength={LANDING_REVIEW_ROLE_MAX_LENGTH}
                   />
 
                   <div className="flex items-center gap-2 rounded-lg border border-zinc-800/50 bg-zinc-900/50 p-2">
                     <Users size={12} className="text-zinc-500" />
                     <input
                       placeholder="URL da Foto / Perfil"
+                      maxLength={LANDING_REVIEW_PROFILE_URL_MAX_LENGTH}
                       value={review.profileUrl}
                       onChange={(event) =>
                         setConfig((current) => ({
@@ -755,16 +841,27 @@ export default function LandingEditorShell({
                             current.reviews,
                             index,
                             "profileUrl",
-                            event.target.value
+                            clampText(
+                              event.target.value,
+                              LANDING_REVIEW_PROFILE_URL_MAX_LENGTH
+                            )
                           ),
                         }))
                       }
                       className="w-full bg-transparent text-[10px] text-emerald-400 placeholder-zinc-600 focus:outline-none"
                     />
                   </div>
+                  <FieldLengthHint
+                    currentLength={review.profileUrl.length}
+                    maxLength={LANDING_REVIEW_PROFILE_URL_MAX_LENGTH}
+                  />
 
+                  <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500">
+                    Depoimento
+                  </label>
                   <textarea
                     placeholder="O que essa pessoa disse?"
+                    maxLength={LANDING_REVIEW_TEXT_MAX_LENGTH}
                     value={review.text}
                     onChange={(event) =>
                       setConfig((current) => ({
@@ -773,12 +870,16 @@ export default function LandingEditorShell({
                           current.reviews,
                           index,
                           "text",
-                          event.target.value
+                          clampText(event.target.value, LANDING_REVIEW_TEXT_MAX_LENGTH)
                         ),
                       }))
                     }
                     rows={3}
-                    className="w-full resize-none rounded p-2 text-xs italic text-zinc-300 outline-none ring-zinc-700 focus:ring-1"
+                    className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900/70 p-3 text-xs italic text-zinc-200 outline-none focus:border-emerald-500"
+                  />
+                  <FieldLengthHint
+                    currentLength={review.text.length}
+                    maxLength={LANDING_REVIEW_TEXT_MAX_LENGTH}
                   />
                 </div>
               </div>

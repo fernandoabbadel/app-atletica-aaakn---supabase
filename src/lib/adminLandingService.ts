@@ -11,6 +11,15 @@ const MAX_SOCIAL_LINKS = 20;
 const MAX_REVIEWS = 30;
 export const MAX_LOADING_PHRASES = 10;
 export const LOADING_PHRASE_MAX_LENGTH = 90;
+export const LANDING_TAGLINE_MAX_LENGTH = 40;
+export const LANDING_HERO_TITLE_MAX_LENGTH = 40;
+export const LANDING_HERO_HIGHLIGHT_MAX_LENGTH = 48;
+export const LANDING_HERO_SUBTITLE_MAX_LENGTH = 180;
+export const LANDING_ADDRESS_MAX_LENGTH = 160;
+export const LANDING_REVIEW_NAME_MAX_LENGTH = 80;
+export const LANDING_REVIEW_ROLE_MAX_LENGTH = 80;
+export const LANDING_REVIEW_TEXT_MAX_LENGTH = 320;
+export const LANDING_REVIEW_PROFILE_URL_MAX_LENGTH = 400;
 
 const MIN_STAT_VALUE = 0;
 const MAX_STAT_VALUE = 9_999_999;
@@ -190,10 +199,10 @@ const normalizeReviews = (raw: unknown, fallback: ReviewConfig[]): ReviewConfig[
 
     normalized.push({
       id: trimField(obj.id, 60) || crypto.randomUUID(),
-      name: trimField(obj.name, 100),
-      role: trimField(obj.role, 100),
-      text: trimField(obj.text, 500),
-      profileUrl: trimField(obj.profileUrl, 400),
+      name: trimField(obj.name, LANDING_REVIEW_NAME_MAX_LENGTH),
+      role: trimField(obj.role, LANDING_REVIEW_ROLE_MAX_LENGTH),
+      text: trimField(obj.text, LANDING_REVIEW_TEXT_MAX_LENGTH),
+      profileUrl: trimField(obj.profileUrl, LANDING_REVIEW_PROFILE_URL_MAX_LENGTH),
     });
   }
 
@@ -253,11 +262,23 @@ export function sanitizeLandingConfig(
   const obj = asObject(raw) ?? {};
 
   return {
-    tagline: trimField(obj.tagline, 120, fallbackConfig.tagline),
+    tagline: trimField(obj.tagline, LANDING_TAGLINE_MAX_LENGTH, fallbackConfig.tagline),
     taglineColor: trimField(obj.taglineColor, 20, fallbackConfig.taglineColor),
-    heroTitle: trimField(obj.heroTitle, 120, fallbackConfig.heroTitle),
-    heroSubtitle: trimField(obj.heroSubtitle, 300, fallbackConfig.heroSubtitle),
-    heroHighlight: trimField(obj.heroHighlight, 120, fallbackConfig.heroHighlight),
+    heroTitle: trimField(
+      obj.heroTitle,
+      LANDING_HERO_TITLE_MAX_LENGTH,
+      fallbackConfig.heroTitle
+    ),
+    heroSubtitle: trimField(
+      obj.heroSubtitle,
+      LANDING_HERO_SUBTITLE_MAX_LENGTH,
+      fallbackConfig.heroSubtitle
+    ),
+    heroHighlight: trimField(
+      obj.heroHighlight,
+      LANDING_HERO_HIGHLIGHT_MAX_LENGTH,
+      fallbackConfig.heroHighlight
+    ),
     titleColor: trimField(obj.titleColor, 20, fallbackConfig.titleColor),
     gradientStart: trimField(obj.gradientStart, 20, fallbackConfig.gradientStart),
     gradientEnd: trimField(obj.gradientEnd, 20, fallbackConfig.gradientEnd),
@@ -279,7 +300,7 @@ export function sanitizeLandingConfig(
       MAX_STAT_VALUE,
       fallbackConfig.statPartners
     ),
-    address: trimField(obj.address, 160, fallbackConfig.address),
+    address: trimField(obj.address, LANDING_ADDRESS_MAX_LENGTH, fallbackConfig.address),
     phone: trimField(obj.phone, 40, fallbackConfig.phone),
     whatsapp: trimField(obj.whatsapp, 30, fallbackConfig.whatsapp),
     email: trimField(obj.email, 160, fallbackConfig.email),
