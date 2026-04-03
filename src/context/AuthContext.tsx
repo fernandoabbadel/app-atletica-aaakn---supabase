@@ -6,13 +6,9 @@ import { useRouter, usePathname } from "next/navigation";
 import { logActivity } from "../lib/logger"; 
 import LoadingScreen from "../app/loading";
 import { DEFAULT_STATS, DEFAULT_USER_PROPS } from "../constants/userDefaults";
-import { ACHIEVEMENTS_CATALOG } from "@/lib/achievements";
 import {
   DEFAULT_PATENTE_CONFIG,
-  calculateAchievementSummary,
-  mergeAchievementCatalogWithDefaults,
   mergePatentesWithDefaults,
-  resolveEffectiveXp,
   resolvePatenteForXp,
 } from "@/lib/achievementRuntime";
 import { getBackendErrorCode, isPermissionError } from "@/lib/backendErrors";
@@ -68,14 +64,6 @@ const DEFAULT_PATENTES: PatenteConfig[] = DEFAULT_PATENTE_CONFIG.map((entry) => 
   iconName: entry.iconName,
   cor: entry.cor,
 }));
-
-const DEFAULT_ACHIEVEMENT_RUNTIME_CATALOG = mergeAchievementCatalogWithDefaults(
-  ACHIEVEMENTS_CATALOG.map((item) => ({
-    ...item,
-    active: true,
-    repeatable: false,
-  }))
-);
 
 export interface UserStats {
     inviteActivations?: number;
@@ -392,14 +380,6 @@ const normalizeUserRow = (row: unknown, authUser?: SupabaseAuthUser | null): Use
   const raw = asRecord(row) ?? {};
   const rawStats = asRecord(raw.stats) ?? {};
   const normalizedStats = { ...DEFAULT_STATS, ...rawStats };
-  const achievementXpFloor = calculateAchievementSummary(
-    DEFAULT_ACHIEVEMENT_RUNTIME_CATALOG,
-    normalizedStats
-  ).totalUnlockedXp;
-  const effectiveXp = resolveEffectiveXp([
-    asNumber(raw.xp, DEFAULT_USER_PROPS.xp),
-    achievementXpFloor,
-  ]);
   const authAnonymous = Boolean(
     (authUser as (SupabaseAuthUser & { is_anonymous?: unknown }) | null | undefined)
       ?.is_anonymous
@@ -414,7 +394,7 @@ const normalizeUserRow = (row: unknown, authUser?: SupabaseAuthUser | null): Use
     role: asString(raw.role, "guest"),
     status: asString(raw.status, "ativo") as UserStatus,
     level: asNumber(raw.level, DEFAULT_USER_PROPS.level),
-    xp: effectiveXp,
+    xp: asNumber(raw.xp, DEFAULT_USER_PROPS.xp),
     xpMultiplier: asNumber(raw.xpMultiplier, DEFAULT_USER_PROPS.xpMultiplier),
     sharkCoins: asNumber(raw.sharkCoins, DEFAULT_USER_PROPS.sharkCoins),
     selos: asNumber(raw.selos, DEFAULT_USER_PROPS.selos),
@@ -1110,31 +1090,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
-        const statsPatch = asRecord(updates.stats) ?? {};
-        const effectiveStatsForXp: Record<string, unknown> = {
-            ...DEFAULT_STATS,
-            ...currentStats,
-            ...statsPatch,
-        };
-        if (typeof updates["stats.loginCount"] === "number") {
-            effectiveStatsForXp.loginCount = updates["stats.loginCount"];
-        }
-        if (typeof updates["stats.albumCollected"] === "number") {
-            effectiveStatsForXp.albumCollected = updates["stats.albumCollected"];
-        }
-        const effectiveStoredXp = asNumber(updates.xp, asNumber(user.xp, 0));
-        const canonicalXp = resolveEffectiveXp([
-            effectiveStoredXp,
-            asNumber(user.xp, 0),
-            calculateAchievementSummary(
-                DEFAULT_ACHIEVEMENT_RUNTIME_CATALOG,
-                effectiveStatsForXp
-            ).totalUnlockedXp,
-        ]);
-        if (canonicalXp !== effectiveStoredXp) {
-            updates.xp = canonicalXp;
-            hasUpdates = true;
-        }
+          const effectiveStoredXp = asNumber(updates.xp, asNumber(user.xp, 0));
+          const canonicalXp = effectiveStoredXp;
 
         const visualMaintenanceKey = [
             user.uid,
@@ -1221,17 +1178,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (user.xpMultiplier === undefined) { updates.xpMultiplier = defaultPlanXpMultiplier; hasUpdates = true; }
             if (user.nivel_prioridade === undefined) { updates.nivel_prioridade = defaultPlanPriority; hasUpdates = true; }
 
-            const patenteAlvo = calculatePatenteData(canonicalXp, patentes);
-            if (patenteAlvo) {
-                if (
-                    user.patente !== patenteAlvo.titulo ||
-                    user.patente_icon !== patenteAlvo.iconName ||
-                    user.patente_cor !== patenteAlvo.cor
-                ) {
-                    updates.patente = patenteAlvo.titulo;
-                    updates.patente_icon = patenteAlvo.iconName;
-                    updates.patente_cor = patenteAlvo.cor;
-                    hasUpdates = true;
+            const shouldHydrateMissingPatenteVisuals =
+                !asString(updates.patente ?? user.patente).trim() ||
+                !asString(updates.patente_icon ?? user.patente_icon).trim() ||
+                !asString(updates.patente_cor ?? user.patente_cor).trim();
+            if (shouldHydrateMissingPatenteVisuals) {
+                const patenteAlvo = calculatePatenteData(canonicalXp, patentes);
+                if (patenteAlvo) {
+                    if (user.patente !== patenteAlvo.titulo) {
+                        updates.patente = patenteAlvo.titulo;
+                        hasUpdates = true;
+                    }
+                    if (user.patente_icon !== patenteAlvo.iconName) {
+                        updates.patente_icon = patenteAlvo.iconName;
+                        hasUpdates = true;
+                    }
+                    if (user.patente_cor !== patenteAlvo.cor) {
+                        updates.patente_cor = patenteAlvo.cor;
+                        hasUpdates = true;
+                    }
                 }
             }
 

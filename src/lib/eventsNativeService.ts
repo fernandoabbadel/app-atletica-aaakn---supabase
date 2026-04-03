@@ -1091,11 +1091,15 @@ export async function upsertAdminEvent(payload: {
       createdAt: nowIso(),
       updatedAt: nowIso(),
     })
-    .select(EVENTOS_SELECT_COLUMNS)
+    .select("id")
     .single();
 
   if (error) throwSupabaseError(error);
-  const created = normalizeEventRow(data as Row);
+  const createdId = asString((data as Row | null)?.id).trim();
+  const created =
+    (createdId
+      ? await selectEventById(createdId, scopedTenantId || undefined)
+      : null) ?? normalizeEventRow(data as Row);
   if (actorUserId) {
     try {
       await incrementUserStats(
