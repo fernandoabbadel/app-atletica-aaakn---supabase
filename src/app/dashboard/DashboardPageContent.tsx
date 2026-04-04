@@ -1,11 +1,11 @@
 import DashboardClientPage from "./DashboardClientPage";
 
 import { fetchBoardroundAppConfig, getBoardroundDisplayName } from "@/lib/boardroundConfigService";
-import { fetchDashboardBundle, type DashboardBundle } from "@/lib/dashboardPublicService";
+import { type DashboardBundle } from "@/lib/dashboardPublicService";
+import { fetchPublicDashboardViewWithAdmin } from "@/lib/publicDashboardViewAdminService";
 import { resolveServerTenantScope } from "@/lib/serverTenantScope";
 import {
   createDefaultTenantAppModulesConfig,
-  fetchEffectiveTenantAppModulesConfig,
   type TenantAppModulesConfig,
 } from "@/lib/tenantAppModulesService";
 
@@ -27,9 +27,8 @@ export async function DashboardPageContent({
   let initialBoardroundDisplayName = "BoardRound";
 
   if (scope.tenantId) {
-    const [bundleResult, modulesResult, boardroundResult] = await Promise.allSettled([
-      fetchDashboardBundle({ tenantId: scope.tenantId }),
-      fetchEffectiveTenantAppModulesConfig({
+    const [dashboardViewResult, boardroundResult] = await Promise.allSettled([
+      fetchPublicDashboardViewWithAdmin({
         tenantId: scope.tenantId,
         tenantSlug: scope.tenantSlug,
       }),
@@ -39,12 +38,9 @@ export async function DashboardPageContent({
       }),
     ]);
 
-    if (bundleResult.status === "fulfilled") {
-      initialData = bundleResult.value;
-    }
-
-    if (modulesResult.status === "fulfilled") {
-      initialModulesConfig = modulesResult.value;
+    if (dashboardViewResult.status === "fulfilled") {
+      initialData = dashboardViewResult.value.data;
+      initialModulesConfig = dashboardViewResult.value.modulesConfig;
     }
 
     if (boardroundResult.status === "fulfilled") {

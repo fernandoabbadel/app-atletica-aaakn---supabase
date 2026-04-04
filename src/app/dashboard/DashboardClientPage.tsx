@@ -49,6 +49,10 @@ type Produto = DashboardProduct;
 type Liga = DashboardLiga;
 type Parceiro = DashboardPartner;
 type PostComunidade = DashboardPost;
+type PublicDashboardResponse = {
+  data: DashboardBundle;
+  modulesConfig: TenantAppModulesConfig;
+};
 
 const WEEKLY_BIZU_ACTIVE_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
 
@@ -79,6 +83,33 @@ const getPartnerLogoSrc = (partner: Parceiro, fallbackLogo: string): string =>
 
 const getPartnerCoverSrc = (partner: Parceiro, fallbackLogo: string): string =>
     partner.imgCapa || partner.imgLogo || fallbackLogo;
+
+const fetchPublicGuestDashboard = async (options: {
+  forceRefresh?: boolean;
+  tenantId?: string;
+  tenantSlug?: string;
+}): Promise<PublicDashboardResponse> => {
+  const searchParams = new URLSearchParams();
+  if (options.tenantId) {
+    searchParams.set("tenantId", options.tenantId);
+  }
+  if (options.tenantSlug) {
+    searchParams.set("tenant", options.tenantSlug);
+  }
+  if (options.forceRefresh) {
+    searchParams.set("refresh", "1");
+  }
+
+  const response = await fetch(`/api/public/dashboard?${searchParams.toString()}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Falha ao carregar dashboard publico (${response.status})`);
+  }
+
+  return (await response.json()) as PublicDashboardResponse;
+};
 
 type DashboardInitialData = Pick<
   DashboardBundle,
@@ -444,6 +475,9 @@ export default function DashboardClientPage({
     const requestKey = `${resolvedTenantId}:${resolvedTenantSlug}:${user?.uid || "anon"}`;
     const initialRequestKey = `${initialTenantId}:${initialTenantSlug}:anon`;
     const shouldForceRefresh = hasPendingDashboardInvalidation();
+    const userUid = user?.uid || "";
+    const isGuestVirtual = userUid.startsWith("guest_virtual_");
+    const shouldUsePublicGuestBundle = Boolean(user?.isAnonymous) || isGuestVirtual;
 
     if (!resolvedTenantId && !resolvedTenantSlug) {
       if (initialData === null) {
@@ -476,22 +510,42 @@ export default function DashboardClientPage({
       }
 
       try {
-        const data = await fetchDashboardBundle({
-          forceRefresh: shouldForceRefresh,
-          tenantId: resolvedTenantId || undefined,
-          userId: user?.uid || undefined,
-        });
-        if (!active) return;
+        if (shouldUsePublicGuestBundle) {
+          const payload = await fetchPublicGuestDashboard({
+            forceRefresh: shouldForceRefresh,
+            tenantId: resolvedTenantId || undefined,
+            tenantSlug: resolvedTenantSlug || undefined,
+          });
+          if (!active) return;
 
-        setEvents(data.events);
-        setProdutos(data.produtos);
-        setParceiros(data.parceiros);
-        setLigas(data.ligas);
-        setMensagens(data.mensagens);
-        setTreinos(data.treinos);
-        setTotalCaca(data.totalCaca);
-        setTotalAlunos(data.totalAlunos);
-        setProductTurmaStats(data.productTurmaStats);
+          setEvents(payload.data.events);
+          setProdutos(payload.data.produtos);
+          setParceiros(payload.data.parceiros);
+          setLigas(payload.data.ligas);
+          setMensagens(payload.data.mensagens);
+          setTreinos(payload.data.treinos);
+          setTotalCaca(payload.data.totalCaca);
+          setTotalAlunos(payload.data.totalAlunos);
+          setProductTurmaStats(payload.data.productTurmaStats);
+          setModulesConfig(payload.modulesConfig);
+        } else {
+          const data = await fetchDashboardBundle({
+            forceRefresh: shouldForceRefresh,
+            tenantId: resolvedTenantId || undefined,
+            userId: user?.uid || undefined,
+          });
+          if (!active) return;
+
+          setEvents(data.events);
+          setProdutos(data.produtos);
+          setParceiros(data.parceiros);
+          setLigas(data.ligas);
+          setMensagens(data.mensagens);
+          setTreinos(data.treinos);
+          setTotalCaca(data.totalCaca);
+          setTotalAlunos(data.totalAlunos);
+          setProductTurmaStats(data.productTurmaStats);
+        }
         if (shouldForceRefresh) {
           acknowledgeDashboardInvalidation();
         }
@@ -508,15 +562,24 @@ export default function DashboardClientPage({
     return () => {
       active = false;
     };
-  }, [activeTenantId, activeTenantSlug, initialData, initialTenantId, initialTenantSlug, user?.uid]);
+  }, [activeTenantId, activeTenantSlug, initialData, initialTenantId, initialTenantSlug, user?.isAnonymous, user?.uid]);
 
   useEffect(() => {
     let active = true;
     const resolvedTenantId = activeTenantId || user?.tenant_id || initialTenantId;
     const resolvedTenantSlug = activeTenantSlug.trim() || initialTenantSlug;
     const requestKey = `${resolvedTenantId}:${resolvedTenantSlug}`;
+    const userUid = user?.uid || "";
+    const isGuestVirtual = userUid.startsWith("guest_virtual_");
+    const shouldUsePublicGuestBundle = Boolean(user?.isAnonymous) || isGuestVirtual;
 
     if (!resolvedTenantId && !resolvedTenantSlug) {
+      return () => {
+        active = false;
+      };
+    }
+
+    if (shouldUsePublicGuestBundle) {
       return () => {
         active = false;
       };
@@ -547,7 +610,7 @@ export default function DashboardClientPage({
     return () => {
       active = false;
     };
-  }, [activeTenantId, activeTenantSlug, initialTenantId, initialTenantSlug, user?.tenant_id]);
+  }, [activeTenantId, activeTenantSlug, initialTenantId, initialTenantSlug, user?.isAnonymous, user?.tenant_id, user?.uid]);
 
   useEffect(() => {
     let active = true;
