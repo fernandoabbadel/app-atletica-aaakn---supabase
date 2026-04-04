@@ -262,7 +262,8 @@ export default function TreinoDetalhesPage() {
   if (!treino) return null;
 
   const theme = getTheme();
-  const confirmadosCount = listaFinal.filter(a => a.statusVisual !== 'falta').length;
+  const confirmadosCount = rsvps.filter((row) => row.status === "going").length;
+  const presentesCount = chamadaAdmin.filter((row) => row.status === "presente").length;
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-32 selection:bg-emerald-500/30">
@@ -311,6 +312,9 @@ export default function TreinoDetalhesPage() {
                 </span>
                 <span className="bg-white/10 backdrop-blur-md text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
                     <Users size={12}/> {confirmadosCount} Atletas
+                </span>
+                <span className="bg-white/10 backdrop-blur-md text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
+                    <CheckCircle size={12}/> {presentesCount} Presentes
                 </span>
             </div>
             

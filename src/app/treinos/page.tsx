@@ -6,7 +6,9 @@ import Link from "next/link";
 // 🦈 Removido useRouter não utilizado
 import Image from "next/image"; // 🦈 Importado componente Image
 import {
+  fetchTreinoPresenceCounts,
   fetchTreinoRsvps,
+  fetchTreinoSettings,
   fetchTreinosByDateRange,
   setTreinoRsvp
 } from "../../lib/treinosNativeService";
@@ -26,6 +28,9 @@ interface TreinoData {
   dia: string;
   status?: string;
   confirmados?: string[];
+  confirmedCount?: number;
+  presentCount?: number;
+  calendarColor?: string;
 }
 
 interface RsvpData {
@@ -61,6 +66,9 @@ const formatDateString = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+const toTreinoModalidadeKey = (value: string) =>
+  value.trim().replace(/\s+/g, " ").toLowerCase();
+
 const getDaysInMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
 const WEEKDAYS = ["D", "S", "T", "Q", "Q", "S", "S"];
 
@@ -74,7 +82,8 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
     const [userRsvp, setUserRsvp] = useState<"going" | "not_going" | null>(null);
     const [rsvpsLocal, setRsvpsLocal] = useState<RsvpData[]>([]);
     const [stats, setStats] = useState({ 
-        confirmados: 0, 
+        confirmados: treino.confirmedCount ?? 0, 
+        presentes: treino.presentCount ?? 0,
         avatares: [] as string[], 
         turmas: [] as TurmaStats[] 
     });
@@ -110,8 +119,13 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
                 img: getTurmaImage(turma, "https://github.com/shadcn.png"),
             }));
 
-        setStats({ confirmados: goingRows.length, avatares, turmas: ranking });
-    }, [user]);
+        setStats({
+            confirmados: goingRows.length,
+            presentes: treino.presentCount ?? 0,
+            avatares,
+            turmas: ranking,
+        });
+    }, [treino.presentCount, user]);
 
     useEffect(() => {
         let mounted = true;
@@ -234,9 +248,15 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
                     </div>
                     
                     {/* Contador Flutuante */}
-                    <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
-                        <Users size={14} className="text-white"/>
-                        <span className="text-xs font-bold text-white">{stats.confirmados}</span>
+                    <div className="flex flex-col gap-2">
+                        <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
+                            <Users size={14} className="text-white"/>
+                            <span className="text-xs font-bold text-white">{stats.confirmados} confirmados</span>
+                        </div>
+                        <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
+                            <CheckCircle size={14} className="text-emerald-400"/>
+                            <span className="text-xs font-bold text-white">{stats.presentes} presentes</span>
+                        </div>
                     </div>
                 </div>
 
@@ -328,6 +348,7 @@ export default function TreinosPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(new Date().getDate());
   const [treinosDoMes, setTreinosDoMes] = useState<TreinoData[]>([]);
+  const [modalidadeColors, setModalidadeColors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   // Buscar Treinos
@@ -347,10 +368,26 @@ export default function TreinosPage() {
           forceRefresh: false,
           tenantId: tenantId || undefined,
         });
-        setTreinosDoMes(lista as TreinoData[]);
+        const [settings, presenceCounts] = await Promise.all([
+          fetchTreinoSettings({ tenantId: tenantId || undefined }),
+          fetchTreinoPresenceCounts({
+            treinoIds: lista.map((treino) => treino.id),
+            tenantId: tenantId || undefined,
+          }),
+        ]);
+        setModalidadeColors(settings.modalidadeColors);
+        setTreinosDoMes(
+          (lista as TreinoData[]).map((treino) => ({
+            ...treino,
+            presentCount: presenceCounts[treino.id] ?? 0,
+            calendarColor:
+              settings.modalidadeColors[toTreinoModalidadeKey(treino.modalidade)] || "#10b981",
+          }))
+        );
       } catch (error: unknown) {
         console.error(error);
         setTreinosDoMes([]);
+        setModalidadeColors({});
       } finally {
         setLoading(false);
       }
@@ -422,7 +459,15 @@ export default function TreinosPage() {
             return (
               <button key={idx} onClick={() => setSelectedDay(item.day!)} title={item.tooltip} className={`relative w-9 h-10 mx-auto flex flex-col items-center justify-center rounded-xl transition-all duration-300 group ${isSelected ? "bg-emerald-500 text-black shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-110 z-10 font-black" : item.isHoliday ? "bg-red-500/10 text-red-500 border border-red-500/30" : "bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
                 <span className="text-xs">{item.day}</span>
-                <div className="flex gap-0.5 mt-1 absolute bottom-1.5 px-1">{item.treinos && item.treinos.slice(0, 3).map((t, i) => <div key={i} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-black' : 'bg-emerald-500'} shadow-sm`}></div>)}</div>
+                <div className="flex gap-0.5 mt-1 absolute bottom-1.5 px-1">
+                  {item.treinos && item.treinos.slice(0, 3).map((t, i) => (
+                    <div
+                      key={i}
+                      className={`w-1 h-1 rounded-full shadow-sm ${isSelected ? 'ring-1 ring-black/30' : ''}`}
+                      style={{ backgroundColor: isSelected ? "#050505" : t.calendarColor || modalidadeColors[toTreinoModalidadeKey(t.modalidade)] || "#10b981" }}
+                    />
+                  ))}
+                </div>
                 {item.isHoliday && !item.treinos?.length && <div className="absolute top-0 right-0 -mt-1 -mr-1"><AlertCircle size={8} className="text-red-500 fill-red-900/50"/></div>}
               </button>
             );

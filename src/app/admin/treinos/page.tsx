@@ -20,22 +20,23 @@ import { isPermissionError } from "@/lib/backendErrors";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import {
     addUserToChamada,
-    createRecurringTreinos,
+    createTreinosForDates,
     deleteChamadaEntry,
     deleteTreino,
     fetchTreinoChamada,
     fetchTreinoDashboardMetrics,
+    fetchTreinoPresenceCounts,
     fetchTreinoRsvps,
     fetchTreinoSettings,
     fetchTreinosAdminList,
     fetchUserDirectory,
-    saveTreinoSettings,
     toggleTreinoStatus,
     type TreinoDashboardMetrics,
     type TreinoRecord,
     type TreinoRsvpRecord,
     type TreinoSettingsRecord,
     type TreinoUserDirectoryItem,
+    upsertTreinoCategory,
     upsertChamadaPresence,
     updateChamadaStatus,
     upsertTreino
@@ -75,7 +76,13 @@ interface VergonhaItem {
     treinoMod: string;
 }
 
+interface CategoriaDraft {
+    imageUrl: string;
+    color: string;
+}
+
 const FERIADOS = ["2026-10-12", "2026-11-02", "2026-11-15", "2026-12-25"];
+const DEFAULT_MODALIDADE_COLOR = "#10b981";
 
 const DIAS_SEMANA = [
     { label: "Domingo", val: 0 },
@@ -100,6 +107,22 @@ const normalizeModalidadeNome = (value: string): string =>
 const toModalidadeKey = (value: string): string =>
     normalizeModalidadeNome(value).toLowerCase();
 
+const isPastTreino = (dia: string): boolean => {
+    if (!dia) return false;
+    const endOfDay = new Date(`${dia}T23:59:59`);
+    if (Number.isNaN(endOfDay.getTime())) return false;
+    return endOfDay.getTime() < Date.now();
+};
+
+const getMaxTreinoCreateDate = (): string => {
+    const maxDate = new Date();
+    maxDate.setMonth(maxDate.getMonth() + 2);
+    const year = maxDate.getFullYear();
+    const month = String(maxDate.getMonth() + 1).padStart(2, "0");
+    const day = String(maxDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+};
+
 export default function AdminTreinosPage() {
   const { addToast } = useToast();
   const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
@@ -114,6 +137,9 @@ export default function AdminTreinosPage() {
   const [allUsers, setAllUsers] = useState<UserBase[]>([]);
   const [modalidades, setModalidades] = useState<string[]>([]);
   const [modalidadeImagens, setModalidadeImagens] = useState<Record<string, string>>({});
+  const [modalidadeColors, setModalidadeColors] = useState<Record<string, string>>({});
+  const [categoriaDrafts, setCategoriaDrafts] = useState<Record<string, CategoriaDraft>>({});
+  const [presenceCounts, setPresenceCounts] = useState<Record<string, number>>({});
   
   // Stats
   const [rankings, setRankings] = useState<Record<string, RankingItem[]>>({});
@@ -127,6 +153,7 @@ export default function AdminTreinosPage() {
   const [showRankingModal, setShowRankingModal] = useState<string | null>(null);
   const [novaModalidadeNome, setNovaModalidadeNome] = useState("");
   const [novaModalidadeImagem, setNovaModalidadeImagem] = useState("");
+  const [novaModalidadeCor, setNovaModalidadeCor] = useState(DEFAULT_MODALIDADE_COLOR);
   
   // Edição
   const [isEditing, setIsEditing] = useState(false);
@@ -152,8 +179,12 @@ export default function AdminTreinosPage() {
   // Form
   const [uploadingNovaModalidadeImagem, setUploadingNovaModalidadeImagem] = useState(false);
   const [uploadingCategoriaEdicao, setUploadingCategoriaEdicao] = useState<string | null>(null);
+  const [savingCategoriaEdicao, setSavingCategoriaEdicao] = useState<string | null>(null);
   const fileInputNovaModalidadeRef = useRef<HTMLInputElement>(null);
   const [recurrenceDate, setRecurrenceDate] = useState("");
+  const [repeatMode, setRepeatMode] = useState<"none" | "weekly" | "daily">("none");
+  const [extraDateDraft, setExtraDateDraft] = useState("");
+  const [extraDates, setExtraDates] = useState<string[]>([]);
 
   const [novoTreino, setNovoTreino] = useState<Partial<Treino>>({
     modalidade: "Futsal", 
@@ -173,6 +204,47 @@ export default function AdminTreinosPage() {
       images[toModalidadeKey(modalidadeNome)] || "",
     [modalidadeImagens]
   );
+
+  const getModalidadeColor = useCallback(
+    (modalidadeNome: string, colors = modalidadeColors): string =>
+      colors[toModalidadeKey(modalidadeNome)] || DEFAULT_MODALIDADE_COLOR,
+    [modalidadeColors]
+  );
+
+  const maxTreinoCreateDate = useMemo(() => getMaxTreinoCreateDate(), []);
+
+  const applyTreinoSettings = useCallback((settings: TreinoSettingsRecord) => {
+      setModalidades(settings.modalidades);
+      setModalidadeImagens(settings.modalidadeImagens);
+      setModalidadeColors(settings.modalidadeColors);
+      setCategoriaDrafts(
+          settings.categorias.reduce<Record<string, CategoriaDraft>>((accumulator, categoria) => {
+              accumulator[categoria.key] = {
+                  imageUrl: categoria.imageUrl || "",
+                  color: categoria.calendarColor || DEFAULT_MODALIDADE_COLOR,
+              };
+              return accumulator;
+          }, {})
+      );
+      const modalidadePadrao = settings.modalidades[0] || "Futsal";
+      setNovoTreino((prev) => {
+          const modalidadeAtual = prev.modalidade && settings.modalidades.includes(prev.modalidade)
+              ? prev.modalidade
+              : modalidadePadrao;
+          return {
+              ...prev,
+              modalidade: modalidadeAtual,
+              imagem: settings.modalidadeImagens[toModalidadeKey(modalidadeAtual)] || "",
+          };
+      });
+  }, []);
+
+  const loadSettings = useCallback(async () => {
+      const settings: TreinoSettingsRecord = await fetchTreinoSettings({
+          tenantId: activeTenantId || undefined,
+      });
+      applyTreinoSettings(settings);
+  }, [activeTenantId, applyTreinoSettings]);
 
   const loadTreinos = useCallback(async (forceRefresh = false) => {
       try {
@@ -227,30 +299,20 @@ export default function AdminTreinosPage() {
   useEffect(() => {
       const fetchMods = async () => {
           try {
-              const settings: TreinoSettingsRecord = await fetchTreinoSettings({
-                  tenantId: activeTenantId || undefined,
-              });
-              const mods = settings.modalidades;
-              const imagens = settings.modalidadeImagens;
-              const modalidadePadrao = mods[0] || "Futsal";
-              setModalidades(mods);
-              setModalidadeImagens(imagens);
-              setNovoTreino(prev => ({
-                  ...prev,
-                  modalidade: modalidadePadrao,
-                  imagem: imagens[toModalidadeKey(modalidadePadrao)] || ""
-              }));
+              await loadSettings();
           } catch (error: unknown) {
               if (!isPermissionError(error)) {
                 console.error(error);
               }
               setModalidades(["Futsal", "Volei"]);
               setModalidadeImagens({});
+              setModalidadeColors({});
+              setCategoriaDrafts({});
               setNovoTreino(prev => ({...prev, modalidade: "Futsal", imagem: ""}));
           }
       };
       void fetchMods();
-  }, [activeTenantId]);
+  }, [loadSettings]);
 
   useEffect(() => {
       void loadTreinos();
@@ -339,6 +401,7 @@ export default function AdminTreinosPage() {
   // --- 4. FILTROS ---
   const treinosProcessados = useMemo(() => {
       let lista = [...treinos];
+      lista = lista.filter((treino) => !isPastTreino(treino.dia));
       if (filtroModalidade !== 'Todas') lista = lista.filter(t => t.modalidade === filtroModalidade);
       lista.sort((a, b) => {
           const dateA = new Date(a.dia).getTime();
@@ -348,12 +411,53 @@ export default function AdminTreinosPage() {
       return lista;
   }, [treinos, filtroModalidade, ordemData]);
 
+  useEffect(() => {
+      const treinoIds = treinosProcessados.map((treino) => treino.id);
+      if (treinoIds.length === 0) {
+          setPresenceCounts({});
+          return;
+      }
+
+      const loadPresence = async () => {
+          try {
+              const counts = await fetchTreinoPresenceCounts({
+                  treinoIds,
+                  tenantId: activeTenantId || undefined,
+              });
+              setPresenceCounts(counts);
+          } catch (error: unknown) {
+              console.error(error);
+              setPresenceCounts({});
+          }
+      };
+
+      void loadPresence();
+  }, [activeTenantId, treinosProcessados]);
+
   // --- ACTIONS ---
 
   const handleOpenNovaModalidade = () => {
       setNovaModalidadeNome("");
       setNovaModalidadeImagem("");
+      setNovaModalidadeCor(DEFAULT_MODALIDADE_COLOR);
       setShowNovaModalidade(true);
+  };
+
+  const handleAddExtraDate = () => {
+      const date = extraDateDraft.trim();
+      if (!date) return;
+      if (date > maxTreinoCreateDate) {
+          addToast("Datas extras tambem precisam respeitar o limite de 2 meses.", "error");
+          return;
+      }
+      setExtraDates((prev) =>
+          Array.from(new Set([...prev, date])).sort((left, right) => left.localeCompare(right))
+      );
+      setExtraDateDraft("");
+  };
+
+  const handleRemoveExtraDate = (date: string) => {
+      setExtraDates((prev) => prev.filter((entry) => entry !== date));
   };
 
   const handleUploadNovaModalidadeImagem = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -394,24 +498,21 @@ export default function AdminTreinosPage() {
   const handleCriarModalidade = async () => {
       const nomeNormalizado = normalizeModalidadeNome(novaModalidadeNome);
       if(!nomeNormalizado) return;
+      if (!activeTenantId) return addToast("O tenant ainda esta carregando. Tente novamente em instantes.", "error");
       const jaExiste = modalidades.some((mod) => normalizeModalidadeNome(mod).toLowerCase() === nomeNormalizado.toLowerCase());
       if(jaExiste) return addToast("Já existe!", "error");
 
-      const novas = [...modalidades, nomeNormalizado];
-      const imagensAtualizadas = { ...modalidadeImagens };
-      if (novaModalidadeImagem) {
-          imagensAtualizadas[toModalidadeKey(nomeNormalizado)] = novaModalidadeImagem;
-      }
-
       try {
-          await saveTreinoSettings({
-              modalidades: novas,
-              modalidadeImagens: imagensAtualizadas
-          }, { tenantId: activeTenantId || undefined });
-          setModalidades(novas);
-          setModalidadeImagens(imagensAtualizadas);
+          const settings = await upsertTreinoCategory({
+              name: nomeNormalizado,
+              imageUrl: novaModalidadeImagem || undefined,
+              calendarColor: novaModalidadeCor,
+              tenantId: activeTenantId,
+          });
+          applyTreinoSettings(settings);
           setNovaModalidadeNome("");
           setNovaModalidadeImagem("");
+          setNovaModalidadeCor(DEFAULT_MODALIDADE_COLOR);
           setShowNovaModalidade(false);
           addToast("Modalidade criada!", "success");
       } catch (error: unknown) {
@@ -456,17 +557,14 @@ export default function AdminTreinosPage() {
               return;
           }
 
-          const key = categoriaKey;
-          const imagensAtualizadas = { ...modalidadeImagens, [key]: url };
-          await saveTreinoSettings({
-              modalidades,
-              modalidadeImagens: imagensAtualizadas
-          }, { tenantId: activeTenantId || undefined });
-          setModalidadeImagens(imagensAtualizadas);
-          setNovoTreino((prev) =>
-              toModalidadeKey(prev.modalidade || "") === key ? { ...prev, imagem: url } : prev
-          );
-          addToast("Imagem da categoria atualizada!", "success");
+          setCategoriaDrafts((prev) => ({
+              ...prev,
+              [categoriaKey]: {
+                  imageUrl: url,
+                  color: prev[categoriaKey]?.color || getModalidadeColor(modalidade),
+              },
+          }));
+          addToast("Imagem carregada. Clique em salvar categoria para persistir.", "success");
       } catch (error: unknown) {
           console.error(error);
           addToast("Erro ao atualizar imagem da categoria.", "error");
@@ -478,21 +576,42 @@ export default function AdminTreinosPage() {
 
   const handleRemoverImagemCategoria = async (modalidade: string) => {
       const key = toModalidadeKey(modalidade);
-      const imagensAtualizadas = { ...modalidadeImagens };
-      delete imagensAtualizadas[key];
+      setCategoriaDrafts((prev) => ({
+          ...prev,
+          [key]: {
+              imageUrl: "",
+              color: prev[key]?.color || getModalidadeColor(modalidade),
+          },
+      }));
+      addToast("Imagem removida do rascunho. Clique em salvar categoria.", "info");
+  };
+
+  const handleSalvarCategoriaEdicao = async (modalidade: string) => {
+      const key = toModalidadeKey(modalidade);
+      if (!activeTenantId) return addToast("O tenant ainda esta carregando. Tente novamente em instantes.", "error");
+      if (savingCategoriaEdicao) return;
+
+      setSavingCategoriaEdicao(modalidade);
       try {
-          await saveTreinoSettings({
-              modalidades,
-              modalidadeImagens: imagensAtualizadas
-          }, { tenantId: activeTenantId || undefined });
-          setModalidadeImagens(imagensAtualizadas);
+          const draft = categoriaDrafts[key];
+          const settings = await upsertTreinoCategory({
+              name: modalidade,
+              imageUrl: draft?.imageUrl ? draft.imageUrl : null,
+              calendarColor: draft?.color || DEFAULT_MODALIDADE_COLOR,
+              tenantId: activeTenantId,
+          });
+          applyTreinoSettings(settings);
           setNovoTreino((prev) =>
-              toModalidadeKey(prev.modalidade || "") === key ? { ...prev, imagem: "" } : prev
+              toModalidadeKey(prev.modalidade || "") === key
+                  ? { ...prev, imagem: settings.modalidadeImagens[key] || "" }
+                  : prev
           );
-          addToast("Imagem removida da categoria.", "success");
+          addToast("Categoria salva!", "success");
       } catch (error: unknown) {
           console.error(error);
-          addToast("Erro ao remover imagem da categoria.", "error");
+          addToast("Erro ao salvar categoria.", "error");
+      } finally {
+          setSavingCategoriaEdicao(null);
       }
   };
 
@@ -519,6 +638,9 @@ export default function AdminTreinosPage() {
           status: "ativo"
       });
       setRecurrenceDate("");
+      setRepeatMode("none");
+      setExtraDateDraft("");
+      setExtraDates([]);
       setEditingId(null); setIsEditing(false); setShowModal(true);
   };
 
@@ -529,6 +651,10 @@ export default function AdminTreinosPage() {
       });
       setEditingId(treino.id);
       setIsEditing(true);
+      setRepeatMode("none");
+      setRecurrenceDate("");
+      setExtraDateDraft("");
+      setExtraDates([]);
       setShowModal(true);
   };
 
@@ -541,6 +667,10 @@ export default function AdminTreinosPage() {
     const modalidade = normalizeModalidadeNome(novoTreino.modalidade || "");
     const dia = (novoTreino.dia || "").trim();
     if (!modalidade || !dia) return addToast("Dados incompletos!", "error");
+    if (!activeTenantId) return addToast("O tenant ainda esta carregando. Tente novamente em instantes.", "error");
+    if (dia > maxTreinoCreateDate) {
+        return addToast("Treinos so podem ser cadastrados com ate 2 meses de antecedencia.", "error");
+    }
 
     const diaObj = new Date(`${dia}T12:00:00`);
     const diaSemanaConfig = DIAS_SEMANA[diaObj.getDay()];
@@ -550,6 +680,13 @@ export default function AdminTreinosPage() {
 
     if (recurrenceDate && recurrenceDate < dia) {
         return addToast("A data final da repetição deve ser igual ou maior que a data inicial.", "error");
+    }
+
+    if (recurrenceDate && recurrenceDate > maxTreinoCreateDate) {
+        return addToast("A recorrencia tambem respeita o limite de 2 meses.", "error");
+    }
+    if (extraDates.some((date) => date > maxTreinoCreateDate)) {
+        return addToast("As datas extras precisam respeitar o limite de 2 meses.", "error");
     }
 
     const imagemModalidade = getModalidadeImagem(modalidade);
@@ -563,11 +700,20 @@ export default function AdminTreinosPage() {
             });
             addToast("Atualizado!", "success");
         } else {
-            if (recurrenceDate) {
-                const result = await createRecurringTreinos({
+            const scheduledDates = new Set<string>([dia, ...extraDates]);
+            if (repeatMode !== "none" && recurrenceDate) {
+                const current = new Date(`${dia}T12:00:00`);
+                const end = new Date(`${recurrenceDate}T12:00:00`);
+                const stepDays = repeatMode === "daily" ? 1 : 7;
+                while (current <= end && scheduledDates.size < 90) {
+                    scheduledDates.add(current.toISOString().split("T")[0] || "");
+                    current.setDate(current.getDate() + stepDays);
+                }
+            }
+            if (scheduledDates.size > 1) {
+                const result = await createTreinosForDates({
                     data: basePayload,
-                    startDate: dia,
-                    endDate: recurrenceDate,
+                    dates: Array.from(scheduledDates),
                     tenantId: activeTenantId || undefined,
                 });
                 if (result.count === 0) {
@@ -580,10 +726,14 @@ export default function AdminTreinosPage() {
             }
         }
         await loadTreinos(true);
-        setShowModal(false); setRecurrenceDate("");
+        setShowModal(false);
+        setRecurrenceDate("");
+        setRepeatMode("none");
+        setExtraDateDraft("");
+        setExtraDates([]);
     } catch (error: unknown) {
         console.error(error);
-        addToast("Erro ao salvar.", "error");
+        addToast(error instanceof Error && error.message ? error.message : "Erro ao salvar.", "error");
     }
   };
 
@@ -810,9 +960,18 @@ export default function AdminTreinosPage() {
                                 <tr><th className="p-4">Data</th><th className="p-4">Modalidade</th><th className="p-4">Local</th><th className="p-4 text-center">Status</th><th className="p-4 text-right">Ações</th></tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-800 text-sm">
+                                {treinosProcessados.length === 0 && (
+                                    <tr>
+                                        <td colSpan={5} className="p-6 text-center text-sm text-zinc-500">
+                                            Nenhum treino ativo ou futuro encontrado. Os encerrados foram movidos para Treinos Antigos.
+                                        </td>
+                                    </tr>
+                                )}
                                 {treinosProcessados.map((treino) => {
                                     const expanded = expandedRow === treino.id;
                                     const isHoliday = isFeriado(treino.dia);
+                                    const confirmedCount = Math.max(0, treino.confirmedCount ?? 0);
+                                    const presentCount = Math.max(0, presenceCounts[treino.id] ?? 0);
                                     return (
                                         <React.Fragment key={treino.id}>
                                             <tr className={`transition-colors ${expanded ? 'bg-zinc-800/30' : 'hover:bg-zinc-800/20'} ${treino.status === 'cancelado' ? 'opacity-50 grayscale' : ''}`}>
@@ -831,11 +990,23 @@ export default function AdminTreinosPage() {
                                                     </div>
                                                     {treino.modalidade}
                                                 </td>
-                                                <td className="p-4 text-zinc-400 text-xs">{treino.local}</td>
+                                                <td className="p-4 text-zinc-400 text-xs">
+                                                    <div className="flex flex-col gap-2">
+                                                        <span>{treino.local}</span>
+                                                        <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
+                                                            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                                                                {confirmedCount} confirmados
+                                                            </span>
+                                                            <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-sky-300">
+                                                                {presentCount} presentes
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </td>
                                                 <td className="p-4 text-center"><button onClick={() => handleToggleStatusTreino(treino)} className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${treino.status === 'ativo' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>{treino.status}</button></td>
                                                 <td className="p-4 text-right">
                                                     <div className="flex items-center justify-end gap-2">
-                                                        <Link href={`/admin/treinos/lista/${treino.id}`} className="p-2 rounded-lg transition bg-zinc-800 text-zinc-400 hover:text-white" title="Abrir lista de presenca">
+                                                        <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/admin/treinos/lista/${treino.id}`) : `/admin/treinos/lista/${treino.id}`} className="p-2 rounded-lg transition bg-zinc-800 text-zinc-400 hover:text-white" title="Abrir lista de presenca">
                                                             <ChevronDown size={16}/>
                                                         </Link>
                                                         <button onClick={() => handleOpenEdit(treino)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white"><Edit size={16}/></button>
@@ -1032,15 +1203,44 @@ export default function AdminTreinosPage() {
             {/* 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 🦈 */}
 
             <div className="grid grid-cols-2 gap-3">
-                <input type="date" className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white outline-none" value={novoTreino.dia} onChange={(e) => setNovoTreino({ ...novoTreino, dia: e.target.value })} />
+                <input type="date" max={maxTreinoCreateDate} className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white outline-none" value={novoTreino.dia} onChange={(e) => setNovoTreino({ ...novoTreino, dia: e.target.value })} />
                 <input type="text" placeholder="20:00" className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white outline-none" value={novoTreino.horario} onChange={(e) => setNovoTreino({ ...novoTreino, horario: e.target.value })} />
             </div>
             <input type="text" placeholder="Local" className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white outline-none" value={novoTreino.local} onChange={(e) => setNovoTreino({ ...novoTreino, local: e.target.value })} />
             {!isEditing && (
-                <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800 flex items-center gap-3">
+                <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800 space-y-3">
                     <CalendarRange size={16} className="text-zinc-500"/>
                     <span className="text-xs text-zinc-400">Repetir até:</span>
-                    <input type="date" className="bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-xs text-white outline-none" value={recurrenceDate} onChange={e => setRecurrenceDate(e.target.value)} />
+                    <input type="date" max={maxTreinoCreateDate} className="bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-xs text-white outline-none" value={recurrenceDate} onChange={e => setRecurrenceDate(e.target.value)} />
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <label className="space-y-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                            Frequencia
+                            <select className="w-full rounded-lg border border-zinc-700 bg-zinc-950 p-2 text-xs text-white outline-none" value={repeatMode} onChange={(event) => setRepeatMode(event.target.value as "none" | "weekly" | "daily")}>
+                                <option value="none">Nao repetir</option>
+                                <option value="weekly">Semanal</option>
+                                <option value="daily">Diaria</option>
+                            </select>
+                        </label>
+                        <label className="space-y-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                            Datas extras
+                            <div className="flex gap-2">
+                                <input type="date" max={maxTreinoCreateDate} className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 p-2 text-xs text-white outline-none" value={extraDateDraft} onChange={(event) => setExtraDateDraft(event.target.value)} />
+                                <button type="button" onClick={handleAddExtraDate} className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20">
+                                    Add
+                                </button>
+                            </div>
+                        </label>
+                    </div>
+                    {extraDates.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            {extraDates.map((date) => (
+                                <button key={date} type="button" onClick={() => handleRemoveExtraDate(date)} className="rounded-full border border-zinc-700 bg-zinc-950 px-3 py-1 text-[10px] font-black uppercase text-zinc-300 hover:border-red-500/40 hover:text-red-300">
+                                    {formatDate(date)} x
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    <p className="text-[10px] text-zinc-500">Limite maximo: {formatDate(maxTreinoCreateDate)}.</p>
                 </div>
             )}
             <div className="flex gap-3 pt-2 border-t border-zinc-800">
@@ -1071,6 +1271,10 @@ export default function AdminTreinosPage() {
                           </div>
                       )}
                   </div>
+                  <label className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs font-black uppercase tracking-wide text-zinc-400">
+                      Cor do ponto no calendario
+                      <input type="color" value={novaModalidadeCor} onChange={(event) => setNovaModalidadeCor(event.target.value)} className="h-10 w-16 cursor-pointer rounded border border-zinc-700 bg-transparent" />
+                  </label>
                   <div className="flex gap-2">
                       <button onClick={() => { setShowNovaModalidade(false); setShowEditarModalidades(true); }} className="flex-1 py-3 text-zinc-400 text-xs uppercase font-bold hover:text-white border border-zinc-700 rounded-xl">Editar categorias</button>
                       <button onClick={() => setShowNovaModalidade(false)} className="flex-1 py-3 text-zinc-500 text-xs uppercase font-bold hover:text-white">Cancelar</button>
@@ -1087,11 +1291,15 @@ export default function AdminTreinosPage() {
                       <h2 className="font-bold text-white text-lg">Editar Categorias</h2>
                       <button onClick={() => setShowEditarModalidades(false)} className="text-zinc-400 hover:text-white"><X size={20}/></button>
                   </div>
+                  <p className="text-xs text-zinc-500">As alteracoes de imagem e cor ficam em rascunho ate voce clicar em salvar categoria.</p>
                   <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar">
                       {modalidades.map((modalidade) => {
                           const key = toModalidadeKey(modalidade);
-                          const imagem = modalidadeImagens[key] || "";
+                          const draft = categoriaDrafts[key];
+                          const imagem = draft?.imageUrl ?? modalidadeImagens[key] ?? "";
+                          const color = draft?.color ?? modalidadeColors[key] ?? DEFAULT_MODALIDADE_COLOR;
                           const uploading = uploadingCategoriaEdicao === modalidade;
+                          const saving = savingCategoriaEdicao === modalidade;
                           return (
                               <div key={modalidade} className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 flex items-center gap-3">
                                   <div className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-700 bg-black/40 relative shrink-0 flex items-center justify-center">
@@ -1099,6 +1307,13 @@ export default function AdminTreinosPage() {
                                   </div>
                                   <div className="flex-1">
                                       <p className="text-sm font-bold text-white">{modalidade}</p>
+                                      <div className="mt-2 flex items-center justify-between rounded-lg border border-zinc-800 bg-black/30 px-3 py-2">
+                                          <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">Cor do ponto</span>
+                                          <div className="flex items-center gap-3">
+                                              <span className="h-3 w-3 rounded-full border border-white/10" style={{ backgroundColor: color }} />
+                                              <input type="color" value={color} onChange={(event) => setCategoriaDrafts((prev) => ({ ...prev, [key]: { imageUrl: prev[key]?.imageUrl ?? imagem, color: event.target.value } }))} className="h-9 w-14 cursor-pointer rounded border border-zinc-700 bg-transparent" />
+                                          </div>
+                                      </div>
                                       <div className="mt-2 flex gap-2">
                                           <label className="px-3 py-2 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-bold uppercase cursor-pointer hover:bg-zinc-700 flex items-center gap-2">
                                               {uploading ? <Loader2 size={12} className="animate-spin"/> : <ImageIcon size={12}/>} 
@@ -1111,6 +1326,9 @@ export default function AdminTreinosPage() {
                                                   Remover
                                               </button>
                                           )}
+                                          <button onClick={() => void handleSalvarCategoriaEdicao(modalidade)} disabled={saving} className="px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs font-bold uppercase hover:bg-emerald-500/20 disabled:opacity-60 disabled:cursor-not-allowed">
+                                              {saving ? "Salvando..." : "Salvar categoria"}
+                                          </button>
                                       </div>
                                   </div>
                               </div>

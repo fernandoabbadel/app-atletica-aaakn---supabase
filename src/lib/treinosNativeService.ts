@@ -19,13 +19,16 @@ const MAX_MONTH_RESULTS = 220;
 const MAX_USERS_RESULTS = 500;
 const MAX_RSVP_RESULTS = 240;
 const MAX_CHAMADA_RESULTS = 240;
+const MAX_BATCH_CREATE_TREINOS = 90;
+const MAX_BATCH_PRESENCE_SCAN_RESULTS = 5_000;
 const MAX_MODALIDADES = 30;
-const MAX_RECURRING_WEEKS = 20;
+const MAX_RECURRING_OCCURRENCES = 62;
 const USER_DIRECTORY_SEGMENT_SIZE = 30;
 const USER_DIRECTORY_COUNT_BATCH_SIZE = 500;
 const MAX_USER_DIRECTORY_COUNT_SCAN_RESULTS = 5_000;
 const TREINOS_DIRECTORY_CACHE_TTL_MS = 60_000;
 const DEFAULT_MODALIDADES = ["Futsal", "Volei"];
+const DEFAULT_MODALIDADE_COLOR = "#10b981";
 const USER_DIRECTORY_SELECT_COLUMNS = "uid,nome,turma,foto,email";
 const USER_DIRECTORY_BASE_GROUPS = [
   ["A", "B", "C", "D", "E", "F"],
@@ -51,11 +54,6 @@ const asNumber = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const resolveTreinosTenantId = (tenantId?: string | null): string =>
   resolveStoredTenantScopeId(asString(tenantId).trim());
-const resolveTreinosSettingsIds = (tenantId?: string | null): string[] => {
-  const scopedTenantId = resolveTreinosTenantId(tenantId);
-  if (!scopedTenantId) return ["treinos"];
-  return [buildTenantScopedRowId(scopedTenantId, "treinos")];
-};
 const getCache = <T>(cache: Map<string, CacheEntry<T>>, key: string): T | null => {
   const cached = cache.get(key);
   if (!cached) return null;
@@ -223,6 +221,85 @@ const normalizeModalidadeImagens = (
     images[key] = url;
   });
   return images;
+};
+
+const normalizeCalendarColor = (value: unknown): string => {
+  const color = asString(value).trim();
+  if (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color)) {
+    return color;
+  }
+  return DEFAULT_MODALIDADE_COLOR;
+};
+
+const normalizeModalidadeColors = (
+  value: unknown,
+  modalidades: string[]
+): Record<string, string> => {
+  const data = asObject(value);
+  if (!data) return {};
+
+  const allowed = new Set(modalidades.map((item) => toModalidadeKey(item)));
+  const colors: Record<string, string> = {};
+  Object.entries(data).forEach(([rawKey, rawValue]) => {
+    const key = toModalidadeKey(rawKey);
+    if (!key) return;
+    if (allowed.size > 0 && !allowed.has(key)) return;
+    colors[key] = normalizeCalendarColor(rawValue);
+  });
+  return colors;
+};
+
+const getTreinoCreationWindowMaxDate = (): Date => {
+  const maxDate = new Date();
+  maxDate.setHours(23, 59, 59, 999);
+  maxDate.setMonth(maxDate.getMonth() + 2);
+  return maxDate;
+};
+
+const ensureTreinoDateWithinCreationWindow = (isoDate: string): void => {
+  const cleanDate = isoDate.trim().slice(0, 10);
+  if (!cleanDate) {
+    throw new Error("Data invalida para treino.");
+  }
+
+  const parsed = new Date(`${cleanDate}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Data invalida para treino.");
+  }
+
+  if (parsed.getTime() > getTreinoCreationWindowMaxDate().getTime()) {
+    throw new Error("Treinos so podem ser cadastrados com ate 2 meses de antecedencia.");
+  }
+};
+
+const buildRecurringTreinoDates = (payload: {
+  startDate: string;
+  endDate: string;
+  frequency?: "weekly" | "daily";
+}): string[] => {
+  const startDate = payload.startDate.trim().slice(0, 10);
+  const endDate = payload.endDate.trim().slice(0, 10);
+  if (!startDate || !endDate) return [];
+
+  const start = new Date(`${startDate}T12:00:00`);
+  const end = new Date(`${endDate}T12:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+
+  const uniqueDates = new Set<string>();
+  const current = new Date(start);
+  const stepDays = payload.frequency === "daily" ? 1 : 7;
+
+  while (
+    current <= end &&
+    uniqueDates.size < MAX_RECURRING_OCCURRENCES
+  ) {
+    const isoDate = createIsoDate(current);
+    ensureTreinoDateWithinCreationWindow(isoDate);
+    uniqueDates.add(isoDate);
+    current.setDate(current.getDate() + stepDays);
+  }
+
+  return Array.from(uniqueDates);
 };
 
 const normalizeStatus = (statusRaw: string): "ativo" | "cancelado" =>
@@ -458,6 +535,13 @@ export interface TreinoDashboardMetrics {
   listaVergonha: TreinoGhostItem[];
 }
 
+export interface TreinoCategoryRecord {
+  key: string;
+  name: string;
+  imageUrl?: string;
+  calendarColor: string;
+}
+
 export interface TreinoParticipantsPage<T> {
   rows: T[];
   nextCursor: string | null;
@@ -467,50 +551,69 @@ export interface TreinoParticipantsPage<T> {
 export interface TreinoSettingsRecord {
   modalidades: string[];
   modalidadeImagens: Record<string, string>;
+  modalidadeColors: Record<string, string>;
+  categorias: TreinoCategoryRecord[];
 }
+
+const fetchTreinoSettingsRow = async (
+  tenantId?: string | null
+): Promise<Row | null> => {
+  const supabase = getSupabaseClient();
+  const settingsId =
+    buildTenantScopedRowId(resolveTreinosTenantId(tenantId), "treinos") || "treinos";
+  const { data, error } = await supabase
+    .from("settings")
+    .select("id,modalidades,data")
+    .eq("id", settingsId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+  return data ? (data as Row) : null;
+};
+
+const buildTreinoSettingsRecord = (selected: Row | null): TreinoSettingsRecord => {
+  const modalidades = normalizeModalidades(selected?.modalidades);
+  const payload = asObject(selected?.data) ?? {};
+  const modalidadeImagens = normalizeModalidadeImagens(payload.modalidadeImagens, modalidades);
+  const modalidadeColors = normalizeModalidadeColors(payload.modalidadeColors, modalidades);
+  const categorias = modalidades.map((name) => {
+    const key = toModalidadeKey(name);
+    const imageUrl = modalidadeImagens[key] || undefined;
+    return {
+      key,
+      name,
+      ...(imageUrl ? { imageUrl } : {}),
+      calendarColor: modalidadeColors[key] || DEFAULT_MODALIDADE_COLOR,
+    };
+  });
+
+  return { modalidades, modalidadeImagens, modalidadeColors, categorias };
+};
 
 export async function fetchTreinoSettings(options?: {
   forceRefresh?: boolean;
   tenantId?: string | null;
 }): Promise<TreinoSettingsRecord> {
   void options;
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("settings")
-    .select("modalidades, data")
-    .in("id", resolveTreinosSettingsIds(options?.tenantId));
-  const rows = Array.isArray(data) ? (data as Row[]) : [];
-  const selected = resolveTreinosSettingsIds(options?.tenantId)
-    .map((id) => rows.find((row) => asString(row.id) === id))
-    .find((row) => Boolean(row));
-  if (error) throwSupabaseError(error);
-
-  const modalidades = normalizeModalidades(selected?.modalidades);
-  const payload = asObject(selected?.data) ?? {};
-  const modalidadeImagens = normalizeModalidadeImagens(payload.modalidadeImagens, modalidades);
-  return { modalidades, modalidadeImagens };
+  const row = await fetchTreinoSettingsRow(options?.tenantId);
+  return buildTreinoSettingsRecord(row);
 }
 
 export async function saveTreinoSettings(payload: {
   modalidades: string[];
   modalidadeImagens?: Record<string, string>;
+  modalidadeColors?: Record<string, string>;
 }, options?: { tenantId?: string | null }): Promise<void> {
   const supabase = getSupabaseClient();
   const normalized = normalizeModalidades(payload.modalidades);
   const modalidadeImagens = normalizeModalidadeImagens(payload.modalidadeImagens, normalized);
+  const modalidadeColors = normalizeModalidadeColors(payload.modalidadeColors, normalized);
   const settingsId = buildTenantScopedRowId(resolveTreinosTenantId(options?.tenantId), "treinos") || "treinos";
-
-  const { data: currentData, error: currentError } = await supabase
-    .from("settings")
-    .select("data")
-    .eq("id", settingsId)
-    .maybeSingle();
-  if (currentError) throwSupabaseError(currentError);
-
+  const currentData = await fetchTreinoSettingsRow(options?.tenantId);
   const currentSettingsData = asObject(currentData?.data) ?? {};
   const nextSettingsData: Row = {
     ...currentSettingsData,
     modalidadeImagens,
+    modalidadeColors,
   };
 
   const { error } = await supabase.from("settings").upsert(
@@ -524,6 +627,55 @@ export async function saveTreinoSettings(payload: {
     { onConflict: "id" }
   );
   if (error) throwSupabaseError(error);
+}
+
+export async function upsertTreinoCategory(payload: {
+  name: string;
+  imageUrl?: string | null;
+  calendarColor?: string | null;
+  tenantId?: string | null;
+}): Promise<TreinoSettingsRecord> {
+  const normalizedName = normalizeModalidadeName(payload.name);
+  if (!normalizedName) {
+    throw new Error("Nome da categoria invalido.");
+  }
+
+  const currentSettings = await fetchTreinoSettings({
+    tenantId: payload.tenantId,
+  });
+  const key = toModalidadeKey(normalizedName);
+  const nextModalidades = currentSettings.modalidades.filter(
+    (item) => toModalidadeKey(item) !== key
+  );
+  nextModalidades.push(normalizedName);
+
+  const nextImagens = { ...currentSettings.modalidadeImagens };
+  if (payload.imageUrl === null) {
+    delete nextImagens[key];
+  } else if (typeof payload.imageUrl === "string") {
+    const imageUrl = payload.imageUrl.trim().slice(0, 2000);
+    if (imageUrl) nextImagens[key] = imageUrl;
+  }
+
+  const nextColors = { ...currentSettings.modalidadeColors };
+  if (payload.calendarColor === null) {
+    nextColors[key] = DEFAULT_MODALIDADE_COLOR;
+  } else if (typeof payload.calendarColor === "string") {
+    nextColors[key] = normalizeCalendarColor(payload.calendarColor);
+  } else if (!nextColors[key]) {
+    nextColors[key] = DEFAULT_MODALIDADE_COLOR;
+  }
+
+  await saveTreinoSettings(
+    {
+      modalidades: nextModalidades,
+      modalidadeImagens: nextImagens,
+      modalidadeColors: nextColors,
+    },
+    { tenantId: payload.tenantId }
+  );
+
+  return fetchTreinoSettings({ tenantId: payload.tenantId });
 }
 
 export async function fetchTreinosAdminList(options?: {
@@ -717,6 +869,47 @@ export async function fetchTreinoChamadaPage(
     .filter((entry): entry is TreinoChamadaRecord => entry !== null);
 
   return { rows, hasMore, nextCursor: nextOffsetCursor(offset, pageSize, hasMore) };
+}
+
+export async function fetchTreinoPresenceCounts(payload: {
+  treinoIds: string[];
+  tenantId?: string | null;
+}): Promise<Record<string, number>> {
+  const treinoIds = Array.from(
+    new Set(
+      payload.treinoIds
+        .map((entry) => asString(entry).trim())
+        .filter((entry) => entry.length > 0)
+    )
+  ).slice(0, MAX_TREINOS_RESULTS);
+  if (treinoIds.length === 0) return {};
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  let query = supabase
+    .from("treinos_chamada")
+    .select("treinoId,status")
+    .in("treinoId", treinoIds)
+    .eq("status", "presente")
+    .range(0, MAX_BATCH_PRESENCE_SCAN_RESULTS - 1);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
+  const { data, error } = await query;
+  if (error) throwSupabaseError(error);
+
+  const counts = treinoIds.reduce<Record<string, number>>((accumulator, treinoId) => {
+    accumulator[treinoId] = 0;
+    return accumulator;
+  }, {});
+  ((data ?? []) as Row[]).forEach((entry) => {
+    const treinoId = asString(entry.treinoId).trim();
+    if (!treinoId) return;
+    counts[treinoId] = (counts[treinoId] ?? 0) + 1;
+  });
+
+  return counts;
 }
 
 export async function fetchUserDirectory(options?: {
@@ -1020,6 +1213,7 @@ export async function upsertTreino(payload: {
   const cleanId = payload.id?.trim() || "";
   const baseData = normalizeTreinoPayload(payload.data);
   if (!baseData.dia || !baseData.modalidade) throw new Error("Dados invalidos para treino.");
+  ensureTreinoDateWithinCreationWindow(baseData.dia);
 
   const diaObj = new Date(`${baseData.dia}T12:00:00`);
   const normalizedData = normalizeTreinoPayload(baseData, getDayLabel(diaObj), getDayOrder(diaObj));
@@ -1053,45 +1247,70 @@ export async function upsertTreino(payload: {
   return { id: asString((data as Row | null)?.id) };
 }
 
+export async function createTreinosForDates(payload: {
+  data: Partial<TreinoRecord>;
+  dates: string[];
+  tenantId?: string | null;
+}): Promise<{ count: number }> {
+  const baseData = normalizeTreinoPayload(payload.data);
+  if (!baseData.modalidade) throw new Error("Dados invalidos para treino.");
+
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  const rows = Array.from(
+    new Set(
+      payload.dates
+        .map((entry) => asString(entry).trim().slice(0, 10))
+        .filter((entry) => entry.length > 0)
+    )
+  )
+    .sort((left, right) => left.localeCompare(right))
+    .slice(0, MAX_BATCH_CREATE_TREINOS)
+    .map((dia) => {
+      ensureTreinoDateWithinCreationWindow(dia);
+      const dayDate = new Date(`${dia}T12:00:00`);
+      if (Number.isNaN(dayDate.getTime())) {
+        throw new Error("Data invalida para treino.");
+      }
+      const dataByDay = normalizeTreinoPayload(
+        { ...baseData, dia },
+        getDayLabel(dayDate),
+        getDayOrder(dayDate)
+      );
+      return {
+        ...dataByDay,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+    });
+
+  if (rows.length === 0) {
+    return { count: 0 };
+  }
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("treinos").insert(rows);
+  if (error) throwSupabaseError(error);
+  return { count: rows.length };
+}
+
 export async function createRecurringTreinos(payload: {
   data: Partial<TreinoRecord>;
   startDate: string;
   endDate: string;
+  frequency?: "weekly" | "daily";
   tenantId?: string | null;
 }): Promise<{ count: number }> {
-  const startDate = payload.startDate.trim().slice(0, 10);
-  const endDate = payload.endDate.trim().slice(0, 10);
-  if (!startDate || !endDate) return { count: 0 };
-
-  const start = new Date(`${startDate}T12:00:00`);
-  const end = new Date(`${endDate}T12:00:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return { count: 0 };
-
-  const baseData = normalizeTreinoPayload(payload.data);
-  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
-  const rows: Row[] = [];
-  const current = new Date(start);
-  let count = 0;
-  while (current <= end && count < MAX_RECURRING_WEEKS) {
-    const dia = createIsoDate(current);
-    const dataByDay = normalizeTreinoPayload({ ...baseData, dia }, getDayLabel(current), getDayOrder(current));
-    rows.push({
-      ...dataByDay,
-      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    });
-    current.setDate(current.getDate() + 7);
-    count += 1;
-  }
-
-  if (rows.length > 0) {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase.from("treinos").insert(rows);
-    if (error) throwSupabaseError(error);
-  }
-
-  return { count };
+  const dates = buildRecurringTreinoDates({
+    startDate: payload.startDate,
+    endDate: payload.endDate,
+    frequency: payload.frequency,
+  });
+  return createTreinosForDates({
+    data: payload.data,
+    dates,
+    tenantId: payload.tenantId,
+  });
 }
 
 export async function toggleTreinoStatus(payload: {

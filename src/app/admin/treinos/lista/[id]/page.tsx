@@ -212,6 +212,16 @@ export default function AdminTreinoListaPage() {
     return rsvpRows.filter((row) => row.status === "going" && !presentes.has(row.userId));
   }, [rsvpRows, chamadaRows]);
 
+  const confirmadosCount = useMemo(
+    () => rsvpRows.filter((row) => row.status === "going").length,
+    [rsvpRows]
+  );
+
+  const presentesCount = useMemo(
+    () => chamadaRows.filter((row) => row.status === "presente").length,
+    [chamadaRows]
+  );
+
   const userSuggestions = useMemo(() => {
     const term = searchUser.trim().toLowerCase();
     if (!term) return [];
@@ -458,6 +468,14 @@ export default function AdminTreinoListaPage() {
               <p className="text-[11px] text-zinc-500 font-bold">
                 {titulo} â€¢ {subtitulo}
               </p>
+              <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase">
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">
+                  {confirmadosCount} confirmados
+                </span>
+                <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-sky-300">
+                  {presentesCount} presentes
+                </span>
+              </div>
             </div>
           </div>
 
