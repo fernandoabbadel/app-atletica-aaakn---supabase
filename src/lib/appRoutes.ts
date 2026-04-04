@@ -2,11 +2,11 @@ export const PUBLIC_PATHS = [
   "/login",
   "/",
   "/visitante",
+  "/convite-necessario",
   "/nova-atletica",
   "/contato-usc",
   "/historico",
   "/cadastro",
-  "/configuracoes",
   "/configuracoes/termos",
   "/empresa/cadastro",
   "/recuperar-senha",
@@ -231,6 +231,7 @@ const MEMBER_PAGE_PATHS = [
   "/treinos",
   "/treinos/[id]",
   "/visitante",
+  "/convite-necessario",
 ] as const;
 
 const titleizeSegment = (segment: string): string =>

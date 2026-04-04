@@ -21,6 +21,8 @@ import {
   sanitizeInviteToken,
   storeInviteToken,
 } from "@/lib/inviteTokenStorage";
+import { fetchPublicTenantBySlugCached } from "@/lib/publicTenantLookup";
+import { resolveTenantInviteGateRedirect } from "@/lib/inviteAccessGate";
 import { isPlatformMaster } from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import { getSupabaseClient } from "@/lib/supabase";
@@ -39,6 +41,7 @@ export default function LoginPageClient() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [inviteTokenHydrated, setInviteTokenHydrated] = useState(false);
   const inviteTokenFromUrl = sanitizeInviteToken(searchParams.get("invite"));
   const [effectiveInviteToken, setEffectiveInviteToken] = useState(
     inviteTokenFromUrl || readStoredInviteToken()
@@ -65,6 +68,10 @@ export default function LoginPageClient() {
       : storedReturnToHint;
   const redirectCommittedRef = useRef(false);
   const normalizedActiveTenantSlug = activeTenantSlug.trim().toLowerCase();
+  const targetTenantSlug =
+    parseTenantScopedPath(inviteAwareReturnTo).tenantSlug ||
+    parseTenantScopedPath(storedReturnToHint).tenantSlug ||
+    normalizedActiveTenantSlug;
   const normalizedTenantStatus = normalizeUserText(user?.tenant_status);
   const normalizedTenantId =
     typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
@@ -80,6 +87,10 @@ export default function LoginPageClient() {
   const tenantScopedPendingPath = normalizedActiveTenantSlug
     ? withTenantSlug(normalizedActiveTenantSlug, "/aguardando-aprovacao")
     : "/aguardando-aprovacao";
+  const [targetTenantAllowPublicSignup, setTargetTenantAllowPublicSignup] = useState<boolean | null>(
+    null
+  );
+  const [targetTenantLoading, setTargetTenantLoading] = useState(false);
 
   const canUseUnscopedCandidate = useCallback(
     (candidate: string): boolean => {
@@ -162,13 +173,58 @@ export default function LoginPageClient() {
       storeInviteToken(inviteTokenFromUrl);
     }
     setEffectiveInviteToken(nextInviteToken);
+    setInviteTokenHydrated(true);
   }, [inviteTokenFromUrl]);
+
+  useEffect(() => {
+    if (!targetTenantSlug) {
+      setTargetTenantAllowPublicSignup(null);
+      setTargetTenantLoading(false);
+      return;
+    }
+
+    let mounted = true;
+    setTargetTenantLoading(true);
+
+    const loadTenant = async () => {
+      try {
+        const tenant = await fetchPublicTenantBySlugCached(targetTenantSlug);
+        if (!mounted) return;
+        setTargetTenantAllowPublicSignup(
+          typeof tenant?.allowPublicSignup === "boolean" ? tenant.allowPublicSignup : null
+        );
+      } catch {
+        if (!mounted) return;
+        setTargetTenantAllowPublicSignup(null);
+      } finally {
+        if (mounted) {
+          setTargetTenantLoading(false);
+        }
+      }
+    };
+
+    void loadTenant();
+    return () => {
+      mounted = false;
+    };
+  }, [targetTenantSlug]);
 
   useEffect(() => {
     if (redirectCommittedRef.current) return;
     if (loading) return;
     if (!user) return;
+    if (!inviteTokenHydrated) return;
     if (!user.isAnonymous && tenantThemeLoading) return;
+    if (
+      !user.isAnonymous &&
+      !isPlatformMasterUser &&
+      !isPendingTenant &&
+      !isApprovedTenant &&
+      targetTenantSlug &&
+      targetTenantLoading
+    ) {
+      return;
+    }
 
     setIsLoading(false);
     const blocked = user.status === "banned" || user.status === "bloqueado";
@@ -178,11 +234,36 @@ export default function LoginPageClient() {
       router.replace("/banned");
       return;
     }
-    const redirectTarget = resolveRedirectTarget();
+    const inviteGateRedirectPath =
+      !user.isAnonymous && !isPlatformMasterUser && !isPendingTenant && !isApprovedTenant
+        ? resolveTenantInviteGateRedirect({
+            user,
+            tenantId: normalizedTenantId,
+            tenantSlug: targetTenantSlug,
+            allowPublicSignup: targetTenantAllowPublicSignup,
+            hasInviteToken: Boolean(effectiveInviteToken),
+          })
+        : null;
+    const redirectTarget = inviteGateRedirectPath || resolveRedirectTarget();
     redirectCommittedRef.current = true;
     clearStoredLoginReturnTo();
     router.replace(redirectTarget);
-  }, [loading, resolveRedirectTarget, router, tenantThemeLoading, user]);
+  }, [
+    effectiveInviteToken,
+    inviteTokenHydrated,
+    isApprovedTenant,
+    isPendingTenant,
+    isPlatformMasterUser,
+    loading,
+    normalizedTenantId,
+    resolveRedirectTarget,
+    router,
+    targetTenantAllowPublicSignup,
+    targetTenantLoading,
+    targetTenantSlug,
+    tenantThemeLoading,
+    user,
+  ]);
 
   const handleLogin = async (event: FormEvent) => {
     event.preventDefault();

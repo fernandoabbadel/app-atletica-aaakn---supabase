@@ -176,7 +176,7 @@ export default function BottomNavbar() {
   const [hasApprovedMiniVendor, setHasApprovedMiniVendor] = useState(false);
   const [boardroundDisplayName, setBoardroundDisplayName] = useState("BoardRound");
   const isHiddenRoute =
-    ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao", "/visitante"].includes(normalizedPathname) ||
+    ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao", "/visitante", "/convite-necessario"].includes(normalizedPathname) ||
     normalizedPathname.startsWith("/empresa") ||
     normalizedPathname.startsWith("/admin") ||
     normalizedPathname.startsWith("/master");

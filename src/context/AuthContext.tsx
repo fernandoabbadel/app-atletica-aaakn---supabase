@@ -31,6 +31,7 @@ import {
   sanitizeReturnToPath,
   storeLoginReturnTo,
 } from "@/lib/authRedirect";
+import { isInviteRequiredPath } from "@/lib/inviteAccessGate";
 import {
   getAccessRoleCandidates,
   hasAdminPanelAccess,
@@ -439,6 +440,7 @@ const isCadastroBypassPath = (pathname: string): boolean => {
   return (
     pathname === "/aguardando-aprovacao" ||
     pathname === "/cadastro" ||
+    isInviteRequiredPath(pathname) ||
     pathname === "/banned" ||
     pathname === "/" ||
     pathname === "/login" ||
@@ -450,6 +452,7 @@ const isTenantPendingBypassPath = (pathname: string): boolean => {
   return (
     pathname === "/aguardando-aprovacao" ||
     pathname === "/cadastro" ||
+    isInviteRequiredPath(pathname) ||
     pathname === "/banned" ||
     pathname === "/" ||
     pathname === "/login" ||

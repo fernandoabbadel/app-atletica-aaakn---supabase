@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import SharkLoader from "./SharkLoader";
 import { useAuth } from "@/context/AuthContext";
@@ -44,7 +44,12 @@ import {
   buildPermissionMatrixStorageKey,
   clearLegacyPermissionMatrixStorage,
 } from "@/lib/permissionCache";
-import { fetchPublicTenantIdBySlugCached } from "@/lib/publicTenantLookup";
+import { fetchPublicTenantBySlugCached } from "@/lib/publicTenantLookup";
+import {
+  INVITE_REQUIRED_PATH,
+  resolveTenantInviteGateRedirect,
+} from "@/lib/inviteAccessGate";
+import { sanitizeInviteToken } from "@/lib/inviteTokenStorage";
 
 const resolvePermissionPath = (path: string): string => {
   if (path === "/admin/atletica" || path.startsWith("/admin/atletica/")) {
@@ -96,6 +101,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   const { addToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const rawCurrentPath = pathname ? pathname.split("?")[0] : "/";
   const routePathInfo = useMemo(
@@ -117,6 +123,8 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     useState<PermissionMatrix | null>(null);
   const [rulesLoading, setRulesLoading] = useState(true);
   const [routeTenantId, setRouteTenantId] = useState("");
+  const [routeTenantAllowPublicSignup, setRouteTenantAllowPublicSignup] =
+    useState<boolean | null>(null);
   const [routeTenantLoading, setRouteTenantLoading] = useState(false);
   const [routeTenantResolved, setRouteTenantResolved] = useState(true);
   const [modulesConfig, setModulesConfig] = useState<TenantAppModulesConfig>(
@@ -129,6 +137,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   const pendingRedirectRef = useRef("");
   const hasUser = !!user;
   const userIsAnonymous = Boolean(user?.isAnonymous);
+  const inviteTokenFromUrl = sanitizeInviteToken(searchParams.get("invite"));
   const effectiveAccessRole = useMemo(
     () => resolveEffectiveAccessRole(user),
     [user]
@@ -202,6 +211,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     if (!hasUser || !routeTenantSlug) {
       setRouteTenantId("");
+      setRouteTenantAllowPublicSignup(null);
       setRouteTenantLoading(false);
       setRouteTenantResolved(true);
       return;
@@ -209,27 +219,23 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
     const userTenantId =
       typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
-    if (
-      normalizedActiveTenantId &&
-      normalizedActiveTenantSlug &&
-      routeTenantSlug === normalizedActiveTenantSlug
-    ) {
-      setRouteTenantId(normalizedActiveTenantId);
-      setRouteTenantLoading(false);
-      setRouteTenantResolved(true);
-      return;
-    }
 
     let mounted = true;
     setRouteTenantId("");
+    setRouteTenantAllowPublicSignup(null);
     setRouteTenantResolved(false);
     setRouteTenantLoading(true);
 
     const resolveRouteTenant = async () => {
       try {
-        const resolvedTenantId = await fetchPublicTenantIdBySlugCached(routeTenantSlug);
+        const publicTenant = await fetchPublicTenantBySlugCached(routeTenantSlug);
         if (!mounted) return;
-        setRouteTenantId(resolvedTenantId);
+        setRouteTenantId(publicTenant?.id?.trim() || "");
+        setRouteTenantAllowPublicSignup(
+          typeof publicTenant?.allowPublicSignup === "boolean"
+            ? publicTenant.allowPublicSignup
+            : null
+        );
       } catch {
         if (!mounted) return;
         if (
@@ -247,6 +253,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
         } else {
           setRouteTenantId("");
         }
+        setRouteTenantAllowPublicSignup(null);
       } finally {
         if (mounted) {
           setRouteTenantLoading(false);
@@ -445,7 +452,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       modulesLoading ||
       tenantThemeLoading ||
       routeTenantLoading ||
-      (hasUser && !!routeTenantSlug && !routeTenantResolved && !effectiveRouteTenantId)
+      (hasUser && !!routeTenantSlug && !routeTenantResolved)
     ) {
       return;
     }
@@ -562,6 +569,24 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       return;
     }
 
+    const inviteGateRedirectPath = resolveTenantInviteGateRedirect({
+      user,
+      tenantId: effectiveRouteTenantId,
+      tenantSlug: routeTenantSlug,
+      allowPublicSignup: routeTenantAllowPublicSignup,
+      hasInviteToken: Boolean(inviteTokenFromUrl),
+    });
+
+    if (
+      inviteGateRedirectPath &&
+      currentPath !== INVITE_REQUIRED_PATH &&
+      rawCurrentPath !== inviteGateRedirectPath
+    ) {
+      setAuthorizedSafe(false);
+      safeReplace(inviteGateRedirectPath);
+      return;
+    }
+
     if (currentUserRole === "guest_anon") {
       if (currentPath === "/dashboard" && !routeTenantSlug && !activeTenantSlug) {
         setAuthorizedSafe(false);
@@ -668,6 +693,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     managedTenantAppModule,
     tenantThemeLoading,
     routeTenantId,
+    routeTenantAllowPublicSignup,
     routeTenantLoading,
     routeTenantResolved,
     routeTenantSlug,
@@ -676,6 +702,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     isTenantLandingPublicPath,
     activeTenantSlug,
     authenticatedTenantId,
+    inviteTokenFromUrl,
     tenantNotFoundPath,
     router,
     permissionMatrix,
