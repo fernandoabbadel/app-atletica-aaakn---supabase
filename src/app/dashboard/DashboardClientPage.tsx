@@ -6,6 +6,7 @@ import {
   Calendar, Loader2, Target, Users, Heart, 
   CheckCircle, ChevronRight, ChevronLeft, ShoppingBag, 
   Star, Crown, Wallet, Dumbbell, ExternalLink, MessageCircle, Lightbulb, MapPin,
+  Lock,
   ScanBarcode, Crosshair
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext'; 
@@ -116,21 +117,72 @@ interface SectionHeaderProps {
     title: string;
     icon: React.ElementType;
     link?: string;
+    linkLocked?: boolean;
+    blockedHref?: string;
     onPrev?: () => void;
     onNext?: () => void;
     colorClass?: string;
 }
 
-const SectionHeader = ({ title, icon: Icon, link, onPrev, onNext, colorClass = "text-brand" }: SectionHeaderProps) => (
+const LockedPill = ({ className = "" }: { className?: string }) => (
+  <span
+    className={`inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/70 px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-zinc-200 backdrop-blur-md ${className}`}
+  >
+    <Lock size={10} />
+    Bloqueado
+  </span>
+);
+
+interface DashboardNavLinkProps {
+  href: string;
+  blockedHref?: string;
+  blocked?: boolean;
+  className?: string;
+  children?: React.ReactNode;
+}
+
+const DashboardNavLink = ({
+  href,
+  blockedHref,
+  blocked = false,
+  className,
+  children,
+}: DashboardNavLinkProps) => (
+  <Link
+    href={blocked && blockedHref ? blockedHref : href}
+    aria-disabled={blocked || undefined}
+    className={`${className || ""}${blocked ? " cursor-not-allowed" : ""}`}
+  >
+    {children}
+  </Link>
+);
+
+const SectionHeader = ({
+  title,
+  icon: Icon,
+  link,
+  linkLocked = false,
+  blockedHref,
+  onPrev,
+  onNext,
+  colorClass = "text-brand",
+}: SectionHeaderProps) => (
     <div className="flex items-center justify-between mb-4 px-1">
         <h2 className="text-sm font-black uppercase tracking-widest mb-0 flex items-center gap-2 text-white">
             <Icon size={18} className={colorClass}/> {title}
         </h2>
         <div className="flex items-center gap-3">
             {link && (
-                <Link href={link} className="text-[10px] font-bold text-zinc-500 hover:text-white uppercase transition flex items-center gap-1">
-                    Ver todos <ExternalLink size={10}/>
-                </Link>
+                <DashboardNavLink
+                  href={link}
+                  blocked={linkLocked}
+                  blockedHref={blockedHref}
+                  className={`text-[10px] font-bold uppercase transition flex items-center gap-1 ${
+                    linkLocked ? "text-zinc-500/80" : "text-zinc-500 hover:text-white"
+                  }`}
+                >
+                    Ver todos {linkLocked ? <Lock size={10}/> : <ExternalLink size={10}/>}
+                </DashboardNavLink>
             )}
             {(onPrev || onNext) && (
                 <div className="flex gap-2">
@@ -148,11 +200,15 @@ const EventCardItem = ({
   onToggleLike,
   tenantSlug,
   imagePriority = false,
+  isLocked = false,
+  blockedHref,
 }: {
   evt: Evento;
   onToggleLike: (id: string, state: boolean) => void;
   tenantSlug?: string;
   imagePriority?: boolean;
+  isLocked?: boolean;
+  blockedHref?: string;
 }) => {
   const isLiked = evt.viewerHasLiked;
   const isGoing = evt.viewerIsInterested;
@@ -160,7 +216,13 @@ const EventCardItem = ({
 
   return (
     <div className="bg-zinc-900 min-w-full rounded-3xl overflow-hidden border border-zinc-800 flex flex-col snap-center relative h-[450px]">
-      <Link href={eventHref} className="relative h-64 w-full bg-black block group">
+      {isLocked && <LockedPill className="absolute top-4 right-4 z-20" />}
+      <DashboardNavLink
+        href={eventHref}
+        blocked={isLocked}
+        blockedHref={blockedHref}
+        className={`relative h-64 w-full bg-black block group${isLocked ? " opacity-90" : ""}`}
+      >
         {evt.imagem ? (
             <Image 
                 src={evt.imagem} 
@@ -176,7 +238,7 @@ const EventCardItem = ({
             <div className="w-full h-full flex items-center justify-center text-zinc-700"><Calendar size={48}/></div>
         )}
         <span className="absolute top-4 left-4 px-3 py-1 rounded-full text-[10px] font-black text-white uppercase bg-black/60 backdrop-blur-md border border-white/10 shadow-xl z-10">{evt.tipo || 'Geral'}</span>
-      </Link>
+      </DashboardNavLink>
       
       <div className="p-6 flex flex-col justify-between flex-1 bg-gradient-to-b from-zinc-900 to-black">
         <div>
@@ -189,14 +251,31 @@ const EventCardItem = ({
         <div className="flex items-center justify-between pt-4 border-t border-white/5">
             <button 
                 onClick={(e) => { e.preventDefault(); onToggleLike(evt.id, isLiked); }} 
-                className={`flex items-center gap-2 font-bold text-xs transition ${isLiked ? 'text-red-500' : 'text-zinc-500 hover:text-white'}`}
+                className={`flex items-center gap-2 font-bold text-xs transition ${
+                  isLocked
+                    ? 'text-zinc-500 cursor-not-allowed'
+                    : isLiked
+                      ? 'text-red-500'
+                      : 'text-zinc-500 hover:text-white'
+                }`}
             >
-                <Heart size={20} className={isLiked ? 'fill-current' : ''}/> {evt.likesCount}
+                {isLocked ? <Lock size={18}/> : <Heart size={20} className={isLiked ? 'fill-current' : ''}/>} {isLocked ? 'Bloqueado' : evt.likesCount}
             </button>
             
-            <Link href={eventHref} className={`px-6 py-3 rounded-xl font-black text-xs uppercase border transition flex items-center gap-2 shadow-lg ${isGoing ? 'bg-brand-solid text-black border-brand-strong shadow-brand' : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:border-brand-strong hover:text-white'}`}>
-                {isGoing && <CheckCircle size={14}/>} {isGoing ? 'Confirmado' : 'Ver Detalhes'}
-            </Link>
+            <DashboardNavLink
+              href={eventHref}
+              blocked={isLocked}
+              blockedHref={blockedHref}
+              className={`px-6 py-3 rounded-xl font-black text-xs uppercase border transition flex items-center gap-2 shadow-lg ${
+                isLocked
+                  ? 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                  : isGoing
+                    ? 'bg-brand-solid text-black border-brand-strong shadow-brand'
+                    : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:border-brand-strong hover:text-white'
+              }`}
+            >
+                {isLocked ? <Lock size={14}/> : isGoing ? <CheckCircle size={14}/> : null} {isLocked ? 'Area Restrita' : isGoing ? 'Confirmado' : 'Ver Detalhes'}
+            </DashboardNavLink>
         </div>
       </div>
     </div>
@@ -210,12 +289,16 @@ const ProductCard = ({
   turmaStats,
   tenantSlug,
   imagePriority = false,
+  isLocked = false,
+  blockedHref,
 }: {
   prod: Produto;
   onToggleLike: (id: string, state: boolean) => void;
   turmaStats: DashboardTurmaStat[];
   tenantSlug?: string;
   imagePriority?: boolean;
+  isLocked?: boolean;
+  blockedHref?: string;
 }) => {
     const isLiked = prod.viewerHasLiked;
     const likeCount = prod.likesCount;
@@ -223,7 +306,13 @@ const ProductCard = ({
 
     return (
         <div className="bg-zinc-900 min-w-full rounded-3xl overflow-hidden border border-zinc-800 flex flex-col h-[450px] snap-center group relative">
-            <Link href={productHref} className="h-64 bg-black relative block overflow-hidden">
+            {isLocked && <LockedPill className="absolute top-4 right-4 z-20" />}
+            <DashboardNavLink
+              href={productHref}
+              blocked={isLocked}
+              blockedHref={blockedHref}
+              className={`h-64 bg-black relative block overflow-hidden${isLocked ? " opacity-90" : ""}`}
+            >
                 <Image 
                     src={prod.img} 
                     alt={prod.nome}
@@ -233,7 +322,7 @@ const ProductCard = ({
                     className="object-cover group-hover:scale-105 transition duration-500" 
                     
                 />
-            </Link>
+            </DashboardNavLink>
             
             <div className="p-6 flex flex-col justify-between flex-1 bg-gradient-to-b from-zinc-900 to-black">
                 <div>
@@ -251,15 +340,30 @@ const ProductCard = ({
                                     e.stopPropagation(); 
                                     onToggleLike(prod.id, isLiked); 
                                 }} 
-                                className={`p-2 rounded-full border transition active:scale-90 ${isLiked ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white'}`}
+                                className={`p-2 rounded-full border transition active:scale-90 ${
+                                  isLocked
+                                    ? 'bg-zinc-800 border-zinc-700 text-zinc-500 cursor-not-allowed'
+                                    : isLiked
+                                      ? 'bg-red-500/20 border-red-500 text-red-500'
+                                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white'
+                                }`}
                             >
-                                <Heart size={20} className={isLiked ? 'fill-current' : ''}/>
+                                {isLocked ? <Lock size={18}/> : <Heart size={20} className={isLiked ? 'fill-current' : ''}/>}
                             </button>
-                            <span className="text-xs font-bold text-zinc-500">{likeCount}</span>
+                            <span className="text-xs font-bold text-zinc-500">{isLocked ? 'Bloqueado' : likeCount}</span>
                         </div>
-                        <Link href={productHref} className="px-5 py-2.5 rounded-xl font-black text-xs uppercase border border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500 hover:text-white transition">
-                            Comprar
-                        </Link>
+                        <DashboardNavLink
+                          href={productHref}
+                          blocked={isLocked}
+                          blockedHref={blockedHref}
+                          className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase border transition ${
+                            isLocked
+                              ? 'border-zinc-700 bg-zinc-800 text-zinc-400'
+                              : 'border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500 hover:text-white'
+                          }`}
+                        >
+                            {isLocked ? 'Area Restrita' : 'Comprar'}
+                        </DashboardNavLink>
                     </div>
 
                     {/* Linha 2: Contador de Turmas (NOVO) */}
@@ -488,6 +592,10 @@ export default function DashboardClientPage({
   
   const handleEventLike = async (id: string, state: boolean) => {
     if (!user || loadingLike) return;
+    if (isGuestRestricted) {
+      router.push(semPermissaoPath);
+      return;
+    }
     setLoadingLike(true);
     try {
       await toggleDashboardEventLike({
@@ -509,6 +617,10 @@ export default function DashboardClientPage({
 
   const handleProductLike = async (id: string, state: boolean) => {
     if (!user || loadingLike) return;
+    if (isGuestRestricted) {
+      router.push(semPermissaoPath);
+      return;
+    }
     setLoadingLike(true);
     try {
       await toggleDashboardProductLike({
@@ -534,6 +646,10 @@ export default function DashboardClientPage({
 
   const handleMessageLike = async (id: string, currentlyLiked: boolean) => {
     if (!user || loadingLike) return;
+    if (isGuestRestricted) {
+      router.push(semPermissaoPath);
+      return;
+    }
     setLoadingLike(true);
     try {
       await toggleDashboardPostLike({
@@ -602,13 +718,19 @@ export default function DashboardClientPage({
 
   const userData = user as unknown as UserData; 
   const userRoleNormalized = resolveEffectiveAccessRole(userData);
+  const userUid = user?.uid || "";
+  const isGuestVirtual = userUid.startsWith("guest_virtual_");
+  const isGuestRestricted = Boolean(user?.isAnonymous) || isGuestVirtual;
   const tenantLogoFallback = tenantLogoUrl || "/logo.png";
   const tenantPath = (path: string): string =>
     effectiveTenantSlug ? withTenantSlug(effectiveTenantSlug, path) : path;
+  const semPermissaoPath = tenantPath("/sem-permissao");
   const boardroundHref =
-    userRoleNormalized === "master" ||
-    userRoleNormalized === "admin_geral" ||
-    userRoleNormalized === "admin_gestor"
+    isGuestRestricted
+      ? semPermissaoPath
+      : userRoleNormalized === "master" ||
+          userRoleNormalized === "admin_geral" ||
+          userRoleNormalized === "admin_gestor"
       ? tenantPath("/boardround")
       : tenantPath("/em-breve");
 
@@ -622,7 +744,12 @@ export default function DashboardClientPage({
           <p className="text-zinc-500 text-xs font-bold tracking-wide">Pronto para dominar?</p>
         </div>
         {isModuleVisible("perfil") ? (
-          <Link href={tenantPath("/perfil")}>
+          <DashboardNavLink
+            href={tenantPath("/perfil")}
+            blocked={isGuestRestricted}
+            blockedHref={semPermissaoPath}
+            className="relative block"
+          >
               <div className="h-12 w-12 rounded-full bg-zinc-900 border-2 border-brand-strong p-0.5 overflow-hidden shadow-brand relative">
                   <Image 
                       src={userData?.foto || "https://github.com/shadcn.png"} 
@@ -633,23 +760,34 @@ export default function DashboardClientPage({
                       
                   />
               </div>
-          </Link>
+              {isGuestRestricted && <LockedPill className="absolute -bottom-2 -right-2 scale-90 origin-bottom-right" />}
+          </DashboardNavLink>
         ) : null}
       </div>
 
       {/* 0. PARCEIROS PREMIUM (OURO/PRATA) */}
       {isModuleVisible("parceiros") && (parceirosOuro.length > 0 || parceirosPrata.length > 0) && (
         <div className="space-y-4">
-          <SectionHeader title="Parceiros Premium" icon={Crown} link={tenantPath("/parceiros")} colorClass="text-yellow-500" />
+          <SectionHeader
+            title="Parceiros Premium"
+            icon={Crown}
+            link={tenantPath("/parceiros")}
+            linkLocked={isGuestRestricted}
+            blockedHref={semPermissaoPath}
+            colorClass="text-yellow-500"
+          />
 
           {parceirosOuro.length > 0 && (
             <div className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-4 pb-2">
               {parceirosOuro.map((p, index) => (
-                <Link
+                <DashboardNavLink
                   href={tenantPath(`/parceiros/${p.id}`)}
+                  blocked={isGuestRestricted}
+                  blockedHref={semPermissaoPath}
                   key={p.id}
                   className="min-w-full h-[450px] bg-zinc-900 rounded-3xl overflow-hidden border border-yellow-500/30 relative group snap-center active:scale-[0.99] transition"
                 >
+                  {isGuestRestricted && <LockedPill className="absolute top-4 right-4 z-20" />}
                   <div className="absolute inset-0">
                     <Image
                       src={getPartnerCoverSrc(p, tenantLogoFallback)}
@@ -682,7 +820,7 @@ export default function DashboardClientPage({
                       Benefícios em destaque para a base
                     </p>
                   </div>
-                </Link>
+                </DashboardNavLink>
               ))}
             </div>
           )}
@@ -695,11 +833,14 @@ export default function DashboardClientPage({
               </div>
               <div className="flex overflow-x-auto gap-4 scrollbar-hide snap-x pb-2">
                 {parceirosPrata.map((p, index) => (
-                  <Link
+                  <DashboardNavLink
                     href={tenantPath(`/parceiros/${p.id}`)}
+                    blocked={isGuestRestricted}
+                    blockedHref={semPermissaoPath}
                     key={p.id}
                     className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-700 hover:border-zinc-500"
                   >
+                    {isGuestRestricted && <LockedPill className="absolute top-3 right-3 z-20" />}
                     <div className="absolute inset-0">
                       <Image
                         src={getPartnerCoverSrc(p, tenantLogoFallback)}
@@ -717,7 +858,7 @@ export default function DashboardClientPage({
                     <div className="text-center relative z-10 px-2 w-full">
                       <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>
                     </div>
-                  </Link>
+                  </DashboardNavLink>
                 ))}
               </div>
             </div>
@@ -727,7 +868,13 @@ export default function DashboardClientPage({
 
       {/* 1. CARTEIRINHA */}
       {isModuleVisible("carteirinha") && (
-      <Link href={tenantPath("/carteirinha")} className="relative h-40 w-full overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 active:scale-95 transition group shadow-2xl block">
+      <DashboardNavLink
+        href={tenantPath("/carteirinha")}
+        blocked={isGuestRestricted}
+        blockedHref={semPermissaoPath}
+        className="relative h-40 w-full overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 active:scale-95 transition group shadow-2xl block"
+      >
+          {isGuestRestricted && <LockedPill className="absolute top-4 right-4 z-20" />}
           <Image 
             src={getTurmaImage(userData?.turma)} 
             alt="Carteira BG"
@@ -745,7 +892,7 @@ export default function DashboardClientPage({
               <h2 className="text-2xl font-black italic uppercase text-white drop-shadow-lg">Carteirinha</h2>
               <p className="text-xs text-zinc-400 font-bold uppercase tracking-widest mt-1">Turma {userData?.turma || "Geral"}</p>
           </div>
-      </Link>
+      </DashboardNavLink>
       )}
 
       {/* 2. BOARDROUND (COM FAIXA "EM BREVE") & TREINOS */}
@@ -758,7 +905,8 @@ export default function DashboardClientPage({
         }`}
       >
           {isModuleVisible("sharkround") && (
-          <Link href={boardroundHref} className="bg-brand-solid rounded-3xl p-5 h-44 flex flex-col justify-between active:scale-95 transition relative overflow-hidden group shadow-brand">
+          <DashboardNavLink href={boardroundHref} className="bg-brand-solid rounded-3xl p-5 h-44 flex flex-col justify-between active:scale-95 transition relative overflow-hidden group shadow-brand">
+              {isGuestRestricted && <LockedPill className="absolute top-11 right-3 z-20" />}
               {/* ID 03: FAIXA EM BREVE */}
               <div className="absolute top-3 -right-8 w-32 bg-orange-500 text-black text-[9px] font-black uppercase text-center py-1 rotate-45 border-2 border-black z-20 shadow-lg">
                   Em Breve
@@ -767,11 +915,17 @@ export default function DashboardClientPage({
               <div className="absolute right-0 top-0 w-24 h-24 bg-white/10 rounded-full blur-xl -mr-6 -mt-6"></div>
               <Target size={32} className="text-black relative z-10" />
               <h3 className="font-black text-black text-xl uppercase italic leading-none relative z-10 drop-shadow-md">{boardroundDisplayName}</h3>
-          </Link>
+          </DashboardNavLink>
           )}
           
           {isModuleVisible("treinos") && (
-          <Link href={tenantPath("/treinos")} className="bg-zinc-900 rounded-3xl h-44 overflow-hidden relative active:scale-95 transition border border-zinc-800 group shadow-lg">
+          <DashboardNavLink
+            href={tenantPath("/treinos")}
+            blocked={isGuestRestricted}
+            blockedHref={semPermissaoPath}
+            className="bg-zinc-900 rounded-3xl h-44 overflow-hidden relative active:scale-95 transition border border-zinc-800 group shadow-lg"
+          >
+              {isGuestRestricted && <LockedPill className="absolute top-3 right-3 z-20" />}
               <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 opacity-30 group-hover:opacity-50 transition">
                   {treinos.length > 0 ? treinos.map((img, i) => (
                     <div key={i} className="relative w-full h-full border-[0.5px] border-black">
@@ -788,14 +942,20 @@ export default function DashboardClientPage({
                   <Dumbbell size={24} className="text-orange-500 mb-1 drop-shadow-md"/>
                   <h3 className="font-black text-white uppercase italic text-xl">Treinos</h3>
               </div>
-          </Link>
+          </DashboardNavLink>
           )}
       </div>
       )}
 
       {/* 🦈 3. ID 01 & 02: CAÇA AOS CALOUROS (ATUALIZADO PARA X/Y) */}
       {isModuleVisible("album") && (
-      <Link href={tenantPath("/album")} className="relative h-40 w-full overflow-hidden rounded-3xl bg-black border border-brand block group active:scale-95 transition-all shadow-brand">
+      <DashboardNavLink
+        href={tenantPath("/album")}
+        blocked={isGuestRestricted}
+        blockedHref={semPermissaoPath}
+        className="relative h-40 w-full overflow-hidden rounded-3xl bg-black border border-brand block group active:scale-95 transition-all shadow-brand"
+      >
+            {isGuestRestricted && <LockedPill className="absolute top-4 right-4 z-20" />}
             {/* Efeitos de Fundo (Sonar) */}
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-brand-primary/20 via-black to-black opacity-80"></div>
             
@@ -834,11 +994,11 @@ export default function DashboardClientPage({
                         <span className="text-xs text-zinc-400 font-bold uppercase tracking-wider block mt-0.5">Encontrados</span>
                     </div>
                     <div className="flex items-center gap-1 text-brand text-[10px] font-bold uppercase tracking-wider bg-brand-primary/10 px-3 py-1.5 rounded-full border border-brand">
-                        Ver Ranking <ChevronRight size={10}/>
+                        {isGuestRestricted ? <Lock size={10}/> : <ChevronRight size={10}/>} {isGuestRestricted ? "Area Restrita" : "Ver Ranking"}
                     </div>
                 </div>
             </div>
-      </Link>
+      </DashboardNavLink>
       )}
 
       {/* 4. CARROSSEL EVENTOS (Padronizado) */}
@@ -848,6 +1008,8 @@ export default function DashboardClientPage({
                   title="Eventos" 
                   icon={Calendar} 
                   link={tenantPath("/eventos")} 
+                  linkLocked={isGuestRestricted}
+                  blockedHref={semPermissaoPath}
                   colorClass="text-brand"
                   onPrev={() => scroll(eventsScrollRef, 'left')} 
                   onNext={() => scroll(eventsScrollRef, 'right')} 
@@ -860,6 +1022,8 @@ export default function DashboardClientPage({
                       onToggleLike={handleEventLike}
                       tenantSlug={activeTenantSlug}
                       imagePriority={index < 2}
+                      isLocked={isGuestRestricted}
+                      blockedHref={semPermissaoPath}
                     />
                   ))}
               </div>
@@ -873,6 +1037,8 @@ export default function DashboardClientPage({
                   title="Ligas Acadêmicas" 
                   icon={Users} 
                   link={tenantPath("/ligas_usc")} 
+                  linkLocked={isGuestRestricted}
+                  blockedHref={semPermissaoPath}
                   colorClass="text-yellow-500"
                   onPrev={() => scroll(ligasScrollRef, 'left')} 
                   onNext={() => scroll(ligasScrollRef, 'right')} 
@@ -884,7 +1050,14 @@ export default function DashboardClientPage({
                            const bizuAtivo = getLigaBizuAtivo(liga);
                            const textoCard = (bizuAtivo || liga.descricao || "Liga acadêmica em destaque.").trim();
                            return (
-                           <Link href={tenantPath("/ligas_usc")} key={liga.id} className="min-w-[160px] flex flex-col items-center gap-4 snap-start group cursor-pointer relative bg-gradient-to-b from-zinc-900 to-black p-5 rounded-[24px] border border-zinc-800 hover:border-yellow-500/50 transition-all shadow-xl active:scale-95">
+                           <DashboardNavLink
+                             href={tenantPath("/ligas_usc")}
+                             blocked={isGuestRestricted}
+                             blockedHref={semPermissaoPath}
+                             key={liga.id}
+                             className="min-w-[160px] flex flex-col items-center gap-4 snap-start group cursor-pointer relative bg-gradient-to-b from-zinc-900 to-black p-5 rounded-[24px] border border-zinc-800 hover:border-yellow-500/50 transition-all shadow-xl active:scale-95"
+                           >
+                               {isGuestRestricted && <LockedPill className="absolute top-3 right-3 z-20" />}
                                
                                <div className="relative w-24 h-24">
                                    <div className="absolute inset-0 rounded-full border-2 border-dashed border-yellow-500/50 animate-spin-slow pointer-events-none"></div>
@@ -922,7 +1095,7 @@ export default function DashboardClientPage({
                                        )}
                                    </div>
                                </div>
-                           </Link>
+                           </DashboardNavLink>
                            );
                        })}
                    </div>
@@ -937,6 +1110,8 @@ export default function DashboardClientPage({
               title="Lojinha" 
               icon={ShoppingBag} 
               link={tenantPath("/loja")} 
+              linkLocked={isGuestRestricted}
+              blockedHref={semPermissaoPath}
               colorClass="text-purple-500"
               onPrev={produtos.length > 0 ? () => scroll(productsScrollRef, 'left') : undefined} 
               onNext={produtos.length > 0 ? () => scroll(productsScrollRef, 'right') : undefined} 
@@ -951,24 +1126,32 @@ export default function DashboardClientPage({
                     turmaStats={productTurmaStats[p.id] || []}
                     tenantSlug={activeTenantSlug}
                     imagePriority={index < 2}
+                    isLocked={isGuestRestricted}
+                    blockedHref={semPermissaoPath}
                   />
                 ))}
             </div>
           ) : (
-            <Link
+            <DashboardNavLink
               href={tenantPath("/loja")}
+              blocked={isGuestRestricted}
+              blockedHref={semPermissaoPath}
               className="block rounded-3xl border border-dashed border-zinc-700 bg-zinc-900/70 p-6 active:scale-[0.99] transition"
             >
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-black uppercase tracking-wide text-white">Sem produtos no momento</p>
-                  <p className="text-xs text-zinc-500 mt-2">Clique para abrir a lojinha e acompanhar quando entrar novidade.</p>
+                  <p className="text-xs text-zinc-500 mt-2">
+                    {isGuestRestricted
+                      ? "Visualização liberada. A compra fica disponível apenas para membros."
+                      : "Clique para abrir a lojinha e acompanhar quando entrar novidade."}
+                  </p>
                 </div>
                 <div className="w-12 h-12 rounded-2xl border border-purple-500/30 bg-purple-500/10 flex items-center justify-center text-purple-400">
-                  <ShoppingBag size={20} />
+                  {isGuestRestricted ? <Lock size={20} /> : <ShoppingBag size={20} />}
                 </div>
               </div>
-            </Link>
+            </DashboardNavLink>
           )}
       </div>
       )}
@@ -976,10 +1159,24 @@ export default function DashboardClientPage({
       {/* 6. PARCEIROS STANDARD (Logo Aumentado) */}
       {isModuleVisible("parceiros") && parceirosStandard.length > 0 && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-6 relative overflow-hidden">
-               <SectionHeader title="Parceiros Standard" icon={Users} link={tenantPath("/parceiros")} colorClass="text-zinc-500"/>
+               <SectionHeader
+                 title="Parceiros Standard"
+                 icon={Users}
+                 link={tenantPath("/parceiros")}
+                 linkLocked={isGuestRestricted}
+                 blockedHref={semPermissaoPath}
+                 colorClass="text-zinc-500"
+               />
                <div className="flex overflow-x-auto gap-4 scrollbar-hide snap-x relative z-10 pb-2">
                    {parceirosStandard.map((p) => (
-                       <Link href={tenantPath(`/parceiros/${p.id}`)} key={p.id} className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-800 hover:border-zinc-600">
+                       <DashboardNavLink
+                         href={tenantPath(`/parceiros/${p.id}`)}
+                         blocked={isGuestRestricted}
+                         blockedHref={semPermissaoPath}
+                         key={p.id}
+                         className="min-w-[150px] h-44 bg-black rounded-2xl flex flex-col items-center justify-center gap-4 snap-start group active:scale-95 transition relative overflow-hidden border border-zinc-800 hover:border-zinc-600"
+                       >
+                           {isGuestRestricted && <LockedPill className="absolute top-3 right-3 z-20" />}
                            <div className="absolute inset-0">
                                <Image src={getPartnerCoverSrc(p, tenantLogoFallback)} alt="Capa" fill sizes="150px" className="object-cover opacity-30 group-hover:opacity-50 transition" />
                                <div className="absolute inset-0 bg-black/40"/>
@@ -990,7 +1187,7 @@ export default function DashboardClientPage({
                            <div className="text-center relative z-10 px-2 w-full">
                                <h4 className="text-xs font-bold text-white truncate">{p.nome}</h4>
                            </div>
-                       </Link>
+                       </DashboardNavLink>
                    ))}
                </div>
           </div>
@@ -999,12 +1196,25 @@ export default function DashboardClientPage({
       {/* 7. COMUNIDADE (Posts) */}
       {isModuleVisible("comunidade") && (
       <div className="space-y-4">
-          <SectionHeader title="Comunidade" icon={MessageCircle} link={tenantPath("/comunidade")} colorClass="text-zinc-500"/>
+          <SectionHeader
+            title="Comunidade"
+            icon={MessageCircle}
+            link={tenantPath("/comunidade")}
+            linkLocked={isGuestRestricted}
+            blockedHref={semPermissaoPath}
+            colorClass="text-zinc-500"
+          />
           {mensagens.length > 0 ? mensagens.slice(0, 2).map((msg) => {
               const userLikedMsg = msg.viewerHasLiked;
               return (
               <div key={msg.id} className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden relative group">
-                    <Link href={tenantPath("/comunidade")} className="absolute inset-0 z-0"/>
+                    {isGuestRestricted && <LockedPill className="absolute top-3 right-3 z-20" />}
+                    <DashboardNavLink
+                      href={tenantPath("/comunidade")}
+                      blocked={isGuestRestricted}
+                      blockedHref={semPermissaoPath}
+                      className="absolute inset-0 z-0"
+                    />
                     
                     <div className="p-4 flex gap-4 items-start relative z-0">
                       <div className="w-10 h-10 rounded-full bg-black border border-zinc-700 relative overflow-hidden">
@@ -1029,9 +1239,15 @@ export default function DashboardClientPage({
                     <div className="px-4 pb-3 flex justify-end relative z-10">
                         <button 
                            onClick={(e) => { e.preventDefault(); handleMessageLike(msg.id, msg.viewerHasLiked); }}
-                           className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-full transition ${userLikedMsg ? 'text-red-500 bg-red-500/10' : 'text-zinc-500 hover:bg-zinc-800'}`}
+                           className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-full transition ${
+                             isGuestRestricted
+                               ? 'text-zinc-500 bg-zinc-800/80 cursor-not-allowed'
+                               : userLikedMsg
+                                 ? 'text-red-500 bg-red-500/10'
+                                 : 'text-zinc-500 hover:bg-zinc-800'
+                           }`}
                         >
-                            <Heart size={12} className={userLikedMsg ? 'fill-current' : ''}/> {msg.likesCount}
+                            {isGuestRestricted ? <Lock size={12}/> : <Heart size={12} className={userLikedMsg ? 'fill-current' : ''}/>} {isGuestRestricted ? 'Bloqueado' : msg.likesCount}
                         </button>
                     </div>
               </div>

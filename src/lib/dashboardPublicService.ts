@@ -321,6 +321,37 @@ async function fetchRowsWithFallback(
   return [];
 }
 
+async function fetchDashboardLeaguePreviewRows(tenantId?: string): Promise<Row[]> {
+  const cleanTenantId = asString(tenantId).trim();
+  const tenantFilter: Record<string, string | boolean> = {};
+  if (cleanTenantId) {
+    tenantFilter.tenant_id = cleanTenantId;
+  }
+
+  return fetchRowsWithFallback("ligas_config", DASHBOARD_LIGAS_SELECT, [
+    {
+      orderBy: { column: "likes", ascending: false },
+      limit: DASHBOARD_LIGAS_QUERY_WINDOW,
+      eq: {
+        ...tenantFilter,
+        visivel: true,
+      },
+    },
+    {
+      orderBy: { column: "updatedAt", ascending: false },
+      limit: DASHBOARD_LIGAS_QUERY_WINDOW,
+      eq: {
+        ...tenantFilter,
+        visivel: true,
+      },
+    },
+    {
+      limit: DASHBOARD_LIGAS_QUERY_WINDOW,
+      eq: tenantFilter,
+    },
+  ]);
+}
+
 async function filterDashboardVisibleProductRows(
   rows: Row[],
   tenantId?: string
@@ -693,14 +724,18 @@ async function fetchDashboardLeagueRows(options: {
 }): Promise<Row[]> {
   const cleanTenantId = asString(options.tenantId).trim();
   const cleanUserId = asString(options.userId).trim();
-  if (!cleanUserId) return [];
+  if (!cleanUserId) {
+    return fetchDashboardLeaguePreviewRows(cleanTenantId || undefined);
+  }
 
   const userExtra = await fetchUserExtra(cleanUserId);
   const followedLeagueIds = resolveFollowedLeagueIdsFromUserExtra(
     userExtra,
     cleanTenantId || undefined
   );
-  if (!followedLeagueIds.length) return [];
+  if (!followedLeagueIds.length) {
+    return fetchDashboardLeaguePreviewRows(cleanTenantId || undefined);
+  }
   const queryLeagueIds =
     followedLeagueIds.length > DASHBOARD_LIGAS_QUERY_WINDOW
       ? seededShuffle(
@@ -965,11 +1000,18 @@ async function fetchDashboardBundleViaRpc(options: {
     .filter((entry): entry is DashboardPartner => entry !== null)
     .filter((partner) => (partner.status || "active") === "active");
 
-  const ligasBase = asArray(payload.ligas)
+  let ligasBase = asArray(payload.ligas)
     .map((entry) => normalizeLiga(asString(asObject(entry)?.id), entry))
     .filter((entry): entry is DashboardLiga => entry !== null)
     .filter((liga) => liga.visivel === true)
     .sort((left, right) => (right.likes || 0) - (left.likes || 0));
+  if (!ligasBase.length && !cleanUserId) {
+    ligasBase = (await fetchDashboardLeaguePreviewRows(cleanTenantId || undefined))
+      .map((entry) => normalizeLiga(asString(asObject(entry)?.id), entry))
+      .filter((entry): entry is DashboardLiga => entry !== null)
+      .filter((liga) => liga.visivel === true)
+      .sort((left, right) => (right.likes || 0) - (left.likes || 0));
+  }
   const ligas =
     ligasBase.length > DASHBOARD_LIGAS_DASHBOARD_LIMIT
       ? seededShuffle(
