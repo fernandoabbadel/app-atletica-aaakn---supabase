@@ -77,6 +77,9 @@ export type MiniVendorFormState = {
   instagramEnabled: boolean;
   whatsapp: string;
   whatsappEnabled: boolean;
+  profileVisible: boolean;
+  categoryVisible: boolean;
+  productsVisible: boolean;
   categoryButtonColor: string;
 };
 
@@ -113,6 +116,9 @@ export const EMPTY_VENDOR_FORM: MiniVendorFormState = {
   instagramEnabled: false,
   whatsapp: "",
   whatsappEnabled: false,
+  profileVisible: true,
+  categoryVisible: true,
+  productsVisible: true,
   categoryButtonColor: "#2563eb",
 };
 
@@ -255,6 +261,9 @@ export const normalizeVendorForm = (profile: MiniVendorProfile | null): MiniVend
   instagramEnabled: profile?.instagramEnabled || false,
   whatsapp: profile?.whatsapp || "",
   whatsappEnabled: profile?.whatsappEnabled || false,
+  profileVisible: profile?.profileVisible ?? true,
+  categoryVisible: profile?.categoryVisible ?? true,
+  productsVisible: profile?.productsVisible ?? true,
   categoryButtonColor: profile?.categoryButtonColor || "#2563eb",
 });
 
@@ -295,6 +304,9 @@ export const restoreVendorFormDraft = (
   instagramEnabled: asBoolean(draft.instagramEnabled),
   whatsapp: asString(draft.whatsapp),
   whatsappEnabled: asBoolean(draft.whatsappEnabled),
+  profileVisible: "profileVisible" in draft ? asBoolean(draft.profileVisible) : true,
+  categoryVisible: "categoryVisible" in draft ? asBoolean(draft.categoryVisible) : true,
+  productsVisible: "productsVisible" in draft ? asBoolean(draft.productsVisible) : true,
   categoryButtonColor: asString(draft.categoryButtonColor) || "#2563eb",
 });
 

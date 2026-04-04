@@ -132,7 +132,7 @@ export default function MiniVendorSettingsPage() {
       ) : (
         <div className="space-y-6">
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
               <div className="flex items-start gap-4">
                 <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-zinc-700 bg-black">
                   <Image
@@ -165,11 +165,6 @@ export default function MiniVendorSettingsPage() {
                     </span>
                   </div>
                 </div>
-              </div>
-
-              <div className="rounded-2xl border border-zinc-800 bg-black/20 px-4 py-3 text-sm text-zinc-400 lg:max-w-sm">
-                Esta pagina agora funciona como diretorio. Cada botao abaixo abre uma rota com
-                consultas separadas para economizar egress e leituras no Supabase.
               </div>
             </div>
           </section>

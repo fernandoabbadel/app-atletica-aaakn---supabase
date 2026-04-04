@@ -34,6 +34,13 @@ const menuItems = [
     color: "text-blue-400 border-blue-500/30 bg-blue-500/10",
   },
   {
+    href: "/admin/loja/produtos-desativados",
+    title: "Desativados",
+    description: "Historico dos produtos fora do ar com reativacao segura",
+    icon: Package,
+    color: "text-red-400 border-red-500/30 bg-red-500/10",
+  },
+  {
     href: "/admin/loja/pedidos-pendentes",
     title: "Pedidos Pendentes",
     description: "Aprovacao separada para evitar bundle pesado",

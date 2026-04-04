@@ -12,9 +12,11 @@ import {
   resolvePlanScopedPriceInfo,
 } from "./commerceCatalog";
 import {
-  fetchApprovedMiniVendorIds,
   fetchMiniVendorProfileById,
   fetchTenantMiniVendors,
+  isMiniVendorCategoryPublic,
+  isMiniVendorProductsPublic,
+  isMiniVendorReceivingOrders,
   resolveMiniVendorPaymentConfig,
 } from "./miniVendorService";
 import { incrementUserStats } from "./supabaseData";
@@ -29,9 +31,9 @@ const MAX_REVIEWS = 600;
 const MAX_CATEGORIES = 300;
 const USER_REVIEW_EXISTS_LIMIT = 1;
 const STORE_PRODUCT_SELECT_COLUMNS =
-  "id,tenant_id,nome,preco,precoAntigo,img,descricao,likes,categoria,estoque,cores,variantes,caracteristicas,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,createdAt,updatedAt";
+  "id,tenant_id,nome,preco,precoAntigo,img,descricao,likes,categoria,estoque,lote,tagLabel,tagColor,tagEffect,cores,variantes,caracteristicas,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,cliques,createdAt,updatedAt";
 const STORE_CATEGORY_SELECT_COLUMNS =
-  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id";
+  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order";
 const STORE_REVIEW_SELECT_COLUMNS =
   "id,productId,userId,userName,userAvatar,rating,comment,createdAt,updatedAt";
 const STORE_ORDER_SELECT_COLUMNS =
@@ -52,6 +54,20 @@ const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : [
 const asString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 const asNum = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+const asBoolean = (value: unknown, fallback = false): boolean =>
+  typeof value === "boolean" ? value : fallback;
+const asInt = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.floor(parsed));
+    }
+  }
+  return null;
+};
 const resolveStoreTenantId = (tenantId?: string | null): string =>
   resolveStoredTenantScopeId(asString(tenantId).trim());
 
@@ -234,6 +250,8 @@ const normalizeCategoryRow = (row: Row): Row => ({
   cover_img: asString(row.cover_img),
   button_color: asString(row.button_color),
   logo_url: asString(row.logo_url),
+  display_order: asInt(row.display_order),
+  is_receiving_orders: asBoolean(row.is_receiving_orders),
   seller: normalizeSellerSnapshot({
     type: row.seller_type,
     id: row.seller_id,
@@ -269,9 +287,47 @@ const resolveMiniVendorProductPaymentConfig = async (options: {
   return resolveMiniVendorPaymentConfig(profile);
 };
 
+const sortStoreCategoryRows = <T extends Row>(rows: T[]): T[] =>
+  [...rows].sort((left, right) => {
+    const leftOrder = asInt(left.display_order);
+    const rightOrder = asInt(right.display_order);
+    if (leftOrder !== null || rightOrder !== null) {
+      if (leftOrder === null) return 1;
+      if (rightOrder === null) return -1;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    }
+
+    const leftMiniVendor = asString(left.seller_type).trim().toLowerCase() === "mini_vendor";
+    const rightMiniVendor = asString(right.seller_type).trim().toLowerCase() === "mini_vendor";
+    if (leftMiniVendor !== rightMiniVendor) {
+      return leftMiniVendor ? 1 : -1;
+    }
+
+    return asString(left.nome).localeCompare(asString(right.nome), "pt-BR", {
+      sensitivity: "base",
+    });
+  });
+
+async function fetchApprovedMiniVendorProfileMap(
+  tenantId?: string | null,
+  forceRefresh = false
+): Promise<Map<string, Awaited<ReturnType<typeof fetchTenantMiniVendors>>[number]>> {
+  const scopedTenantId = resolveStoreTenantId(tenantId);
+  if (!scopedTenantId) return new Map();
+
+  const profiles = await fetchTenantMiniVendors({
+    tenantId: scopedTenantId,
+    statuses: ["approved"],
+    forceRefresh,
+  });
+  return new Map(profiles.map((profile) => [profile.id, profile]));
+}
+
 const filterApprovedMiniVendorRows = async (
   rows: Row[],
-  tenantId?: string | null
+  tenantId?: string | null,
+  scope: "category" | "product" = "product",
+  forceRefresh = false
 ): Promise<Row[]> => {
   const hasMiniVendorRows = rows.some(
     (row) => asString(row.seller_type).trim().toLowerCase() === "mini_vendor"
@@ -281,17 +337,19 @@ const filterApprovedMiniVendorRows = async (
   const scopedTenantId = resolveStoreTenantId(tenantId);
   if (!scopedTenantId) return rows.filter((row) => asString(row.seller_type).trim().toLowerCase() !== "mini_vendor");
 
-  const approvedIds = new Set(
-    await fetchApprovedMiniVendorIds({
-      tenantId: scopedTenantId,
-    })
-  );
+  const approvedProfiles = await fetchApprovedMiniVendorProfileMap(scopedTenantId, forceRefresh);
 
   return rows.filter((row) => {
     const sellerType = asString(row.seller_type).trim().toLowerCase();
     if (sellerType !== "mini_vendor") return true;
     const sellerId = asString(row.seller_id).trim();
-    return sellerId.length > 0 && approvedIds.has(sellerId);
+    if (!sellerId) return false;
+
+    const profile = approvedProfiles.get(sellerId) ?? null;
+    if (!profile) return false;
+    return scope === "category"
+      ? isMiniVendorCategoryPublic(profile)
+      : isMiniVendorProductsPublic(profile);
   });
 };
 
@@ -374,7 +432,7 @@ export async function fetchStoreCategories(options?: {
   try {
     rows = await queryRows("categorias", {
       selectColumns: STORE_CATEGORY_SELECT_COLUMNS,
-      orderBy: { column: "nome", ascending: true },
+      orderBy: { column: "display_order", ascending: true },
       limit: maxResults,
       tenantId: scopedTenantId,
     });
@@ -386,16 +444,13 @@ export async function fetchStoreCategories(options?: {
     });
   }
 
-  const visibleRows = await filterApprovedMiniVendorRows(rows, scopedTenantId);
-  const approvedMiniVendors = scopedTenantId
-    ? await fetchTenantMiniVendors({
-        tenantId: scopedTenantId,
-        statuses: ["approved"],
-        forceRefresh: forceRefresh,
-      })
-    : [];
-  const vendorProfileMap = new Map(
-    approvedMiniVendors.map((profile) => [profile.id, profile])
+  const vendorProfileMap = await fetchApprovedMiniVendorProfileMap(scopedTenantId, forceRefresh);
+  const approvedMiniVendors = Array.from(vendorProfileMap.values());
+  const visibleRows = await filterApprovedMiniVendorRows(
+    rows,
+    scopedTenantId,
+    "category",
+    forceRefresh
   );
   const categoryMap = new Map<string, Row>();
 
@@ -418,6 +473,7 @@ export async function fetchStoreCategories(options?: {
         asString(row.logo_url).trim() ||
         profile?.logoUrl ||
         asString(row.logo_url).trim(),
+      is_receiving_orders: profile ? isMiniVendorReceivingOrders(profile) : false,
     });
     const key = `${asString(normalized.seller_type).trim().toLowerCase()}:${asString(
       normalized.seller_id
@@ -426,6 +482,7 @@ export async function fetchStoreCategories(options?: {
   });
 
   approvedMiniVendors.forEach((profile) => {
+    if (!isMiniVendorCategoryPublic(profile)) return;
     const nome = profile.storeName.trim();
     if (!nome) return;
     const key = `mini_vendor:${profile.id}:${nome.toLowerCase()}`;
@@ -441,13 +498,12 @@ export async function fetchStoreCategories(options?: {
         logo_url: profile.logoUrl,
         seller_type: "mini_vendor",
         seller_id: profile.id,
+        is_receiving_orders: isMiniVendorReceivingOrders(profile),
       })
     );
   });
 
-  const normalizedRows = Array.from(categoryMap.values()).sort((left, right) =>
-    asString(left.nome).localeCompare(asString(right.nome), "pt-BR", { sensitivity: "base" })
-  );
+  const normalizedRows = sortStoreCategoryRows(Array.from(categoryMap.values()));
   setCache(categoriesCache, cacheKey, normalizedRows);
   return normalizedRows;
 }
@@ -507,7 +563,12 @@ export async function fetchStoreProductsPage(options?: {
     rows = await runQuery(false);
   }
 
-  const approvedRows = await filterApprovedMiniVendorRows(rows, scopedTenantId);
+  const approvedRows = await filterApprovedMiniVendorRows(
+    rows,
+    scopedTenantId,
+    "product",
+    forceRefresh
+  );
   const visibleRows = approvedRows
     .map((row) =>
       normalizeProductRow(row, {
@@ -572,7 +633,12 @@ export async function fetchStoreProducts(options?: {
     rows = await runQuery(false);
   }
 
-  const approvedRows = await filterApprovedMiniVendorRows(rows, scopedTenantId);
+  const approvedRows = await filterApprovedMiniVendorRows(
+    rows,
+    scopedTenantId,
+    "product",
+    forceRefresh
+  );
   const normalizedRows = approvedRows
     .map((row) =>
       normalizeProductRow(row, {
@@ -647,7 +713,12 @@ export async function fetchStoreProductsBySeller(options: {
     rows = await runQuery(false);
   }
 
-  const approvedRows = await filterApprovedMiniVendorRows(rows, scopedTenantId);
+  const approvedRows = await filterApprovedMiniVendorRows(
+    rows,
+    scopedTenantId,
+    "product",
+    forceRefresh
+  );
   const normalizedRows = approvedRows
     .map((row) =>
       normalizeProductRow(row, {
@@ -708,7 +779,12 @@ export async function fetchStoreProductDetail(options: {
     throwSupabaseError(productError);
   }
   const visibleProductRows = productData
-    ? await filterApprovedMiniVendorRows([productData as Row], scopedTenantId)
+    ? await filterApprovedMiniVendorRows(
+        [productData as Row],
+        scopedTenantId,
+        "product",
+        forceRefresh
+      )
     : [];
   const produtoCandidate = visibleProductRows[0]
     ? normalizeProductRow(visibleProductRows[0], {

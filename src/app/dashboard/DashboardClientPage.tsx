@@ -13,7 +13,9 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import Link from 'next/link';
 import Image from 'next/image'; 
 import { 
+    acknowledgeDashboardInvalidation,
     fetchDashboardBundle,
+    hasPendingDashboardInvalidation,
     toggleDashboardEventLike,
     toggleDashboardProductLike,
     toggleDashboardPostLike,
@@ -337,6 +339,7 @@ export default function DashboardClientPage({
     const resolvedTenantSlug = activeTenantSlug.trim() || initialTenantSlug;
     const requestKey = `${resolvedTenantId}:${resolvedTenantSlug}:${user?.uid || "anon"}`;
     const initialRequestKey = `${initialTenantId}:${initialTenantSlug}:anon`;
+    const shouldForceRefresh = hasPendingDashboardInvalidation();
 
     if (!resolvedTenantId && !resolvedTenantSlug) {
       if (initialData === null) {
@@ -347,7 +350,7 @@ export default function DashboardClientPage({
       };
     }
 
-    if (initialData !== null && requestKey === initialRequestKey) {
+    if (initialData !== null && requestKey === initialRequestKey && !shouldForceRefresh) {
       lastDashboardRequestKeyRef.current = requestKey;
       setLoadingData(false);
       return () => {
@@ -355,7 +358,7 @@ export default function DashboardClientPage({
       };
     }
 
-    if (lastDashboardRequestKeyRef.current === requestKey) {
+    if (lastDashboardRequestKeyRef.current === requestKey && !shouldForceRefresh) {
       return () => {
         active = false;
       };
@@ -370,6 +373,7 @@ export default function DashboardClientPage({
 
       try {
         const data = await fetchDashboardBundle({
+          forceRefresh: shouldForceRefresh,
           tenantId: resolvedTenantId || undefined,
           userId: user?.uid || undefined,
         });
@@ -384,6 +388,9 @@ export default function DashboardClientPage({
         setTotalCaca(data.totalCaca);
         setTotalAlunos(data.totalAlunos);
         setProductTurmaStats(data.productTurmaStats);
+        if (shouldForceRefresh) {
+          acknowledgeDashboardInvalidation();
+        }
       } catch (error: unknown) {
         console.error("Erro ao carregar dashboard:", error);
       } finally {

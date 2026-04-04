@@ -61,6 +61,8 @@ export type StoreCategory = {
   cover_img?: string;
   button_color?: string;
   logo_url?: string;
+  display_order?: number | null;
+  is_receiving_orders?: boolean;
   seller_type?: "tenant" | "mini_vendor";
   seller_id?: string;
 };
@@ -121,6 +123,11 @@ const getProductColorPreview = (produto: Produto): string[] => {
   const manualColors = parseColorLines(produto.cores);
   return Array.from(new Set([...variantColors, ...manualColors]));
 };
+
+const getCategoryDisplayOrder = (category: StoreCategory): number =>
+  typeof category.display_order === "number" && Number.isFinite(category.display_order)
+    ? Math.max(0, Math.floor(category.display_order))
+    : Number.MAX_SAFE_INTEGER;
 
 interface LojaClientPageProps {
   initialProducts: Produto[];
@@ -339,6 +346,7 @@ export default function LojaClientPage({
                   String(category.seller_id || "").trim() === String(product.seller?.id || "").trim()
               )
             : null;
+        if (sellerType === "mini_vendor" && !vendorCategory) return;
         const categoryLogo =
           sellerType === "tenant"
             ? tenantLogo
@@ -356,12 +364,19 @@ export default function LojaClientPage({
           cover_img: categoryCover,
           button_color: categoryColor,
           logo_url: categoryLogo,
+          display_order: vendorCategory?.display_order,
+          is_receiving_orders: vendorCategory?.is_receiving_orders,
           seller_type: sellerType,
           seller_id: product.seller?.id || "",
         });
       });
 
       return Array.from(categoriesByName.values()).sort((left, right) => {
+        const leftOrder = getCategoryDisplayOrder(left);
+        const rightOrder = getCategoryDisplayOrder(right);
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder;
+        }
         const leftMiniVendor = left.seller_type === "mini_vendor";
         const rightMiniVendor = right.seller_type === "mini_vendor";
         if (leftMiniVendor !== rightMiniVendor) {
@@ -560,12 +575,13 @@ export default function LojaClientPage({
                     </div>
                     <div className="p-3">
                       <span
-                        className="inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white"
+                        className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white"
                         style={{
                           backgroundColor: cat.button_color || palette.primary || "#10b981",
                           borderColor: cat.button_color || palette.primary || "#10b981",
                         }}
                       >
+                        {cat.is_receiving_orders ? <span className="h-2 w-2 rounded-full bg-emerald-300" /> : null}
                         {cat.nome}
                       </span>
                     </div>

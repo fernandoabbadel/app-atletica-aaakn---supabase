@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  resolveInviteDailyWindowStartIso,
+  resolveTenantInviteQuotaState,
+} from "@/lib/inviteQuota";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     const body = asObject(await request.json());
     const tenantId = asString(body?.tenantId).trim();
-    const maxUses = toPositiveInt(body?.maxUses, 1, 5);
+    const maxUses = 1;
     const expiresInHours = toPositiveInt(body?.expiresInHours, 72, 24 * 7);
 
     if (!tenantId) {
@@ -48,7 +52,7 @@ export async function POST(request: NextRequest) {
     const userId = authData.user.id;
     const { data: userRow, error: userError } = await supabaseAdmin
       .from("users")
-      .select("uid,tenant_id,tenant_status,role,status")
+      .select("uid,tenant_id,tenant_status,role,status,extra")
       .eq("uid", userId)
       .maybeSingle();
 
@@ -61,6 +65,7 @@ export async function POST(request: NextRequest) {
     const tenantStatus = asString(userData?.tenant_status).trim().toLowerCase();
     const accountStatus = asString(userData?.status, "ativo").trim().toLowerCase();
     const role = asString(userData?.role, "user").trim().toLowerCase();
+    const quota = resolveTenantInviteQuotaState(userData?.extra, tenantId);
 
     if (!userTenantId || userTenantId !== tenantId || tenantStatus !== "approved") {
       return NextResponse.json(
@@ -73,6 +78,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Seu perfil nao pode gerar convite no momento." },
         { status: 403 }
+      );
+    }
+
+    const { count: todayCount, error: dailyCountError } = await supabaseAdmin
+      .from("tenant_invites")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .eq("created_by", userId)
+      .gte("created_at", resolveInviteDailyWindowStartIso());
+    if (dailyCountError) {
+      return NextResponse.json({ error: dailyCountError.message }, { status: 400 });
+    }
+    if (Math.max(0, todayCount ?? 0) >= quota.totalLimit) {
+      return NextResponse.json(
+        {
+          error:
+            quota.status === "pending"
+              ? "Voce ja usou sua cota atual. Os 5 convites extras liberam em ate 1 hora."
+              : `Voce ja atingiu o limite de ${quota.totalLimit} convites hoje. Use o pedido de mais convites para liberar novos links.`,
+        },
+        { status: 429 }
       );
     }
 
@@ -95,7 +121,7 @@ export async function POST(request: NextRequest) {
         created_at: nowIso,
       })
       .select(
-        "id,tenant_id,token,role_to_assign,requires_approval,max_uses,uses_count,expires_at,is_active,created_by,created_at"
+        "id,tenant_id,token,role_to_assign,requires_approval,max_uses,uses_count,expires_at,is_active,is_revoked,revoked_at,revoked_by,created_by,created_at"
       )
       .single();
 

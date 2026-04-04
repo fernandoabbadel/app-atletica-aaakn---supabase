@@ -3,7 +3,7 @@
 import { type ChangeEvent, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Building2, Loader2, Save, Upload } from "lucide-react";
+import { ArrowLeft, Building2, Loader2, Rocket, Save, Upload } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
@@ -96,6 +96,7 @@ export default function AdminAtleticaPage() {
   const canAccess = canManageTenant(user);
   const tenantId = activeTenantId.trim();
   const adminHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+  const launchHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/lancamento") : "/admin/lancamento";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -534,6 +535,14 @@ export default function AdminAtleticaPage() {
                   </span>
                 </div>
               </label>
+
+              <Link
+                href={launchHref}
+                className="inline-flex items-center gap-2 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-cyan-300 transition hover:bg-cyan-500/20"
+              >
+                <Rocket size={14} />
+                Abrir Central de Convites
+              </Link>
 
               <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3">
                 <input

@@ -11,8 +11,10 @@ import {
   mergePatentesWithDefaults,
   resolvePatenteForXp,
 } from "@/lib/achievementRuntime";
+import { fetchUserAchievementSnapshot } from "@/lib/achievementsService";
 import { getBackendErrorCode, isPermissionError } from "@/lib/backendErrors";
 import { ensureAlbumSelfCollected } from "@/lib/albumService";
+import { calculateLevel } from "@/lib/games";
 import {
   applyPlatformMasterTenantOverride,
   getMasterRolePreview,
@@ -67,6 +69,8 @@ const DEFAULT_PATENTES: PatenteConfig[] = DEFAULT_PATENTE_CONFIG.map((entry) => 
 
 export interface UserStats {
     inviteActivations?: number;
+    mentorsCount?: number;
+    menteesCount?: number;
     loginCount?: number;
     postsCount?: number;
     commentsCount?: number;
@@ -1090,8 +1094,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
-          const effectiveStoredXp = asNumber(updates.xp, asNumber(user.xp, 0));
-          const canonicalXp = effectiveStoredXp;
+        let effectiveStoredXp = asNumber(updates.xp, asNumber(user.xp, 0));
+        let canonicalXp = effectiveStoredXp;
+        const currentResolvedLevel = asNumber(
+          updates.level,
+          asNumber(user.level, DEFAULT_USER_PROPS.level)
+        );
+
+        try {
+            const achievementSnapshot = await fetchUserAchievementSnapshot({
+                userId: user.uid,
+                tenantId: asString(user.tenant_id).trim() || undefined,
+                fallbackStats: (updates.stats ?? currentStats) as Record<string, unknown>,
+                fallbackXp: effectiveStoredXp,
+            });
+
+            const snapshotXp = Math.max(0, achievementSnapshot.displayXp);
+            const snapshotLevel = calculateLevel(snapshotXp);
+
+            canonicalXp = snapshotXp;
+            if (snapshotXp !== effectiveStoredXp) {
+                updates.xp = snapshotXp;
+                effectiveStoredXp = snapshotXp;
+                hasUpdates = true;
+            }
+            if (snapshotLevel !== currentResolvedLevel) {
+                updates.level = snapshotLevel;
+                hasUpdates = true;
+            }
+
+            if (achievementSnapshot.patente) {
+                if (asString(updates.patente ?? user.patente) !== achievementSnapshot.patente.titulo) {
+                    updates.patente = achievementSnapshot.patente.titulo;
+                    hasUpdates = true;
+                }
+                if (asString(updates.patente_icon ?? user.patente_icon) !== achievementSnapshot.patente.iconName) {
+                    updates.patente_icon = achievementSnapshot.patente.iconName;
+                    hasUpdates = true;
+                }
+                if (asString(updates.patente_cor ?? user.patente_cor) !== achievementSnapshot.patente.cor) {
+                    updates.patente_cor = achievementSnapshot.patente.cor;
+                    hasUpdates = true;
+                }
+            }
+        } catch (achievementError: unknown) {
+            maintenanceFailed = true;
+            if (
+                !isPermissionError(achievementError) &&
+                !isNavigatorLockTimeoutError(achievementError) &&
+                !isSupabaseRetryableFetchError(achievementError)
+            ) {
+                console.warn("Falha ao sincronizar snapshot de conquistas do usuario:", achievementError);
+            }
+        }
 
         const visualMaintenanceKey = [
             user.uid,

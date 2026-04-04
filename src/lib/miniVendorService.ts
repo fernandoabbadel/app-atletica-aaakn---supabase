@@ -33,6 +33,9 @@ const MINI_VENDOR_SELECT_COLUMNS = [
   "instagram_enabled",
   "whatsapp",
   "whatsapp_enabled",
+  "profile_visible",
+  "category_visible",
+  "products_visible",
   "category_button_color",
   "approved_by",
   "approved_at",
@@ -249,6 +252,9 @@ export interface MiniVendorProfile {
   instagramEnabled: boolean;
   whatsapp: string;
   whatsappEnabled: boolean;
+  profileVisible: boolean;
+  categoryVisible: boolean;
+  productsVisible: boolean;
   categoryButtonColor: string;
   approvedBy: string;
   approvedAt: string;
@@ -271,8 +277,23 @@ export interface UpsertMiniVendorPayload {
   instagramEnabled: boolean;
   whatsapp?: string;
   whatsappEnabled: boolean;
+  profileVisible?: boolean;
+  categoryVisible?: boolean;
+  productsVisible?: boolean;
   categoryButtonColor?: string;
 }
+
+export const isMiniVendorProfilePublic = (profile: MiniVendorProfile | null): boolean =>
+  Boolean(profile && profile.status === "approved" && profile.profileVisible !== false);
+
+export const isMiniVendorCategoryPublic = (profile: MiniVendorProfile | null): boolean =>
+  Boolean(profile && profile.status === "approved" && profile.categoryVisible !== false);
+
+export const isMiniVendorProductsPublic = (profile: MiniVendorProfile | null): boolean =>
+  Boolean(profile && profile.status === "approved" && profile.productsVisible !== false);
+
+export const isMiniVendorReceivingOrders = (profile: MiniVendorProfile | null): boolean =>
+  isMiniVendorCategoryPublic(profile) && isMiniVendorProductsPublic(profile);
 
 export const resolveMiniVendorPaymentConfig = (
   profile: MiniVendorProfile | null
@@ -320,6 +341,9 @@ const normalizeMiniVendorProfile = (row: Row | null): MiniVendorProfile | null =
     instagramEnabled: asBoolean(row.instagram_enabled),
     whatsapp: asString(row.whatsapp).trim(),
     whatsappEnabled: asBoolean(row.whatsapp_enabled),
+    profileVisible: asBoolean(row.profile_visible, true),
+    categoryVisible: asBoolean(row.category_visible, true),
+    productsVisible: asBoolean(row.products_visible, true),
     categoryButtonColor: asString(row.category_button_color).trim() || "#2563eb",
     approvedBy: asString(row.approved_by).trim(),
     approvedAt: asString(row.approved_at).trim(),
@@ -628,6 +652,9 @@ export async function upsertMiniVendorProfile(
         instagram_enabled: payload.instagramEnabled,
         whatsapp: asString(payload.whatsapp).trim().slice(0, 60),
         whatsapp_enabled: payload.whatsappEnabled,
+        profile_visible: payload.profileVisible ?? existing?.profileVisible ?? true,
+        category_visible: payload.categoryVisible ?? existing?.categoryVisible ?? true,
+        products_visible: payload.productsVisible ?? existing?.productsVisible ?? true,
         category_button_color:
           asString(payload.categoryButtonColor).trim().slice(0, 32) || "#2563eb",
         approved_by: approvedBy || null,

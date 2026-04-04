@@ -33,6 +33,7 @@ import {
   Store,
   ScanBarcode,
   FileText,
+  HeartHandshake,
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -193,6 +194,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { group: "Base", name: "Dashboard Modulos", path: "/admin/dashboard-modulos", icon: <PanelLeftOpen size={18} /> },
     { group: "Governanca", name: "Denuncias", path: "/admin/denuncias", icon: <ShieldAlert size={18} /> },
     { group: "Conteudo", name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
+    { group: "Conteudo", name: "Apadrinhamento", path: "/admin/apadrinhamento", icon: <HeartHandshake size={18} /> },
     { group: "Comercial", name: "Fidelidade", path: "/admin/fidelidade", icon: <Star size={18} /> },
     { group: "Base", name: "Guia do App", path: "/admin/guia", icon: <BookOpen size={18} /> },
     { group: "Esportes", name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },

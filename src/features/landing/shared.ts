@@ -23,6 +23,7 @@ export const mergeLandingConfig = (
   ...data,
   socialLinks: data.socialLinks || fallbackConfig.socialLinks || [],
   reviews: data.reviews || fallbackConfig.reviews || [],
+  hiddenPartnerIds: data.hiddenPartnerIds || fallbackConfig.hiddenPartnerIds || [],
 });
 
 export const extractLandingEditorErrorMessage = (error: unknown): string => {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ExternalLink,
@@ -244,16 +244,20 @@ const getStatusClasses = (status: ProductStatus): string => {
 
 export default function AdminLojaProdutosPage() {
   const router = useRouter();
+  const pathname = usePathname() || "";
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const { tenantId: activeTenantId, tenantLogoUrl, tenantName, tenantSigla, tenantSlug, palette } = useTenantTheme();
   const { addToast } = useToast();
   const tenantCategoryColor = palette.primary || "#10b981";
+  const isInactiveOnlyPage = pathname.endsWith("/produtos-desativados");
 
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [planCatalog, setPlanCatalog] = useState<PlanRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingInactiveProducts, setLoadingInactiveProducts] = useState(false);
   const [isProductOpen, setIsProductOpen] = useState(false);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
@@ -266,6 +270,8 @@ export default function AdminLojaProdutosPage() {
   const [categoryName, setCategoryName] = useState("");
   const [categoryCoverImg, setCategoryCoverImg] = useState("");
   const [categoryButtonColor, setCategoryButtonColor] = useState(tenantCategoryColor);
+  const [selectedCategory, setSelectedCategory] = useState("");
+  const [inactiveRows, setInactiveRows] = useState<ProductRow[]>([]);
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
 
   useEffect(() => {
@@ -275,17 +281,27 @@ export default function AdminLojaProdutosPage() {
 
   const categoryNames = useMemo(() => {
     const merged = new Set<string>();
+    const ordered: string[] = [];
+    const appendCategory = (value: unknown) => {
+      const name = asString(value).trim();
+      if (!name || merged.has(name)) return;
+      merged.add(name);
+      ordered.push(name);
+    };
+
+    appendCategory("Geral");
     categories.forEach((row) => {
-      const name = asString(row.nome).trim();
-      if (name) merged.add(name);
+      appendCategory(row.nome);
     });
-    rows.forEach((row) => {
-      const name = asString(row.categoria).trim();
-      if (name) merged.add(name);
-    });
-    return Array.from(merged).sort((a, b) => a.localeCompare(b));
-  }, [categories, rows]);
+    appendCategory(selectedCategory);
+    appendCategory(form.categoria);
+
+    return ordered;
+  }, [categories, form.categoria, selectedCategory]);
   const backHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/loja") : "/admin/loja";
+  const inactiveProductsHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/loja/produtos-desativados")
+    : "/admin/loja/produtos-desativados";
   const categoryManagerHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/admin/loja/categorias")
     : "/admin/loja/categorias";
@@ -298,13 +314,37 @@ export default function AdminLojaProdutosPage() {
 
   const variantsEnabled = form.usarVariantes || isWearCategory(form.categoria);
 
-  const loadProducts = useCallback(async (forceRefresh = true) => {
-    const products = await fetchStoreProducts({
-      maxResults: 120,
-      forceRefresh,
-      tenantId: activeTenantId || undefined,
-    });
-    setRows(products as ProductRow[]);
+  const selectedCategoryLabel = selectedCategory.trim() || categoryNames[0] || "Geral";
+
+  const loadProducts = useCallback(async (category: string, forceRefresh = false) => {
+    const normalizedCategory = category.trim() || "Geral";
+    setLoadingProducts(true);
+    try {
+      const products = await fetchStoreProducts({
+        maxResults: 120,
+        forceRefresh,
+        tenantId: activeTenantId || undefined,
+        category: normalizedCategory,
+      });
+      setRows(products as ProductRow[]);
+    } finally {
+      setLoadingProducts(false);
+    }
+  }, [activeTenantId]);
+
+  const loadInactiveProducts = useCallback(async (forceRefresh = false) => {
+    setLoadingInactiveProducts(true);
+    try {
+      const products = await fetchStoreProducts({
+        maxResults: 120,
+        forceRefresh,
+        tenantId: activeTenantId || undefined,
+        active: false,
+      });
+      setInactiveRows(products as ProductRow[]);
+    } finally {
+      setLoadingInactiveProducts(false);
+    }
   }, [activeTenantId]);
 
   const loadCategories = useCallback(async (forceRefresh = true) => {
@@ -331,10 +371,10 @@ export default function AdminLojaProdutosPage() {
     let mounted = true;
     const run = async () => {
       try {
-        await Promise.all([loadProducts(true), loadCategories(true), loadPlans(true)]);
+        await Promise.all([loadCategories(true), loadPlans(true)]);
       } catch (error: unknown) {
         console.error(error);
-        if (mounted) addToast("Erro ao carregar produtos.", "error");
+        if (mounted) addToast("Erro ao carregar configuracoes da loja.", "error");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -343,7 +383,84 @@ export default function AdminLojaProdutosPage() {
     return () => {
       mounted = false;
     };
-  }, [addToast, loadCategories, loadPlans, loadProducts]);
+  }, [addToast, loadCategories, loadPlans]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!selectedCategory.trim() || !categoryNames.includes(selectedCategory)) {
+      setSelectedCategory(categoryNames[0] || "Geral");
+    }
+  }, [categoryNames, loading, selectedCategory]);
+
+  useEffect(() => {
+    if (isInactiveOnlyPage) return;
+    if (loading || !selectedCategory.trim()) return;
+
+    let mounted = true;
+    setRows([]);
+    setLoadingProducts(true);
+
+    const run = async () => {
+      try {
+        const products = await fetchStoreProducts({
+          maxResults: 120,
+          forceRefresh: false,
+          tenantId: activeTenantId || undefined,
+          category: selectedCategory,
+        });
+        if (mounted) {
+          setRows(products as ProductRow[]);
+        }
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) {
+          setRows([]);
+          addToast(`Erro ao carregar produtos da categoria ${selectedCategory}.`, "error");
+        }
+      } finally {
+        if (mounted) setLoadingProducts(false);
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantId, addToast, isInactiveOnlyPage, loading, selectedCategory]);
+
+  useEffect(() => {
+    if (loading || !isInactiveOnlyPage) return;
+
+    let mounted = true;
+    setLoadingInactiveProducts(true);
+
+    const run = async () => {
+      try {
+        const products = await fetchStoreProducts({
+          maxResults: 120,
+          forceRefresh: false,
+          tenantId: activeTenantId || undefined,
+          active: false,
+        });
+        if (mounted) {
+          setInactiveRows(products as ProductRow[]);
+        }
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) {
+          setInactiveRows([]);
+          addToast("Erro ao carregar produtos desativados.", "error");
+        }
+      } finally {
+        if (mounted) setLoadingInactiveProducts(false);
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantId, addToast, isInactiveOnlyPage, loading]);
 
   useEffect(() => {
     if (planCatalog.length === 0) return;
@@ -368,6 +485,7 @@ export default function AdminLojaProdutosPage() {
   const resetForm = () =>
     setForm({
       ...EMPTY_FORM,
+      categoria: selectedCategoryLabel,
       variantes: [newVariant()],
       planScopeRows: buildPlanScopeRows(planCatalog),
     });
@@ -453,12 +571,13 @@ export default function AdminLojaProdutosPage() {
       setEditingProductId(null);
       setForm({
         ...EMPTY_FORM,
+        categoria: selectedCategoryLabel,
         variantes: [newVariant()],
         planScopeRows: buildPlanScopeRows(planCatalog),
       });
       setIsProductOpen(true);
     }
-  }, [categoryManagerHref, planCatalog, router, searchParams]);
+  }, [categoryManagerHref, planCatalog, router, searchParams, selectedCategoryLabel]);
 
   useEffect(() => {
     if (isWearCategory(form.categoria)) {
@@ -487,6 +606,7 @@ export default function AdminLojaProdutosPage() {
       setCategoryName("");
       setCategoryCoverImg("");
       setCategoryButtonColor(tenantCategoryColor);
+      setSelectedCategory(nome);
       setIsCategoryOpen(false);
       addToast("Categoria criada.", "success");
     } catch (error: unknown) {
@@ -701,8 +821,16 @@ export default function AdminLojaProdutosPage() {
           editingProductId ? `Produto editado: ${nome}` : `Produto criado: ${nome}`
         ).catch(() => {});
       }
-      await loadProducts(true);
       await loadCategories(true);
+      if (categoria === selectedCategoryLabel) {
+        await loadProducts(categoria, true);
+      } else {
+        setRows([]);
+        setSelectedCategory(categoria);
+      }
+      if (isInactiveOnlyPage) {
+        await loadInactiveProducts(true);
+      }
       closeProductForm();
       addToast(editingProductId ? "Produto atualizado com sucesso." : "Produto criado com sucesso.", "success");
     } catch (error: unknown) {
@@ -717,6 +845,11 @@ export default function AdminLojaProdutosPage() {
     if (togglingProductId) return;
     const currentActive = row.active !== false;
     const nextActive = !currentActive;
+    if (nextActive && !asString(row.categoria).trim()) {
+      addToast("Esse produto ficou sem categoria. Edite e escolha uma categoria antes de reativar.", "error");
+      openEditProduct(row);
+      return;
+    }
 
     try {
       setTogglingProductId(row.id);
@@ -738,7 +871,11 @@ export default function AdminLojaProdutosPage() {
         ).catch(() => {});
       }
       addToast(nextActive ? "Produto ativado." : "Produto desativado.", "success");
-      await loadProducts(true);
+      if (isInactiveOnlyPage) {
+        await loadInactiveProducts(true);
+      } else {
+        await loadProducts(asString(row.categoria) || selectedCategoryLabel, true);
+      }
     } catch (error: unknown) {
       console.error(error);
       addToast("Erro ao atualizar status do produto.", "error");
@@ -769,6 +906,87 @@ export default function AdminLojaProdutosPage() {
       ),
     }));
 
+  const renderProductRow = (row: ProductRow) => (
+    <article key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center gap-4">
+      <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-black border border-zinc-700">
+        <Image
+          src={row.img || "https://placehold.co/200x200/111/333?text=Produto"}
+          alt={row.nome || "Produto"}
+          fill
+          className="object-cover"
+        />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="text-sm font-bold truncate">{row.nome || "Produto"}</p>
+          {row.tagLabel && (
+            <span className="px-2 py-0.5 rounded border border-zinc-700 text-[9px] font-black uppercase text-zinc-300">
+              {row.tagLabel}
+            </span>
+          )}
+          {row.status && row.status !== "ativo" && (
+            <span className={`px-2 py-0.5 rounded border text-[9px] font-black uppercase ${getStatusClasses(row.status)}`}>
+              {row.status === "em_breve" ? "Em-breve" : "Esgotado"}
+            </span>
+          )}
+          <span
+            className={`px-2 py-0.5 rounded border text-[9px] font-black uppercase ${
+              row.active === false
+                ? "border-red-500/30 text-red-300 bg-red-500/5"
+                : "border-emerald-500/30 text-emerald-300 bg-emerald-500/5"
+            }`}
+          >
+            {row.active === false ? "Inativo" : "Ativo"}
+          </span>
+        </div>
+        <p className="text-[11px] text-zinc-400 uppercase">
+          {row.categoria || "Sem categoria"} | Lote: {row.lote || "-"}
+        </p>
+        {!!row.variantes?.length && (
+          <p className="text-[10px] text-zinc-500 uppercase">Variacoes: {row.variantes.length}</p>
+        )}
+        {typeof row.cores === "string" && row.cores.trim() && (
+          <p className="text-[10px] text-zinc-500 line-clamp-1">Cores: {row.cores}</p>
+        )}
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-sm font-black text-emerald-400">R$ {Number(row.preco || 0).toFixed(2)}</p>
+        {!!row.precoAntigo && Number(row.precoAntigo) > Number(row.preco || 0) && (
+          <p className="text-[10px] text-zinc-500 line-through">R$ {Number(row.precoAntigo || 0).toFixed(2)}</p>
+        )}
+        <p className="text-[10px] text-zinc-500 uppercase">Estoque: {Number(row.estoque || 0)}</p>
+        <p className="text-[10px] text-zinc-500 uppercase">Vendidos: {Number(row.vendidos || 0)}</p>
+      </div>
+      <button
+        onClick={() => openEditProduct(row)}
+        className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white"
+        title="Editar produto"
+      >
+        <Pencil size={15} />
+      </button>
+      <button
+        onClick={() => void handleToggleProductActive(row)}
+        disabled={togglingProductId === row.id}
+        className={`p-2 rounded-lg border hover:text-white disabled:opacity-50 ${
+          row.active === false
+            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-300"
+            : "bg-red-500/10 border-red-500/20 text-red-300"
+        }`}
+        title={row.active === false ? "Ativar produto" : "Desativar produto"}
+      >
+        {togglingProductId === row.id ? <Loader2 size={15} className="animate-spin" /> : <Power size={15} />}
+      </button>
+      <Link
+        href={`/loja/${row.id}`}
+        target="_blank"
+        className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white"
+        title="Abrir produto"
+      >
+        <ExternalLink size={15} />
+      </Link>
+    </article>
+  );
+
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
@@ -778,11 +996,28 @@ export default function AdminLojaProdutosPage() {
               <ArrowLeft size={18} className="text-zinc-300" />
             </Link>
             <div>
-              <h1 className="text-xl font-black uppercase tracking-tight">Produtos</h1>
-              <p className="text-[11px] text-zinc-500 font-bold">Criacao completa + categorias + variacoes</p>
+              <h1 className="text-xl font-black uppercase tracking-tight">
+                {isInactiveOnlyPage ? "Produtos Desativados" : "Produtos"}
+              </h1>
+              <p className="text-[11px] text-zinc-500 font-bold">
+                {isInactiveOnlyPage
+                  ? "historico completo para reativacao sem perder dados"
+                  : "criacao completa + categorias + variacoes"}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href={inactiveProductsHref}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase ${
+                isInactiveOnlyPage
+                  ? "border-red-500/30 bg-red-500/10 text-red-300"
+                  : "border-zinc-700 bg-black/30 text-zinc-300 hover:border-zinc-500 hover:text-white"
+              }`}
+            >
+              <Power size={14} />
+              {isInactiveOnlyPage ? "Pagina Atual" : "Ver Desativados"}
+            </Link>
             <Link href={categoryManagerHref} className="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[11px] font-black uppercase text-blue-300 hover:bg-blue-500/20"><Tags size={14} /> Categorias</Link>
             <button onClick={openCreateProduct} className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20"><Plus size={14} /> Novo Produto</button>
           </div>
@@ -800,6 +1035,74 @@ export default function AdminLojaProdutosPage() {
             <p className="mt-1 text-[11px] text-zinc-400">Avaliacoes continuam moderadas apos compra.</p>
           </Link>
         </div>
+
+        {isInactiveOnlyPage ? (
+          <section className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4 space-y-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-sm font-black uppercase text-white">Historico dos Produtos Desativados</h2>
+                <p className="text-[11px] text-zinc-500">
+                  Imagem, categoria, lote, variacoes e preco continuam salvos aqui para reativacao segura.
+                </p>
+              </div>
+              <div className="rounded-xl border border-zinc-800 bg-black/30 px-3 py-2">
+                <p className="text-[10px] font-black uppercase text-zinc-500">Itens no historico</p>
+                <p className="text-sm font-black text-white">
+                  {loading || loadingInactiveProducts
+                    ? "Carregando..."
+                    : `${inactiveRows.length} produto${inactiveRows.length === 1 ? "" : "s"}`}
+                </p>
+              </div>
+            </div>
+            <p className="text-[11px] text-red-200/80">
+              Ao ativar novamente, o produto volta a aparecer na categoria original sem perder o contexto comercial.
+            </p>
+          </section>
+        ) : (
+          <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-sm font-black uppercase text-white">Produtos por Categoria</h2>
+                <p className="text-[11px] text-zinc-500">
+                  Abra so a categoria que voce quer revisar para nao puxar todos os produtos de uma vez.
+                </p>
+              </div>
+              <div className="rounded-xl border border-zinc-800 bg-black/30 px-3 py-2">
+                <p className="text-[10px] font-black uppercase text-zinc-500">Categoria aberta</p>
+                <p className="text-sm font-black text-white">{selectedCategoryLabel}</p>
+                <p className="text-[10px] text-zinc-500">
+                  {loading || !selectedCategory.trim() || loadingProducts
+                    ? "Carregando..."
+                    : `${rows.length} produto${rows.length === 1 ? "" : "s"} carregado${rows.length === 1 ? "" : "s"}`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {categoryNames.map((name) => {
+                const isActive = name === selectedCategoryLabel;
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => {
+                      if (name === selectedCategoryLabel || loadingProducts) return;
+                      setSelectedCategory(name);
+                    }}
+                    disabled={loadingProducts && name !== selectedCategoryLabel}
+                    className={`rounded-xl border px-3 py-2 text-[11px] font-black uppercase transition ${
+                      isActive
+                        ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-300"
+                        : "border-zinc-700 bg-black/30 text-zinc-300 hover:border-zinc-500 hover:text-white disabled:opacity-60"
+                    }`}
+                  >
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {isCategoryOpen && (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
@@ -1211,12 +1514,48 @@ export default function AdminLojaProdutosPage() {
           </div>
         )}
 
-        {loading ? (
-          <div className="text-xs text-zinc-500 uppercase font-bold">Carregando...</div>
-        ) : rows.length === 0 ? (
-          <div className="text-sm text-zinc-500 border border-zinc-800 rounded-xl p-5">Nenhum produto encontrado.</div>
-        ) : (
-          <div className="space-y-3">
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-black uppercase text-white">
+              {isInactiveOnlyPage ? "Lista Desativada" : "Lista da Categoria"}
+            </h2>
+            <p className="text-[11px] text-zinc-500">
+              {isInactiveOnlyPage ? (
+                "Aqui ficam os produtos fora do ar, com todos os dados preservados para auditoria e reativacao."
+              ) : (
+                <>
+                  So os itens de <span className="text-zinc-300">{selectedCategoryLabel}</span> sao consultados agora.
+                </>
+              )}
+            </p>
+          </div>
+
+          {isInactiveOnlyPage ? (
+            loading || loadingInactiveProducts ? (
+              <div className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 p-5 text-xs font-bold uppercase text-zinc-500">
+                <Loader2 size={14} className="animate-spin" />
+                Carregando produtos desativados...
+              </div>
+            ) : inactiveRows.length === 0 ? (
+              <div className="text-sm text-zinc-500 border border-zinc-800 rounded-xl p-5">
+                Nenhum produto desativado no momento.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {inactiveRows.map((row) => renderProductRow(row))}
+              </div>
+            )
+          ) : loading || !selectedCategory.trim() || loadingProducts ? (
+            <div className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 p-5 text-xs font-bold uppercase text-zinc-500">
+              <Loader2 size={14} className="animate-spin" />
+              Carregando produtos de {selectedCategoryLabel}...
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="text-sm text-zinc-500 border border-zinc-800 rounded-xl p-5">
+              Nenhum produto encontrado em {selectedCategoryLabel}.
+            </div>
+          ) : (
+            <div className="space-y-3">
             {rows.map((row) => (
               <article key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center gap-4">
                 <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-black border border-zinc-700">
@@ -1226,9 +1565,11 @@ export default function AdminLojaProdutosPage() {
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="text-sm font-bold truncate">{row.nome || "Produto"}</p>
                     {row.tagLabel && <span className="px-2 py-0.5 rounded border border-zinc-700 text-[9px] font-black uppercase text-zinc-300">{row.tagLabel}</span>}
-                    <span className={`px-2 py-0.5 rounded border text-[9px] font-black uppercase ${getStatusClasses(row.status || "ativo")}`}>
-                      {row.status === "em_breve" ? "Em-breve" : row.status === "esgotado" ? "Esgotado" : "Ativo"}
-                    </span>
+                    {row.status && row.status !== "ativo" && (
+                      <span className={`px-2 py-0.5 rounded border text-[9px] font-black uppercase ${getStatusClasses(row.status)}`}>
+                        {row.status === "em_breve" ? "Em-breve" : "Esgotado"}
+                      </span>
+                    )}
                     <span
                       className={`px-2 py-0.5 rounded border text-[9px] font-black uppercase ${
                         row.active === false
@@ -1275,12 +1616,35 @@ export default function AdminLojaProdutosPage() {
                 </Link>
               </article>
             ))}
-          </div>
+            </div>
+          )}
+        </section>
+
+        {!isInactiveOnlyPage && (
+          <section className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-black uppercase text-white">Produtos Desativados em Pagina Separada</h2>
+                <p className="text-[11px] text-zinc-500">
+                  O historico agora fica fora do catalogo principal para evitar perda de contexto e manter a operacao mais limpa.
+                </p>
+              </div>
+              <Link
+                href={inactiveProductsHref}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] font-black uppercase text-red-300 hover:bg-red-500/20"
+              >
+                <Power size={14} />
+                Abrir Historico
+              </Link>
+            </div>
+          </section>
         )}
 
         <div className="mt-5 text-[11px] text-zinc-600 flex items-center gap-2">
           <Package size={13} />
-          Limite de carregamento: 120 itens por abertura. Pedidos/Reviews continuam em modulos separados para manter leve.
+          {isInactiveOnlyPage
+            ? "Os desativados ficam separados do catalogo ativo, mas continuam completos para futuras reativacoes."
+            : "Cada abertura consulta so a categoria ativa. Pedidos e reviews continuam em modulos separados para manter leve."}
         </div>
       </main>
     </div>

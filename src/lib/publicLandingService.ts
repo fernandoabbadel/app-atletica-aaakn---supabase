@@ -4,6 +4,10 @@ import {
   fetchLandingConfig,
   type LandingConfig,
 } from "./adminLandingService";
+import {
+  fetchPublicPartners,
+  type PartnerRecord,
+} from "./partnersPublicService";
 import { getSupabaseClient } from "./supabase";
 
 type CacheEntry<T> = {
@@ -93,6 +97,7 @@ export interface PublicLandingData {
   usersCount: number;
   tenantsCount: number;
   partnersCount: number;
+  partners: PartnerRecord[];
 }
 
 export interface PublicLandingBrand {
@@ -126,7 +131,7 @@ export async function fetchPublicLandingData(options?: {
     if (cached) return cached;
   }
 
-  const [configResult, usersCountResult, tenantsCountResult, partnersCountResult] =
+  const [configResult, usersCountResult, tenantsCountResult, partnersCountResult, partnersResult] =
     await Promise.allSettled([
       prefetchedConfig
         ? Promise.resolve(prefetchedConfig)
@@ -141,6 +146,13 @@ export async function fetchPublicLandingData(options?: {
         { tableName: "parceiros", countColumn: "id" },
         { tableName: "partners", countColumn: "id" },
       ]),
+      tenantId
+        ? fetchPublicPartners({
+            maxResults: 120,
+            forceRefresh,
+            tenantId,
+          })
+        : Promise.resolve([]),
     ]);
 
   const config = configResult.status === "fulfilled"
@@ -156,12 +168,17 @@ export async function fetchPublicLandingData(options?: {
   const partnersCount = partnersCountResult.status === "fulfilled"
     ? partnersCountResult.value
     : 0;
+  const hiddenPartnerIds = new Set(config.hiddenPartnerIds || []);
+  const partners = partnersResult.status === "fulfilled"
+    ? partnersResult.value.filter((partner) => !hiddenPartnerIds.has(partner.id))
+    : [];
 
   const data: PublicLandingData = {
     config,
     usersCount,
     tenantsCount,
     partnersCount,
+    partners,
   };
 
   setCachedValue(publicLandingCache, cacheKey, data);

@@ -12,6 +12,13 @@ import {
 } from "./upload";
 import { ACHIEVEMENTS_CATALOG } from "./achievements";
 import {
+  buildRequestedTenantInviteQuotaExtra,
+  MEMBER_INVITE_DAILY_LIMIT,
+  resolveInviteDailyWindowStartIso,
+  resolveTenantInviteQuotaState,
+  type TenantInviteQuotaState,
+} from "./inviteQuota";
+import {
   normalizeTenantRole,
   toLegacyTenantRole,
   type TenantScopedRole,
@@ -77,6 +84,9 @@ export interface TenantInvite {
   usesCount: number;
   expiresAt: string;
   isActive: boolean;
+  isRevoked: boolean;
+  revokedAt: string;
+  revokedBy: string;
   createdBy: string;
   createdAt: string;
 }
@@ -171,6 +181,27 @@ export interface TenantInviteListEntry extends TenantInvite {
   inviterPhoto: string;
 }
 
+export interface TenantInviteUsageEntry {
+  invite: TenantInvite;
+  requesterUserId: string;
+  requesterName: string;
+  requesterEmail: string;
+  requesterTurma: string;
+  requesterPhoto: string;
+  status: TenantJoinRequestStatus | "unused";
+  requestedAt: string;
+  reviewedAt: string;
+}
+
+export interface TenantUserInviteDashboard {
+  invites: TenantInvite[];
+  entries: TenantInviteUsageEntry[];
+  totalCreatedToday: number;
+  remainingToday: number;
+  limitPerDay: number;
+  quota: TenantInviteQuotaState;
+}
+
 export interface TenantInviteActivationListEntry {
   requestId: string;
   tenantId: string;
@@ -197,8 +228,10 @@ const TENANT_SELECT_COLUMNS_V1 =
   "id,nome,sigla,slug,faculdade,cidade,curso,area,logo_url,palette_key,allow_public_signup,status,created_at,updated_at";
 const TENANT_SELECT_COLUMNS_V3 =
   "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,contato_email,contato_telefone,logo_url,palette_key,visible_in_directory,allow_public_signup,status,created_at,updated_at";
-const TENANT_INVITE_SELECT_COLUMNS =
+const TENANT_INVITE_SELECT_COLUMNS_V1 =
   "id,tenant_id,token,role_to_assign,requires_approval,max_uses,uses_count,expires_at,is_active,created_by,created_at";
+const TENANT_INVITE_SELECT_COLUMNS_V2 =
+  "id,tenant_id,token,role_to_assign,requires_approval,max_uses,uses_count,expires_at,is_active,is_revoked,revoked_at,revoked_by,created_by,created_at";
 const TENANT_JOIN_REQUEST_SELECT_COLUMNS =
   "id,tenant_id,requester_user_id,invite_id,status,requested_role,approved_role,requested_at,reviewed_at,rejection_reason";
 const TENANT_ONBOARDING_SELECT_COLUMNS_V1 =
@@ -350,6 +383,9 @@ const parseInvite = (row: unknown): TenantInvite | null => {
     usesCount: Math.max(0, asNumber(raw.uses_count, 0)),
     expiresAt: asString(raw.expires_at),
     isActive: asBoolean(raw.is_active, true),
+    isRevoked: asBoolean(raw.is_revoked, false),
+    revokedAt: asString(raw.revoked_at),
+    revokedBy: asString(raw.revoked_by),
     createdBy: asString(raw.created_by),
     createdAt: asString(raw.created_at),
   };
@@ -530,6 +566,14 @@ const fetchUsersPreviewMap = async (
   );
 };
 
+const resolveInviteUsageEntryStatus = (
+  invite: TenantInvite,
+  request: TenantJoinRequest | null
+): TenantJoinRequestStatus | "unused" => {
+  if (request) return request.status;
+  return "unused";
+};
+
 const isRpcFunctionSignatureError = (
   error: unknown,
   functionName: string
@@ -638,7 +682,7 @@ const insertTenantInviteDirect = async (payload: {
       is_active: true,
       created_by: createdBy,
     })
-    .select(TENANT_INVITE_SELECT_COLUMNS)
+    .select(TENANT_INVITE_SELECT_COLUMNS_V1)
     .single();
   if (error) throwSupabaseError(error);
 
@@ -655,6 +699,9 @@ const insertTenantInviteDirect = async (payload: {
     usesCount: 0,
     expiresAt,
     isActive: true,
+    isRevoked: false,
+    revokedAt: "",
+    revokedBy: "",
     createdBy,
     createdAt: new Date().toISOString(),
   };
@@ -1142,12 +1189,25 @@ export async function fetchTenantInvites(
 
   const limit = Math.max(1, Math.min(100, Math.floor(options?.limit ?? 20)));
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("tenant_invites")
-    .select(TENANT_INVITE_SELECT_COLUMNS)
+    .select(TENANT_INVITE_SELECT_COLUMNS_V2)
     .eq("tenant_id", cleanTenantId)
     .order("created_at", { ascending: false })
     .limit(limit);
+  if (
+    error &&
+    shouldFallbackMissingColumns(error, ["is_revoked", "revoked_at", "revoked_by"])
+  ) {
+    const fallbackResult = await supabase
+      .from("tenant_invites")
+      .select(TENANT_INVITE_SELECT_COLUMNS_V1)
+      .eq("tenant_id", cleanTenantId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    data = fallbackResult.data as unknown as typeof data;
+    error = fallbackResult.error;
+  }
   if (error) throwSupabaseError(error);
 
   return (Array.isArray(data) ? data : [])
@@ -1174,6 +1234,229 @@ export async function fetchTenantInviteListEntries(
       inviterPhoto: inviter?.foto || "",
     };
   });
+}
+
+export async function fetchUserInviteDashboard(payload: {
+  tenantId: string;
+  userId: string;
+  limit?: number;
+}): Promise<TenantUserInviteDashboard> {
+  const tenantId = payload.tenantId.trim();
+  const userId = payload.userId.trim();
+  const limit = Math.max(1, Math.min(80, Math.floor(payload.limit ?? 30)));
+
+  if (!tenantId || !userId) {
+    return {
+      invites: [],
+      entries: [],
+      totalCreatedToday: 0,
+      remainingToday: MEMBER_INVITE_DAILY_LIMIT,
+      limitPerDay: MEMBER_INVITE_DAILY_LIMIT,
+      quota: resolveTenantInviteQuotaState(null, ""),
+    };
+  }
+
+  const supabase = getSupabaseClient();
+  const { data: userRow, error: userError } = await supabase
+    .from("users")
+    .select("extra")
+    .eq("uid", userId)
+    .maybeSingle();
+  if (userError) throwSupabaseError(userError);
+  const quota = resolveTenantInviteQuotaState(asObject(userRow)?.extra, tenantId);
+  let invitesData: unknown[] | null = null;
+  let invitesError: unknown = null;
+  const invitesV2 = await supabase
+    .from("tenant_invites")
+    .select(TENANT_INVITE_SELECT_COLUMNS_V2)
+    .eq("tenant_id", tenantId)
+    .eq("created_by", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (
+    invitesV2.error &&
+    shouldFallbackMissingColumns(invitesV2.error, ["is_revoked", "revoked_at", "revoked_by"])
+  ) {
+    const invitesV1 = await supabase
+      .from("tenant_invites")
+      .select(TENANT_INVITE_SELECT_COLUMNS_V1)
+      .eq("tenant_id", tenantId)
+      .eq("created_by", userId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    invitesData = invitesV1.data as unknown as typeof invitesData;
+    invitesError = invitesV1.error;
+  } else {
+    invitesData = invitesV2.data as unknown as typeof invitesData;
+    invitesError = invitesV2.error;
+  }
+
+  if (invitesError) throwSupabaseError(invitesError as Parameters<typeof throwSupabaseError>[0]);
+
+  const invites = (Array.isArray(invitesData) ? invitesData : [])
+    .map((row) => parseInvite(row))
+    .filter((row): row is TenantInvite => row !== null);
+
+  const inviteIds = invites.map((invite) => invite.id);
+  const { data: requestRows, error: requestsError } = inviteIds.length
+    ? await supabase
+        .from("tenant_join_requests")
+        .select(TENANT_JOIN_REQUEST_SELECT_COLUMNS)
+        .eq("tenant_id", tenantId)
+        .in("invite_id", inviteIds)
+    : { data: [], error: null };
+  if (requestsError) throwSupabaseError(requestsError);
+
+  const requests = (Array.isArray(requestRows) ? requestRows : [])
+    .map((row) => parseJoinRequest(row))
+    .filter((row): row is TenantJoinRequest => row !== null);
+  const usersMap = await fetchUsersPreviewMap(requests.map((request) => request.requesterUserId));
+  const requestByInviteId = new Map<string, TenantJoinRequest>();
+  requests.forEach((request) => {
+    if (request.inviteId && !requestByInviteId.has(request.inviteId)) {
+      requestByInviteId.set(request.inviteId, request);
+    }
+  });
+
+  const entries: TenantInviteUsageEntry[] = invites.map((invite) => {
+    const request = requestByInviteId.get(invite.id) || null;
+    const requester = request ? usersMap.get(request.requesterUserId) : undefined;
+    return {
+      invite,
+      requesterUserId: request?.requesterUserId || "",
+      requesterName: requester?.nome || request?.requesterName || "",
+      requesterEmail: requester?.email || request?.requesterEmail || "",
+      requesterTurma: requester?.turma || request?.requesterTurma || "",
+      requesterPhoto: requester?.foto || request?.requesterPhoto || "",
+      status: resolveInviteUsageEntryStatus(invite, request),
+      requestedAt: request?.requestedAt || "",
+      reviewedAt: request?.reviewedAt || "",
+    };
+  });
+
+  const { count, error: todayCountError } = await supabase
+    .from("tenant_invites")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("created_by", userId)
+    .gte("created_at", resolveInviteDailyWindowStartIso());
+  if (todayCountError) throwSupabaseError(todayCountError);
+
+  const totalCreatedToday = Math.max(0, count ?? 0);
+  return {
+    invites,
+    entries,
+    totalCreatedToday,
+    remainingToday: Math.max(0, quota.totalLimit - totalCreatedToday),
+    limitPerDay: quota.totalLimit,
+    quota,
+  };
+}
+
+export async function requestMoreMemberInvites(payload: {
+  tenantId: string;
+}): Promise<TenantInviteQuotaState> {
+  const tenantId = payload.tenantId.trim();
+  if (!tenantId) {
+    throw new Error("Tenant invalido para pedir mais convites.");
+  }
+
+  const supabase = getSupabaseClient();
+  const {
+    data: sessionData,
+    error: sessionError,
+  } = await supabase.auth.getSession();
+  if (sessionError) throwSupabaseError(sessionError);
+
+  const userId = asString(sessionData.session?.user?.id).trim();
+  if (!userId) {
+    throw new Error("Sessao invalida para pedir mais convites.");
+  }
+
+  const { data: userRow, error: userError } = await supabase
+    .from("users")
+    .select("uid,tenant_id,tenant_status,role,status,extra")
+    .eq("uid", userId)
+    .maybeSingle();
+  if (userError) throwSupabaseError(userError);
+
+  const userData = asObject(userRow);
+  const userTenantId = asString(userData?.tenant_id).trim();
+  const tenantStatus = asString(userData?.tenant_status).trim().toLowerCase();
+  const accountStatus = asString(userData?.status, "ativo").trim().toLowerCase();
+  const role = asString(userData?.role, "user").trim().toLowerCase();
+
+  if (!userTenantId || userTenantId !== tenantId || tenantStatus !== "approved") {
+    throw new Error("Seu perfil nao pode pedir mais convites neste tenant.");
+  }
+
+  if (accountStatus === "banned" || accountStatus === "bloqueado" || role === "guest") {
+    throw new Error("Seu perfil nao pode pedir mais convites no momento.");
+  }
+
+  const currentExtra = userData?.extra;
+  const currentQuota = resolveTenantInviteQuotaState(currentExtra, tenantId);
+  if (!currentQuota.canRequestMore) {
+    if (currentQuota.status === "pending") {
+      throw new Error("Seu pedido ja foi feito. Os 5 convites extras liberam em ate 1 hora.");
+    }
+    throw new Error("Seu bonus de 5 convites extras ja foi liberado para hoje.");
+  }
+
+  const nextExtra = buildRequestedTenantInviteQuotaExtra(currentExtra, tenantId);
+  const { error: updateError } = await supabase
+    .from("users")
+    .update({ extra: nextExtra })
+    .eq("uid", userId);
+  if (updateError) throwSupabaseError(updateError);
+
+  return resolveTenantInviteQuotaState(nextExtra, tenantId);
+}
+
+export async function revokeTenantInvite(payload: {
+  tenantId: string;
+  inviteId: string;
+  currentUserId?: string | null;
+}): Promise<void> {
+  const tenantId = payload.tenantId.trim();
+  const inviteId = payload.inviteId.trim();
+  const currentUserId = asString(payload.currentUserId).trim();
+  if (!tenantId || !inviteId) {
+    throw new Error("Convite invalido para revogar.");
+  }
+
+  const supabase = getSupabaseClient();
+  let query = supabase
+    .from("tenant_invites")
+    .update({
+      is_active: false,
+      is_revoked: true,
+      revoked_at: new Date().toISOString(),
+      revoked_by: currentUserId || null,
+    })
+    .eq("tenant_id", tenantId)
+    .eq("id", inviteId);
+  if (currentUserId) {
+    query = query.eq("created_by", currentUserId);
+  }
+
+  const { error } = await query;
+  if (
+    error &&
+    shouldFallbackMissingColumns(error, ["is_revoked", "revoked_at", "revoked_by"])
+  ) {
+    const fallback = await supabase
+      .from("tenant_invites")
+      .update({
+        is_active: false,
+      })
+      .eq("tenant_id", tenantId)
+      .eq("id", inviteId)
+      .match(currentUserId ? { created_by: currentUserId } : {});
+    if (fallback.error) throwSupabaseError(fallback.error);
+    return;
+  }
+  if (error) throwSupabaseError(error);
 }
 
 export async function createTenantInvite(payload: {
@@ -1221,7 +1504,7 @@ export async function createTenantInvite(payload: {
   if (inviteId) {
     const { data: inviteRow, error: inviteError } = await supabase
       .from("tenant_invites")
-      .select(TENANT_INVITE_SELECT_COLUMNS)
+      .select(TENANT_INVITE_SELECT_COLUMNS_V1)
       .eq("id", inviteId)
       .maybeSingle();
     if (inviteError) throwSupabaseError(inviteError);
@@ -1243,6 +1526,9 @@ export async function createTenantInvite(payload: {
     usesCount: 0,
     expiresAt: asString(rawResult?.expires_at),
     isActive: true,
+    isRevoked: false,
+    revokedAt: "",
+    revokedBy: "",
     createdBy: "",
     createdAt: new Date().toISOString(),
   };
@@ -1256,7 +1542,7 @@ export async function createMemberInvite(payload: {
   const cleanTenantId = payload.tenantId.trim();
   if (!cleanTenantId) throw new Error("Tenant invalido para criar convite.");
 
-  const maxUses = Math.max(1, Math.min(5, Math.floor(payload.maxUses ?? 1)));
+  const maxUses = 1;
   const expiresInHours = Math.max(
     1,
     Math.min(24 * 7, Math.floor(payload.expiresInHours ?? 72))
@@ -1272,6 +1558,33 @@ export async function createMemberInvite(payload: {
   const accessToken = asString(sessionData.session?.access_token).trim();
   if (!accessToken) {
     throw new Error("Sessao invalida para gerar convite.");
+  }
+  const currentUserId = asString(sessionData.session?.user?.id).trim();
+  if (currentUserId) {
+    const [{ count, error: dailyLimitError }, { data: userRow, error: userError }] =
+      await Promise.all([
+        supabase
+          .from("tenant_invites")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", cleanTenantId)
+          .eq("created_by", currentUserId)
+          .gte("created_at", resolveInviteDailyWindowStartIso()),
+        supabase.from("users").select("extra").eq("uid", currentUserId).maybeSingle(),
+      ]);
+    if (dailyLimitError) throwSupabaseError(dailyLimitError);
+    if (userError) throwSupabaseError(userError);
+
+    const quota = resolveTenantInviteQuotaState(asObject(userRow)?.extra, cleanTenantId);
+    if (Math.max(0, count ?? 0) >= quota.totalLimit) {
+      if (quota.status === "pending") {
+        throw new Error(
+          "Voce ja usou sua cota atual. Os 5 convites extras liberam em ate 1 hora."
+        );
+      }
+      throw new Error(
+        `Voce ja gerou ${quota.totalLimit} convites hoje. Use o pedido de mais convites para liberar novos links.`
+      );
+    }
   }
 
   try {
@@ -1334,6 +1647,9 @@ export async function createMemberInvite(payload: {
     usesCount: 0,
     expiresAt,
     isActive: true,
+    isRevoked: false,
+    revokedAt: "",
+    revokedBy: "",
     createdBy: "",
     createdAt: new Date().toISOString(),
   };

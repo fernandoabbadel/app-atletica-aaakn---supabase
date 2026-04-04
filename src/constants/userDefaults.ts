@@ -4,6 +4,8 @@
 export const DEFAULT_STATS = {
     accountCreated: 1,
     inviteActivations: 0,
+    mentorsCount: 0,
+    menteesCount: 0,
     loginCount: 1,
     profileComplete: 0,
     postsCount: 0,

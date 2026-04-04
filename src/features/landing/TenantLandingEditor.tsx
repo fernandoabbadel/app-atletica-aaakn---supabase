@@ -19,6 +19,7 @@ import {
 } from "@/lib/adminLandingService";
 import { isPermissionError } from "@/lib/backendErrors";
 import { logActivity } from "@/lib/logger";
+import { fetchAdminPartnersPage, type PartnerRecord } from "@/lib/partnersService";
 import { canManageTenant, isPlatformMaster } from "@/lib/roles";
 import { fetchPublicTenantIdBySlugCached } from "@/lib/publicTenantLookup";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -65,6 +66,7 @@ export default function TenantLandingEditor({
   const [saving, setSaving] = useState(false);
   const [routeTenantId, setRouteTenantId] = useState("");
   const [config, setConfig] = useState<LandingConfig>(TENANT_INITIAL_LANDING_CONFIG);
+  const [partnerRows, setPartnerRows] = useState<PartnerRecord[]>([]);
 
   const contextLabel = useMemo(() => {
     const label =
@@ -106,13 +108,46 @@ export default function TenantLandingEditor({
 
         setRouteTenantId(resolvedTenantId);
 
-        const data = await fetchLandingConfig({
-          fallbackConfig: TENANT_INITIAL_LANDING_CONFIG,
-          tenantId: resolvedTenantId,
-        });
+        const fetchAllTenantPartners = async (): Promise<PartnerRecord[]> => {
+          const collected: PartnerRecord[] = [];
+          const seen = new Set<string>();
+          let nextCursor: string | null = null;
+          let hasMore = true;
+
+          while (hasMore) {
+            const page = await fetchAdminPartnersPage({
+              pageSize: 200,
+              cursorId: nextCursor,
+              status: "all",
+              view: "summary",
+              forceRefresh: nextCursor === null,
+              tenantId: resolvedTenantId,
+            });
+
+            page.partners.forEach((partner) => {
+              if (seen.has(partner.id)) return;
+              seen.add(partner.id);
+              collected.push(partner);
+            });
+
+            hasMore = page.hasMore && Boolean(page.nextCursor);
+            nextCursor = page.nextCursor;
+          }
+
+          return collected.sort((left, right) => left.nome.localeCompare(right.nome, "pt-BR"));
+        };
+
+        const [data, partners] = await Promise.all([
+          fetchLandingConfig({
+            fallbackConfig: TENANT_INITIAL_LANDING_CONFIG,
+            tenantId: resolvedTenantId,
+          }),
+          fetchAllTenantPartners(),
+        ]);
         if (!mounted) return;
 
         setConfig(mergeLandingConfig(TENANT_INITIAL_LANDING_CONFIG, data));
+        setPartnerRows(partners);
       } catch (error: unknown) {
         if (!mounted) return;
 
@@ -217,6 +252,7 @@ export default function TenantLandingEditor({
       accentColor={palette.primary}
       brandManagePath={withTenantSlug(normalizedRouteTenantSlug, "/admin/atletica")}
       brandManageLabel="Editar marca da atletica"
+      partnerRows={partnerRows}
     />
   );
 }

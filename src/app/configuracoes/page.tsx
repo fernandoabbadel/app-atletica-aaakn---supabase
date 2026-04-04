@@ -5,7 +5,7 @@ import {
   ArrowLeft, Bell, LogOut, ChevronRight,
   FileText, Smartphone,
   Trash2, Power, PowerOff, AlertTriangle, Loader2,
-  Crown, Shield, History, Sparkles, Copy, Check, UserPlus, Store
+  Crown, Shield, History, Sparkles, Copy, Check, UserPlus, Store, HeartHandshake
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -17,8 +17,13 @@ import { auth } from "@/lib/backend";
 import { deleteUser } from "@/lib/supa/auth";
 import { logActivity } from "../../lib/logger";
 import { softDeleteAccount, toggleAccountStatus } from "../../lib/settingsService";
-import { createMemberInvite } from "../../lib/tenantService";
+import {
+  createMemberInvite,
+  fetchUserInviteDashboard,
+  type TenantUserInviteDashboard,
+} from "../../lib/tenantService";
 import { fetchCurrentMiniVendorProfile } from "@/lib/miniVendorService";
+import { resolveTenantInviteQuotaState } from "@/lib/inviteQuota";
 import { getTurmaImage } from "../../constants/turmaImages";
 import { resolvePlanTheme, resolveUserPlanIcon } from "../../constants/planVisuals";
 import { buildLoginPath } from "@/lib/authRedirect";
@@ -28,7 +33,17 @@ import {
   fetchEffectiveTenantAppModulesConfig,
   isTenantAppModuleVisible,
 } from "@/lib/tenantAppModulesService";
+import { fetchMentorshipLabels } from "@/lib/mentorshipService";
 import { withTenantSlug } from "@/lib/tenantRouting";
+
+const EMPTY_INVITE_DASHBOARD: TenantUserInviteDashboard = {
+  invites: [],
+  entries: [],
+  totalCreatedToday: 0,
+  remainingToday: 5,
+  limitPerDay: 5,
+  quota: resolveTenantInviteQuotaState(null, ""),
+};
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -42,6 +57,9 @@ export default function SettingsPage() {
   const [inviteCopied, setInviteCopied] = useState(false);
   const [notificacoes, setNotificacoes] = useState(true);
   const [miniVendorBadge, setMiniVendorBadge] = useState("");
+  const [mentorshipHubTitle, setMentorshipHubTitle] = useState("Apadrinhamento");
+  const [inviteDashboard, setInviteDashboard] =
+    useState<TenantUserInviteDashboard>(EMPTY_INVITE_DASHBOARD);
   const [modulesConfig, setModulesConfig] = useState(createDefaultTenantAppModulesConfig);
   const effectiveTenantId =
     tenantId.trim() ||
@@ -191,6 +209,58 @@ export default function SettingsPage() {
     };
   }, [effectiveTenantId, tenantSlug]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      if (!effectiveTenantId) {
+        if (mounted) setMentorshipHubTitle("Apadrinhamento");
+        return;
+      }
+      try {
+        const labels = await fetchMentorshipLabels({
+          tenantId: effectiveTenantId,
+          forceRefresh: true,
+        });
+        if (mounted) setMentorshipHubTitle(labels.hubTitle || "Apadrinhamento");
+      } catch {
+        if (mounted) setMentorshipHubTitle("Apadrinhamento");
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [effectiveTenantId]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      if (!effectiveTenantId || !user?.uid) {
+        if (mounted) setInviteDashboard(EMPTY_INVITE_DASHBOARD);
+        return;
+      }
+      try {
+        const nextDashboard = await fetchUserInviteDashboard({
+          tenantId: effectiveTenantId,
+          userId: user.uid,
+          limit: 20,
+        });
+        if (mounted) setInviteDashboard(nextDashboard);
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) setInviteDashboard(EMPTY_INVITE_DASHBOARD);
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [effectiveTenantId, user?.uid]);
+
   if (!user) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500"/></div>;
 
   const extra = typeof user.extra === "object" && user.extra !== null
@@ -240,6 +310,9 @@ export default function SettingsPage() {
   const segurancaHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/configuracoes/seguranca")
     : "/configuracoes/seguranca";
+  const apadrinhamentoHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/apadrinhamento")
+    : "/configuracoes/apadrinhamento";
   const suporteHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/configuracoes/suporte")
     : "/configuracoes/suporte";
@@ -249,6 +322,9 @@ export default function SettingsPage() {
   const liderTurmaHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/configuracoes/lider-turma")
     : "/configuracoes/lider-turma";
+  const convitesHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/configuracoes/convites")
+    : "/configuracoes/convites";
   const miniVendorHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor")
     : "/configuracoes/mini-vendor";
@@ -284,6 +360,12 @@ export default function SettingsPage() {
         "Convite/Membro",
         `Gerou convite social para ${tenantName || effectiveTenantId}`
       );
+      const nextDashboard = await fetchUserInviteDashboard({
+        tenantId: effectiveTenantId,
+        userId: user.uid,
+        limit: 20,
+      });
+      setInviteDashboard(nextDashboard);
     } catch (error: unknown) {
       console.error(error);
       const message =
@@ -383,7 +465,7 @@ export default function SettingsPage() {
 
               <button
                 onClick={() => void handleCreateInvite()}
-                disabled={inviteLoading}
+                disabled={inviteLoading || inviteDashboard.remainingToday <= 0}
                 className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-2xl border border-amber-200/30 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 px-5 py-4 text-xs font-black uppercase tracking-[0.24em] text-[#1b1300] shadow-[0_18px_45px_rgba(245,158,11,0.32)] transition duration-300 hover:scale-[1.01] hover:shadow-[0_22px_60px_rgba(245,158,11,0.42)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="absolute inset-y-0 left-[-30%] w-24 -skew-x-12 bg-white/35 blur-xl transition-transform duration-700 group-hover:translate-x-[340%]"></span>
@@ -410,6 +492,16 @@ export default function SettingsPage() {
                   <p className="break-all font-mono text-[11px] leading-5 text-zinc-200">{inviteLink}</p>
                 </div>
               )}
+
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={convitesHref}
+                  className="inline-flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/10 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-100 hover:bg-amber-300/15"
+                >
+                  <History size={12} />
+                  Abrir meus convites
+                </Link>
+              </div>
             </div>
           </section>
         )}
@@ -421,6 +513,8 @@ export default function SettingsPage() {
                 <div className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800">
                     <MenuItem href={perfilHref} icon={<FileText size={18} />} label="Dados Pessoais" desc="Atualizar cadastro" />
                     <MenuItem href={planosHref} icon={<Crown size={18} />} label="Planos da Atletica" desc="Ver niveis e beneficios" />
+                    <MenuItem href={convitesHref} icon={<UserPlus size={18} />} label="Meus Convites" desc="Tabela completa dos links gerados" />
+                    <MenuItem href={apadrinhamentoHref} icon={<HeartHandshake size={18} />} label={mentorshipHubTitle} desc="Aceitar convites e ver seu vinculo" />
                     {showMiniVendorMenu ? (
                       <MenuItem href={miniVendorHref} icon={<Store size={18} />} label="Mini Vendor" desc="Cadastrar ou editar sua lojinha" badge={miniVendorBadge || undefined} />
                     ) : null}

@@ -334,6 +334,43 @@ export interface PublicProfileBundle extends OwnProfileBundle {
   isFollowing: boolean;
 }
 
+const normalizePublicBundlePayload = (
+  raw: unknown
+): PublicProfileBundle | null | undefined => {
+  if (raw === null) {
+    return null;
+  }
+
+  const payload = asObject(raw);
+  if (!payload) {
+    return undefined;
+  }
+
+  const profile = normalizeUserProfile(payload.profile);
+  if (!profile) {
+    return null;
+  }
+
+  return {
+    profile,
+    followersCount: Math.max(0, asNumber(payload.followersCount, 0)),
+    followingCount: Math.max(0, asNumber(payload.followingCount, 0)),
+    posts: asArray(payload.posts)
+      .map(normalizePost)
+      .filter((entry): entry is ProfilePostRecord => entry !== null),
+    events: asArray(payload.events)
+      .map(normalizeEvent)
+      .filter((entry): entry is ProfileEventRecord => entry !== null),
+    treinos: asArray(payload.treinos)
+      .map(normalizeTreino)
+      .filter((entry): entry is ProfileTreinoRecord => entry !== null),
+    ligas: asArray(payload.ligas)
+      .map(normalizeLiga)
+      .filter((entry): entry is ProfileLigaRecord => entry !== null),
+    isFollowing: asBoolean(payload.isFollowing, false),
+  };
+};
+
 const normalizeUserProfile = (raw: unknown): ProfileUserRecord | null => {
   const data = asObject(raw);
   if (!data) return null;
@@ -813,34 +850,46 @@ async function fetchPublicProfileBundleViaRpc(
     return null;
   }
 
-  const payload = asObject(data);
-  if (!payload) {
+  return normalizePublicBundlePayload(data);
+}
+
+async function fetchPublicProfileBundleViaApi(
+  targetUid: string,
+  viewerUid: string,
+  options?: { forceRefresh?: boolean; tenantId?: string | null }
+): Promise<PublicProfileBundle | null | undefined> {
+  if (typeof window === "undefined") {
     return undefined;
   }
 
-  const profile = normalizeUserProfile(payload.profile);
-  if (!profile) {
-    return null;
+  const params = new URLSearchParams({
+    userId: targetUid,
+  });
+  if (viewerUid) {
+    params.set("viewerUid", viewerUid);
+  }
+  if (options?.tenantId) {
+    params.set("tenantId", options.tenantId);
+  }
+  if (options?.forceRefresh) {
+    params.set("refresh", "1");
   }
 
-  return {
-    profile,
-    followersCount: Math.max(0, asNumber(payload.followersCount, 0)),
-    followingCount: Math.max(0, asNumber(payload.followingCount, 0)),
-    posts: asArray(payload.posts)
-      .map(normalizePost)
-      .filter((entry): entry is ProfilePostRecord => entry !== null),
-    events: asArray(payload.events)
-      .map(normalizeEvent)
-      .filter((entry): entry is ProfileEventRecord => entry !== null),
-    treinos: asArray(payload.treinos)
-      .map(normalizeTreino)
-      .filter((entry): entry is ProfileTreinoRecord => entry !== null),
-    ligas: asArray(payload.ligas)
-      .map(normalizeLiga)
-      .filter((entry): entry is ProfileLigaRecord => entry !== null),
-    isFollowing: asBoolean(payload.isFollowing, false),
-  };
+  try {
+    const response = await fetch(`/api/public/profile?${params.toString()}`, {
+      cache: "no-store",
+    });
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      return undefined;
+    }
+
+    return normalizePublicBundlePayload(await response.json());
+  } catch {
+    return undefined;
+  }
 }
 
 async function fetchFollowListViaRpc(
@@ -898,7 +947,14 @@ export async function fetchPublicProfileBundle(
     if (cached !== null || publicBundleCache.has(cacheKey)) return cached;
   }
 
-  const rpcBundle = await fetchPublicProfileBundleViaRpc(targetUid, viewerUid, tenantId);
+  const apiBundle = await fetchPublicProfileBundleViaApi(targetUid, viewerUid, {
+    forceRefresh,
+    tenantId,
+  });
+  const rpcBundle =
+    apiBundle !== undefined
+      ? apiBundle
+      : await fetchPublicProfileBundleViaRpc(targetUid, viewerUid, tenantId);
   const baseBundle =
     rpcBundle !== undefined
       ? rpcBundle

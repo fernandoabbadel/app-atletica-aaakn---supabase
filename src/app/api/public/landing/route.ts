@@ -23,6 +23,7 @@ import {
   fetchPublicTenantBySlugWithAdmin,
   type PublicTenantDirectoryEntry,
 } from "@/lib/publicTenantDirectoryService";
+import { fetchLandingPartnersWithAdmin } from "@/lib/publicLandingPartnersAdminService";
 import { cleanupExpiredRateLimitBuckets, consumeRateLimit } from "@/lib/rateLimiter";
 import { ServerCache } from "@/lib/serverCache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -65,6 +66,7 @@ const fallbackPayload = (
   usersCount: 0,
   tenantsCount: 0,
   partnersCount: 0,
+  partners: [],
   brand,
 });
 
@@ -386,6 +388,13 @@ export async function GET(request: Request) {
 
         let data = fallbackPayload(config, brand);
         try {
+          const hiddenPartnerIds = new Set(config.hiddenPartnerIds || []);
+          const partners = tenant?.tenantId
+            ? (await fetchLandingPartnersWithAdmin(tenant.tenantId)).filter(
+                (partner) => !hiddenPartnerIds.has(partner.id)
+              )
+            : [];
+
           data = {
             ...(await fetchPublicLandingData({
               forceRefresh: shouldRefresh,
@@ -393,6 +402,7 @@ export async function GET(request: Request) {
               prefetchedConfig: config,
               tenantId: tenant?.tenantId || "",
             })),
+            partners,
             brand,
           };
         } catch (dataError: unknown) {

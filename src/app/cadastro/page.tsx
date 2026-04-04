@@ -116,9 +116,27 @@ const extractErrorMessage = (error: unknown): string => {
   return "Erro inesperado.";
 };
 
+const normalizeInviteJoinFailureMessage = (message: string): string => {
+  const normalized = message.trim().toLowerCase();
+  if (normalized.includes("token esgotado")) {
+    return "Deu ruim no plantao! O limite desse convite ja era.";
+  }
+  if (normalized.includes("token expirado")) {
+    return "Esse convite expirou. Peca um link novo para entrar.";
+  }
+  if (
+    normalized.includes("token invalido") ||
+    normalized.includes("inativo") ||
+    normalized.includes("revogado")
+  ) {
+    return "Esse convite nao esta mais disponivel. Peca um link novo.";
+  }
+  return message.trim();
+};
+
 export default function CadastroPage() {
   const { user, updateUser, logout, loading: authLoading } = useAuth();
-  const { tenantId, tenantSlug } = useTenantTheme();
+  const { tenantId, tenantName, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const pathname = usePathname() || "/cadastro";
   const router = useRouter();
@@ -129,6 +147,9 @@ export default function CadastroPage() {
   );
   const hasInviteToken = effectiveInviteToken.length > 0;
   const activeTenantId = tenantId.trim() || String(user?.tenant_id || "").trim();
+  const inviteTenantLabel = tenantSlug.trim()
+    ? tenantName.trim() || tenantSlug.trim().toUpperCase()
+    : activeTenantId || "a atletica do convite";
   
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false); 
@@ -406,17 +427,19 @@ export default function CadastroPage() {
         try {
           await requestJoinWithInvite(effectiveInviteToken);
         } catch (joinError: unknown) {
-          inviteJoinFailedMessage = extractErrorMessage(joinError);
+          inviteJoinFailedMessage = normalizeInviteJoinFailureMessage(
+            extractErrorMessage(joinError)
+          );
           const normalizedJoinMessage = inviteJoinFailedMessage.toLowerCase();
           const shouldClearInviteToken =
             normalizedJoinMessage.includes("token invalido") ||
             normalizedJoinMessage.includes("token expirado") ||
-            normalizedJoinMessage.includes("token esgotado") ||
+            normalizedJoinMessage.includes("convite ja era") ||
             normalizedJoinMessage.includes("inativo");
           if (shouldClearInviteToken) {
             clearStoredInviteToken();
           }
-          addToast("Convite nao foi aplicado. Vou seguir pela regra da atletica.", "info");
+          addToast(inviteJoinFailedMessage, "info");
         }
       } else if (hasInviteToken && (currentTenantStatus === "pending" || currentTenantStatus === "approved")) {
         clearStoredInviteToken();
@@ -630,6 +653,9 @@ export default function CadastroPage() {
                     <div className="mt-3 bg-cyan-500/10 border border-cyan-500/20 p-3 rounded-xl max-w-xl mx-auto">
                         <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wide">
                             Convite detectado: ao concluir, seu acesso fica aguardando aprovacao.
+                        </p>
+                        <p className="mt-2 text-[11px] text-cyan-100/80">
+                            Este link ja trava seu cadastro em <span className="font-black text-cyan-200">{inviteTenantLabel}</span> e essa tenant nao pode ser alterada neste fluxo.
                         </p>
                     </div>
                 )}

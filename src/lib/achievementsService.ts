@@ -20,6 +20,7 @@ import {
   type RuntimeAchievementConfig,
   type RuntimePatenteConfig,
 } from "./achievementRuntime";
+import { calculateLevel } from "./games";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -653,17 +654,25 @@ export async function syncUserAchievementState(payload: {
   );
   const previousSummary = calculateAchievementSummary(catalog, currentStats);
   const nextSummary = calculateAchievementSummary(catalog, nextStats);
+  const logRows = await fetchUserAchievementLogRows({
+    userId,
+    tenantId: effectiveTenantId || undefined,
+  });
+  const logXpTotal = sumAchievementLogsXp(logRows, catalog);
   const nextXp = resolveEffectiveXp([
     asNumber(userRow.xp, 0) + asNumber(payload.xpDelta, 0),
     nextSummary.totalUnlockedXp,
+    logXpTotal,
   ]);
   const patente = resolvePatenteForXp(patentes, nextXp);
+  const nextLevel = calculateLevel(nextXp);
 
   const { error: updateError } = await supabase
     .from("users")
     .update({
       stats: nextStats,
       xp: nextXp,
+      level: nextLevel,
       patente: patente?.titulo || null,
       patente_icon: patente?.iconName || null,
       patente_cor: patente?.cor || null,

@@ -113,6 +113,7 @@ const resolveDefaultRolesForPath = (path: string): string[] => {
     matchesRoute(normalizedPath, "/admin/album") ||
     matchesRoute(normalizedPath, "/admin/comunidade") ||
     matchesRoute(normalizedPath, "/admin/conquistas") ||
+    matchesRoute(normalizedPath, "/admin/apadrinhamento") ||
     matchesRoute(normalizedPath, "/admin/carteirinha") ||
     matchesRoute(normalizedPath, "/admin/fidelidade") ||
     matchesRoute(normalizedPath, "/admin/guia") ||

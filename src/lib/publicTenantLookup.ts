@@ -128,6 +128,16 @@ export async function fetchPublicTenantBySlugCached(
     const staleEntry = tenantCache.get(tenantSlug)?.value ?? null;
 
     try {
+      const directTenant = await fetchTenantBySlug(tenantSlug);
+      if (directTenant) {
+        setCachedTenant(tenantSlug, directTenant);
+        return directTenant;
+      }
+    } catch {
+      // fallback para API publica logo abaixo
+    }
+
+    try {
       const publicTenant = await fetchTenantFromPublicApi(tenantSlug);
       setCachedTenant(tenantSlug, publicTenant);
       return publicTenant;

@@ -6,6 +6,8 @@ import Link from "next/link";
 import {
   Building2,
   Globe,
+  Eye,
+  EyeOff,
   Instagram,
   LayoutTemplate,
   Linkedin,
@@ -40,6 +42,7 @@ import {
   type LandingConfig,
   type SocialLink,
 } from "@/lib/adminLandingService";
+import { type PartnerRecord } from "@/lib/partnersService";
 import {
   EMAIL_MAX_LENGTH,
   normalizeEmailInput,
@@ -65,6 +68,7 @@ type LandingEditorShellProps = {
   accentColor: string;
   brandManagePath?: string;
   brandManageLabel?: string;
+  partnerRows?: PartnerRecord[];
 };
 
 const updateReviewField = (
@@ -108,9 +112,12 @@ export default function LandingEditorShell({
   accentColor,
   brandManagePath = "",
   brandManageLabel = "",
+  partnerRows = [],
 }: LandingEditorShellProps) {
   const { addToast } = useToast();
   const isPlatform = scope === "platform";
+  const hiddenPartnerIds = new Set(config.hiddenPartnerIds || []);
+  const activePartnersCount = partnerRows.filter((partner) => partner.status === "active").length;
 
   const notify = (message: string, type: LandingEditorToastType = "info") => {
     addToast(message, type);
@@ -216,6 +223,20 @@ export default function LandingEditorShell({
       return {
         ...current,
         loadingPhrases: nextLoadingPhrases,
+      };
+    });
+  };
+
+  const togglePartnerVisibility = (partnerId: string) => {
+    setConfig((current) => {
+      const currentHiddenPartnerIds = current.hiddenPartnerIds || [];
+      const nextHiddenPartnerIds = currentHiddenPartnerIds.includes(partnerId)
+        ? currentHiddenPartnerIds.filter((id) => id !== partnerId)
+        : [...currentHiddenPartnerIds, partnerId];
+
+      return {
+        ...current,
+        hiddenPartnerIds: nextHiddenPartnerIds,
       };
     });
   };
@@ -680,6 +701,135 @@ export default function LandingEditorShell({
               </div>
             </div>
           </div>
+
+          {!isPlatform ? (
+            <div className="space-y-5 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="flex items-center gap-2 text-xl font-bold text-white">
+                    <Building2 className="text-cyan-400" size={20} />
+                    Parceiros na Landing
+                  </h2>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Apenas parceiros com status ativo aparecem na landing por padrao. Os
+                    demais precisam ser ativados no modulo de parceiros antes de entrar na
+                    vitrine oficial.
+                  </p>
+                </div>
+                <span className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">
+                  {activePartnersCount} ativos / {partnerRows.length} cadastrados
+                </span>
+              </div>
+
+              {partnerRows.length > 0 ? (
+                <div className="space-y-3">
+                  {partnerRows.map((partner) => {
+                    const isVisible = !hiddenPartnerIds.has(partner.id);
+                    const previewImage = partner.imgLogo || partner.imgCapa || "/logo.png";
+                    const isActivePartner = partner.status === "active";
+                    const statusLabel = isActivePartner
+                      ? "Ativo"
+                      : partner.status === "pending"
+                        ? "Pendente"
+                        : "Inativo";
+                    const visibilityLabel = isActivePartner
+                      ? isVisible
+                        ? "Exibindo agora"
+                        : "Oculto agora"
+                      : "Nao elegivel";
+
+                    return (
+                      <div
+                        key={partner.id}
+                        className="flex flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 md:flex-row md:items-center md:justify-between"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+                            <Image
+                              src={previewImage}
+                              alt={`Logo ${partner.nome}`}
+                              fill
+                              sizes="56px"
+                              className="object-cover"
+                              unoptimized={previewImage.startsWith("http")}
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black uppercase tracking-wide text-white">
+                              {partner.nome}
+                            </p>
+                            <p className="truncate text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
+                              {partner.categoria || "Parceiro"} • {partner.tier}
+                            </p>
+                            <p className="mt-1 text-[11px] text-zinc-500">
+                              {isActivePartner
+                                ? isVisible
+                                  ? "Visivel na landing oficial."
+                                  : "Oculto na landing oficial."
+                                : "Parceiro inativo no modulo de parceiros. Nao aparece na landing."}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-stretch gap-2 md:items-end">
+                          <span
+                            className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
+                              isActivePartner && isVisible
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                : isActivePartner
+                                  ? "border-zinc-700 bg-zinc-900 text-zinc-300"
+                                  : "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                            }`}
+                          >
+                            {visibilityLabel}
+                          </span>
+
+                          <span
+                            className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
+                              isActivePartner
+                                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+                                : "border-zinc-700 bg-zinc-900 text-zinc-400"
+                            }`}
+                          >
+                            Status: {statusLabel}
+                          </span>
+
+                          <button
+                            onClick={() => togglePartnerVisibility(partner.id)}
+                            disabled={!isActivePartner}
+                            className={`inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] transition ${
+                              !isActivePartner
+                                ? "cursor-not-allowed border-zinc-800 bg-zinc-900/70 text-zinc-500"
+                                : isVisible
+                                  ? "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-600 hover:text-white"
+                                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"
+                            }`}
+                          >
+                            {!isActivePartner ? (
+                              <Building2 size={14} />
+                            ) : isVisible ? (
+                              <EyeOff size={14} />
+                            ) : (
+                              <Eye size={14} />
+                            )}
+                            {!isActivePartner
+                              ? "Ative no modulo Parceiros"
+                              : isVisible
+                                ? "Ocultar da landing"
+                                : "Mostrar na landing"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/60 p-5 text-sm text-zinc-500">
+                  Nenhum parceiro cadastrado nesta tenant ainda.
+                </div>
+              )}
+            </div>
+          ) : null}
 
           <div className="space-y-5 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6">
             <div className="flex items-center justify-between gap-4">

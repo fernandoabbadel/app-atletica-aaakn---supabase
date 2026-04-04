@@ -117,6 +117,9 @@ export default function MiniVendorPublicProfilePage() {
   const instagramHref =
     profile?.instagramEnabled && instagramHandle ? `https://instagram.com/${instagramHandle}` : "";
   const editHref = tenantPath("/configuracoes/mini-vendor/editar");
+  const owner = bundle?.owner || null;
+  const ownerProfileHref = owner?.uid ? tenantPath(`/perfil/${owner.uid}`) : "";
+  const ownerAvatar = owner?.foto || profile?.logoUrl || tenantLogoUrl || "/logo.png";
 
   const ensureAuthenticated = (): boolean => {
     if (user?.uid) return true;
@@ -285,16 +288,15 @@ export default function MiniVendorPublicProfilePage() {
                 <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[10px] font-black uppercase text-blue-300">
                   Loja aprovada
                 </span>
-                {profile.whatsappEnabled && profile.whatsapp.trim() ? (
-                  <span className="rounded-full border border-zinc-700 bg-black/40 px-3 py-1 text-[10px] font-black uppercase text-zinc-300">
-                    WhatsApp ativo
-                  </span>
-                ) : null}
-                {profile.instagramEnabled && instagramHandle ? (
-                  <span className="rounded-full border border-zinc-700 bg-black/40 px-3 py-1 text-[10px] font-black uppercase text-zinc-300">
-                    Instagram ativo
-                  </span>
-                ) : null}
+                <span
+                  className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase ${
+                    bundle.isReceivingOrders
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                      : "border-zinc-700 bg-black/40 text-zinc-300"
+                  }`}
+                >
+                  {bundle.isReceivingOrders ? "Recebendo pedidos" : "Pedidos pausados"}
+                </span>
               </div>
 
               <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
@@ -375,6 +377,36 @@ export default function MiniVendorPublicProfilePage() {
                 </div>
               </div>
 
+              {owner && ownerProfileHref ? (
+                <div className="mt-6 w-full max-w-md rounded-[1.75rem] border border-zinc-800 bg-zinc-900/50 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
+                    Owner da lojinha
+                  </p>
+                  <div className="mt-4">
+                    <Link
+                      href={ownerProfileHref}
+                      className="flex min-w-0 items-center gap-3 rounded-2xl border border-zinc-800 bg-black/20 px-3 py-3 transition hover:border-emerald-500/30 hover:bg-emerald-500/10"
+                    >
+                      <div className="relative h-12 w-12 overflow-hidden rounded-full border border-zinc-700 bg-black">
+                        <Image
+                          src={ownerAvatar}
+                          alt={owner.nome}
+                          fill
+                          sizes="48px"
+                          className="object-cover"
+                        />
+                      </div>
+                      <div className="min-w-0 text-left">
+                        <p className="truncate text-sm font-black text-white">{owner.nome}</p>
+                        <p className="truncate text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                          {owner.turma || "Atleta"}
+                        </p>
+                      </div>
+                    </Link>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
                 {instagramHref ? (
                   <a
@@ -400,41 +432,6 @@ export default function MiniVendorPublicProfilePage() {
                 ) : null}
               </div>
             </div>
-
-            <section className="mt-6 grid gap-4 md:grid-cols-2">
-              <article className="rounded-[1.75rem] border border-zinc-800 bg-zinc-900/70 p-5">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
-                  Contato
-                </p>
-                <div className="mt-4 space-y-3">
-                  <div className="rounded-2xl border border-zinc-800 bg-black/20 p-4">
-                    <p className="text-[10px] font-black uppercase text-zinc-500">WhatsApp</p>
-                    <p className="mt-1 text-sm font-bold text-white">
-                      {profile.whatsappEnabled && profile.whatsapp.trim()
-                        ? profile.whatsapp
-                        : "Nao divulgado"}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-black/20 p-4">
-                    <p className="text-[10px] font-black uppercase text-zinc-500">Instagram</p>
-                    <p className="mt-1 text-sm font-bold text-white">
-                      {profile.instagramEnabled && instagramHandle ? `@${instagramHandle}` : "Nao divulgado"}
-                    </p>
-                  </div>
-                </div>
-              </article>
-
-              <article className="rounded-[1.75rem] border border-zinc-800 bg-zinc-900/70 p-5">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
-                  Sobre a loja
-                </p>
-                <div className="mt-4 rounded-2xl border border-zinc-800 bg-black/20 p-4">
-                  <p className="text-sm leading-6 text-zinc-300">
-                    {profile.description || "Essa lojinha ainda nao adicionou uma descricao detalhada."}
-                  </p>
-                </div>
-              </article>
-            </section>
 
             <section className="mt-6 rounded-[2rem] border border-zinc-800 bg-zinc-900/70 p-5">
               <div className="flex items-center justify-between gap-3">

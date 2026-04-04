@@ -10,6 +10,7 @@ import {
   normalizePlanVisibilityEntries,
   normalizeSellerSnapshot,
 } from "./commerceCatalog";
+import { clearDashboardCaches } from "./dashboardPublicService";
 import { clearStorePublicCaches } from "./storePublicService";
 import { getSupabaseClient } from "./supabase";
 
@@ -31,9 +32,9 @@ const MAX_ORDERS = 1200;
 const MAX_REVIEWS = 600;
 const MAX_CATEGORIES = 300;
 const STORE_PRODUCT_SELECT_COLUMNS =
-  "id,tenant_id,nome,categoria,descricao,img,preco,precoAntigo,estoque,cores,variantes,caracteristicas,badge,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,likes,createdAt,updatedAt";
+  "id,tenant_id,nome,categoria,descricao,img,preco,precoAntigo,estoque,lote,tagLabel,tagColor,tagEffect,cores,variantes,caracteristicas,badge,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,cliques,likes,createdAt,updatedAt";
 const STORE_CATEGORY_SELECT_COLUMNS =
-  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,createdAt,updatedAt";
+  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order,createdAt,updatedAt";
 const STORE_ORDER_SELECT_COLUMNS =
   "id,tenant_id,userId,userName,productId,productName,price,total,quantidade,itens,data,status,approvedBy,seller_type,seller_id,seller_name,seller_logo_url,payment_config,createdAt,updatedAt";
 const STORE_REVIEW_SELECT_COLUMNS =
@@ -77,6 +78,22 @@ const asNum = (value: unknown, fallback = 0): number =>
 
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
+
+const hasOwnField = (row: Row, field: string): boolean =>
+  Object.prototype.hasOwnProperty.call(row, field);
+
+const asInt = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.floor(parsed));
+    }
+  }
+  return null;
+};
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
@@ -131,6 +148,27 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
 
 const getStoreSelectColumns = (tableName: string): string[] =>
   [...(STORE_SELECT_COLUMNS_BY_TABLE[tableName] ?? ["id", "createdAt", "updatedAt"])];
+
+const sortStoreCategoryRows = <T extends Row>(rows: T[]): T[] =>
+  [...rows].sort((left, right) => {
+    const leftOrder = asInt(left.display_order);
+    const rightOrder = asInt(right.display_order);
+    if (leftOrder !== null || rightOrder !== null) {
+      if (leftOrder === null) return 1;
+      if (rightOrder === null) return -1;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    }
+
+    const leftMiniVendor = asString(left.seller_type).trim().toLowerCase() === "mini_vendor";
+    const rightMiniVendor = asString(right.seller_type).trim().toLowerCase() === "mini_vendor";
+    if (leftMiniVendor !== rightMiniVendor) {
+      return leftMiniVendor ? 1 : -1;
+    }
+
+    return asString(left.nome).localeCompare(asString(right.nome), "pt-BR", {
+      sensitivity: "base",
+    });
+  });
 
 const omitRowColumnCaseInsensitive = (row: Row, columnName: string): Row =>
   Object.fromEntries(
@@ -339,6 +377,7 @@ const normalizeAdminStoreRow = (table: string, row: Row): Row => {
       cover_img: asString(row.cover_img) || asString(row.logo_url),
       button_color: asString(row.button_color),
       logo_url: asString(row.logo_url),
+      display_order: asInt(row.display_order),
       seller: normalizeSellerSnapshot({
         type: row.seller_type,
         id: row.seller_id,
@@ -367,6 +406,7 @@ const normalizeAdminStoreRow = (table: string, row: Row): Row => {
 const invalidateStoreCaches = (productId?: string): void => {
   adminBundleCache.clear();
   productsFeedCache.clear();
+  clearDashboardCaches();
   clearStorePublicCaches(productId);
 
   const cleanProductId = productId?.trim() || "";
@@ -434,7 +474,9 @@ export async function fetchAdminStoreBundle(options?: {
 
   const bundle = {
     produtos: produtos.map((row) => normalizeAdminStoreRow("produtos", row)),
-    categorias: categorias.map((row) => normalizeAdminStoreRow("categorias", row)),
+    categorias: sortStoreCategoryRows(
+      categorias.map((row) => normalizeAdminStoreRow("categorias", row))
+    ),
     pedidos: pedidos.map((row) => normalizeAdminStoreRow("orders", row)),
     reviews,
   };
@@ -477,11 +519,23 @@ export async function fetchStoreProducts(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
   tenantId?: string | null;
+  category?: string | null;
+  active?: boolean | null;
 }): Promise<Row[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_PRODUCTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const scopedTenantId = resolveStoreTenantId(options?.tenantId);
-  const cacheKey = `${scopedTenantId || "all"}:${maxResults}`;
+  const category = asString(options?.category).trim();
+  const productFilters: Array<{ field: string; value: unknown }> = [];
+  if (category) {
+    productFilters.push({ field: "categoria", value: category });
+  }
+  if (typeof options?.active === "boolean") {
+    productFilters.push({ field: "active", value: options.active });
+  }
+  const cacheKey = `${scopedTenantId || "all"}:${maxResults}:${category || "all"}:${
+    typeof options?.active === "boolean" ? String(options.active) : "all"
+  }`;
 
   if (!forceRefresh) {
     const cached = getCache(productsFeedCache, cacheKey);
@@ -489,8 +543,16 @@ export async function fetchStoreProducts(options?: {
   }
 
   const rows = await queryRows("produtos", [
-    { orderByField: "nome", orderAscending: true, limit: maxResults },
-    { limit: maxResults },
+    {
+      orderByField: "nome",
+      orderAscending: true,
+      limit: maxResults,
+      ...(productFilters.length ? { filters: productFilters } : {}),
+    },
+    {
+      limit: maxResults,
+      ...(productFilters.length ? { filters: productFilters } : {}),
+    },
   ]);
   const normalizedRows = rows.map((row) => normalizeAdminStoreRow("produtos", row));
   setCache(productsFeedCache, cacheKey, normalizedRows);
@@ -973,48 +1035,78 @@ export async function upsertStoreProduct(payload: {
   tenantId?: string | null;
 }): Promise<void> {
   const productId = payload.productId?.trim() || "";
+  const isCreate = !productId;
   const rawData = { ...payload.data };
   const scopedTenantId = resolveStoreTenantId(payload.tenantId);
-  const sanitizedData: Row = {
-    ...rawData,
-    nome: asString(rawData.nome).trim().slice(0, 120),
-    categoria: asString(rawData.categoria).trim().slice(0, 80),
-    descricao: asString(rawData.descricao).trim().slice(0, 1200),
-    img: asString(rawData.img).trim().slice(0, 400),
-    lote: asString(rawData.lote).trim().slice(0, 80),
-    cores: asString(rawData.cores).trim().slice(0, 600),
-    tagLabel: asString(rawData.tagLabel).trim().slice(0, 30),
-    status: normalizeAvailabilityStatus(rawData.status, rawData.active === false ? "esgotado" : "ativo"),
+  const sanitizedData: Row = { ...rawData };
+
+  const sanitizeStringField = (field: string, maxLength: number): void => {
+    if (isCreate || hasOwnField(rawData, field)) {
+      sanitizedData[field] = asString(rawData[field]).trim().slice(0, maxLength);
+    }
   };
 
-  const planPrices = normalizePlanPriceEntries(rawData.plan_prices);
-  const planVisibility = normalizePlanVisibilityEntries(rawData.plan_visibility);
-  const paymentConfig = normalizePaymentConfig(rawData.payment_config);
-  const seller = normalizeSellerSnapshot({
-    type: rawData.seller_type,
-    id: rawData.seller_id,
-    name: rawData.seller_name,
-    logoUrl: rawData.seller_logo_url,
-  });
+  sanitizeStringField("nome", 120);
+  sanitizeStringField("categoria", 80);
+  sanitizeStringField("descricao", 1200);
+  sanitizeStringField("img", 400);
+  sanitizeStringField("lote", 80);
+  sanitizeStringField("cores", 600);
+  sanitizeStringField("tagLabel", 30);
 
-  sanitizedData.plan_prices = planPrices;
-  sanitizedData.plan_visibility = planVisibility;
-  sanitizedData.payment_config = paymentConfig;
-  sanitizedData.seller_type = seller?.type ?? "tenant";
-  sanitizedData.seller_id = seller?.id ?? "";
-  sanitizedData.seller_name = seller?.name ?? "";
-  sanitizedData.seller_logo_url = seller?.logoUrl ?? "";
+  if (isCreate || hasOwnField(rawData, "status")) {
+    sanitizedData.status = normalizeAvailabilityStatus(
+      rawData.status,
+      rawData.active === false ? "esgotado" : "ativo"
+    );
+  }
 
-  if (Array.isArray(rawData.caracteristicas)) {
-    sanitizedData.caracteristicas = rawData.caracteristicas
+  if (isCreate || hasOwnField(rawData, "plan_prices")) {
+    sanitizedData.plan_prices = normalizePlanPriceEntries(rawData.plan_prices);
+  }
+  if (isCreate || hasOwnField(rawData, "plan_visibility")) {
+    sanitizedData.plan_visibility = normalizePlanVisibilityEntries(rawData.plan_visibility);
+  }
+  if (isCreate || hasOwnField(rawData, "payment_config")) {
+    sanitizedData.payment_config = normalizePaymentConfig(rawData.payment_config);
+  }
+
+  const hasSellerSnapshot =
+    isCreate ||
+    hasOwnField(rawData, "seller_type") ||
+    hasOwnField(rawData, "seller_id") ||
+    hasOwnField(rawData, "seller_name") ||
+    hasOwnField(rawData, "seller_logo_url");
+
+  if (hasSellerSnapshot) {
+    const seller = normalizeSellerSnapshot({
+      type: rawData.seller_type,
+      id: rawData.seller_id,
+      name: rawData.seller_name,
+      logoUrl: rawData.seller_logo_url,
+    });
+
+    sanitizedData.seller_type = seller?.type ?? "tenant";
+    sanitizedData.seller_id = seller?.id ?? "";
+    sanitizedData.seller_name = seller?.name ?? "";
+    sanitizedData.seller_logo_url = seller?.logoUrl ?? "";
+  }
+
+  if (isCreate || hasOwnField(rawData, "caracteristicas")) {
+    const caracteristicas = Array.isArray(rawData.caracteristicas)
+      ? rawData.caracteristicas
+      : [];
+    sanitizedData.caracteristicas = caracteristicas
       .filter((entry): entry is string => typeof entry === "string")
       .map((entry) => entry.trim().slice(0, 120))
       .filter(Boolean)
       .slice(0, 24);
   }
 
-  if (Array.isArray(rawData.variantes)) {
-    sanitizedData.variantes = rawData.variantes
+  if (isCreate || hasOwnField(rawData, "variantes")) {
+    const variantes = Array.isArray(rawData.variantes) ? rawData.variantes : [];
+    sanitizedData.variantes = variantes
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
       .map((entry) => {
         const row = entry as Record<string, unknown>;
         return {
@@ -1107,6 +1199,7 @@ export async function createStoreCategory(
         coverImg?: string;
         buttonColor?: string;
         logoUrl?: string;
+        displayOrder?: number;
         sellerType?: "tenant" | "mini_vendor";
         sellerId?: string;
         tenantId?: string | null;
@@ -1123,6 +1216,7 @@ export async function upsertStoreCategory(payload: {
     coverImg?: string;
     buttonColor?: string;
     logoUrl?: string;
+    displayOrder?: number;
     sellerType?: "tenant" | "mini_vendor";
     sellerId?: string;
     tenantId?: string | null;
@@ -1134,34 +1228,23 @@ export async function upsertStoreCategory(payload: {
   const coverImg = asString(source.coverImg).trim().slice(0, 400);
   const buttonColor = asString(source.buttonColor).trim().slice(0, 40);
   const logoUrl = asString(source.logoUrl).trim().slice(0, 400);
+  const displayOrder = asInt(source.displayOrder);
   const sellerType = source.sellerType === "mini_vendor" ? "mini_vendor" : "tenant";
   const sellerId = asString(source.sellerId).trim().slice(0, 120);
   const scopedTenantId = resolveStoreTenantId(source.tenantId);
   if (!cleanNome) return;
 
-  const insertPayload: Row = {
-    nome: cleanNome,
-    cover_img: coverImg || null,
-    button_color: buttonColor || null,
-    logo_url: logoUrl || null,
-    seller_type: sellerType,
-    seller_id: sellerId || null,
-    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-  };
-
-  const updatePayload: Row = {
-    nome: cleanNome,
-    cover_img: coverImg || null,
-    button_color: buttonColor || null,
-    logo_url: logoUrl || null,
-    seller_type: sellerType,
-    seller_id: sellerId || null,
-    updatedAt: nowIso(),
-  };
-
   if (categoryId) {
+    const updatePayload: Row = {
+      nome: cleanNome,
+      cover_img: coverImg || null,
+      button_color: buttonColor || null,
+      logo_url: logoUrl || null,
+      seller_type: sellerType,
+      seller_id: sellerId || null,
+      ...(displayOrder !== null ? { display_order: displayOrder } : {}),
+      updatedAt: nowIso(),
+    };
     await mutateStoreTableWithSchemaFallback({
       tableName: "categorias",
       operation: "update",
@@ -1175,6 +1258,21 @@ export async function upsertStoreCategory(payload: {
     return;
   }
 
+  const nextDisplayOrder =
+    displayOrder !== null ? displayOrder : await resolveNextStoreCategoryDisplayOrder(scopedTenantId);
+  const insertPayload: Row = {
+    nome: cleanNome,
+    cover_img: coverImg || null,
+    button_color: buttonColor || null,
+    logo_url: logoUrl || null,
+    seller_type: sellerType,
+    seller_id: sellerId || null,
+    ...(nextDisplayOrder !== null ? { display_order: nextDisplayOrder } : {}),
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+
   await callWithFallback<Record<string, unknown>, { ok: boolean }>(
     CALLABLE_CREATE_CATEGORY,
     {
@@ -1182,6 +1280,7 @@ export async function upsertStoreCategory(payload: {
       cover_img: coverImg,
       button_color: buttonColor,
       logo_url: logoUrl,
+      ...(nextDisplayOrder !== null ? { display_order: nextDisplayOrder } : {}),
       seller_type: sellerType,
       seller_id: sellerId,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
@@ -1195,6 +1294,79 @@ export async function upsertStoreCategory(payload: {
       return { ok: true };
     }
   );
+
+  invalidateStoreCaches();
+}
+
+async function resolveNextStoreCategoryDisplayOrder(
+  tenantId?: string | null
+): Promise<number | null> {
+  const scopedTenantId = resolveStoreTenantId(tenantId);
+  if (!scopedTenantId) return null;
+
+  const supabase = getSupabaseClient();
+  const query = supabase
+    .from("categorias")
+    .select("display_order")
+    .eq("tenant_id", scopedTenantId)
+    .limit(1);
+
+  let data: unknown[] | null = null;
+  let error: { message: string; code?: string | null; name?: string | null } | null = null;
+  try {
+    const ordered = await query.order("display_order", { ascending: false });
+    data = ordered.data;
+    error = ordered.error;
+  } catch {
+    const fallback = await query;
+    data = fallback.data;
+    error = fallback.error;
+  }
+
+  if (error) {
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim().toLowerCase();
+    if (missingColumn === "display_order" || missingColumn === "tenant_id") {
+      return null;
+    }
+    throwSupabaseError(error);
+  }
+
+  const latestRow =
+    Array.isArray(data) && data[0] && typeof data[0] === "object"
+      ? (data[0] as Row)
+      : null;
+  const currentMax = asInt(latestRow?.display_order);
+  return currentMax === null ? 0 : currentMax + 1;
+}
+
+export async function saveStoreCategoryDisplayOrder(payload: {
+  orderedCategoryIds: string[];
+  tenantId?: string | null;
+}): Promise<void> {
+  const orderedCategoryIds = Array.from(
+    new Set(
+      payload.orderedCategoryIds
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+    )
+  );
+  if (orderedCategoryIds.length === 0) return;
+
+  const scopedTenantId = resolveStoreTenantId(payload.tenantId);
+  for (const [index, categoryId] of orderedCategoryIds.entries()) {
+    await mutateStoreTableWithSchemaFallback({
+      tableName: "categorias",
+      operation: "update",
+      payload: {
+        display_order: index,
+        updatedAt: nowIso(),
+      },
+      filters: [
+        { field: "id", value: categoryId },
+        ...(scopedTenantId ? [{ field: "tenant_id", value: scopedTenantId }] : []),
+      ],
+    });
+  }
 
   invalidateStoreCaches();
 }
@@ -1235,9 +1407,7 @@ export async function renameStoreProductsCategory(payload: {
 }
 
 export function clearStoreCaches(): void {
-  adminBundleCache.clear();
-  productsFeedCache.clear();
-  productDetailCache.clear();
+  invalidateStoreCaches();
 }
 
 

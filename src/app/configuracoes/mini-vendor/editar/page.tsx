@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Image from "next/image";
-import { Loader2, ImagePlus, Save } from "lucide-react";
+import { Eye, EyeOff, ImagePlus, Loader2, Package, Save, Store, Tags } from "lucide-react";
 
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useAuth } from "@/context/AuthContext";
@@ -208,6 +208,9 @@ export default function MiniVendorCompanyEditPage() {
         instagramEnabled: vendorForm.instagramEnabled,
         whatsapp: vendorForm.whatsapp.trim(),
         whatsappEnabled: vendorForm.whatsappEnabled,
+        profileVisible: vendorForm.profileVisible,
+        categoryVisible: vendorForm.categoryVisible,
+        productsVisible: vendorForm.productsVisible,
         categoryButtonColor: vendorForm.categoryButtonColor,
       });
       setProfile(saved);
@@ -229,6 +232,9 @@ export default function MiniVendorCompanyEditPage() {
 
   const profileLogo = vendorForm.logoUrl || profile?.logoUrl || tenantLogoUrl || "/logo.png";
   const profileCover = vendorForm.coverUrl || profile?.coverUrl || tenantLogoUrl || "/logo.png";
+  const isReceivingOrders = vendorForm.categoryVisible && vendorForm.productsVisible;
+  const allPublicAreasVisible =
+    vendorForm.profileVisible && vendorForm.categoryVisible && vendorForm.productsVisible;
   const storePreviewColor = {
     borderColor: vendorForm.categoryButtonColor,
     backgroundColor: vendorForm.categoryButtonColor,
@@ -272,6 +278,15 @@ export default function MiniVendorCompanyEditPage() {
                     <span className="inline-flex rounded-full border border-zinc-700 bg-black/30 px-3 py-1 text-[10px] font-black uppercase text-zinc-400">
                       Categoria publica: {vendorForm.storeName.trim() || profile?.storeName || "Minha Loja"}
                     </span>
+                    <span
+                      className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase ${
+                        isReceivingOrders
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-700 bg-black/30 text-zinc-400"
+                      }`}
+                    >
+                      {isReceivingOrders ? "Recebendo pedidos" : "Loja pausada"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -296,6 +311,153 @@ export default function MiniVendorCompanyEditPage() {
                   : "Depois de salvar, o cadastro fica aguardando aprovacao do admin da atletica."}
               </div>
             ) : null}
+
+            <div className="mt-5 rounded-2xl border border-zinc-800 bg-black/20 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
+                    Visibilidade publica
+                  </p>
+                  <p className="mt-2 text-sm text-zinc-300">
+                    Pause a loja quando ela deixar de vender. Voce pode esconder o perfil, a
+                    categoria e os produtos separadamente.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVendorForm((previous) => ({
+                      ...previous,
+                      profileVisible: !allPublicAreasVisible,
+                      categoryVisible: !allPublicAreasVisible,
+                      productsVisible: !allPublicAreasVisible,
+                    }))
+                  }
+                  className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black uppercase transition ${
+                    allPublicAreasVisible
+                      ? "border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20"
+                      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                  }`}
+                >
+                  {allPublicAreasVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                  {allPublicAreasVisible ? "Ocultar tudo" : "Ativar tudo"}
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVendorForm((previous) => ({
+                      ...previous,
+                      profileVisible: !previous.profileVisible,
+                    }))
+                  }
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    vendorForm.profileVisible
+                      ? "border-emerald-500/30 bg-emerald-500/10"
+                      : "border-zinc-800 bg-zinc-950/80"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="inline-flex rounded-2xl border border-white/10 bg-black/30 p-3 text-white">
+                      <Store size={18} />
+                    </div>
+                    <span
+                      className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase ${
+                        vendorForm.profileVisible
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-700 bg-black/30 text-zinc-400"
+                      }`}
+                    >
+                      {vendorForm.profileVisible ? "Visivel" : "Oculto"}
+                    </span>
+                  </div>
+                  <p className="mt-4 text-sm font-black uppercase text-white">Perfil publico</p>
+                  <p className="mt-2 text-xs leading-5 text-zinc-400">
+                    Controla a pagina da lojinha em `/perfil/mini-vendor`.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVendorForm((previous) => ({
+                      ...previous,
+                      categoryVisible: !previous.categoryVisible,
+                    }))
+                  }
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    vendorForm.categoryVisible
+                      ? "border-emerald-500/30 bg-emerald-500/10"
+                      : "border-zinc-800 bg-zinc-950/80"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="inline-flex rounded-2xl border border-white/10 bg-black/30 p-3 text-white">
+                      <Tags size={18} />
+                    </div>
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black uppercase ${
+                        vendorForm.categoryVisible
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-700 bg-black/30 text-zinc-400"
+                      }`}
+                    >
+                      {isReceivingOrders ? <span className="h-2 w-2 rounded-full bg-emerald-400" /> : null}
+                      {vendorForm.categoryVisible ? "Categoria visivel" : "Categoria oculta"}
+                    </span>
+                  </div>
+                  <p className="mt-4 text-sm font-black uppercase text-white">Categoria publica</p>
+                  <p className="mt-2 text-xs leading-5 text-zinc-400">
+                    Mantem a label da categoria visivel na loja. Quando ela estiver pronta para
+                    pedido, aparece com a bolinha verde.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVendorForm((previous) => ({
+                      ...previous,
+                      productsVisible: !previous.productsVisible,
+                    }))
+                  }
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    vendorForm.productsVisible
+                      ? "border-emerald-500/30 bg-emerald-500/10"
+                      : "border-zinc-800 bg-zinc-950/80"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="inline-flex rounded-2xl border border-white/10 bg-black/30 p-3 text-white">
+                      <Package size={18} />
+                    </div>
+                    <span
+                      className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase ${
+                        vendorForm.productsVisible
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-700 bg-black/30 text-zinc-400"
+                      }`}
+                    >
+                      {vendorForm.productsVisible ? "Produtos visiveis" : "Produtos ocultos"}
+                    </span>
+                  </div>
+                  <p className="mt-4 text-sm font-black uppercase text-white">Produtos da loja</p>
+                  <p className="mt-2 text-xs leading-5 text-zinc-400">
+                    Mostra ou esconde os produtos publicados pelo mini vendor na loja oficial.
+                  </p>
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 px-4 py-3 text-xs text-zinc-400">
+                Status atual:{" "}
+                <span className="font-black text-white">
+                  {isReceivingOrders ? "categoria pronta para receber pedidos" : "categoria pausada"}
+                </span>
+                .
+              </div>
+            </div>
 
             <div className="mt-5 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
               <div className="space-y-4">
@@ -505,9 +667,10 @@ export default function MiniVendorCompanyEditPage() {
                     <Image src={profileCover} alt="Preview da capa" fill sizes="320px" className="object-cover opacity-80" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
                     <span
-                      className="absolute bottom-3 left-3 rounded-full border px-3 py-1 text-[10px] font-black uppercase text-white"
+                      className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black uppercase text-white"
                       style={storePreviewColor}
                     >
+                      {isReceivingOrders ? <span className="h-2 w-2 rounded-full bg-emerald-300" /> : null}
                       {vendorForm.storeName.trim() || profile?.storeName || "Minha Loja"}
                     </span>
                   </div>

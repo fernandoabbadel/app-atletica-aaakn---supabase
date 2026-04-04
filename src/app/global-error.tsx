@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { AlertTriangle, RefreshCcw } from "lucide-react";
@@ -11,14 +11,40 @@ type GlobalErrorPageProps = {
 };
 
 const BRAND_SNAPSHOT_KEY = "usc_active_tenant_brand";
+const CHUNK_RELOAD_KEY = "usc_global_chunk_reload_once";
 
 export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) {
   const [logoUrl, setLogoUrl] = useState("/logo.png");
   const [tenantName, setTenantName] = useState("USC");
+  const isChunkLoadError = useMemo(
+    () => /chunkloaderror|loading chunk/i.test(`${error.name || ""} ${error.message || ""}`),
+    [error.message, error.name]
+  );
+  const isRemoteLogo = /^https?:\/\//i.test(logoUrl);
 
   useEffect(() => {
     console.error("Global app error:", error);
   }, [error]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isChunkLoadError) return;
+    try {
+      if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1") return;
+      sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
+      window.location.reload();
+    } catch {
+      window.location.reload();
+    }
+  }, [isChunkLoadError]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || isChunkLoadError) return;
+    try {
+      sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    } catch {
+      // ignora falha de storage
+    }
+  }, [isChunkLoadError]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -40,6 +66,20 @@ export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) 
     }
   }, []);
 
+  const handleRetry = useCallback(() => {
+    if (isChunkLoadError && typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+      } catch {
+        // ignora falha de storage
+      }
+      window.location.reload();
+      return;
+    }
+
+    reset();
+  }, [isChunkLoadError, reset]);
+
   return (
     <html lang="pt-BR">
       <body className="min-h-screen bg-[#140900] text-white flex flex-col items-center justify-center p-6 relative overflow-hidden">
@@ -55,6 +95,7 @@ export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) 
                 sizes="96px"
                 className="object-contain drop-shadow-2xl"
                 priority
+                unoptimized={isRemoteLogo}
               />
             </div>
 
@@ -69,15 +110,17 @@ export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) 
             <AlertTriangle size={24} /> Falha Critica
           </h1>
           <p className="text-zinc-300 text-sm mb-8">
-            Ocorreu um erro global inesperado. Reinicie esta tela.
+            {isChunkLoadError
+              ? "Os arquivos da aplicacao demoraram para carregar. Vamos tentar recarregar tudo."
+              : "Ocorreu um erro global inesperado. Reinicie esta tela."}
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
-              onClick={() => reset()}
+              onClick={handleRetry}
               className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-black font-black text-xs uppercase transition"
             >
-              <RefreshCcw size={16} /> Tentar de novo
+              <RefreshCcw size={16} /> {isChunkLoadError ? "Recarregar app" : "Tentar de novo"}
             </button>
 
             <Link

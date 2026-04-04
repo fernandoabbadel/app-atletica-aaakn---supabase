@@ -9,6 +9,7 @@ const READ_CACHE_TTL_MS = 45_000;
 
 const MAX_SOCIAL_LINKS = 20;
 const MAX_REVIEWS = 30;
+const MAX_HIDDEN_PARTNER_IDS = 300;
 export const MAX_LOADING_PHRASES = 10;
 export const LOADING_PHRASE_MAX_LENGTH = 90;
 export const LANDING_TAGLINE_MAX_LENGTH = 40;
@@ -74,6 +75,7 @@ export interface LandingConfig {
   loadingPhrases: string[];
   socialLinks: SocialLink[];
   reviews: ReviewConfig[];
+  hiddenPartnerIds: string[];
 }
 
 export const DEFAULT_LOADING_PHRASES = [
@@ -108,6 +110,7 @@ export const DEFAULT_TENANT_LANDING_CONFIG: LandingConfig = {
   loadingPhrases: [...DEFAULT_LOADING_PHRASES],
   socialLinks: [],
   reviews: [],
+  hiddenPartnerIds: [],
 };
 
 export const DEFAULT_PLATFORM_LANDING_CONFIG: LandingConfig = {
@@ -129,6 +132,7 @@ export const DEFAULT_PLATFORM_LANDING_CONFIG: LandingConfig = {
   loadingPhrases: [...DEFAULT_LOADING_PHRASES],
   socialLinks: [],
   reviews: [],
+  hiddenPartnerIds: [],
 };
 
 export const DEFAULT_LANDING_CONFIG = DEFAULT_PLATFORM_LANDING_CONFIG;
@@ -222,6 +226,24 @@ const normalizeLoadingPhrases = (
   return normalized.length > 0 ? normalized : [...fallback];
 };
 
+const normalizeHiddenPartnerIds = (
+  raw: unknown,
+  fallback: string[]
+): string[] => {
+  if (!Array.isArray(raw)) return [...fallback];
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const entry of raw.slice(0, MAX_HIDDEN_PARTNER_IDS)) {
+    const id = trimField(entry, 120);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    normalized.push(id);
+  }
+
+  return normalized;
+};
+
 const getSupabaseErrorText = (error: unknown): string => {
   const raw = asObject(error);
   return [
@@ -310,6 +332,10 @@ export function sanitizeLandingConfig(
     ),
     socialLinks: normalizeSocialLinks(obj.socialLinks, fallbackConfig.socialLinks),
     reviews: normalizeReviews(obj.reviews, fallbackConfig.reviews),
+    hiddenPartnerIds: normalizeHiddenPartnerIds(
+      obj.hiddenPartnerIds,
+      fallbackConfig.hiddenPartnerIds
+    ),
   };
 }
 

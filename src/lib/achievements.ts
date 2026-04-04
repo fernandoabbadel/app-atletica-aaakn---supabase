@@ -89,10 +89,10 @@ export const ACHIEVEMENTS_CATALOG: Achievement[] = [
     // =================================================================
     // 6. SOCIAL (COMUNIDADE)
     // =================================================================
-    { id: "soc_10", titulo: "Convocador", desc: "Teve 5 convites ativados na atlética.", cat: "Social", xp: 250, target: 5, statKey: "inviteActivations", iconName: "UserPlus", iconEmoji: "📨" },
-    { id: "soc_11", titulo: "Puxador de Rede", desc: "Teve 10 convites ativados na atlética.", cat: "Social", xp: 600, target: 10, statKey: "inviteActivations", iconName: "UserPlus", iconEmoji: "🦈" },
-    { id: "soc_12", titulo: "Embaixador", desc: "Teve 50 convites ativados na atlética.", cat: "Social", xp: 3000, target: 50, statKey: "inviteActivations", iconName: "Crown", iconEmoji: "🏛️" },
-    { id: "soc_13", titulo: "Lenda do Recrutamento", desc: "Teve 100 convites ativados na atlética.", cat: "Social", xp: 8000, target: 100, statKey: "inviteActivations", iconName: "Star", iconEmoji: "🚀" },
+    { id: "soc_10", titulo: "Primeiro Convite", desc: "Teve 1 convite aprovado na atlética.", cat: "Social", xp: 120, target: 1, statKey: "inviteActivations", iconName: "UserPlus", iconEmoji: "📨" },
+    { id: "soc_11", titulo: "Convocador", desc: "Teve 5 convites aprovados na atlética.", cat: "Social", xp: 350, target: 5, statKey: "inviteActivations", iconName: "UserPlus", iconEmoji: "🦈" },
+    { id: "soc_12", titulo: "Puxador de Rede", desc: "Teve 10 convites aprovados na atlética.", cat: "Social", xp: 800, target: 10, statKey: "inviteActivations", iconName: "Crown", iconEmoji: "🏛️" },
+    { id: "soc_13", titulo: "Embaixador do Cardume", desc: "Teve 20 convites aprovados na atlética.", cat: "Social", xp: 1600, target: 20, statKey: "inviteActivations", iconName: "Star", iconEmoji: "🚀" },
     { id: "soc_2", titulo: "Voz da Comunidade", desc: "Fez 5 posts na comunidade.", cat: "Social", xp: 100, target: 5, statKey: "postsCount", iconName: "Megaphone", iconEmoji: "📣" },
     { id: "soc_3", titulo: "Presenca Marcante", desc: "Fez 50 posts na comunidade.", cat: "Social", xp: 1000, target: 50, statKey: "postsCount", iconName: "Megaphone", iconEmoji: "🌊" },
     { id: "soc_4", titulo: "Tagarela", desc: "Comentou em 20 publicacoes.", cat: "Social", xp: 150, target: 20, statKey: "commentsCount", iconName: "MessageCircle", iconEmoji: "💬" },
@@ -103,4 +103,6 @@ export const ACHIEVEMENTS_CATALOG: Achievement[] = [
     { id: "soc_9", titulo: "Sentinela da Comunidade", desc: "Fez uma denuncia que foi aceita.", cat: "Social", xp: 200, target: 1, statKey: "validReports", iconName: "ShieldAlert", iconEmoji: "🛡️" },
     { id: "soc_14", titulo: "Primeiro Follow", desc: "Seguiu 1 pessoa dentro do app.", cat: "Social", xp: 80, target: 1, statKey: "followingCount", iconName: "UserPlus", iconEmoji: "👣" },
     { id: "soc_15", titulo: "Primeiro Follower", desc: "Foi seguido por 1 pessoa dentro do app.", cat: "Social", xp: 120, target: 1, statKey: "followersCount", iconName: "Heart", iconEmoji: "💖" },
+    { id: "soc_16", titulo: "Guiado no Cardume", desc: "Aceitou um padrinho ou madrinha na atletica.", cat: "Social", xp: 180, target: 1, statKey: "mentorsCount", iconName: "HeartHandshake", iconEmoji: "🫂" },
+    { id: "soc_17", titulo: "Puxou um Calouro", desc: "Aceitou um afilhado ou afilhada na atletica.", cat: "Social", xp: 220, target: 1, statKey: "menteesCount", iconName: "Users", iconEmoji: "🦈" },
 ];

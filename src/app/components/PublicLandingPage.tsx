@@ -45,6 +45,7 @@ import {
   fetchPublicLandingData,
   type PublicLandingPayload,
 } from "@/lib/publicLandingService";
+import { type PartnerRecord } from "@/lib/partnersPublicService";
 import { hasAdminPanelAccess, isPlatformMaster } from "@/lib/roles";
 import { fetchTenantBySlug } from "@/lib/tenantService";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -118,6 +119,12 @@ const resolveSocialIcon = (platform: string) => {
     default:
       return <Globe size={14} />;
   }
+};
+
+const partnerTierBadgeClass: Record<string, string> = {
+  ouro: "border-yellow-500/30 bg-yellow-500/15 text-yellow-200",
+  prata: "border-zinc-500/30 bg-zinc-500/15 text-zinc-200",
+  standard: "border-emerald-500/30 bg-emerald-500/15 text-emerald-200",
 };
 
 const useCounter = (end: number, duration = 2000) => {
@@ -248,6 +255,7 @@ export default function PublicLandingPage({
     tenants: 0,
     partners: 0,
   });
+  const [landingPartners, setLandingPartners] = useState<PartnerRecord[]>([]);
   const [brand, setBrand] = useState<BrandState>(DEFAULT_BRAND);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"aluno" | "empresa">("aluno");
@@ -330,16 +338,38 @@ export default function PublicLandingPage({
 
   useEffect(() => {
     let mounted = true;
+    let latestRequestId = 0;
+    let lastForegroundRefreshAt = 0;
 
-    const fetchData = async () => {
+    const fetchData = async ({
+      preserveExistingState = false,
+      showLoader = false,
+      forceRefresh = false,
+    }: {
+      preserveExistingState?: boolean;
+      showLoader?: boolean;
+      forceRefresh?: boolean;
+    } = {}) => {
+      const requestId = latestRequestId + 1;
+      latestRequestId = requestId;
+
+      if (showLoader && mounted) {
+        setLoading(true);
+      }
+
       try {
-        const search = tenantSlug
-          ? `?tenant=${encodeURIComponent(tenantSlug)}`
-          : "?scope=platform";
+        const searchParams = new URLSearchParams(
+          tenantSlug
+            ? { tenant: tenantSlug }
+            : { scope: "platform" }
+        );
+        if (forceRefresh) {
+          searchParams.set("refresh", "1");
+        }
         let data: Partial<PublicLandingPayload>;
 
         try {
-          const response = await fetch(`/api/public/landing${search}`, {
+          const response = await fetch(`/api/public/landing?${searchParams.toString()}`, {
             cache: "no-store",
           });
           if (!response.ok) {
@@ -397,7 +427,7 @@ export default function PublicLandingPage({
         const resolvedBrand =
           shouldUseThemedTenantBrand && themedTenantBrand ? themedTenantBrand : nextBrand;
 
-        if (!mounted) return;
+        if (!mounted || requestId !== latestRequestId) return;
 
         storeLandingConfigSnapshot(nextConfig, typeof data.tenantId === "string" ? data.tenantId : "");
         setConfig(nextConfig);
@@ -407,21 +437,46 @@ export default function PublicLandingPage({
           tenants: typeof data.tenantsCount === "number" ? data.tenantsCount : 0,
           partners: typeof data.partnersCount === "number" ? data.partnersCount : 0,
         });
+        setLandingPartners(Array.isArray(data.partners) ? data.partners : []);
       } catch (error: unknown) {
         console.error("Erro ao carregar landing:", error);
-        if (mounted) {
+        if (mounted && requestId === latestRequestId && !preserveExistingState) {
           setBrand(themedTenantBrand ?? (isTenantLanding ? resolveFallbackBrand(tenantSlug) : DEFAULT_BRAND));
+          setLandingPartners([]);
         }
       } finally {
-        if (mounted) {
+        if (mounted && requestId === latestRequestId) {
           setLoading(false);
         }
       }
     };
 
-    void fetchData();
+    const triggerForegroundRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+
+      const now = Date.now();
+      if (now - lastForegroundRefreshAt < 1200) return;
+
+      lastForegroundRefreshAt = now;
+      void fetchData({ forceRefresh: true, preserveExistingState: true });
+    };
+
+    const triggerFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastForegroundRefreshAt < 1200) return;
+
+      lastForegroundRefreshAt = now;
+      void fetchData({ forceRefresh: true, preserveExistingState: true });
+    };
+
+    void fetchData({ showLoader: true });
+    window.addEventListener("focus", triggerFocusRefresh);
+    document.addEventListener("visibilitychange", triggerForegroundRefresh);
+
     return () => {
       mounted = false;
+      window.removeEventListener("focus", triggerFocusRefresh);
+      document.removeEventListener("visibilitychange", triggerForegroundRefresh);
     };
   }, [fallbackConfig, isTenantLanding, tenantSlug, themedTenantBrand]);
 
@@ -671,6 +726,81 @@ export default function PublicLandingPage({
           </div>
         </div>
       </main>
+
+      {isTenantLanding && landingPartners.length > 0 ? (
+        <section className="container mx-auto border-t border-white/5 bg-zinc-950/20 px-4 py-20">
+          <div className="mb-8 flex items-center justify-center gap-2 lg:justify-start">
+            <Handshake className="text-brand" />
+            <h3 className="text-xl font-black uppercase tracking-tight text-white">
+              Parceiros Oficiais
+            </h3>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {landingPartners.map((partner) => {
+              const partnerHref = withTenantSlug(tenantSlug, `/parceiros/${partner.id}`);
+              const previewImage = partner.imgCapa || partner.imgLogo || "/logo.png";
+              const partnerBadgeClass =
+                partnerTierBadgeClass[partner.tier] || partnerTierBadgeClass.standard;
+
+              return (
+                <Link
+                  key={partner.id}
+                  href={partnerHref}
+                  className="group overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900/70 transition hover:-translate-y-1 hover:border-brand"
+                >
+                  <div className="relative h-40 overflow-hidden bg-zinc-950">
+                    <Image
+                      src={previewImage}
+                      alt={partner.nome}
+                      fill
+                      className="object-cover opacity-75 transition duration-500 group-hover:scale-105 group-hover:opacity-95"
+                      unoptimized={previewImage.startsWith("http")}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/30 to-transparent" />
+                    <span
+                      className={`absolute left-4 top-4 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${partnerBadgeClass}`}
+                    >
+                      {partner.tier}
+                    </span>
+                  </div>
+
+                  <div className="space-y-4 p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
+                        <Image
+                          src={partner.imgLogo || previewImage}
+                          alt={`Logo ${partner.nome}`}
+                          fill
+                          className="object-cover"
+                          unoptimized={(partner.imgLogo || previewImage).startsWith("http")}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="truncate text-sm font-black uppercase tracking-wide text-white">
+                          {partner.nome}
+                        </h4>
+                        <p className="truncate text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
+                          {partner.categoria || "Parceiro"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="line-clamp-3 text-sm leading-relaxed text-zinc-300">
+                      {partner.descricao || "Beneficios exclusivos para a comunidade da atletica."}
+                    </p>
+
+                    <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
+                      <span>Ver parceiro</span>
+                      <span className="text-brand-accent">Abrir</span>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <section className="container mx-auto border-t border-white/5 bg-zinc-950/30 px-4 py-20">
         <div className="mb-8 flex items-center justify-center gap-2 lg:justify-start">

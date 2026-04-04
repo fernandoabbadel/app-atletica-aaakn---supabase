@@ -1,7 +1,12 @@
 "use client";
 
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
-import { fetchMiniVendorProfileById, type MiniVendorProfile } from "./miniVendorService";
+import {
+  fetchMiniVendorProfileById,
+  isMiniVendorProfilePublic,
+  isMiniVendorReceivingOrders,
+  type MiniVendorProfile,
+} from "./miniVendorService";
 import { fetchStoreProductsBySeller } from "./storePublicService";
 import { getSupabaseClient } from "./supabase";
 
@@ -148,14 +153,23 @@ export interface MiniVendorSocialViewerData {
   turma?: string;
 }
 
+export interface MiniVendorPublicOwner {
+  uid: string;
+  nome: string;
+  foto: string;
+  turma: string;
+}
+
 export interface MiniVendorPublicBundle {
   profile: MiniVendorProfile;
+  owner: MiniVendorPublicOwner | null;
   products: MiniVendorPublicProduct[];
   followersCount: number;
   likesCount: number;
   productsCount: number;
   isFollowing: boolean;
   isLiked: boolean;
+  isReceivingOrders: boolean;
 }
 
 const normalizeMiniVendorPublicProduct = (row: unknown): MiniVendorPublicProduct | null => {
@@ -300,6 +314,32 @@ async function readMiniVendorSocialState(options: {
   return normalized;
 }
 
+async function fetchMiniVendorOwnerSummary(
+  ownerUserIdRaw: string
+): Promise<MiniVendorPublicOwner | null> {
+  const ownerUserId = ownerUserIdRaw.trim();
+  if (!ownerUserId) return null;
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("uid,nome,foto,turma")
+    .eq("uid", ownerUserId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const row = asObject(data);
+  const uid = asString(row?.uid).trim();
+  if (!uid) return null;
+
+  return {
+    uid,
+    nome: asString(row?.nome).trim() || "Atleta",
+    foto: asString(row?.foto).trim(),
+    turma: asString(row?.turma).trim(),
+  };
+}
+
 export async function fetchMiniVendorPublicBundle(options: {
   tenantId?: string | null;
   miniVendorId: string;
@@ -347,12 +387,12 @@ export async function fetchMiniVendorPublicBundle(options: {
       miniVendorId,
       forceRefresh,
     });
-    if (!profile || profile.status !== "approved") {
+    if (!profile || !isMiniVendorProfilePublic(profile)) {
       setCache(bundleCache, cacheKey, null);
       return null;
     }
 
-    const [productsRows, followersCount, likesCount, isFollowing, isLiked] = await Promise.all([
+    const [productsRows, owner, followersCount, likesCount, isFollowing, isLiked] = await Promise.all([
       fetchStoreProductsBySeller({
         seller: { type: "mini_vendor", id: miniVendorId },
         tenantId,
@@ -361,6 +401,7 @@ export async function fetchMiniVendorPublicBundle(options: {
         userPlanNames: options.userPlanNames,
         userPlanIds: options.userPlanIds,
       }),
+      fetchMiniVendorOwnerSummary(profile.userId),
       countMiniVendorSocialRows({
         table: "mini_vendor_followers",
         tenantId,
@@ -395,12 +436,14 @@ export async function fetchMiniVendorPublicBundle(options: {
 
     const bundle: MiniVendorPublicBundle = {
       profile,
+      owner,
       products,
       followersCount,
       likesCount,
       productsCount: products.length,
       isFollowing,
       isLiked,
+      isReceivingOrders: isMiniVendorReceivingOrders(profile),
     };
 
     setCache(bundleCache, cacheKey, bundle);
@@ -436,7 +479,7 @@ async function toggleMiniVendorSocialRow(options: {
     miniVendorId,
     forceRefresh: true,
   });
-  if (!profile || profile.status !== "approved") {
+  if (!profile || !isMiniVendorProfilePublic(profile)) {
     throw new Error("Mini vendor indisponivel no momento.");
   }
   if (profile.userId === viewerUid) {

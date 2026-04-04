@@ -8,7 +8,7 @@ import Image from "next/image";
 import { 
   ArrowLeft, MapPin, Edit3, Instagram, MessageCircle, Ghost, Fish, Share2, ShieldCheck, Loader2, 
   UserPlus, UserCheck, X, PawPrint, Users, Lock, Heart,
-  Calendar, Clock, CheckCircle, EyeOff, Store
+  Calendar, Clock, CheckCircle, EyeOff, Store, HeartHandshake, MoreHorizontal
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext"; 
 import { useToast } from "../../../context/ToastContext";
@@ -19,6 +19,19 @@ import {
   toggleFollowProfile
 } from "../../../lib/profilePublicService";
 import { getBackendErrorCode } from "@/lib/backendErrors";
+import {
+  fetchMentorshipProfileBundle,
+  respondToMentorshipInvite,
+  resolveMentorshipRoleOptions,
+  sendMentorshipInvite,
+  type MentorshipProfileBundle,
+  updateMentorshipRoleLabel,
+} from "@/lib/mentorshipService";
+import {
+  fetchCurrentMiniVendorProfile,
+  isMiniVendorProfilePublic,
+  type MiniVendorProfile,
+} from "@/lib/miniVendorService";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import Link from "next/link";
 import { getTurmaImage } from "../../../constants/turmaImages";
@@ -111,6 +124,14 @@ interface FollowData {
     turma: string;
 }
 
+type ProfileTab =
+  | "posts"
+  | "eventos"
+  | "treinos"
+  | "ligas"
+  | "apadrinhamento"
+  | "mini_vendor";
+
 const getSportInfo = (sport: string) => {
     const map: Record<string, { emoji: string, label: string, color: string }> = {
         "futebol": { emoji: "⚽", label: "Futebol", color: "bg-green-500/20 text-green-400" },
@@ -182,6 +203,8 @@ export default function PerfilPublicoPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
   const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const effectiveMentorshipTenantId =
+    activeTenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -192,10 +215,24 @@ export default function PerfilPublicoPage() {
   const [followingCount, setFollowingCount] = useState(0);
   const [followersList, setFollowersList] = useState<FollowData[]>([]);
   const [followingList, setFollowingList] = useState<FollowData[]>([]);
+  const [mentorshipBundle, setMentorshipBundle] = useState<MentorshipProfileBundle | null>(null);
+  const [miniVendorProfile, setMiniVendorProfile] = useState<MiniVendorProfile | null>(null);
+  const [miniVendorHiddenByOwner, setMiniVendorHiddenByOwner] = useState(false);
+  const [sendingMentorshipMode, setSendingMentorshipMode] = useState<"" | "mentor" | "mentee">("");
+  const [removingMentorshipId, setRemovingMentorshipId] = useState("");
+  const [editingMentorshipId, setEditingMentorshipId] = useState("");
+  const [showRelationshipMenu, setShowRelationshipMenu] = useState(false);
   
   const [activeModal, setActiveModal] = useState<'followers' | 'following' | null>(null);
-  const [activeTab, setActiveTab] = useState<'posts' | 'eventos' | 'treinos' | 'ligas'>('posts');
-  const tabs: Array<typeof activeTab> = ['posts', 'eventos', 'treinos', 'ligas'];
+  const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
+  const tabs: Array<{ id: ProfileTab; label: string }> = [
+    { id: "posts", label: "Posts" },
+    { id: "eventos", label: "Eventos" },
+    { id: "treinos", label: "Treinos" },
+    { id: "ligas", label: "Ligas" },
+    { id: "apadrinhamento", label: "Apadrinhamento" },
+    { id: "mini_vendor", label: "Mini Vendor" },
+  ];
 
   const [recentPosts, setRecentPosts] = useState<PostItem[]>([]);
   const [myEvents, setMyEvents] = useState<EventItem[]>([]);
@@ -247,6 +284,40 @@ export default function PerfilPublicoPage() {
 
                 setMyTreinos((bundle.treinos as TreinoItem[]).slice(0, 5));
 
+                if (effectiveTenantId) {
+                  const [nextMentorshipBundle, nextMiniVendorProfile] = await Promise.all([
+                    fetchMentorshipProfileBundle({
+                      tenantId: effectiveTenantId,
+                      targetUserId: uid,
+                      viewerUserId: user?.uid,
+                      forceRefresh: true,
+                    }).catch(() => null),
+                    fetchCurrentMiniVendorProfile({
+                      tenantId: effectiveTenantId,
+                      userId: uid,
+                      forceRefresh: true,
+                    }).catch(() => null),
+                  ]);
+
+                  setMentorshipBundle(nextMentorshipBundle);
+                  const isMiniVendorHiddenFromProfile = Boolean(
+                    nextMiniVendorProfile &&
+                    nextMiniVendorProfile.status === "approved" &&
+                    nextMiniVendorProfile.profileVisible === false
+                  );
+                  const canSeeMiniVendor =
+                    isAdminLikeRole(resolveEffectiveAccessRole(user)) ||
+                    isMiniVendorProfilePublic(nextMiniVendorProfile);
+                  setMiniVendorHiddenByOwner(
+                    isMiniVendorHiddenFromProfile && !canSeeMiniVendor
+                  );
+                  setMiniVendorProfile(canSeeMiniVendor ? nextMiniVendorProfile : null);
+                } else {
+                  setMentorshipBundle(null);
+                  setMiniVendorProfile(null);
+                  setMiniVendorHiddenByOwner(false);
+                }
+
             } else {
                 addToast("Usuário não encontrado.", "error");
                 router.push(tenantPath("/dashboard"));
@@ -256,6 +327,10 @@ export default function PerfilPublicoPage() {
     };
     void fetchProfile();
   }, [params.id, user, activeTenantId, isOwnProfile, addToast, router, tenantPath]); // ðŸ¦ˆ Dependências adicionadas
+
+  useEffect(() => {
+    setShowRelationshipMenu(false);
+  }, [params.id]);
 
   const handleFollow = async () => {
       if (!user || !profile) return;
@@ -302,6 +377,95 @@ export default function PerfilPublicoPage() {
           } else {
             addToast("Erro ao seguir.", "error");
           }
+      }
+  };
+
+  const handleSendMentorshipInvite = async (mode: "mentor" | "mentee") => {
+      if (!user?.uid || !profile?.uid || !effectiveMentorshipTenantId || sendingMentorshipMode) return;
+      try {
+          setSendingMentorshipMode(mode);
+          await sendMentorshipInvite({
+              tenantId: effectiveMentorshipTenantId,
+              currentUserId: user.uid,
+              targetUserId: profile.uid,
+              mode,
+          });
+          const nextBundle = await fetchMentorshipProfileBundle({
+              tenantId: effectiveMentorshipTenantId,
+              targetUserId: profile.uid,
+              viewerUserId: user.uid,
+              forceRefresh: true,
+          });
+          setMentorshipBundle(nextBundle);
+          setShowRelationshipMenu(false);
+          addToast(
+            mode === "mentor"
+              ? "Convite para padrinho/madrinha enviado."
+              : "Convite para afilhado/afilhada enviado.",
+            "success"
+          );
+      } catch (error: unknown) {
+          console.error(error);
+          addToast(error instanceof Error ? error.message : "Erro ao enviar convite.", "error");
+      } finally {
+          setSendingMentorshipMode("");
+      }
+  };
+
+  const handleRemoveMentorship = async (relationshipId: string) => {
+      if (!isOwnProfile || !user?.uid || !profile?.uid || !effectiveMentorshipTenantId || !relationshipId || removingMentorshipId) return;
+      try {
+          setRemovingMentorshipId(relationshipId);
+          await respondToMentorshipInvite({
+              tenantId: effectiveMentorshipTenantId,
+              relationshipId,
+              currentUserId: user.uid,
+              action: "remove",
+          });
+          const nextBundle = await fetchMentorshipProfileBundle({
+              tenantId: effectiveMentorshipTenantId,
+              targetUserId: profile.uid,
+              viewerUserId: user.uid,
+              forceRefresh: true,
+          });
+          setMentorshipBundle(nextBundle);
+          addToast("Vinculo removido.", "success");
+      } catch (error: unknown) {
+          console.error(error);
+          addToast(error instanceof Error ? error.message : "Erro ao remover vinculo.", "error");
+      } finally {
+          setRemovingMentorshipId("");
+      }
+  };
+
+  const handleEditMentorshipLabel = async (
+      relationshipId: string,
+      roleSide: "mentor" | "mentee",
+      roleLabel: string
+  ) => {
+      if (!isOwnProfile || !user?.uid || !profile?.uid || !effectiveMentorshipTenantId || !relationshipId || editingMentorshipId) return;
+      try {
+          setEditingMentorshipId(relationshipId);
+          await updateMentorshipRoleLabel({
+              tenantId: effectiveMentorshipTenantId,
+              relationshipId,
+              currentUserId: user.uid,
+              roleSide,
+              roleLabel,
+          });
+          const nextBundle = await fetchMentorshipProfileBundle({
+              tenantId: effectiveMentorshipTenantId,
+              targetUserId: profile.uid,
+              viewerUserId: user.uid,
+              forceRefresh: true,
+          });
+          setMentorshipBundle(nextBundle);
+          addToast("Rotulo atualizado.", "success");
+      } catch (error: unknown) {
+          console.error(error);
+          addToast(error instanceof Error ? error.message : "Erro ao editar rotulo.", "error");
+      } finally {
+          setEditingMentorshipId("");
       }
   };
 
@@ -372,6 +536,14 @@ export default function PerfilPublicoPage() {
   const showRelacionamento = isOwnProfile || profile.relacionamentoPublico;
   const turmaImage = getTurmaImage(profile.turma);
   const badgeProps = { nome: profile.plano, cor: profile.plano_cor, iconName: profile.plano_icon };
+  const mentorshipLabels = mentorshipBundle?.labels || {
+    hubTitle: "Apadrinhamento",
+    mentorLabel: "Padrinho/Madrinha",
+    menteeLabel: "Afilhado/Afilhada",
+    inviteMentorLabel: "Adicionar como meu padrinho/madrinha",
+    inviteMenteeLabel: "Adicionar como meu afilhado/afilhada",
+    requestHelpText: "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atletica.",
+  };
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-24">
@@ -445,7 +617,43 @@ export default function PerfilPublicoPage() {
                 {isOwnProfile ? (
                     <Link href={tenantPath("/cadastro")} className="px-8 py-2 bg-zinc-800 rounded-full text-xs font-bold uppercase border border-zinc-700 hover:bg-zinc-700 hover:border-emerald-500 transition shadow-lg flex items-center gap-2"><Edit3 size={14}/> Editar Perfil</Link>
                 ) : (
-                    <button onClick={handleFollow} className={`px-8 py-2 rounded-full text-xs font-bold uppercase border transition shadow-lg flex items-center gap-2 ${isFollowing ? 'bg-zinc-900 border-zinc-700 text-zinc-400' : 'bg-emerald-600 border-emerald-500 text-white hover:scale-105'}`}>{isFollowing ? <UserCheck size={14}/> : <UserPlus size={14}/>} {isFollowing ? "Seguindo" : "Seguir"}</button>
+                    <div className="relative flex items-center gap-2">
+                        <button onClick={handleFollow} className={`px-8 py-2 rounded-full text-xs font-bold uppercase border transition shadow-lg flex items-center gap-2 ${isFollowing ? 'bg-zinc-900 border-zinc-700 text-zinc-400' : 'bg-emerald-600 border-emerald-500 text-white hover:scale-105'}`}>{isFollowing ? <UserCheck size={14}/> : <UserPlus size={14}/>} {isFollowing ? "Seguindo" : "Seguir"}</button>
+                        {user?.uid && effectiveMentorshipTenantId ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setShowRelationshipMenu((prev) => !prev)}
+                              className="rounded-full border border-zinc-700 bg-zinc-900 p-2 text-zinc-300 transition hover:border-zinc-500 hover:text-white"
+                              title="Mais acoes"
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+                            {showRelationshipMenu ? (
+                              <div className="absolute top-full right-0 z-30 mt-2 min-w-[240px] rounded-2xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSendMentorshipInvite("mentor")}
+                                  disabled={sendingMentorshipMode.length > 0 || (mentorshipBundle?.viewerMentorRequestStatus ?? "none") !== "none"}
+                                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <HeartHandshake size={14} className="text-emerald-400" />
+                                  {mentorshipLabels.inviteMentorLabel}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSendMentorshipInvite("mentee")}
+                                  disabled={sendingMentorshipMode.length > 0 || (mentorshipBundle?.viewerMenteeRequestStatus ?? "none") !== "none"}
+                                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <Users size={14} className="text-cyan-400" />
+                                  {mentorshipLabels.inviteMenteeLabel}
+                                </button>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
+                    </div>
                 )}
                 
                 <LevelBadge
@@ -481,7 +689,7 @@ export default function PerfilPublicoPage() {
             <div className="w-full max-w-sm">
                 <div className="flex justify-between border-b border-zinc-800 mb-4 overflow-x-auto">
                     {tabs.map((tab) => (
-                        <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors ${activeTab === tab ? 'border-emerald-500 text-emerald-500' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>{tab}</button>
+                        <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors ${activeTab === tab.id ? 'border-emerald-500 text-emerald-500' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>{tab.label}</button>
                     ))}
                 </div>
 
@@ -547,6 +755,145 @@ export default function PerfilPublicoPage() {
                                 ))}
                              </div>
                         ) : <div className="text-center text-zinc-600 text-xs py-4">Nenhum treino confirmado.</div>
+                    )}
+
+                    {activeTab === 'apadrinhamento' && (
+                        <div className="animate-in fade-in space-y-4">
+                            <div className="grid gap-4 md:grid-cols-2">
+                                {[{
+                                  title: mentorshipLabels.mentorLabel,
+                                  item: mentorshipBundle?.mentor,
+                                }, {
+                                  title: mentorshipLabels.menteeLabel,
+                                  item: mentorshipBundle?.mentee,
+                                }].map((section) => (
+                                  <div key={section.title} className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5 text-center">
+                                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                                        {section.item?.roleLabel || section.title}
+                                      </p>
+                                      {section.item ? (
+                                        <div className="mt-4">
+                                          <Link href={tenantPath(`/perfil/${section.item.user.uid}`)} className="block">
+                                            <div className="mx-auto relative h-32 w-32 overflow-hidden rounded-full border-4 border-zinc-800 bg-zinc-950 shadow-2xl">
+                                                <Image
+                                                  src={section.item.user.foto || "https://github.com/shadcn.png"}
+                                                  alt={section.item.user.nome}
+                                                  fill
+                                                  sizes="128px"
+                                                  className="object-cover"
+                                                />
+                                            </div>
+                                            <p className="mt-4 text-base font-black uppercase text-white">{section.item.user.nome}</p>
+                                            <p className="text-[11px] font-bold uppercase text-zinc-500">{section.item.user.turma || "Sem turma"}</p>
+                                            <p className="mt-2 text-[11px] font-bold text-emerald-300">Abrir perfil</p>
+                                          </Link>
+                                          {isOwnProfile ? (
+                                            <div className="mt-4 flex flex-wrap justify-center gap-2">
+                                              {resolveMentorshipRoleOptions(
+                                                mentorshipLabels,
+                                                section.item!.ownerRoleSide
+                                              ).length > 1 ? (
+                                                <div className="w-full text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                                                  Meu rotulo
+                                                </div>
+                                              ) : null}
+                                              {resolveMentorshipRoleOptions(
+                                                mentorshipLabels,
+                                                section.item!.ownerRoleSide
+                                              ).length > 1
+                                                ? resolveMentorshipRoleOptions(
+                                                    mentorshipLabels,
+                                                    section.item!.ownerRoleSide
+                                                  ).map((option) => (
+                                                      <button
+                                                        key={option}
+                                                        type="button"
+                                                        onClick={() =>
+                                                          void handleEditMentorshipLabel(
+                                                            section.item!.relationshipId,
+                                                            section.item!.ownerRoleSide,
+                                                            option
+                                                          )
+                                                        }
+                                                        disabled={
+                                                          editingMentorshipId === section.item!.relationshipId ||
+                                                          option === section.item!.ownerRoleLabel
+                                                        }
+                                                        className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[11px] font-black uppercase disabled:opacity-60 ${
+                                                          option === section.item!.ownerRoleLabel
+                                                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                                            : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-500 hover:text-white"
+                                                        }`}
+                                                      >
+                                                        {editingMentorshipId === section.item!.relationshipId &&
+                                                        option !== section.item!.ownerRoleLabel ? (
+                                                          <Loader2 size={14} className="animate-spin" />
+                                                        ) : (
+                                                          <HeartHandshake size={14} />
+                                                        )}
+                                                        {option}
+                                                      </button>
+                                                    ))
+                                                : null}
+                                              <button
+                                                type="button"
+                                                onClick={() => void handleRemoveMentorship(section.item!.relationshipId)}
+                                                disabled={removingMentorshipId === section.item!.relationshipId}
+                                                className="inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-4 py-2 text-[11px] font-black uppercase text-red-300 hover:bg-red-500/20 disabled:opacity-60"
+                                              >
+                                                {removingMentorshipId === section.item.relationshipId ? (
+                                                  <Loader2 size={14} className="animate-spin" />
+                                                ) : (
+                                                  <X size={14} />
+                                                )}
+                                                Remover
+                                              </button>
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      ) : (
+                                        <div className="mt-4 flex flex-col items-center">
+                                            <div className="h-32 w-32 rounded-full border border-dashed border-zinc-800 bg-black/20" />
+                                        </div>
+                                      )}
+                                  </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'mini_vendor' && (
+                        miniVendorProfile ? (
+                            <div className="animate-in fade-in rounded-3xl border border-zinc-800 bg-zinc-900/70 p-6 text-center">
+                                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Mini Vendor</p>
+                                <div className="mx-auto mt-5 relative h-32 w-32 overflow-hidden rounded-full border-4 border-zinc-800 bg-zinc-950 shadow-2xl">
+                                    <Image
+                                      src={miniVendorProfile.logoUrl || profile.foto || "https://github.com/shadcn.png"}
+                                      alt={miniVendorProfile.storeName || "Mini Vendor"}
+                                      fill
+                                      sizes="128px"
+                                      className="object-cover"
+                                    />
+                                </div>
+                                <p className="mt-4 text-lg font-black uppercase text-white">{miniVendorProfile.storeName || "Mini Vendor"}</p>
+                                <p className="text-[11px] font-bold uppercase text-zinc-500">{profile.turma || "Sem turma"}</p>
+                                <p className="mt-3 text-sm text-zinc-400">{miniVendorProfile.description || "Loja mini vendor ativa neste perfil."}</p>
+                                <div className="mt-4 flex justify-center">
+                                    <Link href={tenantPath(`/perfil/mini-vendor/${miniVendorProfile.id}`)} className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20">
+                                        <Store size={14} />
+                                        Abrir Mini Vendor
+                                    </Link>
+                                </div>
+                            </div>
+                        ) : miniVendorHiddenByOwner ? (
+                            <div className="rounded-3xl border border-dashed border-zinc-800 bg-zinc-900/40 p-6 text-center text-sm text-zinc-400">
+                                {isOwnProfile
+                                  ? "Sua Mini Vendor esta oculta nesta aba enquanto o perfil publico da loja estiver desligado."
+                                  : "Essa Mini Vendor esta oculta neste perfil no momento."}
+                            </div>
+                        ) : (
+                            <div className="text-center text-zinc-600 text-xs py-4">Esse perfil ainda nao criou Mini Vendor publico.</div>
+                        )
                     )}
                 </div>
             </div>

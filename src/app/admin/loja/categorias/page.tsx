@@ -5,7 +5,9 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
+  ChevronDown,
   ExternalLink,
+  GripVertical,
   ImagePlus,
   Loader2,
   Pencil,
@@ -20,6 +22,7 @@ import { useToast } from "@/context/ToastContext";
 import {
   fetchAdminStoreBundle,
   renameStoreProductsCategory,
+  saveStoreCategoryDisplayOrder,
   upsertStoreCategory,
 } from "@/lib/storeService";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -37,6 +40,7 @@ type CategoryRow = {
   cover_img?: string;
   button_color?: string;
   logo_url?: string;
+  display_order?: number | null;
   seller_type?: string;
   seller_id?: string;
 };
@@ -62,6 +66,7 @@ type DisplayCategory = {
   coverImg: string;
   logoUrl: string;
   buttonColor: string;
+  displayOrder: number | null;
   sellerType: "tenant" | "mini_vendor";
   sellerId: string;
   derivedOnly: boolean;
@@ -77,6 +82,27 @@ const buildEmptyForm = (buttonColor: string): CategoryFormState => ({
 });
 
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
+const asInt = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.floor(parsed));
+    }
+  }
+  return null;
+};
+const arraysEqual = (left: string[], right: string[]): boolean =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+const moveListItem = <T,>(items: T[], fromIndex: number, toIndex: number): T[] => {
+  if (fromIndex === toIndex) return items;
+  const next = [...items];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+};
 
 const resolveSellerType = (value: unknown): "tenant" | "mini_vendor" =>
   asString(value).trim().toLowerCase() === "mini_vendor" ? "mini_vendor" : "tenant";
@@ -107,9 +133,13 @@ export default function AdminLojaCategoriasPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [editingCategoryKey, setEditingCategoryKey] = useState<string | null>(null);
+  const [orderedCategoryKeys, setOrderedCategoryKeys] = useState<string[]>([]);
+  const [draggingCategoryKey, setDraggingCategoryKey] = useState<string | null>(null);
+  const [isOrderPanelOpen, setIsOrderPanelOpen] = useState(true);
   const [form, setForm] = useState<CategoryFormState>(() => buildEmptyForm(tenantCategoryColor));
 
   useEffect(() => {
@@ -186,9 +216,10 @@ export default function AdminLojaCategoriasPage() {
           sellerType === "tenant"
             ? cleanTenantLogoUrl || asString(row.logo_url).trim()
             : asString(row.logo_url).trim(),
-          buttonColor:
+        buttonColor:
           asString(row.button_color).trim() ||
           (sellerType === "mini_vendor" ? MINI_VENDOR_COLOR_DEFAULT : tenantCategoryColor),
+        displayOrder: asInt(row.display_order),
         sellerType,
         sellerId,
         derivedOnly: false,
@@ -225,6 +256,7 @@ export default function AdminLojaCategoriasPage() {
         logoUrl: productLogoUrl,
         buttonColor:
           sellerType === "mini_vendor" ? MINI_VENDOR_COLOR_DEFAULT : tenantCategoryColor,
+        displayOrder: null,
         sellerType,
         sellerId,
         derivedOnly: true,
@@ -232,6 +264,13 @@ export default function AdminLojaCategoriasPage() {
     });
 
     return Array.from(rows.values()).sort((left, right) => {
+      if (left.displayOrder !== null || right.displayOrder !== null) {
+        if (left.displayOrder === null) return 1;
+        if (right.displayOrder === null) return -1;
+        if (left.displayOrder !== right.displayOrder) {
+          return left.displayOrder - right.displayOrder;
+        }
+      }
       if (left.sellerType !== right.sellerType) {
         return left.sellerType === "tenant" ? -1 : 1;
       }
@@ -269,6 +308,55 @@ export default function AdminLojaCategoriasPage() {
         : null,
     [displayedCategories, editingCategoryKey]
   );
+  const orderableCategoryMap = useMemo(
+    () =>
+      new Map(
+        displayedCategories
+          .filter((row) => Boolean(row.categoryId))
+          .map((row) => [row.key, row])
+      ),
+    [displayedCategories]
+  );
+  const defaultOrderedKeys = useMemo(
+    () =>
+      displayedCategories
+        .filter((row) => Boolean(row.categoryId))
+        .map((row) => row.key),
+    [displayedCategories]
+  );
+  const orderableCategories = useMemo(
+    () =>
+      orderedCategoryKeys
+        .map((key) => orderableCategoryMap.get(key) ?? null)
+        .filter((row): row is DisplayCategory => row !== null),
+    [orderableCategoryMap, orderedCategoryKeys]
+  );
+  const nonOrderableCategoriesCount = displayedCategories.length - orderableCategories.length;
+  const isOrderDirty = useMemo(
+    () => !arraysEqual(orderedCategoryKeys, defaultOrderedKeys),
+    [defaultOrderedKeys, orderedCategoryKeys]
+  );
+
+  useEffect(() => {
+    setOrderedCategoryKeys((previous) => {
+      if (defaultOrderedKeys.length === 0) return [];
+      if (previous.length === 0) return defaultOrderedKeys;
+
+      const previousFiltered = previous.filter((key) => defaultOrderedKeys.includes(key));
+      const missingKeys = defaultOrderedKeys.filter((key) => !previousFiltered.includes(key));
+      const merged = [...previousFiltered, ...missingKeys];
+      return arraysEqual(merged, previous) ? previous : merged;
+    });
+  }, [defaultOrderedKeys]);
+
+  const moveCategoryInOrder = useCallback((sourceKey: string, targetKey: string) => {
+    setOrderedCategoryKeys((previous) => {
+      const sourceIndex = previous.indexOf(sourceKey);
+      const targetIndex = previous.indexOf(targetKey);
+      if (sourceIndex < 0 || targetIndex < 0) return previous;
+      return moveListItem(previous, sourceIndex, targetIndex);
+    });
+  }, []);
 
   const resetForm = () => {
     setEditingCategoryKey(null);
@@ -380,6 +468,37 @@ export default function AdminLojaCategoriasPage() {
   const previewCover = form.coverImg.trim() || previewLogo;
   const previewColor = form.buttonColor.trim() || tenantCategoryColor;
 
+  const handleSaveOrder = async () => {
+    const tenantId = activeTenantId.trim();
+    const orderedCategoryIds = orderableCategories
+      .map((row) => row.categoryId)
+      .filter((row): row is string => Boolean(row));
+
+    if (!tenantId) {
+      addToast("Abra um tenant valido antes de salvar a ordem.", "error");
+      return;
+    }
+    if (orderedCategoryIds.length === 0) {
+      addToast("Nenhuma categoria persistida para ordenar.", "info");
+      return;
+    }
+
+    try {
+      setSavingOrder(true);
+      await saveStoreCategoryDisplayOrder({
+        orderedCategoryIds,
+        tenantId,
+      });
+      await loadData(true);
+      addToast("Ordem das categorias salva.", "success");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao salvar a ordem das categorias.", "error");
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#050505] pb-20 font-sans text-white">
       <header className="sticky top-0 z-20 border-b border-zinc-800 bg-[#050505]/90 px-6 py-5 backdrop-blur-md">
@@ -474,6 +593,116 @@ export default function AdminLojaCategoriasPage() {
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-800 bg-black/20 p-4 md:col-span-2">
+                <button
+                  type="button"
+                  onClick={() => setIsOrderPanelOpen((previous) => !previous)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                >
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                      Ordem publica das categorias
+                    </p>
+                    <p className="mt-2 text-sm text-zinc-300">
+                      Arraste para definir a ordem em que as categorias aparecem na loja.
+                    </p>
+                  </div>
+                  <ChevronDown
+                    size={18}
+                    className={`text-zinc-400 transition ${isOrderPanelOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+
+                {isOrderPanelOpen ? (
+                  <div className="mt-4 space-y-3">
+                    {orderableCategories.length === 0 ? (
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 text-sm text-zinc-500">
+                        Salve pelo menos uma categoria para poder ordenar aqui.
+                      </div>
+                    ) : (
+                      orderableCategories.map((row, index) => (
+                        <div
+                          key={row.key}
+                          draggable
+                          onDragStart={() => setDraggingCategoryKey(row.key)}
+                          onDragEnd={() => setDraggingCategoryKey(null)}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            if (!draggingCategoryKey || draggingCategoryKey === row.key) return;
+                            moveCategoryInOrder(draggingCategoryKey, row.key);
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            if (!draggingCategoryKey || draggingCategoryKey === row.key) return;
+                            moveCategoryInOrder(draggingCategoryKey, row.key);
+                            setDraggingCategoryKey(null);
+                          }}
+                          className={`flex items-center gap-3 rounded-2xl border px-4 py-3 transition ${
+                            draggingCategoryKey === row.key
+                              ? "border-emerald-500/40 bg-emerald-500/10"
+                              : "border-zinc-800 bg-zinc-950/80"
+                          }`}
+                        >
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-black text-[11px] font-black text-zinc-300">
+                            {index + 1}
+                          </span>
+                          <div className="inline-flex cursor-grab items-center justify-center rounded-xl border border-zinc-700 bg-black/40 p-2 text-zinc-400 active:cursor-grabbing">
+                            <GripVertical size={14} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate text-sm font-bold text-white">{row.nome}</p>
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${
+                                  row.sellerType === "mini_vendor"
+                                    ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
+                                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                }`}
+                              >
+                                {row.sellerType === "mini_vendor" ? "Mini Vendor" : "Tenant"}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-[11px] text-zinc-500">
+                              {row.sellerType === "mini_vendor"
+                                ? "Categoria publica da lojinha aprovada."
+                                : "Categoria publica do tenant."}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+
+                    {nonOrderableCategoriesCount > 0 ? (
+                      <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/10 p-3 text-[11px] text-yellow-100">
+                        {nonOrderableCategoriesCount} categoria
+                        {nonOrderableCategoriesCount === 1 ? "" : "s"} ainda aparece
+                        apenas nos produtos. Complete o cadastro dela antes de arrastar.
+                      </div>
+                    ) : null}
+
+                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setOrderedCategoryKeys(defaultOrderedKeys)}
+                        disabled={!isOrderDirty || savingOrder}
+                        className="rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-xs font-black uppercase text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                      >
+                        Restaurar ordem
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveOrder()}
+                        disabled={!isOrderDirty || savingOrder}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-black uppercase text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                      >
+                        {savingOrder ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                        {savingOrder ? "Salvando ordem..." : "Salvar ordem"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
               <label className="space-y-1 md:col-span-2">
                 <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
                   Nome da categoria
