@@ -372,10 +372,6 @@ export default function PublicLandingPage({
           const response = await fetch(`/api/public/landing?${searchParams.toString()}`, {
             cache: "no-store",
           });
-          if (response.status === 404 && tenantSlug) {
-            router.replace(withTenantSlug(tenantSlug, "/nao-encontrado"));
-            return;
-          }
           if (!response.ok) {
             throw new Error(`Falha ao carregar landing: ${response.status}`);
           }

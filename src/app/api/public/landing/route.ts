@@ -139,6 +139,17 @@ const buildTenantFallbackBrand = (tenantSlug: string): PublicLandingBrand => {
   };
 };
 
+const resolveSupabaseHost = (): string => {
+  const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  if (!rawUrl.trim()) return "missing";
+
+  try {
+    return new URL(rawUrl).host;
+  } catch {
+    return "invalid";
+  }
+};
+
 const resolveRequestIp = (request: Request): string => {
   const forwardedFor = request.headers.get("x-forwarded-for") || "";
   const firstForwardedIp = forwardedFor.split(",")[0]?.trim();
@@ -425,24 +436,14 @@ export async function GET(request: Request) {
     }
 
     if (tenantSlug && !tenant) {
-      const payload = { error: "Atletica nao encontrada." };
-      QueryMonitor.recordQuery({
-        endpoint: LANDING_ENDPOINT,
-        method: "GET",
-        durationMs: Date.now() - startedAt,
-        payloadBytes: measurePayloadBytes(payload),
-        cacheHit: false,
-        statusCode: 404,
-        tenantId: tenantSlug,
-        error: payload.error,
-      });
-      return NextResponse.json(payload, {
-        status: 404,
-        headers: {
-          "Cache-Control": "no-store",
-          "X-RateLimit-Remaining": String(rateLimit.remaining),
-        },
-      });
+      console.error(
+        "[public landing] tenant slug nao encontrado no lookup server-side",
+        JSON.stringify({
+          tenantSlug,
+          supabaseHost: resolveSupabaseHost(),
+          scope: cacheScope,
+        })
+      );
     }
 
     const brand =
