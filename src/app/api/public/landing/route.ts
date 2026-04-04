@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
@@ -31,8 +32,9 @@ import { TENANT_SLUG_COOKIE_NAME } from "@/lib/tenantRouting";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
-const LANDING_ROUTE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const LANDING_BRAND_CACHE_TTL_MS = 5 * 60 * 1000;
 const LANDING_SERVER_CACHE_TTL_MS = 10 * 60 * 1000;
+const LANDING_FALLBACK_SERVER_CACHE_TTL_MS = 60 * 1000;
 const LANDING_ENDPOINT = "/api/public/landing";
 
 const DEFAULT_PLATFORM_BRAND: PublicLandingBrand = {
@@ -47,6 +49,13 @@ const SITE_CONFIG_TABLE = "site_config";
 type TenantPublicBrand = {
   tenantId: string;
   brand: PublicLandingBrand;
+  version: string;
+};
+
+type LandingConfigResolution = {
+  config: LandingConfig;
+  source: "official" | "fallback";
+  version: string;
 };
 
 type RouteCacheEntry<T> = {
@@ -55,12 +64,12 @@ type RouteCacheEntry<T> = {
 };
 
 const tenantBrandCache = new Map<string, RouteCacheEntry<TenantPublicBrand | null>>();
-const landingConfigCache = new Map<string, RouteCacheEntry<LandingConfig>>();
 const LANDING_CONFIG_SELECT_CANDIDATES = ["id,data", "id,config", "id,payload", "*"] as const;
 
 const fallbackPayload = (
   config: LandingConfig = DEFAULT_LANDING_CONFIG,
-  brand: PublicLandingBrand = DEFAULT_PLATFORM_BRAND
+  brand: PublicLandingBrand = DEFAULT_PLATFORM_BRAND,
+  source: "official" | "fallback" = "fallback"
 ): PublicLandingPayload => ({
   config,
   usersCount: 0,
@@ -68,6 +77,7 @@ const fallbackPayload = (
   partnersCount: 0,
   partners: [],
   brand,
+  source,
 });
 
 const resolveLandingFallbackConfig = (tenantScope: boolean): LandingConfig =>
@@ -98,11 +108,12 @@ const measurePayloadBytes = (payload: unknown): number => {
 
 const getRouteCacheValue = <T>(
   cache: Map<string, RouteCacheEntry<T>>,
-  key: string
+  key: string,
+  ttlMs: number
 ): T | null => {
   const cached = cache.get(key);
   if (!cached) return null;
-  if (Date.now() - cached.cachedAt > LANDING_ROUTE_CACHE_TTL_MS) {
+  if (Date.now() - cached.cachedAt > ttlMs) {
     cache.delete(key);
     return null;
   }
@@ -175,6 +186,11 @@ const mapTenantEntryToBrand = (
     subtitle: tenant.curso || tenant.faculdade || "Landing oficial da atletica.",
     logoUrl: tenant.logoUrl || PLATFORM_LOGO_URL,
   },
+  version:
+    tenant.updatedAt.trim() ||
+    tenant.createdAt.trim() ||
+    tenant.id.trim() ||
+    tenant.slug.trim().toLowerCase(),
 });
 
 const resolveTenantPublicBrand = async (
@@ -188,7 +204,11 @@ const resolveTenantPublicBrand = async (
     tenantBrandCache.delete(cleanTenantSlug);
   }
 
-  const cached = getRouteCacheValue(tenantBrandCache, cleanTenantSlug);
+  const cached = getRouteCacheValue(
+    tenantBrandCache,
+    cleanTenantSlug,
+    LANDING_BRAND_CACHE_TTL_MS
+  );
   if (cached !== null || tenantBrandCache.has(cleanTenantSlug)) {
     return cached;
   }
@@ -214,21 +234,36 @@ const extractConfigPayload = (raw: unknown): unknown => {
   return raw;
 };
 
+const hashPayloadVersion = (payload: unknown): string => {
+  try {
+    return createHash("sha1")
+      .update(JSON.stringify(payload) || "null")
+      .digest("hex")
+      .slice(0, 16);
+  } catch {
+    return "unknown";
+  }
+};
+
+const resolveLandingConfigVersion = (rowId: string, raw: unknown): string => {
+  if (raw && typeof raw === "object") {
+    const record = raw as Record<string, unknown>;
+    if (typeof record.updated_at === "string" && record.updated_at.trim()) {
+      return `${rowId}:${record.updated_at.trim()}`;
+    }
+  }
+
+  return `${rowId}:${hashPayloadVersion(extractConfigPayload(raw))}`;
+};
+
 const fetchLandingConfigWithAdmin = async (
   tenantId?: string,
-  forceRefresh = false,
   tenantScopedFallback = false
-): Promise<LandingConfig> => {
+): Promise<LandingConfigResolution> => {
   const cleanTenantId = (tenantId || "").trim();
-  const cacheKey = cleanTenantId || (tenantScopedFallback ? "tenant-default" : "default");
   const fallbackConfig = resolveLandingFallbackConfig(
     cleanTenantId.length > 0 || tenantScopedFallback
   );
-  if (forceRefresh) {
-    landingConfigCache.delete(cacheKey);
-  }
-  const cached = getRouteCacheValue(landingConfigCache, cacheKey);
-  if (cached) return cached;
 
   const fetchRowAttempt = async (
     rowId: string,
@@ -275,31 +310,56 @@ const fetchLandingConfigWithAdmin = async (
     return null;
   };
 
-  const attempts: Array<() => Promise<unknown>> = cleanTenantId
+  const attempts: Array<{ rowId: string; load: () => Promise<unknown> }> = cleanTenantId
     ? [
-        () => fetchRowAttempt(`${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`, "tenant"),
-        () => fetchRowAttempt(`${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`, "any"),
-        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "tenant"),
-        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "global"),
-        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "any"),
+        {
+          rowId: `${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`,
+          load: () => fetchRowAttempt(`${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`, "tenant"),
+        },
+        {
+          rowId: `${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`,
+          load: () => fetchRowAttempt(`${LANDING_CONFIG_ROW_ID}__${cleanTenantId}`, "any"),
+        },
+        {
+          rowId: LANDING_CONFIG_ROW_ID,
+          load: () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "tenant"),
+        },
+        {
+          rowId: LANDING_CONFIG_ROW_ID,
+          load: () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "global"),
+        },
+        {
+          rowId: LANDING_CONFIG_ROW_ID,
+          load: () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "any"),
+        },
       ]
     : [
-        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "global"),
-        () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "any"),
+        {
+          rowId: LANDING_CONFIG_ROW_ID,
+          load: () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "global"),
+        },
+        {
+          rowId: LANDING_CONFIG_ROW_ID,
+          load: () => fetchRowAttempt(LANDING_CONFIG_ROW_ID, "any"),
+        },
       ];
 
   for (const attempt of attempts) {
-    const data = await attempt();
+    const data = await attempt.load();
     if (data) {
-        return setRouteCacheValue(
-          landingConfigCache,
-          cacheKey,
-          sanitizeLandingConfig(extractConfigPayload(data), fallbackConfig)
-        );
-      }
+      return {
+        config: sanitizeLandingConfig(extractConfigPayload(data), fallbackConfig),
+        source: "official",
+        version: resolveLandingConfigVersion(attempt.rowId, data),
+      };
     }
+  }
 
-  return setRouteCacheValue(landingConfigCache, cacheKey, fallbackConfig);
+  return {
+    config: fallbackConfig,
+    source: "fallback",
+    version: `fallback:${cleanTenantId || (tenantScopedFallback ? "tenant-default" : "default")}`,
+  };
 };
 
 export async function GET(request: Request) {
@@ -346,47 +406,73 @@ export async function GET(request: Request) {
       .trim()
       .toLowerCase();
     const tenantSlug = scope === "platform" ? "" : queryTenantSlug || cookieTenantSlug;
-    const cacheKey = `public:landing:${scope || "default"}:${tenantSlug || "platform"}`;
+    const cacheScope = tenantSlug ? "tenant" : "platform";
+    const cacheKeyBase = `public:landing:${cacheScope}:${tenantSlug || "platform"}`;
     if (shouldRefresh) {
       revalidateLandingPaths(scope, tenantSlug);
-      ServerCache.delete(cacheKey);
+      ServerCache.invalidatePattern(`${cacheKeyBase}:*`);
       if (tenantSlug) {
         tenantBrandCache.delete(tenantSlug);
       }
     }
+    let tenant: TenantPublicBrand | null = null;
+    if (tenantSlug) {
+      try {
+        tenant = await resolveTenantPublicBrand(tenantSlug, shouldRefresh);
+      } catch (tenantError: unknown) {
+        console.warn("Landing publica: falha ao resolver marca do tenant.", tenantError);
+      }
+    }
+
+    if (tenantSlug && !tenant) {
+      const payload = { error: "Atletica nao encontrada." };
+      QueryMonitor.recordQuery({
+        endpoint: LANDING_ENDPOINT,
+        method: "GET",
+        durationMs: Date.now() - startedAt,
+        payloadBytes: measurePayloadBytes(payload),
+        cacheHit: false,
+        statusCode: 404,
+        tenantId: tenantSlug,
+        error: payload.error,
+      });
+      return NextResponse.json(payload, {
+        status: 404,
+        headers: {
+          "Cache-Control": "no-store",
+          "X-RateLimit-Remaining": String(rateLimit.remaining),
+        },
+      });
+    }
+
+    const brand =
+      tenant?.brand ??
+      (tenantSlug ? buildTenantFallbackBrand(tenantSlug) : DEFAULT_PLATFORM_BRAND);
+    const fallbackConfig = resolveLandingFallbackConfig(Boolean(tenant?.tenantId || tenantSlug));
+
+    let configResolution: LandingConfigResolution = {
+      config: fallbackConfig,
+      source: "fallback",
+      version: `fallback:${tenant?.tenantId || tenantSlug || "platform"}`,
+    };
+    try {
+      configResolution = await fetchLandingConfigWithAdmin(
+        tenant?.tenantId || "",
+        Boolean(tenantSlug)
+      );
+    } catch (configError: unknown) {
+      console.warn("Landing publica: falha ao carregar config da landing.", configError);
+    }
+
+    const cacheKey = `${cacheKeyBase}:${tenant?.version || "platform"}:${configResolution.version}`;
     const cachedPayload = shouldRefresh ? null : ServerCache.get<PublicLandingPayload>(cacheKey);
     const cacheHit = cachedPayload !== null;
     const payload =
       cachedPayload ??
       (await (async (): Promise<PublicLandingPayload> => {
-        let tenant: TenantPublicBrand | null = null;
-        if (tenantSlug) {
-          try {
-            tenant = await resolveTenantPublicBrand(tenantSlug, shouldRefresh);
-          } catch (tenantError: unknown) {
-            console.warn("Landing publica: falha ao resolver marca do tenant.", tenantError);
-          }
-        }
+        const config = configResolution.config;
 
-        const brand =
-          tenant?.brand ??
-          (tenantSlug ? buildTenantFallbackBrand(tenantSlug) : DEFAULT_PLATFORM_BRAND);
-        const fallbackConfig = resolveLandingFallbackConfig(
-          Boolean(tenant?.tenantId || tenantSlug)
-        );
-
-        let config = fallbackConfig;
-        try {
-          config = await fetchLandingConfigWithAdmin(
-            tenant?.tenantId || "",
-            shouldRefresh,
-            Boolean(tenantSlug)
-          );
-        } catch (configError: unknown) {
-          console.warn("Landing publica: falha ao carregar config da landing.", configError);
-        }
-
-        let data = fallbackPayload(config, brand);
+        let data = fallbackPayload(config, brand, configResolution.source);
         try {
           const hiddenPartnerIds = new Set(config.hiddenPartnerIds || []);
           const partners = tenant?.tenantId
@@ -401,9 +487,11 @@ export async function GET(request: Request) {
               fallbackConfig,
               prefetchedConfig: config,
               tenantId: tenant?.tenantId || "",
+              includePartners: false,
             })),
             partners,
             brand,
+            source: configResolution.source,
           };
         } catch (dataError: unknown) {
           console.warn("Landing publica: falha ao montar dados publicos da landing.", dataError);
@@ -414,8 +502,15 @@ export async function GET(request: Request) {
           tenantId: tenant?.tenantId || "",
           config,
           brand,
+          source: configResolution.source,
         } satisfies PublicLandingPayload;
-        ServerCache.set(cacheKey, nextPayload, LANDING_SERVER_CACHE_TTL_MS);
+        ServerCache.set(
+          cacheKey,
+          nextPayload,
+          configResolution.source === "official"
+            ? LANDING_SERVER_CACHE_TTL_MS
+            : LANDING_FALLBACK_SERVER_CACHE_TTL_MS
+        );
         return nextPayload;
       })());
 
@@ -442,7 +537,8 @@ export async function GET(request: Request) {
       : DEFAULT_PLATFORM_BRAND;
     const payload = fallbackPayload(
       resolveLandingFallbackConfig(queryTenantSlug.length > 0),
-      fallbackBrand
+      fallbackBrand,
+      "fallback"
     );
     QueryMonitor.recordQuery({
       endpoint: LANDING_ENDPOINT,

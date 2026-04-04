@@ -110,6 +110,7 @@ export interface PublicLandingBrand {
 export interface PublicLandingPayload extends PublicLandingData {
   tenantId?: string;
   brand: PublicLandingBrand;
+  source?: "official" | "fallback";
 }
 
 export async function fetchPublicLandingData(options?: {
@@ -117,10 +118,12 @@ export async function fetchPublicLandingData(options?: {
   fallbackConfig?: LandingConfig;
   tenantId?: string | null;
   prefetchedConfig?: LandingConfig;
+  includePartners?: boolean;
 }): Promise<PublicLandingData> {
   const forceRefresh = options?.forceRefresh ?? false;
   const tenantId = options?.tenantId?.trim() || "";
-  const cacheKey = tenantId || "default";
+  const includePartners = options?.includePartners ?? true;
+  const cacheKey = `${tenantId || "default"}:${includePartners ? "partners" : "counts-only"}`;
   const fallbackConfig =
     options?.fallbackConfig ??
     (tenantId ? DEFAULT_TENANT_LANDING_CONFIG : DEFAULT_LANDING_CONFIG);
@@ -146,7 +149,7 @@ export async function fetchPublicLandingData(options?: {
         { tableName: "parceiros", countColumn: "id" },
         { tableName: "partners", countColumn: "id" },
       ]),
-      tenantId
+      tenantId && includePartners
         ? fetchPublicPartners({
             maxResults: 120,
             forceRefresh,
