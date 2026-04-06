@@ -173,8 +173,6 @@ export default function CadastroPage() {
     (effectiveTenantSlug ? effectiveTenantSlug.toUpperCase() : "") ||
     effectiveTenantId ||
     "a atletica do convite";
-  const inviteRequiresApproval = inviteResolvedContext?.invite.requiresApproval ?? true;
-  
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false); 
   const [loadingTurmas, setLoadingTurmas] = useState(true);
@@ -752,28 +750,6 @@ export default function CadastroPage() {
                 </div>
 
                 <h1 className="text-3xl font-black uppercase italic tracking-tighter">Perfil do <span className="text-emerald-500">Atleta</span></h1>
-                {hasInviteToken && (
-                    <div className="mt-3 bg-cyan-500/10 border border-cyan-500/20 p-3 rounded-xl max-w-xl mx-auto">
-                        <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wide">
-                            {inviteContextLoading
-                              ? "Validando de qual atletica veio esse convite..."
-                              : inviteRequiresApproval
-                                ? `Convite de ${inviteTenantLabel} detectado: ao concluir, seu acesso fica aguardando aprovacao.`
-                                : `Convite de ${inviteTenantLabel} detectado: ao concluir, seu acesso entra direto nessa atletica.`}
-                        </p>
-                        <p className="mt-2 text-[11px] text-cyan-100/80">
-                            {inviteContextLoading ? (
-                              "Assim que a validacao terminar, seu cadastro fica preso exatamente na atletica emissora do token."
-                            ) : (
-                              <>
-                                Este link ja trava seu cadastro em{" "}
-                                <span className="font-black text-cyan-200">{inviteTenantLabel}</span> e essa atletica nao pode ser alterada neste fluxo.
-                              </>
-                            )}
-                        </p>
-                    </div>
-                )}
-                
                 {/* AVISO DE FOTO */}
                 <div className="mt-4 bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl max-w-sm mx-auto">
                     <p className="text-[10px] text-yellow-400 font-bold uppercase tracking-wide flex items-center justify-center gap-2">

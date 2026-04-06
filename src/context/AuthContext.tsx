@@ -26,7 +26,7 @@ import {
 } from "@/lib/tenantContext";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import {
-  buildLoginRedirectUrl,
+  buildInviteAwareLoginRedirectUrl,
   readStoredLoginReturnTo,
   sanitizeReturnToPath,
   storeLoginReturnTo,
@@ -178,7 +178,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
-  loginGoogle: (options?: { returnTo?: string }) => Promise<void>;
+  loginGoogle: (options?: { returnTo?: string; inviteToken?: string }) => Promise<void>;
   loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
   checkPermission: (allowedRoles: string[]) => boolean;
@@ -1430,7 +1430,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // --- FUNÃƒâ€¡Ãƒâ€¢ES PÃƒÅ¡BLICAS ---
 
-  const loginGoogle = async (options?: { returnTo?: string }) => {
+  const loginGoogle = async (options?: { returnTo?: string; inviteToken?: string }) => {
     try {
       if (isLocalGuest) {
           localStorage.removeItem("shark_guest_session");
@@ -1439,7 +1439,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const desiredReturnTo = sanitizeReturnToPath(options?.returnTo);
       storeLoginReturnTo(desiredReturnTo);
-      const redirectTo = buildLoginRedirectUrl(desiredReturnTo);
+      const redirectTo = buildInviteAwareLoginRedirectUrl(
+        desiredReturnTo,
+        options?.inviteToken
+      );
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",

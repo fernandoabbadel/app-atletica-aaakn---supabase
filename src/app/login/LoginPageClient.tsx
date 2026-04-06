@@ -313,7 +313,10 @@ export default function LoginPageClient() {
   const handleGoogleLogin = async () => {
     try {
       setIsLoading(true);
-      await loginGoogle({ returnTo: inviteAwareReturnTo });
+      await loginGoogle({
+        returnTo: inviteAwareReturnTo,
+        inviteToken: effectiveInviteToken || undefined,
+      });
     } catch {
       setIsLoading(false);
     }

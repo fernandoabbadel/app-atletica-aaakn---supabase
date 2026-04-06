@@ -56,6 +56,18 @@ export const buildAbsoluteAppUrl = (path: string): string | undefined => {
 export const buildLoginRedirectUrl = (returnTo?: string): string | undefined =>
   buildAbsoluteAppUrl(buildLoginPath(returnTo));
 
+export const buildInviteAwareLoginRedirectUrl = (
+  returnTo?: string,
+  inviteToken?: string | null
+): string | undefined => {
+  const loginPath = buildLoginPath(returnTo);
+  const safeInviteToken = typeof inviteToken === "string" ? inviteToken.trim() : "";
+  const loginPathWithInvite = safeInviteToken
+    ? `${loginPath}&invite=${encodeURIComponent(safeInviteToken)}`
+    : loginPath;
+  return buildAbsoluteAppUrl(loginPathWithInvite);
+};
+
 export const storeLoginReturnTo = (returnTo?: string): string => {
   const safeReturnTo = sanitizeReturnToPath(returnTo);
   if (typeof window !== "undefined") {

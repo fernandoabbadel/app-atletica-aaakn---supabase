@@ -49,7 +49,11 @@ import {
   INVITE_REQUIRED_PATH,
   resolveTenantInviteGateRedirect,
 } from "@/lib/inviteAccessGate";
-import { sanitizeInviteToken } from "@/lib/inviteTokenStorage";
+import {
+  readStoredInviteToken,
+  sanitizeInviteToken,
+  storeInviteToken,
+} from "@/lib/inviteTokenStorage";
 
 const resolvePermissionPath = (path: string): string => {
   if (path === "/admin/atletica" || path.startsWith("/admin/atletica/")) {
@@ -138,6 +142,9 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   const hasUser = !!user;
   const userIsAnonymous = Boolean(user?.isAnonymous);
   const inviteTokenFromUrl = sanitizeInviteToken(searchParams.get("invite"));
+  const [effectiveInviteToken, setEffectiveInviteToken] = useState(
+    inviteTokenFromUrl || readStoredInviteToken()
+  );
   const effectiveAccessRole = useMemo(
     () => resolveEffectiveAccessRole(user),
     [user]
@@ -207,6 +214,14 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
   const setAuthorizedSafe = useCallback((next: boolean) => {
     setAuthorized((previous) => (previous === next ? previous : next));
   }, []);
+
+  useEffect(() => {
+    const nextInviteToken = inviteTokenFromUrl || readStoredInviteToken();
+    if (inviteTokenFromUrl) {
+      storeInviteToken(inviteTokenFromUrl);
+    }
+    setEffectiveInviteToken(nextInviteToken);
+  }, [inviteTokenFromUrl]);
 
   useEffect(() => {
     if (!hasUser || !routeTenantSlug) {
@@ -574,7 +589,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       tenantId: effectiveRouteTenantId,
       tenantSlug: routeTenantSlug,
       allowPublicSignup: routeTenantAllowPublicSignup,
-      hasInviteToken: Boolean(inviteTokenFromUrl),
+      hasInviteToken: Boolean(effectiveInviteToken),
     });
 
     if (
@@ -702,7 +717,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     isTenantLandingPublicPath,
     activeTenantSlug,
     authenticatedTenantId,
-    inviteTokenFromUrl,
+    effectiveInviteToken,
     tenantNotFoundPath,
     router,
     permissionMatrix,
