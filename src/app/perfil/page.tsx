@@ -16,17 +16,19 @@ export default function MeuPerfilRedirectPage() {
   useEffect(() => {
     if (loading) return;
 
+    const { tenantSlug } = parseTenantScopedPath(pathname);
+
     if (!user) {
       router.replace(buildLoginPath(pathname));
       return;
     }
 
     if (String(user.role ?? "guest") === "guest") {
-      router.replace("/cadastro");
+      const cadastroPath = tenantSlug ? withTenantSlug(tenantSlug, "/cadastro") : "/cadastro";
+      router.replace(cadastroPath);
       return;
     }
 
-    const { tenantSlug } = parseTenantScopedPath(pathname);
     const targetPath = `/perfil/${user.uid}`;
     const nextPath = tenantSlug ? withTenantSlug(tenantSlug, targetPath) : targetPath;
 

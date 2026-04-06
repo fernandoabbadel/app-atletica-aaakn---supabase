@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Clock3, LogOut, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { buildLoginPath } from "@/lib/authRedirect";
+import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import {
   fetchPendingMembershipStatusForCurrentUser,
   fetchTenantById,
@@ -38,6 +39,7 @@ const statusColorClass = (status: TenantMembershipStatus): string => {
 
 export default function AguardandoAprovacaoPage() {
   const router = useRouter();
+  const pathname = usePathname() || "/aguardando-aprovacao";
   const { user, loading: authLoading, logout } = useAuth();
   const { addToast } = useToast();
 
@@ -90,11 +92,11 @@ export default function AguardandoAprovacaoPage() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
-      router.replace(buildLoginPath("/aguardando-aprovacao"));
+      router.replace(buildLoginPath(pathname));
       return;
     }
     void loadStatus("initial");
-  }, [authLoading, loadStatus, router, user]);
+  }, [authLoading, loadStatus, pathname, router, user]);
 
   if (loading) {
     return (
@@ -105,6 +107,8 @@ export default function AguardandoAprovacaoPage() {
   }
 
   const currentStatus = membership?.status || "pending";
+  const { tenantSlug } = parseTenantScopedPath(pathname);
+  const cadastroPath = tenantSlug ? withTenantSlug(tenantSlug, "/cadastro") : "/cadastro";
 
   return (
     <div className="min-h-screen bg-[#050505] text-white px-4 py-8">
@@ -160,7 +164,7 @@ export default function AguardandoAprovacaoPage() {
 
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Link
-            href="/cadastro"
+            href={cadastroPath}
             className="inline-flex items-center justify-center px-4 py-3 rounded-xl border border-zinc-700 bg-black text-xs font-black uppercase"
           >
             Revisar Cadastro

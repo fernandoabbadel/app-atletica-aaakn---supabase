@@ -19,6 +19,9 @@ const TENANT_NATIVE_ROUTES = new Set([
   "/admin",
   "/admin/landing",
 ]);
+const TENANT_SCOPED_GLOBAL_REWRITE_ROUTES = new Set([
+  "/cadastro",
+]);
 
 const setTenantSlugCookie = (response: NextResponse, tenantSlug: string): void => {
   const cleanSlug = tenantSlug.trim().toLowerCase();
@@ -57,6 +60,14 @@ export function proxy(request: NextRequest): NextResponse {
     }
 
     if (isGlobalOnlyPath(parsed.scopedPath)) {
+      if (TENANT_SCOPED_GLOBAL_REWRITE_ROUTES.has(parsed.scopedPath)) {
+        const rewriteUrl = request.nextUrl.clone();
+        rewriteUrl.pathname = parsed.scopedPath;
+        const response = NextResponse.rewrite(rewriteUrl);
+        setTenantSlugCookie(response, parsed.tenantSlug);
+        return response;
+      }
+
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = parsed.scopedPath;
       const response = NextResponse.redirect(redirectUrl);
