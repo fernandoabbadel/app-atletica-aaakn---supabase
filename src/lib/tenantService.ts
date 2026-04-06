@@ -91,6 +91,11 @@ export interface TenantInvite {
   createdAt: string;
 }
 
+export interface TenantInviteResolvedContext {
+  invite: TenantInvite;
+  tenant: TenantSummary | null;
+}
+
 export interface TenantJoinRequest {
   id: string;
   tenantId: string;
@@ -1836,6 +1841,39 @@ export async function requestJoinWithInvite(token: string): Promise<string> {
     return data[0].trim();
   }
   throw new Error("Solicitacao criada, mas o banco nao retornou o id.");
+}
+
+export async function fetchInviteResolvedContext(
+  token: string
+): Promise<TenantInviteResolvedContext | null> {
+  const cleanToken = token.trim();
+  if (!cleanToken) return null;
+
+  const response = await fetch(
+    `/api/member-invite?token=${encodeURIComponent(cleanToken)}`,
+    { cache: "no-store" }
+  );
+  if (response.status === 404) return null;
+
+  const responseData = (await response.json()) as {
+    invite?: unknown;
+    tenant?: unknown;
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(asString(responseData.error, "Erro ao validar convite."));
+  }
+
+  const invite = parseInvite(responseData.invite);
+  if (!invite) {
+    throw new Error("Convite encontrado, mas os dados retornaram incompletos.");
+  }
+
+  return {
+    invite,
+    tenant: parseTenant(responseData.tenant),
+  };
 }
 
 export async function requestJoinManual(tenantId: string): Promise<string> {

@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { 
   User, Hash, Instagram, FileText, Phone, Save, Loader2, ShieldAlert, 
   Eye, EyeOff, CheckCircle2, MapPin, Calendar, Heart, Trophy, PawPrint, 
-  ArrowLeft, BadgeCheck, Lock, Camera, UploadCloud 
+  ArrowLeft, BadgeCheck, Lock, Camera, UploadCloud, Building2 
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext"; 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -20,6 +20,7 @@ import { getTurmaImage } from "../../constants/turmaImages";
 import { buildLoginPath } from "@/lib/authRedirect";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 import {
+  fetchInviteResolvedContext,
   fetchPendingMembershipStatusForCurrentUser,
   requestJoinManual,
   requestJoinWithInvite,
@@ -134,6 +135,8 @@ const normalizeInviteJoinFailureMessage = (message: string): string => {
   return message.trim();
 };
 
+const GUEST_PLACEHOLDER_NAME = "visitante usc";
+
 export default function CadastroPage() {
   const { user, updateUser, logout, loading: authLoading } = useAuth();
   const { tenantId, tenantName, tenantSlug } = useTenantTheme();
@@ -141,15 +144,36 @@ export default function CadastroPage() {
   const pathname = usePathname() || "/cadastro";
   const router = useRouter();
   const searchParams = useSearchParams();
+  const routePathInfo = useMemo(() => parseTenantScopedPath(pathname), [pathname]);
   const inviteTokenFromUrl = sanitizeInviteToken(searchParams.get("invite"));
   const [effectiveInviteToken, setEffectiveInviteToken] = useState(
     inviteTokenFromUrl || readStoredInviteToken()
   );
+  const [inviteResolvedContext, setInviteResolvedContext] = useState<
+    Awaited<ReturnType<typeof fetchInviteResolvedContext>>
+  >(null);
+  const [inviteContextLoading, setInviteContextLoading] = useState(false);
   const hasInviteToken = effectiveInviteToken.length > 0;
-  const activeTenantId = tenantId.trim() || String(user?.tenant_id || "").trim();
-  const inviteTenantLabel = tenantSlug.trim()
-    ? tenantName.trim() || tenantSlug.trim().toUpperCase()
-    : activeTenantId || "a atletica do convite";
+  const normalizedUserRole = String(user?.role || "").trim().toLowerCase();
+  const isGuestUser = normalizedUserRole === "guest" || Boolean(user?.isAnonymous);
+  const rawUserName = String(user?.nome || "").trim();
+  const isGuestPlaceholderName =
+    rawUserName.toLowerCase() === GUEST_PLACEHOLDER_NAME ||
+    String(user?.email || "").trim().toLowerCase() === "visitante@usc.app";
+  const inviteResolvedTenant = inviteResolvedContext?.tenant ?? null;
+  const inviteResolvedTenantSlug = inviteResolvedTenant?.slug?.trim().toLowerCase() || "";
+  const effectiveTenantSlug = inviteResolvedTenantSlug || tenantSlug.trim().toLowerCase();
+  const effectiveTenantId =
+    inviteResolvedTenant?.id?.trim() || tenantId.trim() || String(user?.tenant_id || "").trim();
+  const effectiveTenantName = inviteResolvedTenant?.nome?.trim() || tenantName.trim();
+  const effectiveTenantSigla = inviteResolvedTenant?.sigla?.trim() || "";
+  const inviteTenantLabel =
+    effectiveTenantName ||
+    effectiveTenantSigla ||
+    (effectiveTenantSlug ? effectiveTenantSlug.toUpperCase() : "") ||
+    effectiveTenantId ||
+    "a atletica do convite";
+  const inviteRequiresApproval = inviteResolvedContext?.invite.requiresApproval ?? true;
   
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false); 
@@ -195,15 +219,17 @@ export default function CadastroPage() {
   });
 
   const scopedPath = (path: string) =>
-    tenantSlug.trim() ? withTenantSlug(tenantSlug, path) : path;
+    effectiveTenantSlug ? withTenantSlug(effectiveTenantSlug, path) : path;
 
   const profilePath = user?.uid ? scopedPath(`/perfil/${user.uid}`) : scopedPath("/perfil");
   const pendingPath = scopedPath("/aguardando-aprovacao");
   const landingPath = scopedPath("/");
-  const currentRoutePath = parseTenantScopedPath(pathname).tenantSlug
+  const currentRoutePath = routePathInfo.tenantSlug
     ? pathname
     : scopedPath("/cadastro");
-  const loginPath = buildLoginPath(currentRoutePath);
+  const loginPath = hasInviteToken
+    ? `${buildLoginPath(currentRoutePath)}&invite=${encodeURIComponent(effectiveInviteToken)}`
+    : buildLoginPath(currentRoutePath);
   const visibleTurmas = useMemo(
     () => turmas.filter((turma) => !turma.hidden || turma.id === formData.turma),
     [formData.turma, turmas]
@@ -216,6 +242,64 @@ export default function CadastroPage() {
     }
     setEffectiveInviteToken(nextInviteToken);
   }, [inviteTokenFromUrl]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (!hasInviteToken) {
+      setInviteResolvedContext(null);
+      setInviteContextLoading(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    setInviteContextLoading(true);
+    const loadInviteContext = async () => {
+      try {
+        const nextContext = await fetchInviteResolvedContext(effectiveInviteToken);
+        if (!mounted) return;
+        setInviteResolvedContext(nextContext);
+      } catch (loadError) {
+        console.error("Erro ao resolver tenant do convite:", loadError);
+        if (!mounted) return;
+        setInviteResolvedContext(null);
+      } finally {
+        if (mounted) {
+          setInviteContextLoading(false);
+        }
+      }
+    };
+
+    void loadInviteContext();
+    return () => {
+      mounted = false;
+    };
+  }, [effectiveInviteToken, hasInviteToken]);
+
+  useEffect(() => {
+    if (!hasInviteToken || inviteContextLoading || !inviteResolvedTenantSlug) return;
+    if (
+      routePathInfo.tenantSlug === inviteResolvedTenantSlug &&
+      routePathInfo.scopedPath === "/cadastro"
+    ) {
+      return;
+    }
+
+    router.replace(
+      `${withTenantSlug(inviteResolvedTenantSlug, "/cadastro")}?invite=${encodeURIComponent(
+        effectiveInviteToken
+      )}`
+    );
+  }, [
+    effectiveInviteToken,
+    hasInviteToken,
+    inviteContextLoading,
+    inviteResolvedTenantSlug,
+    routePathInfo.scopedPath,
+    routePathInfo.tenantSlug,
+    router,
+  ]);
 
   // APIs IBGE
   useEffect(() => {
@@ -235,17 +319,23 @@ export default function CadastroPage() {
   // ðŸ¦ˆ LOAD DE DADOS COM SANITIZAÃ‡ÃƒO
   useEffect(() => {
     if (user) {
+      const resolvedIdentityName =
+        isGuestUser && isGuestPlaceholderName ? "" : String(user.nome || "");
       // ðŸ¦ˆ ID 1: Verifica se localização já existe para travar
       if (user.estadoOrigem && user.cidadeOrigem) {
           setLocationLocked(true);
           // Preenche os selects/inputs mesmo travados
           setUfSelected(String(user.estadoOrigem));
       } else if (user.estadoOrigem) {
+          setLocationLocked(false);
           setUfSelected(String(user.estadoOrigem));
+      } else {
+          setLocationLocked(false);
+          setUfSelected("");
       }
 
       setFormData({
-        nome: String(user.nome || ""),
+        nome: resolvedIdentityName,
         apelido: String(user.apelido || ""),
         matricula: String(user.matricula || ""),
         turma: String(user.turma || ""),
@@ -264,7 +354,7 @@ export default function CadastroPage() {
         foto: String(user.foto || "")
       });
     }
-  }, [user]);
+  }, [isGuestPlaceholderName, isGuestUser, user]);
 
   useEffect(() => {
     if (authLoading || user) return;
@@ -276,15 +366,15 @@ export default function CadastroPage() {
 
     const snapshot =
       readActiveTurmasSnapshot({
-        tenantId: activeTenantId || undefined,
-        tenantSlug,
+        tenantId: effectiveTenantId || undefined,
+        tenantSlug: effectiveTenantSlug,
       })?.turmas ?? [];
 
     if (snapshot.length > 0) {
       setTurmas(snapshot);
     }
 
-    if (!activeTenantId && !tenantSlug.trim()) {
+    if (!effectiveTenantId && !effectiveTenantSlug) {
       setTurmas(getDefaultTurmas());
       setTurmasLoadError("");
       setLoadingTurmas(false);
@@ -298,7 +388,7 @@ export default function CadastroPage() {
       setTurmasLoadError("");
       try {
         const rows = await fetchTurmasConfig({
-          tenantId: activeTenantId || undefined,
+          tenantId: effectiveTenantId || undefined,
           forceRefresh: true,
         });
         if (!mounted) return;
@@ -319,7 +409,7 @@ export default function CadastroPage() {
     return () => {
       mounted = false;
     };
-  }, [activeTenantId, tenantSlug]);
+  }, [effectiveTenantId, effectiveTenantSlug]);
 
   // ðŸ¦ˆ Lógica de Upload de Foto
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -378,6 +468,9 @@ export default function CadastroPage() {
     setLoading(true);
     setError("");
 
+    if (hasInviteToken && inviteContextLoading) { setLoading(false); return setError("Ainda estou validando a atletica desse convite. Tente novamente em alguns segundos."); }
+    if (hasInviteToken && !inviteResolvedContext) { setLoading(false); return setError("Nao consegui identificar a atletica desse convite. Abra novamente o link original."); }
+    if (!formData.nome.trim()) { setLoading(false); return setError("Informe seu nome completo."); }
     if (!formData.apelido.trim()) { setLoading(false); return setError("O 'Apelido' e obrigatorio, soldado!"); }
     if (!formData.matricula.trim()) { setLoading(false); return setError("A matricula e obrigatoria!"); }
     if (!formData.dataNascimento) { setLoading(false); return setError("Data de nascimento e necessaria!"); }
@@ -390,11 +483,12 @@ export default function CadastroPage() {
 
     try {
       // 1. Atualiza dados do usuário
-      const isGuestRole = String(user?.role || "").trim().toLowerCase() === "guest";
+      const isGuestRole = isGuestUser;
       let inviteJoinFailedMessage = "";
 
       await updateUser({
         ...formData,
+        nome: formData.nome.trim(),
         instagram: formData.instagram ? `@${formData.instagram.replace("@", "")}` : "",
       });
 
@@ -464,7 +558,7 @@ export default function CadastroPage() {
 
         if (membership?.status === "pending") {
           clearStoredInviteToken();
-          addToast("Cadastro concluido. Aguarde aprovacao da atletica.", "info");
+          addToast(`Cadastro concluido. ${inviteTenantLabel} vai analisar seu acesso.`, "info");
           router.push(pendingPath);
           return;
         }
@@ -478,8 +572,17 @@ export default function CadastroPage() {
         // Nao bloqueia fluxo principal se esta consulta falhar.
       }
 
+      if (hasInviteToken) {
+        const inviteFlowMessage =
+          inviteJoinFailedMessage ||
+          `Ficha salva, mas ainda nao consegui confirmar sua entrada em ${inviteTenantLabel}. Tente novamente com o mesmo convite.`;
+        setError(inviteFlowMessage);
+        addToast(inviteFlowMessage, "info");
+        return;
+      }
+
       if (isGuestRole) {
-        if (!activeTenantId) {
+        if (!effectiveTenantId) {
           setError(
             inviteJoinFailedMessage || "Escolha uma atletica antes de concluir o cadastro."
           );
@@ -488,7 +591,7 @@ export default function CadastroPage() {
         }
 
         try {
-          await requestJoinManual(activeTenantId);
+          await requestJoinManual(effectiveTenantId);
           const manualMembership = await fetchPendingMembershipStatusForCurrentUser();
           if (manualMembership) {
             const membershipPatch: Parameters<typeof updateUser>[0] = {
@@ -502,8 +605,8 @@ export default function CadastroPage() {
               clearStoredInviteToken();
               addToast(
                 inviteJoinFailedMessage
-                  ? "Convite ignorado. Cadastro enviado para aprovacao da atletica."
-                  : "Cadastro concluido. Aguarde aprovacao da atletica.",
+                  ? `Convite ignorado. Cadastro enviado para aprovacao de ${inviteTenantLabel}.`
+                  : `Cadastro concluido. ${inviteTenantLabel} vai analisar seu acesso.`,
                 "info"
               );
               router.push(pendingPath);
@@ -529,8 +632,8 @@ export default function CadastroPage() {
         } catch (manualJoinError: unknown) {
           const manualMessage = extractErrorMessage(manualJoinError);
           if (manualMessage.toLowerCase().includes("cadastro publico")) {
-            setError("Esta atletica exige convite para novos cadastros.");
-            addToast("Esta atletica exige convite para novos cadastros.", "info");
+            setError(`${inviteTenantLabel} exige convite para novos cadastros.`);
+            addToast(`${inviteTenantLabel} exige convite para novos cadastros.`, "info");
           } else {
             setError(inviteJoinFailedMessage || manualMessage);
             addToast(manualMessage, "error");
@@ -652,10 +755,21 @@ export default function CadastroPage() {
                 {hasInviteToken && (
                     <div className="mt-3 bg-cyan-500/10 border border-cyan-500/20 p-3 rounded-xl max-w-xl mx-auto">
                         <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wide">
-                            Convite detectado: ao concluir, seu acesso fica aguardando aprovacao.
+                            {inviteContextLoading
+                              ? "Validando de qual atletica veio esse convite..."
+                              : inviteRequiresApproval
+                                ? `Convite de ${inviteTenantLabel} detectado: ao concluir, seu acesso fica aguardando aprovacao.`
+                                : `Convite de ${inviteTenantLabel} detectado: ao concluir, seu acesso entra direto nessa atletica.`}
                         </p>
                         <p className="mt-2 text-[11px] text-cyan-100/80">
-                            Este link ja trava seu cadastro em <span className="font-black text-cyan-200">{inviteTenantLabel}</span> e essa tenant nao pode ser alterada neste fluxo.
+                            {inviteContextLoading ? (
+                              "Assim que a validacao terminar, seu cadastro fica preso exatamente na atletica emissora do token."
+                            ) : (
+                              <>
+                                Este link ja trava seu cadastro em{" "}
+                                <span className="font-black text-cyan-200">{inviteTenantLabel}</span> e essa atletica nao pode ser alterada neste fluxo.
+                              </>
+                            )}
                         </p>
                     </div>
                 )}
@@ -681,8 +795,37 @@ export default function CadastroPage() {
                 {/* BLOCO 1: IDENTIDADE */}
                 <div className="space-y-4">
                     <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Identidade</label>
+
+                    {hasInviteToken ? (
+                    <div className="relative group opacity-80">
+                        <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-cyan-300" size={18} />
+                        <input
+                          type="text"
+                          className="input-field pl-14 cursor-not-allowed bg-zinc-950 text-cyan-100"
+                          value={inviteContextLoading ? "Validando atletica do convite..." : inviteTenantLabel}
+                          readOnly
+                          title="Atletica travada pelo convite."
+                        />
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600">
+                            <Lock size={14}/>
+                        </div>
+                    </div>
+                    ) : null}
                     
-                    {/* NOME COMPLETO (TRAVADO) */}
+                    {isGuestUser ? (
+                    <div className="relative group">
+                        <User className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-emerald-500 transition" size={18} />
+                        <input
+                          type="text"
+                          placeholder="Nome Completo"
+                          className="input-field pl-14"
+                          value={formData.nome}
+                          onChange={e => setFormData({ ...formData, nome: e.target.value })}
+                          maxLength={120}
+                          required
+                        />
+                    </div>
+                    ) : (
                     <div className="relative group opacity-60">
                         <User className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
                         <input type="text" placeholder="Nome Completo" className="input-field pl-14 cursor-not-allowed bg-zinc-950" value={formData.nome} readOnly title="Nome oficial nao pode ser alterado aqui." />
@@ -690,6 +833,7 @@ export default function CadastroPage() {
                             <Lock size={14}/> 
                         </div>
                     </div>
+                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="relative group">
@@ -906,7 +1050,7 @@ export default function CadastroPage() {
                     </div>
                 </div>
                 
-                <button type="submit" disabled={loading || imageLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase py-5 rounded-[2rem] shadow-xl shadow-emerald-900/20 transition-all flex justify-center items-center gap-2">
+                <button type="submit" disabled={loading || imageLoading || inviteContextLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase py-5 rounded-[2rem] shadow-xl shadow-emerald-900/20 transition-all flex justify-center items-center gap-2 disabled:cursor-not-allowed disabled:opacity-70">
                     {loading ? <Loader2 className="animate-spin"/> : <Save size={20} />}
                     {loading ? "Gravando Ficha..." : "Finalizar & Ir pro Perfil"}
                 </button>

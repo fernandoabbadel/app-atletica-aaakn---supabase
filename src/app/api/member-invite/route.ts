@@ -23,6 +23,59 @@ const toPositiveInt = (value: unknown, fallback: number, max: number): number =>
 const buildInviteToken = (): string =>
   `m${Date.now().toString(36)}${crypto.randomUUID().replace(/-/g, "")}`;
 
+export async function GET(request: NextRequest) {
+  try {
+    const token = request.nextUrl.searchParams.get("token")?.trim() || "";
+    if (!token) {
+      return NextResponse.json({ error: "Token de convite invalido." }, { status: 400 });
+    }
+
+    const { data: inviteRow, error: inviteError } = await supabaseAdmin
+      .from("tenant_invites")
+      .select(
+        "id,tenant_id,token,role_to_assign,requires_approval,max_uses,uses_count,expires_at,is_active,is_revoked,revoked_at,revoked_by,created_by,created_at"
+      )
+      .eq("token", token)
+      .maybeSingle();
+
+    if (inviteError) {
+      return NextResponse.json({ error: inviteError.message }, { status: 400 });
+    }
+
+    if (!inviteRow) {
+      return NextResponse.json({ error: "Convite nao encontrado." }, { status: 404 });
+    }
+
+    const invite = asObject(inviteRow);
+    const tenantId = asString(invite?.tenant_id).trim();
+
+    let tenantRow: unknown = null;
+    if (tenantId) {
+      const { data: tenantData, error: tenantError } = await supabaseAdmin
+        .from("tenants")
+        .select(
+          "id,nome,sigla,slug,faculdade,cidade,curso,area,cnpj,contato_email,contato_telefone,logo_url,palette_key,visible_in_directory,allow_public_signup,status,created_at,updated_at"
+        )
+        .eq("id", tenantId)
+        .maybeSingle();
+
+      if (tenantError) {
+        return NextResponse.json({ error: tenantError.message }, { status: 400 });
+      }
+
+      tenantRow = tenantData;
+    }
+
+    return NextResponse.json({ invite: inviteRow, tenant: tenantRow });
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : "Erro inesperado ao buscar convite.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get("authorization") || "";
