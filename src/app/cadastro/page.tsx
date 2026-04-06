@@ -668,6 +668,9 @@ export default function CadastroPage() {
                     <p className="text-[10px] text-zinc-400 mt-1">
                         Perfis com fotos fake, desenhos ou conteudo improprio serao <span className="text-red-400 font-bold underline">bloqueados</span> sem aviso.
                     </p>
+                    <p className="text-[10px] text-zinc-300 mt-2">
+                        Se for trocar a foto, reduza antes no <span className="font-black text-emerald-300">Squash App</span> para ate <span className="font-black text-emerald-400">200 KB</span>.
+                    </p>
                 </div>
             </div>
 

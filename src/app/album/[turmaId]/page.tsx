@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Html5Qrcode } from "html5-qrcode";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -43,6 +43,7 @@ import {
   getBackendErrorCode,
   isPermissionError,
 } from "@/lib/backendErrors";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 interface UserData {
   id: string;
@@ -136,6 +137,7 @@ const extractTargetUidFromQr = (rawValue: string): string => {
 
 export default function AlbumTurmaPage() {
   const params = useParams<{ turmaId: string }>();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
   const turma = useMemo(
@@ -144,7 +146,7 @@ export default function AlbumTurmaPage() {
   );
 
   const { user, loading: authLoading } = useAuth();
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const effectiveTenantId = activeTenantId || user?.tenant_id || "";
 
@@ -600,15 +602,43 @@ export default function AlbumTurmaPage() {
       <main className="px-4 grid grid-cols-1 gap-6 max-w-3xl mx-auto">
         {usuarios.map((u) => {
           const isColada = meuAlbum.includes(u.id);
+          const profileHref = tenantSlug.trim()
+            ? withTenantSlug(tenantSlug, `/perfil/${u.id}`)
+            : `/perfil/${u.id}`;
           return (
             <div
               key={u.id}
-              className={`relative rounded-[2.2rem] border transition-all duration-500 overflow-hidden ${
+              className={`group relative rounded-[2.2rem] border transition-all duration-500 overflow-hidden ${
                 isColada
-                  ? "bg-zinc-900/80 border-emerald-500/40 shadow-2xl"
+                  ? "bg-zinc-900/80 border-emerald-500/40 shadow-2xl cursor-pointer hover:border-emerald-400/80 hover:-translate-y-0.5 hover:shadow-[0_20px_60px_rgba(16,185,129,0.18)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#050505]"
                   : "bg-zinc-950 border-white/5 grayscale brightness-50 opacity-40"
               }`}
+              role={isColada ? "link" : undefined}
+              tabIndex={isColada ? 0 : undefined}
+              title={isColada ? `Visitar perfil de ${u.apelido || u.nome}` : undefined}
+              onClick={
+                isColada
+                  ? () => {
+                      router.push(profileHref);
+                    }
+                  : undefined
+              }
+              onKeyDown={
+                isColada
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        router.push(profileHref);
+                      }
+                    }
+                  : undefined
+              }
             >
+              {isColada && (
+                <div className="pointer-events-none absolute right-4 top-4 z-20 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300 opacity-0 translate-y-1 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
+                  Visitar perfil
+                </div>
+              )}
               <div className="p-5 sm:p-6 flex items-center gap-4 sm:gap-6">
                 <div
                   className={`relative shrink-0 w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 transition-all duration-700 overflow-hidden ${
@@ -688,6 +718,8 @@ export default function AlbumTurmaPage() {
                           href={`https://instagram.com/${u.instagram.replace("@", "")}`}
                           target="_blank"
                           rel="noreferrer"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
                           className="inline-flex items-center gap-1.5 mt-2 text-pink-500 text-[10px] font-black uppercase hover:underline"
                         >
                           <Instagram size={12} /> @{u.instagram.replace("@", "")}

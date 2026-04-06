@@ -56,11 +56,11 @@ const DEFAULT_RECENT_CATEGORY_WINDOW_DAYS = 2;
 const COMMUNITY_READS_TABLE = "community_category_reads";
 const COMMUNITY_CATEGORY_COUNTS_RPC = "community_category_counts_bundle";
 const COMMUNITY_POSTS_SELECT_COLUMNS =
-  "id,userId,userName,avatar,handle,role,tenant_role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,imagem,categoria,likes,hype,comentarios,blocked,commentsDisabled,fixado,denunciasCount,createdAt,updatedAt";
+  "id,userId,userName,avatar,handle,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,imagem,categoria,likes,hype,comentarios,blocked,commentsDisabled,fixado,denunciasCount,createdAt,updatedAt";
 const COMMUNITY_REPORTS_SELECT_COLUMNS =
   "id,targetId,targetType,postText,reporterId,reporterName,reason,status,timestamp,reviewedAt,reviewedBy";
 const COMMUNITY_COMMENTS_SELECT_COLUMNS =
-  "id,postId,userId,userName,avatar,role,tenant_role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,likes,hidden,reports,createdAt,updatedAt";
+  "id,postId,userId,userName,avatar,role,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,texto,likes,createdAt,updatedAt";
 const COMMUNITY_CONFIG_SELECT_COLUMNS = "id,data,titulo,subtitulo,capaUrl,limitMessages,updatedAt";
 let communityCategoryCountsRpcAvailable: boolean | null = null;
 
@@ -1256,6 +1256,7 @@ export async function createCommunityPost(
   const visual = userId ? visuals.get(userId) : undefined;
   const payloadData: Row = { ...payload };
   delete payloadData.tenantId;
+  delete payloadData.tenant_role;
   payloadData.texto = asString(payloadData.texto).trim().slice(0, 150);
   payloadData.text = asString(payloadData.text ?? payloadData.texto).trim().slice(0, 150);
   payloadData.categoria = sanitizeCategoryName(asString(payloadData.categoria));
@@ -1266,7 +1267,6 @@ export async function createCommunityPost(
         avatar: visual.foto || payloadData.avatar,
         handle: visual.apelido ? `@${visual.apelido}` : payloadData.handle,
         role: visual.role || payloadData.role,
-        tenant_role: visual.tenant_role || payloadData.tenant_role,
         plano: visual.plano,
         plano_cor: visual.plano_cor,
         plano_icon: visual.plano_icon,
@@ -1316,6 +1316,7 @@ export async function createCommunityComment(payload: {
   const visual = userId ? visuals.get(userId) : undefined;
   const payloadData: Row = { ...payload.data };
   delete payloadData.tenantId;
+  delete payloadData.tenant_role;
   payloadData.texto = asString(payloadData.texto).trim().slice(0, 220);
   payloadData.text = asString(payloadData.text ?? payloadData.texto).trim().slice(0, 220);
 
@@ -1334,7 +1335,6 @@ export async function createCommunityComment(payload: {
         userName: visual.nome || payloadData.userName,
         avatar: visual.foto || payloadData.avatar,
         role: visual.role || payloadData.role,
-        tenant_role: visual.tenant_role || payloadData.tenant_role,
         plano: visual.plano,
         plano_cor: visual.plano_cor,
         plano_icon: visual.plano_icon,

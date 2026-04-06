@@ -10,6 +10,11 @@ const RULES = {
 type SecurityResult = { allowed: boolean; reason?: string };
 const localPostCooldownFallback = new Map<string, number>();
 
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+};
+
 const toDateSafe = (value: unknown): Date | null => {
   if (value instanceof Date) return value;
   if (typeof value === "string") {
@@ -26,6 +31,36 @@ const toDateSafe = (value: unknown): Date | null => {
     return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
   }
   return null;
+};
+
+const readLastPostTimestamp = (extra: unknown): number => {
+  const extraData = asRecord(extra);
+  if (!extraData) return 0;
+
+  const securityData = asRecord(extraData.security);
+  const candidates = [
+    extraData.communityLastPostAt,
+    extraData.lastPostTime,
+    securityData?.lastPostTime,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = toDateSafe(candidate);
+    if (parsed) return parsed.getTime();
+  }
+
+  return 0;
+};
+
+const writeLastPostTimestamp = (extra: unknown, iso: string): Record<string, unknown> => {
+  const nextExtra = { ...(asRecord(extra) ?? {}) };
+  const nextSecurity = { ...(asRecord(nextExtra.security) ?? {}) };
+
+  nextExtra.communityLastPostAt = iso;
+  nextSecurity.lastPostTime = iso;
+  nextExtra.security = nextSecurity;
+
+  return nextExtra;
 };
 
 const isMissingSchemaColumnError = (error: unknown, columnName: string): boolean => {
@@ -47,7 +82,7 @@ export const Security = {
       const supabase = getSupabaseClient();
       const { data: userRow, error: userError } = await supabase
         .from("users")
-        .select("uid")
+        .select("uid,extra")
         .eq("uid", userId)
         .maybeSingle();
       if (userError) throw userError;
@@ -56,19 +91,7 @@ export const Security = {
         return { allowed: false, reason: "Usuario nao encontrado." };
       }
 
-      let persistedLastPost = 0;
-      try {
-        const { data: cooldownRow, error: cooldownError } = await supabase
-          .from("users")
-          .select("uid,lastPostTime")
-          .eq("uid", userId)
-          .maybeSingle();
-        if (cooldownError) throw cooldownError;
-        persistedLastPost = toDateSafe(cooldownRow?.lastPostTime)?.getTime() || 0;
-      } catch (error: unknown) {
-        if (!isMissingSchemaColumnError(error, "lastPostTime")) throw error;
-      }
-
+      const persistedLastPost = readLastPostTimestamp(userRow.extra);
       const localLastPost = localPostCooldownFallback.get(userId) || 0;
       const lastPost = Math.max(persistedLastPost, localLastPost);
       const now = Date.now();
@@ -79,19 +102,17 @@ export const Security = {
       }
 
       try {
+        const nowIso = new Date(now).toISOString();
         const { error: updateError } = await supabase
           .from("users")
           .update({
-            lastPostTime: new Date(now).toISOString(),
-            updatedAt: new Date(now).toISOString(),
+            extra: writeLastPostTimestamp(userRow.extra, nowIso),
+            updatedAt: nowIso,
           })
           .eq("uid", userId);
         if (updateError) throw updateError;
-      } catch (error: unknown) {
-        if (!isMissingSchemaColumnError(error, "lastPostTime")) {
-          throw error;
-        }
-        // Fallback local para manter cooldown funcionando nesta sessao enquanto a coluna nao existe.
+      } catch {
+        // Fallback local para manter cooldown funcionando mesmo se a persistencia falhar.
         localPostCooldownFallback.set(userId, now);
       }
 
