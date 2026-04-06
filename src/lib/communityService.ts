@@ -1257,8 +1257,8 @@ export async function createCommunityPost(
   const payloadData: Row = { ...payload };
   delete payloadData.tenantId;
   delete payloadData.tenant_role;
+  delete payloadData.text;
   payloadData.texto = asString(payloadData.texto).trim().slice(0, 150);
-  payloadData.text = asString(payloadData.text ?? payloadData.texto).trim().slice(0, 150);
   payloadData.categoria = sanitizeCategoryName(asString(payloadData.categoria));
 
   const visualPatch: Row = visual
@@ -1317,8 +1317,8 @@ export async function createCommunityComment(payload: {
   const payloadData: Row = { ...payload.data };
   delete payloadData.tenantId;
   delete payloadData.tenant_role;
+  delete payloadData.text;
   payloadData.texto = asString(payloadData.texto).trim().slice(0, 220);
-  payloadData.text = asString(payloadData.text ?? payloadData.texto).trim().slice(0, 220);
 
   let postLookup = supabase.from("posts").select("id").eq("id", postId);
   if (scopedTenantId) {
