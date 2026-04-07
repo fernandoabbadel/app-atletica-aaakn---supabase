@@ -37,6 +37,8 @@ const DEFAULT_VALUES = {
 const REPAIR_USER_BASE_COLUMNS = [
   "uid",
   "email",
+  "role",
+  "tenant_status",
   "xp",
   "xpMultiplier",
   "level",
@@ -73,6 +75,8 @@ const extractMissingUsersColumn = (error: unknown): string | null => {
 type RepairUserRow = {
   uid?: string;
   email?: string;
+  role?: string;
+  tenant_status?: string;
   xp?: number;
   xpMultiplier?: number;
   level?: number;
@@ -138,6 +142,15 @@ export const repairUserProfile = async (uid: string) => {
     }
 
     const updates: Record<string, unknown> = {};
+    const roleNormalized = String(currentData.role || "").trim().toLowerCase();
+    const tenantStatusNormalized = String(currentData.tenant_status || "").trim().toLowerCase();
+    const planNormalized = String(currentData.plano || "").trim().toLowerCase();
+    const shouldRepairApprovedVisitorPlan =
+      (
+        tenantStatusNormalized === "approved" ||
+        (roleNormalized !== "" && roleNormalized !== "guest" && roleNormalized !== "visitante")
+      ) &&
+      (planNormalized === "" || planNormalized === "visitante");
 
     console.log(`Diagnosticando paciente: ${String(currentData.email || cleanUid)}...`);
 
@@ -153,11 +166,29 @@ export const repairUserProfile = async (uid: string) => {
     if (!currentData.tier) updates.tier = DEFAULT_VALUES.tier;
 
     // 2. Verificacao de plano e visual
-    if (!currentData.plano) updates.plano = DEFAULT_VALUES.plano;
-    if (!currentData.plano_status) updates.plano_status = DEFAULT_VALUES.plano_status;
-    if (!currentData.plano_badge) updates.plano_badge = DEFAULT_VALUES.plano_badge;
-    if (!currentData.plano_cor) updates.plano_cor = DEFAULT_VALUES.plano_cor;
-    if (!currentData.plano_icon) updates.plano_icon = DEFAULT_VALUES.plano_icon;
+    if (shouldRepairApprovedVisitorPlan) {
+      updates.plano = DEFAULT_VALUES.plano;
+      updates.plano_status = DEFAULT_VALUES.plano_status;
+      updates.plano_badge = DEFAULT_VALUES.plano_badge;
+      updates.plano_cor = DEFAULT_VALUES.plano_cor;
+      updates.plano_icon = DEFAULT_VALUES.plano_icon;
+      updates.tier = DEFAULT_VALUES.tier;
+      if (selectedColumns.has("desconto_loja")) {
+        updates.desconto_loja = DEFAULT_VALUES.desconto_loja;
+      }
+      if (selectedColumns.has("nivel_prioridade")) {
+        updates.nivel_prioridade = DEFAULT_VALUES.nivel_prioridade;
+      }
+      if (currentData.xpMultiplier === undefined || currentData.xpMultiplier <= 0) {
+        updates.xpMultiplier = DEFAULT_VALUES.xpMultiplier;
+      }
+    } else {
+      if (!currentData.plano) updates.plano = DEFAULT_VALUES.plano;
+      if (!currentData.plano_status) updates.plano_status = DEFAULT_VALUES.plano_status;
+      if (!currentData.plano_badge) updates.plano_badge = DEFAULT_VALUES.plano_badge;
+      if (!currentData.plano_cor) updates.plano_cor = DEFAULT_VALUES.plano_cor;
+      if (!currentData.plano_icon) updates.plano_icon = DEFAULT_VALUES.plano_icon;
+    }
     if (
       selectedColumns.has("desconto_loja") &&
       currentData.desconto_loja === undefined
