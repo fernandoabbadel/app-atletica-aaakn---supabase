@@ -39,18 +39,6 @@ const STORE_ORDER_SELECT_COLUMNS =
   "id,tenant_id,userId,userName,productId,productName,price,total,quantidade,itens,data,status,approvedBy,seller_type,seller_id,seller_name,seller_logo_url,payment_config,createdAt,updatedAt";
 const STORE_REVIEW_SELECT_COLUMNS =
   "id,productId,userId,userName,userAvatar,rating,comment,status,createdAt,updatedAt";
-const STORE_PENDING_ORDER_LIST_SELECT_COLUMNS = [
-  "id",
-  "userId",
-  "userName",
-  "productId",
-  "productName",
-  "price",
-  "quantidade",
-  "itens",
-  "status",
-  "createdAt",
-];
 const STORE_SELECT_COLUMNS_BY_TABLE: Record<string, string[]> = {
   produtos: STORE_PRODUCT_SELECT_COLUMNS.split(","),
   categorias: STORE_CATEGORY_SELECT_COLUMNS.split(","),
@@ -434,6 +422,11 @@ export interface StorePendingOrdersPage {
   hasMore: boolean;
 }
 
+export interface StoreOrdersPage {
+  rows: Row[];
+  hasMore: boolean;
+}
+
 export async function fetchAdminStoreBundle(options?: {
   productsLimit?: number;
   categoriesLimit?: number;
@@ -484,35 +477,48 @@ export async function fetchAdminStoreBundle(options?: {
   return bundle;
 }
 
-export async function fetchPendingStoreOrdersPage(options?: {
+export async function fetchStoreOrdersPage(options?: {
   page?: number;
   pageSize?: number;
-}): Promise<StorePendingOrdersPage> {
+  status?: "pendente" | "approved" | "rejected" | "delivered";
+}): Promise<StoreOrdersPage> {
   const page = Math.max(1, Math.floor(options?.page ?? 1));
   const pageSize = Math.min(50, Math.max(1, Math.floor(options?.pageSize ?? 20)));
   const offset = (page - 1) * pageSize;
+  const status = asString(options?.status, "pendente");
 
   const rows = await queryRows("orders", [
     {
-      filters: [{ field: "status", value: "pendente" }],
+      filters: [{ field: "status", value: status }],
       orderByField: "createdAt",
       orderAscending: false,
       limit: pageSize + 1,
       offset,
-      selectColumns: STORE_PENDING_ORDER_LIST_SELECT_COLUMNS,
+      selectColumns: STORE_ORDER_SELECT_COLUMNS.split(","),
     },
     {
-      filters: [{ field: "status", value: "pendente" }],
+      filters: [{ field: "status", value: status }],
       limit: pageSize + 1,
       offset,
-      selectColumns: STORE_PENDING_ORDER_LIST_SELECT_COLUMNS,
+      selectColumns: STORE_ORDER_SELECT_COLUMNS.split(","),
     },
   ]);
 
   return {
-    rows: rows.slice(0, pageSize),
+    rows: rows.slice(0, pageSize).map((row) => normalizeAdminStoreRow("orders", row)),
     hasMore: rows.length > pageSize,
   };
+}
+
+export async function fetchPendingStoreOrdersPage(options?: {
+  page?: number;
+  pageSize?: number;
+}): Promise<StorePendingOrdersPage> {
+  return fetchStoreOrdersPage({
+    page: options?.page,
+    pageSize: options?.pageSize,
+    status: "pendente",
+  });
 }
 
 export async function fetchStoreProducts(options?: {

@@ -213,6 +213,7 @@ export default function LojaClientPage({
   useEffect(() => {
     const canReuseInitialProducts =
       initialProductsHydrated &&
+      initialProducts.length > 0 &&
       filtroCategoria === "Todos" &&
       initialPlanScopeKey === currentPlanScopeKey;
 
@@ -266,7 +267,16 @@ export default function LojaClientPage({
     return () => {
       mounted = false;
     };
-  }, [activeTenantId, currentPlanScopeKey, filtroCategoria, initialPlanScopeKey, initialProductsHydrated, userPlanIds, userPlanNames]);
+  }, [
+    activeTenantId,
+    currentPlanScopeKey,
+    filtroCategoria,
+    initialPlanScopeKey,
+    initialProducts,
+    initialProductsHydrated,
+    userPlanIds,
+    userPlanNames,
+  ]);
 
   const handleLoadMore = async () => {
     if (loading || loadingMore || !hasMore) return;
@@ -800,11 +810,6 @@ export default function LojaClientPage({
           </div>
         )}
 
-        {!loading && (
-          <p className="mt-4 text-center text-[10px] text-zinc-600 font-bold uppercase tracking-wide">
-            Loja paginada por categoria ({STORE_PAGE_SIZE} por leitura)
-          </p>
-        )}
       </main>
 
       {/* BANNER PROMOCIONAL XP (INTEGRACAO COM CONQUISTAS/FIDELIDADE) */}

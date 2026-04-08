@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Eye, EyeOff, ImagePlus, Loader2, Package, Save, Store, Tags } from "lucide-react";
 
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
@@ -13,6 +15,8 @@ import {
   type MiniVendorProfile,
   upsertMiniVendorProfile,
 } from "@/lib/miniVendorService";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   buildDraftAssetFileName,
   sanitizeStoragePathSegment,
@@ -42,9 +46,10 @@ import {
 import { MiniVendorShell } from "../_components/MiniVendorShell";
 
 export default function MiniVendorCompanyEditPage() {
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const { addToast } = useToast();
-  const { tenantId, tenantLogoUrl } = useTenantTheme();
+  const { tenantId, tenantLogoUrl, tenantSlug } = useTenantTheme();
 
   const [loading, setLoading] = useState(true);
   const [savingVendor, setSavingVendor] = useState(false);
@@ -54,15 +59,33 @@ export default function MiniVendorCompanyEditPage() {
   const [vendorForm, setVendorForm] = useState<MiniVendorFormState>(EMPTY_VENDOR_FORM);
   const draftRestoredRef = useRef(false);
 
-  const canUseArea = Boolean(user?.uid) && Boolean(tenantId.trim());
+  const currentUserId = user?.uid?.trim() || "";
+  const requestedUserId = String(searchParams.get("userId") || "").trim();
+  const canManageOtherMiniVendor = isAdminLikeRole(resolveEffectiveAccessRole(user));
+  const managedUserId =
+    canManageOtherMiniVendor && requestedUserId ? requestedUserId : currentUserId;
+  const isAdminManagingVendor =
+    canManageOtherMiniVendor &&
+    managedUserId.length > 0 &&
+    managedUserId !== currentUserId;
+  const canUseArea = Boolean(currentUserId) && Boolean(tenantId.trim());
+  const backPath = isAdminManagingVendor
+    ? "/admin/mini-vendors/cadastros"
+    : "/configuracoes/mini-vendor";
+  const productsHref = tenantSlug
+    ? withTenantSlug(
+        tenantSlug,
+        `/configuracoes/mini-vendor/produtos${isAdminManagingVendor ? `?userId=${encodeURIComponent(managedUserId)}` : ""}`
+      )
+    : `/configuracoes/mini-vendor/produtos${isAdminManagingVendor ? `?userId=${encodeURIComponent(managedUserId)}` : ""}`;
   const vendorDraftKey = useMemo(() => {
-    if (!tenantId.trim() || !user?.uid) return "";
-    return `mini-vendor:${tenantId}:${user.uid}:vendor-draft`;
-  }, [tenantId, user?.uid]);
+    if (!tenantId.trim() || !managedUserId) return "";
+    return `mini-vendor:${tenantId}:${managedUserId}:vendor-draft`;
+  }, [managedUserId, tenantId]);
 
   const loadPage = useCallback(async (forceRefresh = true) => {
     const cleanTenantId = tenantId.trim();
-    const cleanUserId = user?.uid?.trim() || "";
+    const cleanUserId = managedUserId.trim();
     if (!cleanTenantId || !cleanUserId) {
       setProfile(null);
       setVendorForm(EMPTY_VENDOR_FORM);
@@ -76,7 +99,7 @@ export default function MiniVendorCompanyEditPage() {
     });
     setProfile(vendorProfile);
     setVendorForm(normalizeVendorForm(vendorProfile));
-  }, [tenantId, user?.uid]);
+  }, [managedUserId, tenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -127,7 +150,7 @@ export default function MiniVendorCompanyEditPage() {
       else setUploadingCover(true);
 
       const cleanTenantId = tenantId.trim();
-      const cleanUserId = user?.uid?.trim() || "";
+      const cleanUserId = managedUserId.trim();
       const isStableTarget = cleanTenantId.length > 0 && cleanUserId.length > 0;
       const folder = target === "logoUrl" ? "logos" : "covers";
       const objectDir = isStableTarget
@@ -168,7 +191,7 @@ export default function MiniVendorCompanyEditPage() {
 
   const handleSaveVendor = async () => {
     const cleanTenantId = tenantId.trim();
-    const cleanUserId = user?.uid?.trim() || "";
+    const cleanUserId = managedUserId.trim();
 
     if (!cleanUserId || !cleanTenantId) {
       addToast("Abra a area da atletica antes de cadastrar a loja.", "error");
@@ -243,7 +266,21 @@ export default function MiniVendorCompanyEditPage() {
   return (
     <MiniVendorShell
       title="Editar Empresa"
-      subtitle="Dados da lojinha separados do catalogo e dos pedidos para reduzir consultas desnecessarias."
+      subtitle={
+        isAdminManagingVendor
+          ? "Edicao administrativa da lojinha selecionada."
+          : "Dados da lojinha separados do catalogo e dos pedidos para reduzir consultas desnecessarias."
+      }
+      backPath={backPath}
+      actions={
+        <Link
+          href={productsHref}
+          className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 hover:bg-zinc-800"
+        >
+          <Package size={14} />
+          Produtos
+        </Link>
+      }
     >
       {!canUseArea ? (
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">

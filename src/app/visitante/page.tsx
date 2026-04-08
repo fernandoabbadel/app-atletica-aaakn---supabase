@@ -328,9 +328,7 @@ export default function VisitantePage() {
                 Entrada publica
               </div>
               <h2 className="mt-5 max-w-4xl text-4xl font-black uppercase tracking-[-0.04em] text-white md:text-6xl">
-                A atletica certa,
-                <br />
-                na cor da sua atletica
+                Procurar atlética
               </h2>
               <p className="mt-4 max-w-2xl text-sm text-zinc-300 md:text-base">
                 Busque, escolha e entre.

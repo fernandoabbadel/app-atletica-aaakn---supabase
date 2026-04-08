@@ -39,6 +39,7 @@ import {
   getDefaultTurmas,
   type TurmaConfig,
 } from "../../../lib/turmasService";
+import { calculateAgeFromBirthDate } from "@/lib/birthDate";
 import {
   getBackendErrorCode,
   isPermissionError,
@@ -176,14 +177,8 @@ export default function AlbumTurmaPage() {
   }, [meuAlbum]);
 
   const calcularIdade = (dataNasc?: string): string => {
-    if (!dataNasc) return "??";
-    const hoje = new Date();
-    const nasc = new Date(dataNasc);
-    if (Number.isNaN(nasc.getTime())) return "??";
-    let idade = hoje.getFullYear() - nasc.getFullYear();
-    const m = hoje.getMonth() - nasc.getMonth();
-    if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) idade -= 1;
-    return `${idade}`;
+    const idade = calculateAgeFromBirthDate(dataNasc);
+    return idade === null ? "??" : String(idade);
   };
 
   const stopScanner = useCallback(async () => {

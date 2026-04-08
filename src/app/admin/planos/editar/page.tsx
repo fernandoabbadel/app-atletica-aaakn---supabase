@@ -7,6 +7,7 @@ import { ArrowLeft, RefreshCcw, Save, Trash2 } from "lucide-react";
 import {
   deletePlan,
   fetchPlanCatalog,
+  movePlanToDisplayPosition,
   restoreDefaultPlanCatalog,
   upsertPlan,
   type PlanRecord,
@@ -20,6 +21,7 @@ import {
 import { useToast } from "../../../../context/ToastContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { parseTenantScopedRowId } from "@/lib/tenantScopedCatalog";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 type PlanFormState = {
   nome: string;
@@ -34,6 +36,7 @@ type PlanFormState = {
   xpMultiplier: string;
   nivelPrioridade: string;
   descontoLoja: string;
+  displayOrder: string;
 };
 
 const EMPTY_FORM: PlanFormState = {
@@ -49,6 +52,7 @@ const EMPTY_FORM: PlanFormState = {
   xpMultiplier: "1",
   nivelPrioridade: "1",
   descontoLoja: "0",
+  displayOrder: "1",
 };
 
 const toFormState = (row: PlanRecord): PlanFormState => ({
@@ -64,6 +68,7 @@ const toFormState = (row: PlanRecord): PlanFormState => ({
   xpMultiplier: String(row.xpMultiplier ?? 1),
   nivelPrioridade: String(row.nivelPrioridade ?? 1),
   descontoLoja: String(row.descontoLoja ?? 0),
+  displayOrder: String((row.displayOrder ?? 0) + 1),
 });
 
 const parseNumber = (value: string, fallback: number): number => {
@@ -73,7 +78,7 @@ const parseNumber = (value: string, fallback: number): number => {
 
 export default function AdminPlanosEditarPage() {
   const { addToast } = useToast();
-  const { tenantId } = useTenantTheme();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const [rows, setRows] = useState<PlanRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [restoring, setRestoring] = useState(false);
@@ -125,6 +130,12 @@ export default function AdminPlanosEditarPage() {
       return;
     }
 
+    const selectedPlan = rows.find((entry) => entry.id === selectedPlanId) ?? null;
+    const desiredDisplayPosition = Math.max(
+      1,
+      Math.min(rows.length, Math.round(parseNumber(form.displayOrder, 1)))
+    );
+
     setSaving(true);
     try {
       await upsertPlan({
@@ -146,8 +157,19 @@ export default function AdminPlanosEditarPage() {
           xpMultiplier: Math.max(0, parseNumber(form.xpMultiplier, 1)),
           nivelPrioridade: Math.max(1, Math.round(parseNumber(form.nivelPrioridade, 1))),
           descontoLoja: Math.max(0, Math.round(parseNumber(form.descontoLoja, 0))),
+          displayOrder: desiredDisplayPosition - 1,
         },
       });
+      if (
+        selectedPlan &&
+        desiredDisplayPosition !== Math.max(1, (selectedPlan.displayOrder ?? 0) + 1)
+      ) {
+        await movePlanToDisplayPosition({
+          planId: selectedPlanId,
+          targetPosition: desiredDisplayPosition,
+          tenantId,
+        });
+      }
       addToast("Plano atualizado.", "success");
       await load(true);
     } catch (error: unknown) {
@@ -189,6 +211,7 @@ export default function AdminPlanosEditarPage() {
 
   const previewTheme = resolvePlanTheme(form.cor);
   const PreviewIcon = resolvePlanIcon(form.icon);
+  const adminPlansHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/planos") : "/admin/planos";
 
   const fieldClass =
     "w-full rounded-lg border border-zinc-700 bg-black/50 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500";
@@ -198,7 +221,7 @@ export default function AdminPlanosEditarPage() {
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-20">
       <header className="sticky top-0 z-20 bg-[#050505]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-5">
         <div className="flex items-center gap-3">
-          <Link href="/admin/planos" className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
+          <Link href={adminPlansHref} className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800">
             <ArrowLeft size={18} className="text-zinc-300" />
           </Link>
           <div>
@@ -247,6 +270,7 @@ export default function AdminPlanosEditarPage() {
                     >
                       <div className="space-y-1 min-w-0">
                         <p className="text-sm font-bold truncate">{row.nome}</p>
+                        <p className="text-[11px] text-zinc-400 uppercase">Posicao: {(row.displayOrder ?? 0) + 1}</p>
                         <p className="text-[11px] text-zinc-400 uppercase">Prioridade: {row.nivelPrioridade}</p>
                         <p className="text-sm font-black text-emerald-400">R$ {Number(row.precoVal || 0).toFixed(2)}</p>
                         <div
@@ -370,6 +394,20 @@ export default function AdminPlanosEditarPage() {
                     onChange={(e) => setForm((prev) => ({ ...prev, descontoLoja: e.target.value }))}
                     inputMode="numeric"
                   />
+                </div>
+                <div className="space-y-1">
+                  <label className={labelClass}>Ordem de Exibicao</label>
+                  <select
+                    className={fieldClass}
+                    value={form.displayOrder}
+                    onChange={(e) => setForm((prev) => ({ ...prev, displayOrder: e.target.value }))}
+                  >
+                    {rows.map((_, index) => (
+                      <option key={`display-order-${index + 1}`} value={String(index + 1)}>
+                        Posicao {index + 1}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-1">
                   <label className={labelClass}>Prioridade</label>

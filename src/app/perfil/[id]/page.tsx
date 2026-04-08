@@ -32,6 +32,13 @@ import {
   isMiniVendorProfilePublic,
   type MiniVendorProfile,
 } from "@/lib/miniVendorService";
+import {
+  fetchCadastroConfig,
+  getDefaultCadastroConfig,
+  type CadastroConfig,
+} from "@/lib/cadastroConfigService";
+import { calculateAgeFromBirthDate } from "@/lib/birthDate";
+import { getSportPresentation } from "@/lib/cadastroOptions";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import Link from "next/link";
 import { getTurmaImage } from "../../../constants/turmaImages";
@@ -132,24 +139,6 @@ type ProfileTab =
   | "apadrinhamento"
   | "mini_vendor";
 
-const getSportInfo = (sport: string) => {
-    const map: Record<string, { emoji: string, label: string, color: string }> = {
-        "futebol": { emoji: "⚽", label: "Futebol", color: "bg-green-500/20 text-green-400" },
-        "futsal": { emoji: "👟", label: "Futsal", color: "bg-emerald-500/20 text-emerald-400" },
-        "rugby": { emoji: "🏉", label: "Rugby", color: "bg-orange-500/20 text-orange-400" },
-        "tenis": { emoji: "🎾", label: "Tênis", color: "bg-yellow-500/20 text-yellow-400" },
-        "beach_tennis": { emoji: "🏖️", label: "Beach Tennis", color: "bg-yellow-600/20 text-yellow-500" },
-        "natacao": { emoji: "🏊‍♂️", label: "Natação", color: "bg-cyan-500/20 text-cyan-400" },
-        "surf": { emoji: "🏄‍♂️", label: "Surf", color: "bg-blue-500/20 text-blue-400" },
-        "taco": { emoji: "🏏", label: "Taco", color: "bg-purple-500/20 text-purple-400" },
-        "dog_walking": { emoji: "🐕", label: "Dog Walking", color: "bg-amber-800/20 text-amber-500" },
-        "canoagem": { emoji: "🛶", label: "Canoagem", color: "bg-blue-800/20 text-blue-300" },
-        "volei": { emoji: "🏐", label: "Vôlei", color: "bg-blue-400/20 text-blue-200" },
-        "handebol": { emoji: "🤾", label: "Handebol", color: "bg-red-500/20 text-red-400" },
-    };
-    return map[sport.toLowerCase()] || { emoji: "🏅", label: sport, color: "bg-zinc-800 text-zinc-400" };
-};
-
 // --- COMPONENTES VISUAIS ---
 
 const LevelBadge = ({
@@ -218,6 +207,7 @@ export default function PerfilPublicoPage() {
   const [mentorshipBundle, setMentorshipBundle] = useState<MentorshipProfileBundle | null>(null);
   const [miniVendorProfile, setMiniVendorProfile] = useState<MiniVendorProfile | null>(null);
   const [miniVendorHiddenByOwner, setMiniVendorHiddenByOwner] = useState(false);
+  const [cadastroConfig, setCadastroConfig] = useState<CadastroConfig>(getDefaultCadastroConfig);
   const [sendingMentorshipMode, setSendingMentorshipMode] = useState<"" | "mentor" | "mentee">("");
   const [removingMentorshipId, setRemovingMentorshipId] = useState("");
   const [editingMentorshipId, setEditingMentorshipId] = useState("");
@@ -238,6 +228,10 @@ export default function PerfilPublicoPage() {
   const [myEvents, setMyEvents] = useState<EventItem[]>([]);
   const [myTreinos, setMyTreinos] = useState<TreinoItem[]>([]);
   const [myLigas, setMyLigas] = useState<LigaItem[]>([]);
+  const effectiveCadastroTenantId =
+    activeTenantId ||
+    (typeof profile?.tenant_id === "string" ? profile.tenant_id.trim() : "") ||
+    (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
 
   // Verifica se sou eu mesmo
   const isOwnProfile = user?.uid === params.id;
@@ -331,6 +325,37 @@ export default function PerfilPublicoPage() {
   useEffect(() => {
     setShowRelationshipMenu(false);
   }, [params.id]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (!effectiveCadastroTenantId) {
+      setCadastroConfig(getDefaultCadastroConfig());
+      return () => {
+        mounted = false;
+      };
+    }
+
+    const loadCadastroConfig = async () => {
+      try {
+        const nextConfig = await fetchCadastroConfig({
+          tenantId: effectiveCadastroTenantId,
+          forceRefresh: true,
+        });
+        if (!mounted) return;
+        setCadastroConfig(nextConfig);
+      } catch (error: unknown) {
+        console.error("Erro ao carregar configuracao de modalidades:", error);
+        if (!mounted) return;
+        setCadastroConfig(getDefaultCadastroConfig());
+      }
+    };
+
+    void loadCadastroConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [effectiveCadastroTenantId]);
 
   const handleFollow = async () => {
       if (!user || !profile) return;
@@ -530,7 +555,15 @@ export default function PerfilPublicoPage() {
 
   if (!profile) return null;
 
-  const getIdade = () => { if (profile.dataNascimento) { const birth = new Date(profile.dataNascimento); const today = new Date(); let age = today.getFullYear() - birth.getFullYear(); if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--; return age; } return null; };
+  const profileAge = calculateAgeFromBirthDate(profile.dataNascimento);
+  const resolveSportInfo = (sport: string) => {
+    const presentation = getSportPresentation(sport, cadastroConfig.sportOptions);
+    return {
+      emoji: presentation.emoji,
+      label: presentation.label,
+      color: presentation.colorClass,
+    };
+  };
   const showAge = isOwnProfile || profile.idadePublica;
   const showWhatsapp = isOwnProfile || profile.whatsappPublico;
   const showRelacionamento = isOwnProfile || profile.relacionamentoPublico;
@@ -607,7 +640,7 @@ export default function PerfilPublicoPage() {
 
                 <div className="flex items-center justify-center gap-2 mt-2">
                     <span className="bg-zinc-800 border border-zinc-700 px-3 py-1 rounded-full text-[10px] font-black uppercase text-zinc-300">{profile.turma || "Sem Turma"}</span>
-                    {showAge && getIdade() !== null && (<div className="relative group/age"><span className="bg-zinc-800 border border-zinc-700 px-3 py-1 rounded-full text-[10px] font-black uppercase text-zinc-300 flex items-center gap-1">{getIdade()} Anos{!profile.idadePublica && <Lock size={8} className="text-zinc-500"/>}</span></div>)}
+                    {showAge && profileAge !== null && (<div className="relative group/age"><span className="bg-zinc-800 border border-zinc-700 px-3 py-1 rounded-full text-[10px] font-black uppercase text-zinc-300 flex items-center gap-1">{profileAge} Anos{!profile.idadePublica && <Lock size={8} className="text-zinc-500"/>}</span></div>)}
                 </div>
             </div>
             
@@ -907,7 +940,7 @@ export default function PerfilPublicoPage() {
                     {profile.pets && (<div className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl flex items-center gap-3 col-span-2"><div className="p-2 bg-zinc-800 rounded-lg text-emerald-500"><PawPrint size={16}/></div><div><p className="text-[9px] text-zinc-500 uppercase font-bold">Mascote</p><p className="text-xs font-bold text-white uppercase">{profile.pets}</p></div></div>)}
                 </div>
                 {profile.esportes && profile.esportes.length > 0 && (
-                    <div className="pt-4"><h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest pl-2 border-l-2 border-blue-500 mb-3">Modalidades</h3><div className="flex flex-wrap gap-2">{profile.esportes.map((sport, i) => { const info = getSportInfo(sport); return <span key={i} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide border border-white/5 shadow-sm ${info.color}`}><span className="text-sm">{info.emoji}</span> {info.label}</span>; })}</div></div>
+                    <div className="pt-4"><h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest pl-2 border-l-2 border-blue-500 mb-3">Modalidades</h3><div className="flex flex-wrap gap-2">{profile.esportes.map((sport, i) => { const info = resolveSportInfo(sport); return <span key={i} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide border border-white/5 shadow-sm ${info.color}`}><span className="text-sm">{info.emoji}</span> {info.label}</span>; })}</div></div>
                 )}
             </div>
         </div>

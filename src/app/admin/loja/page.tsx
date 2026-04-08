@@ -48,6 +48,13 @@ const menuItems = [
     color: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10",
   },
   {
+    href: "/admin/loja/pedidos-aprovados",
+    title: "Pedidos Aprovados",
+    description: "Historico editavel dos comprovantes confirmados",
+    icon: ShoppingBag,
+    color: "text-cyan-400 border-cyan-500/30 bg-cyan-500/10",
+  },
+  {
     href: "/admin/loja/review",
     title: "Reviews",
     description: "Fila de avaliacoes moderada por pagina",
@@ -159,7 +166,6 @@ export default function AdminLojaMenuPage() {
             </Link>
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight">Admin Loja</h1>
-              <p className="text-[11px] text-zinc-500 font-bold">Menu leve com modulos separados</p>
             </div>
           </div>
 

@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
-import { CheckCircle2, Clock3, Loader2, ShoppingBag, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock3,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  ShoppingBag,
+  Truck,
+  XCircle,
+} from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -13,6 +22,7 @@ import {
   type MiniVendorProfile,
 } from "@/lib/miniVendorService";
 import { approveStoreOrder, setStoreOrderStatus } from "@/lib/storeService";
+import { fetchCanonicalUserVisuals } from "@/lib/userVisualsService";
 
 import { getVendorStatusClass, getVendorStatusLabel, type OrderRow } from "../_shared";
 import { MiniVendorShell } from "./MiniVendorShell";
@@ -45,6 +55,22 @@ const PAGE_COPY: Record<
   },
 };
 
+const formatDateTime = (value?: string): string => {
+  const isoValue = String(value || "").trim();
+  if (!isoValue) return "Nao informado";
+
+  const parsed = new Date(isoValue);
+  if (Number.isNaN(parsed.getTime())) return "Nao informado";
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(parsed);
+};
+
+const compactUserId = (value: string): string =>
+  value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
+
 export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
   const { user } = useAuth();
   const { addToast } = useToast();
@@ -54,6 +80,8 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
   const [profile, setProfile] = useState<MiniVendorProfile | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [actionId, setActionId] = useState("");
+  const [editingId, setEditingId] = useState("");
+  const [approverNames, setApproverNames] = useState<Record<string, string>>({});
 
   const pageCopy = PAGE_COPY[mode];
 
@@ -85,8 +113,34 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
       forceRefresh,
       limit: 80,
     });
-    setOrders(rows as OrderRow[]);
-  }, [pageCopy.status, tenantId, user?.uid]);
+    const nextRows = rows as OrderRow[];
+    setOrders(nextRows);
+
+    if (mode !== "approved") {
+      setApproverNames({});
+      return;
+    }
+
+    const approverIds = Array.from(
+      new Set(
+        nextRows
+          .map((row) => String(row.approvedBy || "").trim())
+          .filter((value) => value.length > 0 && value !== "admin")
+      )
+    );
+    if (approverIds.length === 0) {
+      setApproverNames({});
+      return;
+    }
+
+    const visuals = await fetchCanonicalUserVisuals(approverIds);
+    const nextNames: Record<string, string> = {};
+    approverIds.forEach((id) => {
+      const visual = visuals.get(id);
+      nextNames[id] = visual?.nome || compactUserId(id);
+    });
+    setApproverNames(nextNames);
+  }, [mode, pageCopy.status, tenantId, user?.uid]);
 
   useEffect(() => {
     let mounted = true;
@@ -147,6 +201,36 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
     } finally {
       setActionId("");
     }
+  };
+
+  const handleStatusChange = async (
+    row: OrderRow,
+    status: "pendente" | "rejected" | "delivered",
+    successMessage: string
+  ) => {
+    try {
+      setActionId(row.id);
+      await setStoreOrderStatus({
+        orderId: row.id,
+        status,
+      });
+      await loadPage(true);
+      setEditingId("");
+      addToast(successMessage, status === "rejected" ? "info" : "success");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao atualizar pedido.", "error");
+    } finally {
+      setActionId("");
+    }
+  };
+
+  const resolveApproverLabel = (row: OrderRow): string => {
+    const approvedBy = String(row.approvedBy || "").trim();
+    if (!approvedBy) return "Nao informado";
+    if (approvedBy === "admin") return "Admin";
+    if (approvedBy === user?.uid) return user.nome || "Voce";
+    return approverNames[approvedBy] || compactUserId(approvedBy);
   };
 
   return (
@@ -231,6 +315,25 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
                       key={row.id}
                       className="rounded-2xl border border-zinc-800 bg-black/20 p-4"
                     >
+                      {mode === "approved" && (
+                        <div className="mb-3 grid gap-2 text-[11px] text-zinc-400 sm:grid-cols-2">
+                          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                              Aprovado por
+                            </p>
+                            <p className="mt-1 font-bold text-white">{resolveApproverLabel(row)}</p>
+                          </div>
+                          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                              Data da aprovacao
+                            </p>
+                            <p className="mt-1 font-bold text-white">
+                              {formatDateTime(row.updatedAt || row.createdAt)}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>
                           <p className="text-sm font-bold text-white">
@@ -274,9 +377,64 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
                               </button>
                             </>
                           ) : (
-                            <span className="inline-flex rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[10px] font-black uppercase text-blue-300">
-                              Confirmado
-                            </span>
+                            <div className="w-full min-w-[220px] space-y-2">
+                              <span className="inline-flex w-full justify-center rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[10px] font-black uppercase text-blue-300">
+                                Confirmado
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setEditingId((prev) => (prev === row.id ? "" : row.id))}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+                              >
+                                <Pencil size={12} />
+                                {editingId === row.id ? "Fechar edicao" : "Editar aprovacao"}
+                              </button>
+                              {editingId === row.id && (
+                                <div className="grid gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleStatusChange(
+                                        row,
+                                        "pendente",
+                                        "Pedido voltou para pendente."
+                                      )
+                                    }
+                                    disabled={actionId === row.id}
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-500/20 disabled:opacity-60"
+                                  >
+                                    <RotateCcw size={12} />
+                                    Voltar para pendente
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleStatusChange(
+                                        row,
+                                        "delivered",
+                                        "Pedido marcado como entregue."
+                                      )
+                                    }
+                                    disabled={actionId === row.id}
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-60"
+                                  >
+                                    <Truck size={12} />
+                                    Marcar entregue
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleStatusChange(row, "rejected", "Pedido rejeitado.")
+                                    }
+                                    disabled={actionId === row.id}
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20 disabled:opacity-60"
+                                  >
+                                    <XCircle size={12} />
+                                    Rejeitar
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>

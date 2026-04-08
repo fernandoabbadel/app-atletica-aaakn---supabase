@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ImagePlus, Loader2, Pencil, Plus, Save, Tags, Trash2, X } from "lucide-react";
 
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
@@ -15,6 +16,7 @@ import {
   type MiniVendorProfile,
 } from "@/lib/miniVendorService";
 import { fetchPlanCatalog, type PlanRecord } from "@/lib/plansPublicService";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import { upsertStoreProduct } from "@/lib/storeService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import {
@@ -61,6 +63,7 @@ import {
 import { MiniVendorShell } from "../_components/MiniVendorShell";
 
 export default function MiniVendorProductsPage() {
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const { addToast } = useToast();
   const { tenantId, tenantLogoUrl, tenantSlug } = useTenantTheme();
@@ -78,17 +81,32 @@ export default function MiniVendorProductsPage() {
   const [productForm, setProductForm] = useState<ProductFormState>(EMPTY_PRODUCT_FORM);
   const draftRestoredRef = useRef(false);
 
-  const canUseArea = Boolean(user?.uid) && Boolean(tenantId.trim());
+  const currentUserId = user?.uid?.trim() || "";
+  const requestedUserId = String(searchParams.get("userId") || "").trim();
+  const canManageOtherMiniVendor = isAdminLikeRole(resolveEffectiveAccessRole(user));
+  const managedUserId =
+    canManageOtherMiniVendor && requestedUserId ? requestedUserId : currentUserId;
+  const isAdminManagingVendor =
+    canManageOtherMiniVendor &&
+    managedUserId.length > 0 &&
+    managedUserId !== currentUserId;
+  const canUseArea = Boolean(currentUserId) && Boolean(tenantId.trim());
   const isApproved = profile?.status === "approved";
   const storeName = profile?.storeName.trim() || "Minha Loja";
   const profileLogo = profile?.logoUrl || tenantLogoUrl || "/logo.png";
+  const backPath = isAdminManagingVendor
+    ? "/admin/mini-vendors/cadastros"
+    : "/configuracoes/mini-vendor";
   const editCompanyHref = tenantSlug
-    ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/editar")
-    : "/configuracoes/mini-vendor/editar";
+    ? withTenantSlug(
+        tenantSlug,
+        `/configuracoes/mini-vendor/editar${isAdminManagingVendor ? `?userId=${encodeURIComponent(managedUserId)}` : ""}`
+      )
+    : `/configuracoes/mini-vendor/editar${isAdminManagingVendor ? `?userId=${encodeURIComponent(managedUserId)}` : ""}`;
   const productDraftKey = useMemo(() => {
-    if (!tenantId.trim() || !user?.uid) return "";
-    return `mini-vendor:${tenantId}:${user.uid}:product-draft`;
-  }, [tenantId, user?.uid]);
+    if (!tenantId.trim() || !managedUserId) return "";
+    return `mini-vendor:${tenantId}:${managedUserId}:product-draft`;
+  }, [managedUserId, tenantId]);
 
   const loadProducts = useCallback(async (sellerId: string, forceRefresh = true) => {
     const rows = await fetchMiniVendorProducts({
@@ -102,7 +120,7 @@ export default function MiniVendorProductsPage() {
 
   const loadPage = useCallback(async (forceRefresh = true) => {
     const cleanTenantId = tenantId.trim();
-    const cleanUserId = user?.uid?.trim() || "";
+    const cleanUserId = managedUserId.trim();
     if (!cleanTenantId || !cleanUserId) {
       setProfile(null);
       setProducts([]);
@@ -120,7 +138,7 @@ export default function MiniVendorProductsPage() {
       return;
     }
     await loadProducts(vendorProfile.id, forceRefresh);
-  }, [loadProducts, tenantId, user?.uid]);
+  }, [loadProducts, managedUserId, tenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -443,7 +461,12 @@ export default function MiniVendorProductsPage() {
   return (
     <MiniVendorShell
       title="Produtos do Mini Vendor"
-      subtitle="Catalogo separado do cadastro da empresa, com planos carregados somente quando o formulario abre."
+      subtitle={
+        isAdminManagingVendor
+          ? "Edicao administrativa do catalogo da lojinha selecionada."
+          : "Catalogo separado do cadastro da empresa, com planos carregados somente quando o formulario abre."
+      }
+      backPath={backPath}
       actions={
         <Link
           href={editCompanyHref}

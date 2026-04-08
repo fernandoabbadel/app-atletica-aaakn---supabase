@@ -62,6 +62,9 @@ export type OrderRow = {
   total?: number;
   quantidade?: number;
   status?: string;
+  approvedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type MiniVendorFormState = {

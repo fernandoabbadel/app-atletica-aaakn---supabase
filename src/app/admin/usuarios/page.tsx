@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   Users,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
 } from "@/lib/adminUsersService";
 import { adminRecountFollowStatsBatch } from "@/lib/profileService";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
 
@@ -62,7 +64,7 @@ const statusClass: Record<AdminUserListItem["status"], string> = {
 
 export default function AdminUsuariosPage() {
   const { addToast } = useToast();
-  const { tenantId: activeTenantId } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
 
   const [rows, setRows] = useState<AdminUserListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,6 +132,10 @@ export default function AdminUsuariosPage() {
     const blocked = rows.filter((row) => row.status === "bloqueado").length;
     return { total, active, blocked };
   }, [rows]);
+  const adminDashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin") : "/admin";
+  const cadastroConfigHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/usuarios/cadastro")
+    : "/admin/usuarios/cadastro";
 
   const handleToggleStatus = async (row: AdminUserListItem) => {
     const nextStatus: AdminUserListItem["status"] =
@@ -228,7 +234,7 @@ export default function AdminUsuariosPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Link
-              href="/admin"
+              href={adminDashboardHref}
               className="p-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
               title="Voltar ao painel admin"
               aria-label="Voltar ao painel admin"
@@ -244,6 +250,13 @@ export default function AdminUsuariosPage() {
               </p>
             </div>
           </div>
+          <Link
+            href={cadastroConfigHref}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-300 transition hover:bg-emerald-500/20"
+          >
+            <SlidersHorizontal size={14} />
+            Configurar Cadastro
+          </Link>
           <div className="hidden md:flex items-center gap-3 text-xs font-bold uppercase text-zinc-400">
             <span className="px-2 py-1 rounded border border-zinc-700 bg-zinc-900">
               <Users size={12} className="inline mr-1" /> {stats.total}
@@ -359,7 +372,7 @@ export default function AdminUsuariosPage() {
                       <td className="p-4">
                         <div className="flex justify-end gap-2">
                           <Link
-                            href={`/admin/usuarios/${row.id}`}
+                            href={tenantSlug ? withTenantSlug(tenantSlug, `/admin/usuarios/${row.id}`) : `/admin/usuarios/${row.id}`}
                             className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700"
                             title="Editar usuario"
                             aria-label={`Editar usuario ${row.nome}`}

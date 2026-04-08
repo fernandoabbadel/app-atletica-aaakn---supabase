@@ -1,10 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import type { FormEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Eye, EyeOff, LogIn, Waves } from "lucide-react";
+import { Waves } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
 import { useAuth } from "@/context/AuthContext";
@@ -14,7 +13,6 @@ import {
   clearStoredLoginReturnTo,
   readStoredLoginReturnTo,
   sanitizeReturnToPath,
-  storeLoginReturnTo,
 } from "@/lib/authRedirect";
 import {
   readStoredInviteToken,
@@ -25,7 +23,6 @@ import { fetchPublicTenantBySlugCached } from "@/lib/publicTenantLookup";
 import { resolveTenantInviteGateRedirect } from "@/lib/inviteAccessGate";
 import { isPlatformMaster } from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
-import { getSupabaseClient } from "@/lib/supabase";
 
 const normalizeUserText = (value: unknown): string =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -37,9 +34,6 @@ export default function LoginPageClient() {
   const { loginAsGuest, loginGoogle, user, loading } = useAuth();
   const { tenantSlug: activeTenantSlug, loading: tenantThemeLoading } = useTenantTheme();
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [inviteTokenHydrated, setInviteTokenHydrated] = useState(false);
   const inviteTokenFromUrl = sanitizeInviteToken(searchParams.get("invite"));
@@ -265,38 +259,6 @@ export default function LoginPageClient() {
     user,
   ]);
 
-  const handleLogin = async (event: FormEvent) => {
-    event.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password;
-    if (!cleanEmail || !cleanPassword) {
-      addToast("Informe email e senha.", "error");
-      return;
-    }
-
-    setIsLoading(true);
-    redirectCommittedRef.current = false;
-    try {
-      storeLoginReturnTo(inviteAwareReturnTo);
-      const supabase = getSupabaseClient();
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password: cleanPassword,
-      });
-      if (error) {
-        throw error;
-      }
-      if (!data.user) {
-        throw new Error("Sessao nao iniciada.");
-      }
-      addToast("Login realizado. Carregando sua atletica...", "success");
-    } catch (error: unknown) {
-      console.error("Erro ao entrar:", error);
-      setIsLoading(false);
-      addToast("Email ou senha invalidos.", "error");
-    }
-  };
-
   const handleGuestLogin = async () => {
     try {
       setIsLoading(true);
@@ -362,78 +324,16 @@ export default function LoginPageClient() {
 
       <div className="relative z-10 w-full max-w-sm">
         <div className="bg-zinc-900/80 backdrop-blur-xl rounded-3xl border border-brand p-6 shadow-brand">
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider ml-1">
-                E-mail Institucional
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="seu.email@faculdade.edu.br"
-                className="brand-input"
-                maxLength={120}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider ml-1">
-                Senha
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="********"
-                  className="brand-input pr-12"
-                  maxLength={64}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-brand-accent transition"
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                className="text-xs text-brand-accent hover:text-brand font-medium transition"
-              >
-                Esqueci minha senha
-              </button>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="brand-button-solid w-full py-3.5 text-sm transform hover:scale-[1.02] active:scale-[0.98]"
-            >
-              {isLoading ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <LogIn className="w-4 h-4" />
-                  Entrar na plataforma
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="flex items-center gap-3 my-6">
-            <div className="flex-1 h-px bg-zinc-800" />
-            <span className="text-xs text-zinc-600 font-medium">ou entre com</span>
-            <div className="flex-1 h-px bg-zinc-800" />
+          <div className="rounded-2xl border border-zinc-800 bg-black/20 px-4 py-4 text-center">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
+              Acesso
+            </p>
+            <p className="mt-2 text-sm text-zinc-300">
+              O login por email institucional foi pausado. Entre com Google para continuar.
+            </p>
           </div>
 
-          <div className="space-y-3">
+          <div className="mt-5 space-y-3">
             {effectiveInviteToken && (
               <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-left">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-200">

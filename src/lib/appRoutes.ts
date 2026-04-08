@@ -36,11 +36,13 @@ const PATH_LABEL_OVERRIDES: Record<string, string> = {
   "/admin/master": "Admin Master",
   "/admin/boardround": "Admin BoardRound",
   "/admin/apadrinhamento": "Admin Apadrinhamento",
+  "/admin/loja/pedidos-aprovados": "Loja Pedidos Aprovados",
   "/admin/permissoes": "Permissoes",
   "/admin/permissoes/usuarios": "Permissoes Usuarios",
   "/admin/scanner": "Scanner QR",
   "/admin/treinos/lista/[id]": "Admin Treino Lista",
   "/admin/usuarios/[id]": "Admin Usuario Detalhe",
+  "/admin/usuarios/cadastro": "Admin Cadastro Config",
   "/boardround": "BoardRound",
   "/boardround/estatisticas": "BoardRound Estatisticas",
   "/boardround/ranking": "BoardRound Ranking",
@@ -108,6 +110,7 @@ const ADMIN_PAGE_PATHS = [
   "/admin/logs",
   "/admin/loja",
   "/admin/loja/categorias",
+  "/admin/loja/pedidos-aprovados",
   "/admin/loja/pedidos-pendentes",
   "/admin/loja/produtos-desativados",
   "/admin/loja/produtos",
@@ -142,6 +145,7 @@ const ADMIN_PAGE_PATHS = [
   "/admin/treinos/lista/[id]",
   "/admin/turma",
   "/admin/usuarios",
+  "/admin/usuarios/cadastro",
   "/admin/usuarios/[id]",
 ] as const;
 
@@ -269,9 +273,13 @@ export const APP_PAGES: AppPageDefinition[] = [
     path === "/admin/atletica"
       ? page(path, { permissionPath: "/admin/configuracoes" })
       : path === "/admin/boardround"
-        ? page(path, { permissionPath: "/admin/sharkround" })
+      ? page(path, { permissionPath: "/admin/sharkround" })
         : path === "/admin/historico/organograma"
           ? page(path, { permissionPath: "/admin/historico" })
+      : path === "/admin/loja/pedidos-aprovados"
+        ? page(path, { permissionPath: "/admin/loja" })
+      : path === "/admin/usuarios/cadastro"
+        ? page(path, { permissionPath: "/admin/usuarios" })
       : page(path)
   ),
   ...MASTER_PAGE_PATHS.map((path) => page(path)),

@@ -33,6 +33,8 @@ const PLAN_REJECT_CALLABLE = "planAdminRejectRequest";
 const PLAN_DELETE_REQUEST_CALLABLE = "planAdminDeleteRequest";
 const PLAN_SAVE_BANNER_CALLABLE = "planAdminSaveBanner";
 const PLANOS_SELECT_COLUMNS =
+  "id,nome,preco,precoVal,parcelamento,descricao,cor,icon,destaque,beneficios,xpMultiplier,nivelPrioridade,descontoLoja,displayOrder";
+const PLANOS_LEGACY_SELECT_COLUMNS =
   "id,nome,preco,precoVal,parcelamento,descricao,cor,icon,destaque,beneficios,xpMultiplier,nivelPrioridade,descontoLoja";
 const ASSINATURAS_SELECT_COLUMNS =
   "id,aluno,turma,foto,planoId,planoNome,valorPago,dataInicio,status,metodo,userId";
@@ -265,6 +267,78 @@ const updateUserWithSchemaFallback = async (
   }
 };
 
+const updatePlanWithSchemaFallback = async (options: {
+  planId: string;
+  tenantId?: string | null;
+  patch: Record<string, unknown>;
+}): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolvePlanTenantId(options.tenantId);
+  const mutablePatch: Record<string, unknown> = { ...options.patch };
+
+  while (Object.keys(mutablePatch).length > 0) {
+    try {
+      let query = supabase
+        .from("planos")
+        .update(mutablePatch)
+        .eq("id", options.planId.trim());
+      if (scopedTenantId) {
+        query = query.eq("tenant_id", scopedTenantId);
+      }
+      const { error } = await query;
+      if (error) throw error;
+      return;
+    } catch (error: unknown) {
+      const missingColumn = extractMissingColumnFromSchemaError(error);
+      const removableKey = missingColumn
+        ? findPatchKeyByColumn(mutablePatch, missingColumn)
+        : null;
+      if (!removableKey) throw error;
+
+      delete mutablePatch[removableKey];
+      console.warn(
+        `Plan update fallback: coluna ausente "${missingColumn}" em planos; seguindo sem esse campo.`
+      );
+    }
+  }
+};
+
+const upsertPlanRowsWithSchemaFallback = async (
+  rows: Array<Record<string, unknown>>
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  let mutableRows = rows.map((row) => ({ ...row }));
+
+  while (mutableRows.length > 0) {
+    try {
+      const { error } = await supabase.from("planos").upsert(mutableRows, {
+        onConflict: "id",
+      });
+      if (error) throw error;
+      return;
+    } catch (error: unknown) {
+      const missingColumn = extractMissingColumnFromSchemaError(error);
+      if (!missingColumn) throw error;
+
+      let removed = false;
+      mutableRows = mutableRows.map((row) => {
+        const removableKey = findPatchKeyByColumn(row, missingColumn);
+        if (!removableKey) return row;
+        removed = true;
+        const nextRow = { ...row };
+        delete nextRow[removableKey];
+        return nextRow;
+      });
+
+      if (!removed) throw error;
+
+      console.warn(
+        `Plan upsert fallback: coluna ausente "${missingColumn}" em planos; seguindo sem esse campo.`
+      );
+    }
+  }
+};
+
 async function callWithFallback<TReq, TRes>(
   callableName: string,
   payload: TReq,
@@ -389,6 +463,7 @@ export interface PlanRecord {
   xpMultiplier: number;
   nivelPrioridade: number;
   descontoLoja: number;
+  displayOrder: number;
 }
 
 export interface PlanRequestRecord {
@@ -469,6 +544,7 @@ const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
       xpMultiplier: 1,
       nivelPrioridade: 1,
       descontoLoja: 0,
+      displayOrder: 0,
     },
   },
   {
@@ -490,6 +566,7 @@ const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
       xpMultiplier: 1.1,
       nivelPrioridade: 2,
       descontoLoja: 5,
+      displayOrder: 1,
     },
   },
   {
@@ -511,6 +588,7 @@ const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
       xpMultiplier: 1.25,
       nivelPrioridade: 3,
       descontoLoja: 10,
+      displayOrder: 2,
     },
   },
   {
@@ -532,6 +610,7 @@ const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
       xpMultiplier: 1.5,
       nivelPrioridade: 4,
       descontoLoja: 20,
+      displayOrder: 3,
     },
   },
 ] as const;
@@ -554,6 +633,7 @@ const normalizePlan = (id: string, raw: unknown): PlanRecord | null => {
     xpMultiplier: Math.max(0, asNumber(data.xpMultiplier, 1)),
     nivelPrioridade: Math.max(1, asNumber(data.nivelPrioridade, 1)),
     descontoLoja: Math.max(0, asNumber(data.descontoLoja, 0)),
+    displayOrder: Math.max(0, Math.floor(asNumber(data.displayOrder, Number.MAX_SAFE_INTEGER))),
   };
 };
 
@@ -629,6 +709,10 @@ const normalizePlanPayload = (
   xpMultiplier: Math.max(0, asNumber(payload.xpMultiplier, 1)),
   nivelPrioridade: Math.max(1, asNumber(payload.nivelPrioridade, 1)),
   descontoLoja: Math.max(0, asNumber(payload.descontoLoja, 0)),
+  displayOrder: Math.max(
+    0,
+    Math.floor(asNumber(payload.displayOrder, Number.MAX_SAFE_INTEGER))
+  ),
 });
 
 const normalizePlanReferenceValue = (value: unknown): string =>
@@ -889,19 +973,47 @@ export async function fetchPlanCatalog(options?: {
   }
 
   const supabase = getSupabaseClient();
-  let query = supabase
-    .from("planos")
-    .select(PLANOS_SELECT_COLUMNS)
-    .order("precoVal", { ascending: true });
-  if (scopedTenantId) {
-    query = query.eq("tenant_id", scopedTenantId);
-  }
-  const { data, error } = await query.limit(maxResults);
-  if (error) throwSupabaseError(error);
+  const runQuery = async (withDisplayOrder: boolean): Promise<unknown[] | null> => {
+    let query = supabase
+      .from("planos")
+      .select(withDisplayOrder ? PLANOS_SELECT_COLUMNS : PLANOS_LEGACY_SELECT_COLUMNS);
+    query = withDisplayOrder
+      ? query.order("displayOrder", { ascending: true }).order("precoVal", { ascending: true })
+      : query.order("precoVal", { ascending: true });
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query.limit(maxResults);
+    if (error) {
+      const missingColumn = extractMissingColumnFromSchemaError(error);
+      if (withDisplayOrder && missingColumn?.toLowerCase() === "displayorder") {
+        return null;
+      }
+      throwSupabaseError(error);
+    }
+    return Array.isArray(data) ? (data as unknown[]) : [];
+  };
 
-  const plans = (data ?? [])
+  const data = (await runQuery(true)) ?? (await runQuery(false)) ?? [];
+  const plans = data
     .map((row) => normalizePlan(asString((row as Record<string, unknown>).id), row))
-    .filter((row): row is PlanRecord => row !== null);
+    .filter((row): row is PlanRecord => row !== null)
+    .sort((left, right) => {
+      if (left.displayOrder !== right.displayOrder) {
+        return left.displayOrder - right.displayOrder;
+      }
+      if (left.precoVal !== right.precoVal) {
+        return left.precoVal - right.precoVal;
+      }
+      return left.nome.localeCompare(right.nome, "pt-BR");
+    })
+    .map((plan, index) => ({
+      ...plan,
+      displayOrder:
+        Number.isFinite(plan.displayOrder) && plan.displayOrder !== Number.MAX_SAFE_INTEGER
+          ? plan.displayOrder
+          : index,
+    }));
 
   setMapCachedValue(plansCache, cacheKey, plans);
   return plans;
@@ -934,15 +1046,26 @@ export async function fetchPlanById(
     return null;
   }
 
-  let query = supabase
-    .from("planos")
-    .select(PLANOS_SELECT_COLUMNS)
-    .in("id", candidateIds);
-  if (scopedTenantId) {
-    query = query.eq("tenant_id", scopedTenantId);
-  }
-  const { data, error } = await query.limit(candidateIds.length);
-  if (error) throwSupabaseError(error);
+  const runQuery = async (withDisplayOrder: boolean): Promise<unknown[] | null> => {
+    let query = supabase
+      .from("planos")
+      .select(withDisplayOrder ? PLANOS_SELECT_COLUMNS : PLANOS_LEGACY_SELECT_COLUMNS)
+      .in("id", candidateIds);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    const { data, error } = await query.limit(candidateIds.length);
+    if (error) {
+      const missingColumn = extractMissingColumnFromSchemaError(error);
+      if (withDisplayOrder && missingColumn?.toLowerCase() === "displayorder") {
+        return null;
+      }
+      throwSupabaseError(error);
+    }
+    return Array.isArray(data) ? (data as unknown[]) : [];
+  };
+
+  const data = (await runQuery(true)) ?? (await runQuery(false)) ?? [];
 
   const rows = Array.isArray(data) ? data : [];
   if (rows.length === 0) {
@@ -960,6 +1083,51 @@ export async function fetchPlanById(
   const plan = normalizePlan(asString((selectedRow as Record<string, unknown>).id), selectedRow);
   setMapCachedValue(planByIdCache, cacheKey, plan);
   return plan;
+}
+
+export async function movePlanToDisplayPosition(payload: {
+  planId: string;
+  targetPosition: number;
+  tenantId?: string | null;
+}): Promise<PlanRecord[]> {
+  const cleanPlanId = payload.planId.trim();
+  if (!cleanPlanId) return [];
+
+  const scopedTenantId = resolvePlanTenantId(payload.tenantId);
+  const plans = await fetchPlanCatalog({
+    maxResults: MAX_PLAN_RESULTS,
+    forceRefresh: true,
+    tenantId: scopedTenantId,
+  });
+  if (plans.length === 0) return [];
+
+  const currentIndex = plans.findIndex((plan) => plan.id === cleanPlanId);
+  if (currentIndex < 0) return plans;
+
+  const targetIndex = Math.max(
+    0,
+    Math.min(plans.length - 1, Math.floor(payload.targetPosition) - 1)
+  );
+  if (currentIndex === targetIndex) return plans;
+
+  const orderedPlans = [...plans];
+  const [movedPlan] = orderedPlans.splice(currentIndex, 1);
+  orderedPlans.splice(targetIndex, 0, movedPlan);
+
+  await upsertPlanRowsWithSchemaFallback(
+    orderedPlans.map((plan, index) => ({
+      id: plan.id,
+      tenant_id: scopedTenantId || null,
+      displayOrder: index,
+      updatedAt: nowIso(),
+    }))
+  );
+
+  clearPlanReadCaches();
+  return orderedPlans.map((plan, index) => ({
+    ...plan,
+    displayOrder: index,
+  }));
 }
 
 export async function fetchPlanSubscriptions(options?: {
@@ -1236,33 +1404,29 @@ export async function upsertPlan(payload: {
     PLAN_UPSERT_CALLABLE,
     requestPayload,
     async () => {
-      const supabase = getSupabaseClient();
       if (id) {
-        const { error } = await supabase
-          .from("planos")
-          .update({
+        await updatePlanWithSchemaFallback({
+          planId: scopedId,
+          tenantId: scopedTenantId,
+          patch: {
             ...normalizedData,
             tenant_id: scopedTenantId || null,
             updatedAt: nowIso(),
-          })
-          .eq("id", scopedId);
-        if (error) throwSupabaseError(error);
+          },
+        });
         return { id: scopedId };
       }
 
-      const { data, error } = await supabase
-        .from("planos")
-        .insert({
+      await upsertPlanRowsWithSchemaFallback([
+        {
           id: scopedId,
           ...normalizedData,
           tenant_id: scopedTenantId || null,
           createdAt: nowIso(),
           updatedAt: nowIso(),
-        })
-        .select("id")
-        .single();
-      if (error) throwSupabaseError(error);
-      return { id: asString((data as Record<string, unknown> | null)?.id) };
+        },
+      ]);
+      return { id: scopedId };
     }
   );
 
@@ -1321,7 +1485,6 @@ export async function seedDefaultPlans(
     { plans: safeEntries },
     async () => {
       if (safeEntries.length === 0) return { ok: true };
-      const supabase = getSupabaseClient();
       const rows = safeEntries.map((entry) => ({
         id: buildTenantScopedRowId(scopedTenantId, slugifyPlanBaseId(entry.nome)),
         ...entry,
@@ -1329,8 +1492,7 @@ export async function seedDefaultPlans(
         createdAt: nowIso(),
         updatedAt: nowIso(),
       }));
-      const { error } = await supabase.from("planos").insert(rows);
-      if (error) throwSupabaseError(error);
+      await upsertPlanRowsWithSchemaFallback(rows);
       return { ok: true };
     }
   );
@@ -1364,21 +1526,16 @@ export async function restoreDefaultPlanCatalog(options?: {
     return { restored: 0, skipped: true };
   }
 
-  const supabase = getSupabaseClient();
   const writes = entriesToRestore.map(async (entry) => {
-    const { error } = await supabase
-      .from("planos")
-      .upsert(
-        {
-          id: buildTenantScopedRowId(scopedTenantId, entry.id) || entry.id,
-          ...entry.data,
-          tenant_id: scopedTenantId || null,
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        },
-        { onConflict: "id" }
-      );
-    if (error) throwSupabaseError(error);
+    await upsertPlanRowsWithSchemaFallback([
+      {
+        id: buildTenantScopedRowId(scopedTenantId, entry.id) || entry.id,
+        ...entry.data,
+        tenant_id: scopedTenantId || null,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      },
+    ]);
   });
   await Promise.all(writes);
   clearPlanReadCaches();

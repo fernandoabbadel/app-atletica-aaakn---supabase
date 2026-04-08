@@ -34,6 +34,7 @@ import {
   ScanBarcode,
   FileText,
   HeartHandshake,
+  X,
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -98,6 +99,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       effectiveAccessRole.includes("admin"));
   const sidebarTenantSlug = pathInfo.tenantSlug || activeTenantSlug.trim();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = React.useState(false);
   const [sidebarProfilesConfig, setSidebarProfilesConfig] = React.useState(
     createDefaultTenantAdminSidebarProfilesConfig
   );
@@ -273,33 +275,68 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
   }, [canViewMasterLink, currentPath, router, semPermissaoHref, sidebarProfileKey, sidebarProfilesConfig]);
 
+  useEffect(() => {
+    setIsMobileSidebarOpen(false);
+  }, [pathname]);
+
+  const desktopSidebarWidthClass = isSidebarCollapsed ? "lg:w-[88px]" : "lg:w-64";
+
   return (
-    <div className="flex min-h-screen bg-[#050505]">
-      <aside
-        className={`fixed z-40 flex h-full flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 ${
-          isSidebarCollapsed ? "w-[88px]" : "w-64"
+    <div className="min-h-screen bg-[#050505]">
+      <button
+        type="button"
+        onClick={() => setIsMobileSidebarOpen(true)}
+        className="fixed left-4 top-4 z-50 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/95 text-zinc-200 shadow-2xl backdrop-blur-xl transition hover:border-brand hover:text-white lg:hidden"
+        aria-label="Abrir menu admin"
+      >
+        <PanelLeftOpen size={18} />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setIsMobileSidebarOpen(false)}
+        className={`fixed inset-0 z-30 bg-black/70 backdrop-blur-sm transition duration-300 lg:hidden ${
+          isMobileSidebarOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
         }`}
+        aria-label="Fechar menu admin"
+      />
+
+      <aside
+        className={`fixed left-0 top-0 z-40 flex h-full w-[min(86vw,18rem)] flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 lg:translate-x-0 ${
+          isMobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        } ${desktopSidebarWidthClass}`}
       >
         <button
+          type="button"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          className="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-700 bg-zinc-950 text-zinc-300 shadow-lg transition hover:border-brand hover:text-white lg:hidden"
+          title="Fechar menu"
+        >
+          <X size={14} />
+        </button>
+
+        <button
           onClick={toggleSidebar}
-          className="absolute -right-3 top-6 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-950 text-zinc-300 shadow-lg transition hover:border-brand hover:text-white"
+          className="absolute -right-3 top-6 z-10 hidden h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-950 text-zinc-300 shadow-lg transition hover:border-brand hover:text-white lg:inline-flex"
           title={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
         >
           {isSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
         </button>
-        <div className="flex min-h-0 flex-1 flex-col p-6">
-          <div className="mb-8 flex items-center gap-3">
-            <div className="brand-icon-chip h-10 w-10 shrink-0 rounded-xl">
-              <ShieldAlert size={24} className="text-black" />
-            </div>
-            {!isSidebarCollapsed && (
-              <div className="min-w-0">
-                <h1 className="leading-none text-lg font-black uppercase tracking-tighter text-white">Painel Admin</h1>
-                <p className="truncate text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-                  {(tenantSigla || "USC").toUpperCase()} • v2.0
-                </p>
+        <div className="flex min-h-0 flex-1 flex-col p-5 lg:p-6">
+          <div className="mb-6 flex items-center justify-between gap-3 lg:mb-8 lg:block">
+            <div className="flex items-center gap-3">
+              <div className="brand-icon-chip h-10 w-10 shrink-0 rounded-xl">
+                <ShieldAlert size={24} className="text-black" />
               </div>
-            )}
+              {!isSidebarCollapsed && (
+                <div className="min-w-0">
+                  <h1 className="leading-none text-lg font-black uppercase tracking-tighter text-white">Painel Admin</h1>
+                  <p className="truncate text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                    {(tenantSigla || "USC").toUpperCase()} • v2.0
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
           <div
@@ -433,10 +470,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </nav>
           </div>
         </div>
-
       </aside>
 
-      <main className={`flex-1 p-8 transition-all duration-300 ${isSidebarCollapsed ? "ml-[88px]" : "ml-64"}`}>{children}</main>
+      <main
+        className={`min-w-0 px-4 pb-8 pt-20 transition-all duration-300 sm:px-6 lg:px-8 lg:pt-8 ${
+          isSidebarCollapsed ? "lg:ml-[88px]" : "lg:ml-64"
+        }`}
+      >
+        {children}
+      </main>
     </div>
   );
 }

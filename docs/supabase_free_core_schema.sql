@@ -424,10 +424,12 @@ create table if not exists public.planos (
   "xpMultiplier" numeric(8,2) not null default 1,
   "nivelPrioridade" integer not null default 1,
   "descontoLoja" numeric(8,2) not null default 0,
+  "displayOrder" integer not null default 0,
   "createdAt" timestamptz not null default now(),
   "updatedAt" timestamptz not null default now()
 );
 create index if not exists idx_planos_precoVal on public.planos ("precoVal");
+create index if not exists idx_planos_tenant_display_order on public.planos (tenant_id, "displayOrder", nome);
 
 create table if not exists public.solicitacoes_adesao (
   id text primary key default gen_random_uuid()::text,

@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { 
   User, Hash, Instagram, FileText, Phone, Save, Loader2, ShieldAlert, 
-  Eye, EyeOff, CheckCircle2, MapPin, Calendar, Heart, Trophy, PawPrint, 
+  Eye, EyeOff, CheckCircle2, MapPin, Heart, Trophy, PawPrint, 
   ArrowLeft, BadgeCheck, Lock, Camera, UploadCloud, Building2 
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext"; 
@@ -37,38 +37,17 @@ import {
   readActiveTurmasSnapshot,
   type TurmaConfig,
 } from "@/lib/turmasService";
-
-const STATUS_RELACIONAMENTO = ["Solteiro(a)", "Namorando", "Casado(a)", "Enrolado(a)", "No QG da Atletica"];
-
-const ESPORTES_OPTIONS = [
-    { id: "futebol", label: "Futebol", icon: "\u26BD" },
-    { id: "futsal", label: "Futsal", icon: "\uD83D\uDC5F" },
-    { id: "volei", label: "Volei", icon: "\uD83C\uDFD0" },
-    { id: "basquete", label: "Basquete", icon: "\uD83C\uDFC0" },
-    { id: "handball", label: "Handball", icon: "\uD83E\uDD3E" },
-    { id: "rugby", label: "Rugby", icon: "\uD83C\uDFC9" },
-    { id: "baseball", label: "Baseball", icon: "\u26BE" },
-    { id: "futevolei", label: "Futevolei", icon: "\uD83C\uDFD0" },
-    { id: "beach_tennis", label: "Beach Tennis", icon: "\uD83C\uDFD6\uFE0F" },
-    { id: "tenis", label: "Tenis", icon: "\uD83C\uDFBE" },
-    { id: "frescobol", label: "Frescobol", icon: "\uD83C\uDFD3" },
-    { id: "taco", label: "Taco (Bets)", icon: "\uD83C\uDFCF" },
-    { id: "peteca", label: "Peteca", icon: "\uD83C\uDFF8" },
-    { id: "surf", label: "Surf", icon: "\uD83C\uDFC4" },
-    { id: "natacao", label: "Natacao", icon: "\uD83C\uDFCA" },
-    { id: "canoagem", label: "Canoagem", icon: "\uD83D\uDEF6" },
-    { id: "skate", label: "Skate", icon: "\uD83D\uDEF9" },
-    { id: "dog_walking", label: "Dog Walking", icon: "\uD83D\uDC15" },
-    { id: "truco", label: "Truco", icon: "\uD83C\uDCCF" },
-    { id: "sinuca", label: "Sinuca", icon: "\uD83C\uDFB1" },
-];
-
-const PETS_OPTIONS = [
-    { id: "cachorro", label: "Cachorro", icon: "\uD83D\uDC36" },
-    { id: "gato", label: "Gato", icon: "\uD83D\uDC31" },
-    { id: "ambos", label: "Ambos", icon: "\uD83D\uDC36\uD83D\uDC31" },
-    { id: "nenhum", label: "Sem Pet", icon: "\uD83D\uDEAB" },
-];
+import BirthDateField from "@/components/forms/BirthDateField";
+import {
+  fetchCadastroConfig,
+  getDefaultCadastroConfig,
+  type CadastroConfig,
+} from "@/lib/cadastroConfigService";
+import {
+  DEFAULT_PET_OPTIONS,
+  DEFAULT_STATUS_RELACIONAMENTO_OPTIONS,
+  normalizeSelectedSportIds,
+} from "@/lib/cadastroOptions";
 
 // ðŸ¦ˆ ID 3: Interfaces para remover 'any'
 interface IBGEUF {
@@ -179,6 +158,7 @@ export default function CadastroPage() {
   const [error, setError] = useState("");
   const [turmasLoadError, setTurmasLoadError] = useState("");
   const [turmas, setTurmas] = useState<TurmaConfig[]>([]);
+  const [cadastroConfig, setCadastroConfig] = useState<CadastroConfig>(getDefaultCadastroConfig);
   
   // ðŸ¦ˆ ID 3: Tipagem correta
   const [ufs, setUfs] = useState<IBGEUF[]>([]);
@@ -231,6 +211,11 @@ export default function CadastroPage() {
   const visibleTurmas = useMemo(
     () => turmas.filter((turma) => !turma.hidden || turma.id === formData.turma),
     [formData.turma, turmas]
+  );
+  const cadastroFields = cadastroConfig.fields;
+  const visibleSportOptions = useMemo(
+    () => cadastroConfig.sportOptions.filter((option) => option.enabled),
+    [cadastroConfig.sportOptions]
   );
 
   useEffect(() => {
@@ -299,6 +284,37 @@ export default function CadastroPage() {
     router,
   ]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    if (!effectiveTenantId) {
+      setCadastroConfig(getDefaultCadastroConfig());
+      return () => {
+        mounted = false;
+      };
+    }
+
+    const loadCadastroConfig = async () => {
+      try {
+        const nextConfig = await fetchCadastroConfig({
+          tenantId: effectiveTenantId,
+          forceRefresh: true,
+        });
+        if (!mounted) return;
+        setCadastroConfig(nextConfig);
+      } catch (configError: unknown) {
+        console.error("Erro ao carregar configuracao do cadastro:", configError);
+        if (!mounted) return;
+        setCadastroConfig(getDefaultCadastroConfig());
+      }
+    };
+
+    void loadCadastroConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [effectiveTenantId]);
+
   // APIs IBGE
   useEffect(() => {
     fetch("https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome")
@@ -347,7 +363,7 @@ export default function CadastroPage() {
         estadoOrigem: String(user.estadoOrigem || ""),
         statusRelacionamento: String(user.statusRelacionamento || "Solteiro(a)"),
         relacionamentoPublico: Boolean(user.relacionamentoPublico ?? true),
-        esportes: Array.isArray(user.esportes) ? user.esportes : [],
+        esportes: normalizeSelectedSportIds(Array.isArray(user.esportes) ? user.esportes : []),
         pets: String(user.pets || "nenhum"),
         foto: String(user.foto || "")
       });
@@ -358,6 +374,22 @@ export default function CadastroPage() {
     if (authLoading || user) return;
     router.replace(loginPath);
   }, [authLoading, loginPath, router, user]);
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const normalizedSports = normalizeSelectedSportIds(
+        prev.esportes,
+        cadastroConfig.sportOptions
+      );
+      if (normalizedSports.join("|") === prev.esportes.join("|")) {
+        return prev;
+      }
+      return {
+        ...prev,
+        esportes: normalizedSports,
+      };
+    });
+  }, [cadastroConfig.sportOptions]);
 
   useEffect(() => {
     let mounted = true;
@@ -455,8 +487,11 @@ export default function CadastroPage() {
 
   const toggleEsporte = (id: string) => {
       setFormData(prev => {
-          const exists = prev.esportes.includes(id);
-          const newEsportes = exists ? prev.esportes.filter(e => e !== id) : [...prev.esportes, id];
+          const normalizedId = normalizeSelectedSportIds([id], cadastroConfig.sportOptions)[0] || id;
+          const exists = prev.esportes.includes(normalizedId);
+          const newEsportes = exists
+            ? prev.esportes.filter((entry) => entry !== normalizedId)
+            : [...prev.esportes, normalizedId];
           return { ...prev, esportes: newEsportes };
       });
   };
@@ -476,7 +511,35 @@ export default function CadastroPage() {
     if (!formData.telefone) { setLoading(false); return setError("Telefone e obrigatorio para contato!"); }
     if (!/^\+55\d{10,11}$/.test(formData.telefone)) { setLoading(false); return setError("Telefone deve estar no formato +5512912345678."); }
     if (!formData.turma) { setLoading(false); return setError("Selecione sua turma!"); }
-    
+    if (cadastroFields.instagram.enabled && cadastroFields.instagram.required && !formData.instagram.trim()) {
+      setLoading(false);
+      return setError("Instagram obrigatorio neste cadastro.");
+    }
+    if (cadastroFields.bio.enabled && cadastroFields.bio.required && !formData.bio.trim()) {
+      setLoading(false);
+      return setError("Preencha sua bio antes de continuar.");
+    }
+    if (
+      cadastroFields.statusRelacionamento.enabled &&
+      cadastroFields.statusRelacionamento.required &&
+      !formData.statusRelacionamento.trim()
+    ) {
+      setLoading(false);
+      return setError("Selecione seu status de relacionamento.");
+    }
+    if (cadastroFields.pets.enabled && cadastroFields.pets.required && !formData.pets.trim()) {
+      setLoading(false);
+      return setError("Selecione uma opcao de mascote.");
+    }
+    if (
+      cadastroFields.esportes.enabled &&
+      cadastroFields.esportes.required &&
+      formData.esportes.length === 0
+    ) {
+      setLoading(false);
+      return setError("Selecione pelo menos uma modalidade.");
+    }
+
     if (!formData.foto) { setLoading(false); return setError("A foto de perfil e obrigatoria!"); }
 
     try {
@@ -496,13 +559,21 @@ export default function CadastroPage() {
         formData.nome && 
         user?.email && // Email vem do Auth
         formData.turma && 
-        formData.instagram && 
         formData.telefone &&
         formData.matricula && 
         formData.apelido && 
         formData.cidadeOrigem && 
         formData.estadoOrigem && 
-        formData.foto;
+        formData.foto &&
+        (!cadastroFields.instagram.enabled || !cadastroFields.instagram.required || Boolean(formData.instagram.trim())) &&
+        (!cadastroFields.bio.enabled || !cadastroFields.bio.required || Boolean(formData.bio.trim())) &&
+        (
+          !cadastroFields.statusRelacionamento.enabled ||
+          !cadastroFields.statusRelacionamento.required ||
+          Boolean(formData.statusRelacionamento.trim())
+        ) &&
+        (!cadastroFields.pets.enabled || !cadastroFields.pets.required || Boolean(formData.pets.trim())) &&
+        (!cadastroFields.esportes.enabled || !cadastroFields.esportes.required || formData.esportes.length > 0);
 
       if (isProfileComplete && user?.uid) {
         await markProfileComplete(user.uid);
@@ -823,11 +894,13 @@ export default function CadastroPage() {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={`grid grid-cols-1 gap-4 ${cadastroFields.statusRelacionamento.enabled ? "md:grid-cols-2" : ""}`}>
                         <div className="flex gap-2">
-                             <div className="relative group flex-1">
-                                <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                                <input type="date" className="input-field pl-14" value={formData.dataNascimento} onChange={e => setFormData({...formData, dataNascimento: e.target.value})} required />
+                            <div className="flex-1">
+                                <BirthDateField
+                                  value={formData.dataNascimento}
+                                  onChange={(value) => setFormData((prev) => ({ ...prev, dataNascimento: value }))}
+                                />
                             </div>
                             <button 
                                 type="button" 
@@ -839,17 +912,21 @@ export default function CadastroPage() {
                             </button>
                         </div>
 
+                        {cadastroFields.statusRelacionamento.enabled ? (
                         <div className="flex gap-2">
                             <div className="relative flex-1 group">
                                 <Heart className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-pink-500" size={18} />
                                 <select className="input-field pl-14 flex-1 appearance-none" value={formData.statusRelacionamento} onChange={e => setFormData({...formData, statusRelacionamento: e.target.value})}>
-                                    {STATUS_RELACIONAMENTO.map(s => <option key={s} value={s}>{s}</option>)}
+                                    {DEFAULT_STATUS_RELACIONAMENTO_OPTIONS.map((status) => (
+                                      <option key={status} value={status}>{status}</option>
+                                    ))}
                                 </select>
                             </div>
                             <button type="button" onClick={() => setFormData({...formData, relacionamentoPublico: !formData.relacionamentoPublico})} className={`w-14 rounded-xl border flex items-center justify-center transition-all ${formData.relacionamentoPublico ? "bg-pink-500/20 border-pink-500/50 text-pink-500" : "bg-zinc-800 border-zinc-700 text-zinc-500"}`}>
                                 {formData.relacionamentoPublico ? <Eye size={20} /> : <EyeOff size={20} />}
                             </button>
                         </div>
+                        ) : null}
                     </div>
 
                     {/* ðŸ¦ˆ ID 1: LOCALIZAÃ‡ÃƒO - Travar se já existir */}
@@ -889,7 +966,7 @@ export default function CadastroPage() {
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={`grid grid-cols-1 gap-4 ${cadastroFields.instagram.enabled ? "md:grid-cols-2" : ""}`}>
                         <div className="flex gap-2">
                             <div className="relative flex-1 group">
                                 <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
@@ -908,20 +985,30 @@ export default function CadastroPage() {
                                 {formData.whatsappPublico ? <Eye size={20} /> : <EyeOff size={20} />}
                             </button>
                         </div>
+                        {cadastroFields.instagram.enabled ? (
                         <div className="relative group">
                             <Instagram className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-pink-500 transition" size={18} />
-                            <input type="text" maxLength={120} placeholder="Insta (sem @)" className="input-field pl-14" value={formData.instagram} onChange={e => setFormData({...formData, instagram: e.target.value.slice(0, 120)})} />
+                            <input
+                              type="text"
+                              maxLength={120}
+                              placeholder={cadastroFields.instagram.required ? "Insta obrigatorio (sem @)" : "Insta (sem @)"}
+                              className="input-field pl-14"
+                              value={formData.instagram}
+                              onChange={e => setFormData({...formData, instagram: e.target.value.slice(0, 120)})}
+                            />
                         </div>
+                        ) : null}
                     </div>
                 </div>
 
                 {/* BLOCO 2: PETS */}
+                {cadastroFields.pets.enabled ? (
                 <div className="space-y-3">
                     <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1 flex items-center gap-2">
                         <PawPrint size={12} className="text-orange-500"/> Mascote do QG
                     </label>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {PETS_OPTIONS.map((pet) => (
+                        {DEFAULT_PET_OPTIONS.map((pet) => (
                             <button
                                 key={pet.id}
                                 type="button"
@@ -939,14 +1026,16 @@ export default function CadastroPage() {
                         ))}
                     </div>
                 </div>
+                ) : null}
 
                 {/* BLOCO 3: ESPORTES */}
+                {cadastroFields.esportes.enabled ? (
                 <div className="space-y-3">
                     <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1 flex items-center gap-2">
                         <Trophy size={12} className="text-emerald-500"/> Suas Modalidades
                     </label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                        {ESPORTES_OPTIONS.map((esp) => {
+                        {visibleSportOptions.map((esp) => {
                             const isSelected = formData.esportes.includes(esp.id);
                             return (
                                 <button
@@ -967,6 +1056,7 @@ export default function CadastroPage() {
                         })}
                     </div>
                 </div>
+                ) : null}
 
                 {/* BLOCO 4: TURMA */}
                 <div className="space-y-3">
@@ -1017,6 +1107,7 @@ export default function CadastroPage() {
                 </div>
 
                 {/* BIO */}
+                {cadastroFields.bio.enabled ? (
                 <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Grito de Guerra (Bio do Album)</label>
                     <div className="relative group">
@@ -1025,6 +1116,7 @@ export default function CadastroPage() {
                         <span className="absolute right-4 bottom-2 text-[10px] text-zinc-700 font-bold">{formData.bio.length}/100</span>
                     </div>
                 </div>
+                ) : null}
                 
                 <button type="submit" disabled={loading || imageLoading || inviteContextLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase py-5 rounded-[2rem] shadow-xl shadow-emerald-900/20 transition-all flex justify-center items-center gap-2 disabled:cursor-not-allowed disabled:opacity-70">
                     {loading ? <Loader2 className="animate-spin"/> : <Save size={20} />}

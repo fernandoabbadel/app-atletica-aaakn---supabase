@@ -106,6 +106,7 @@ export const TENANT_ADMIN_SIDEBAR_ITEMS: TenantAdminSidebarItemDefinition[] = [
   sidebarItem("landing", "Comercial", "Landing", "/admin/landing", "Personalizacao da landing e conteudo comercial."),
   sidebarItem("loja", "Comercial", "Loja", "/admin/loja", "Produtos, pedidos, reviews e operacao da loja."),
   sidebarItem("loja_categorias", "Comercial", "Loja - Categorias", "/admin/loja/categorias", "Cadastro e organizacao de categorias da loja.", ["loja"]),
+  sidebarItem("loja_pedidos_aprovados", "Comercial", "Loja - Pedidos Aprovados", "/admin/loja/pedidos-aprovados", "Historico e edicao dos pedidos aprovados da loja.", ["loja"]),
   sidebarItem("loja_pedidos_pendentes", "Comercial", "Loja - Pedidos Pendentes", "/admin/loja/pedidos-pendentes", "Acompanhamento de pedidos pendentes da loja.", ["loja"]),
   sidebarItem("loja_produtos_desativados", "Comercial", "Loja - Produtos Desativados", "/admin/loja/produtos-desativados", "Historico de produtos fora do ar com reativacao.", ["loja"]),
   sidebarItem("loja_produtos", "Comercial", "Loja - Produtos", "/admin/loja/produtos", "Gestao detalhada dos produtos da loja.", ["loja"]),

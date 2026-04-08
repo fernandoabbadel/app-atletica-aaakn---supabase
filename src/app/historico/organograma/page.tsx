@@ -134,7 +134,7 @@ export default function OrganogramaPage() {
             <ArrowLeft size={18} />
           </Link>
 
-          <div className="mt-8 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+          <div className="mt-8">
             <div className="max-w-2xl">
               <p className="text-[11px] font-black uppercase tracking-[0.35em] text-brand">
                 {tenantSigla || "USC"} • Liderancas
@@ -147,17 +147,6 @@ export default function OrganogramaPage() {
               </p>
             </div>
 
-            <div className="rounded-3xl border border-brand/30 bg-black/40 px-5 py-4 backdrop-blur-xl">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-                Estrutura ativa
-              </p>
-              <p className="mt-2 text-3xl font-black text-brand">
-                {members.length}
-              </p>
-              <p className="text-xs font-bold uppercase text-zinc-500">
-                membros no quadro
-              </p>
-            </div>
           </div>
         </div>
       </section>

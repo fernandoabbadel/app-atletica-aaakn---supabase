@@ -92,7 +92,9 @@ export default function MasterTopBar() {
     .sort((left, right) => left.nome.localeCompare(right.nome));
   const routeTenant = tenantOptions.find((tenant) => tenant.slug === pathInfo.tenantSlug) || null;
   const selectedTenantId = isMasterScope
-    ? (isOverrideActive ? tenantId : "")
+    ? isOverrideActive
+      ? tenantId
+      : ""
     : tenantId || routeTenant?.id || "";
   const selectedTenant =
     tenantOptions.find((tenant) => tenant.id === selectedTenantId) || routeTenant;
@@ -174,108 +176,105 @@ export default function MasterTopBar() {
   };
 
   return (
-    <>
-      <div className="h-16" />
-      <div className="fixed inset-x-0 top-0 z-[90] border-b border-red-500/20 bg-[linear-gradient(90deg,#2f0505,#120606_28%,#0a0a0a_55%,#120606_78%,#2f0505)] shadow-[0_16px_50px_rgba(127,29,29,0.28)]">
-        <div className="mx-auto flex min-h-16 max-w-[1800px] flex-wrap items-center gap-2 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white md:flex-nowrap md:px-5">
-          <span className="inline-flex shrink-0 items-center gap-2 rounded-full border border-red-300/30 bg-red-500/12 px-3 py-1 text-red-100">
-            <ShieldAlert size={12} />
-            Modo Master
+    <div className="sticky top-0 z-[90] border-b border-red-500/20 bg-[linear-gradient(90deg,#2f0505,#120606_28%,#0a0a0a_55%,#120606_78%,#2f0505)] shadow-[0_16px_50px_rgba(127,29,29,0.28)]">
+      <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.14em] text-white sm:text-[10px] md:flex-nowrap md:px-5 md:tracking-[0.16em]">
+        <span className="inline-flex shrink-0 items-center gap-2 rounded-full border border-red-300/30 bg-red-500/12 px-3 py-1 text-red-100">
+          <ShieldAlert size={11} />
+          Modo Master
+        </span>
+
+        <span className="hidden text-zinc-500 md:block">|</span>
+
+        <span className="hidden truncate text-zinc-200 md:block">
+          vendo{" "}
+          <span style={{ color: selectedTenantId ? palette.accent : undefined }}>
+            {activeTenantLabel}
           </span>
+        </span>
 
-          <span className="hidden text-zinc-500 md:block">|</span>
+        <span className="hidden text-zinc-500 xl:block">|</span>
 
-          <span className="truncate text-zinc-200">
-            vendo{" "}
-            <span style={{ color: selectedTenantId ? palette.accent : undefined }}>
-              {activeTenantLabel}
-            </span>
+        <span className="hidden truncate text-zinc-400 xl:block">
+          role {effectiveRoleLabel} | {mode}
+        </span>
+
+        {isOverrideActive && (
+          <span
+            className="hidden rounded-full border px-2 py-1 text-[9px] md:inline-flex"
+            style={{
+              borderColor: "rgb(var(--tenant-primary-rgb) / 0.32)",
+              backgroundColor: "rgb(var(--tenant-primary-rgb) / 0.12)",
+              color: "var(--tenant-accent)",
+            }}
+          >
+            contexto forcado
           </span>
+        )}
 
-          <span className="hidden text-zinc-500 xl:block">|</span>
-
-          <span className="hidden truncate text-zinc-400 xl:block">
-            role {effectiveRoleLabel} • {mode}
-          </span>
-
-          {isOverrideActive && (
-            <span
-              className="hidden rounded-full border px-2 py-1 text-[9px] md:inline-flex"
-              style={{
-                borderColor: "rgb(var(--tenant-primary-rgb) / 0.32)",
-                backgroundColor: "rgb(var(--tenant-primary-rgb) / 0.12)",
-                color: "var(--tenant-accent)",
-              }}
+        <div className="ml-auto grid w-full grid-cols-1 gap-2 sm:grid-cols-2 md:flex md:w-auto md:flex-row">
+          <label className="flex min-w-0 items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-3 py-2 md:min-w-[220px]">
+            <span className="shrink-0 text-[9px] text-zinc-500">Tenant</span>
+            <select
+              value={selectedTenantId}
+              onChange={(event) => handleTenantChange(event.target.value)}
+              className="w-full bg-transparent text-[10px] font-black uppercase text-white outline-none"
+              disabled={loadingTenants || loadingChange}
             >
-              contexto forcado
-            </span>
-          )}
-
-          <div className="ml-auto flex w-full flex-col gap-2 md:w-auto md:flex-row">
-            <label className="flex min-w-[220px] items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-3 py-2">
-              <span className="shrink-0 text-[9px] text-zinc-500">Tenant</span>
-              <select
-                value={selectedTenantId}
-                onChange={(event) => handleTenantChange(event.target.value)}
-                className="w-full bg-transparent text-[10px] font-black uppercase text-white outline-none"
-                disabled={loadingTenants || loadingChange}
-              >
-                <option value="" className="bg-zinc-950 text-white">
-                  Plataforma USC
+              <option value="" className="bg-zinc-950 text-white">
+                Plataforma USC
+              </option>
+              {tenantOptions.map((tenant) => (
+                <option key={tenant.id} value={tenant.id} className="bg-zinc-950 text-white">
+                  {tenant.sigla} - {tenant.nome}
                 </option>
-                {tenantOptions.map((tenant) => (
-                  <option key={tenant.id} value={tenant.id} className="bg-zinc-950 text-white">
-                    {tenant.sigla} - {tenant.nome}
-                  </option>
-                ))}
-              </select>
-            </label>
+              ))}
+            </select>
+          </label>
 
-            <label className="flex min-w-[190px] items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-3 py-2">
-              <span className="shrink-0 text-[9px] text-zinc-500">Role</span>
-              <select
-                value={previewRole}
-                onChange={(event) => handleRoleChange(event.target.value)}
-                className="w-full bg-transparent text-[10px] font-black uppercase text-white outline-none"
-              >
-                {ROLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value} className="bg-zinc-950 text-white">
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <label className="flex min-w-0 items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-3 py-2 md:min-w-[190px]">
+            <span className="shrink-0 text-[9px] text-zinc-500">Role</span>
+            <select
+              value={previewRole}
+              onChange={(event) => handleRoleChange(event.target.value)}
+              className="w-full bg-transparent text-[10px] font-black uppercase text-white outline-none"
+            >
+              {ROLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value} className="bg-zinc-950 text-white">
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:col-span-2 md:col-auto">
+            <Link
+              href="/master"
+              className="inline-flex items-center gap-1 rounded-full border border-red-300/20 bg-white/5 px-3 py-2 text-[9px] text-zinc-200 transition hover:bg-red-500/15 hover:text-white"
+            >
+              <Building2 size={11} />
+              Master
+            </Link>
+            {adminTargetSlug ? (
               <Link
-                href="/master"
-                className="inline-flex items-center gap-1 rounded-full border border-red-300/20 bg-white/5 px-3 py-2 text-[9px] text-zinc-200 transition hover:bg-red-500/15 hover:text-white"
+                href={withTenantSlug(adminTargetSlug, "/admin")}
+                className="inline-flex items-center gap-1 rounded-full border bg-white/5 px-3 py-2 text-[9px] transition hover:text-white"
+                style={{
+                  borderColor: "rgb(var(--tenant-primary-rgb) / 0.24)",
+                  color: "var(--tenant-accent)",
+                }}
               >
-                <Building2 size={11} />
-                Master
+                <Waypoints size={11} />
+                Admin
               </Link>
-              {adminTargetSlug ? (
-                <Link
-                  href={withTenantSlug(adminTargetSlug, "/admin")}
-                  className="inline-flex items-center gap-1 rounded-full border bg-white/5 px-3 py-2 text-[9px] transition hover:text-white"
-                  style={{
-                    borderColor: "rgb(var(--tenant-primary-rgb) / 0.24)",
-                    color: "var(--tenant-accent)",
-                  }}
-                >
-                  <Waypoints size={11} />
-                  Admin
-                </Link>
-              ) : (
-                <div className="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-zinc-700 bg-white/5 px-3 py-2 text-[9px] text-zinc-500 opacity-60">
-                  <Waypoints size={11} />
-                  Admin
-                </div>
-              )}
-            </div>
+            ) : (
+              <div className="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-zinc-700 bg-white/5 px-3 py-2 text-[9px] text-zinc-500 opacity-60">
+                <Waypoints size={11} />
+                Admin
+              </div>
+            )}
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

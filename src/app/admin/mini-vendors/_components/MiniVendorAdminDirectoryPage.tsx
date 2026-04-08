@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Loader2, LogOut, Store, XCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+  LogOut,
+  Package,
+  Pencil,
+  Store,
+  XCircle,
+} from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -13,6 +23,7 @@ import {
   setMiniVendorStatus,
   type MiniVendorProfile,
 } from "@/lib/miniVendorService";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 type MiniVendorAdminDirectoryMode = "approvals" | "vendors";
@@ -67,6 +78,7 @@ export default function MiniVendorAdminDirectoryPage({
   const [actionId, setActionId] = useState("");
 
   const pageCopy = PAGE_COPY[mode];
+  const canManageVendorLinks = isAdminLikeRole(resolveEffectiveAccessRole(user));
   const backHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/admin/mini-vendors")
     : "/admin/mini-vendors";
@@ -235,6 +247,50 @@ export default function MiniVendorAdminDirectoryPage({
                   key={row.id}
                   className="space-y-3 rounded-2xl border border-zinc-800 bg-black/20 p-4"
                 >
+                  {canManageVendorLinks && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={
+                          tenantSlug
+                            ? withTenantSlug(tenantSlug, `/perfil/mini-vendor/${row.id}`)
+                            : `/perfil/mini-vendor/${row.id}`
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+                      >
+                        <ExternalLink size={12} />
+                        Pagina do mini vendor
+                      </Link>
+                      <Link
+                        href={
+                          tenantSlug
+                            ? withTenantSlug(
+                                tenantSlug,
+                                `/configuracoes/mini-vendor/editar?userId=${encodeURIComponent(row.userId)}`
+                              )
+                            : `/configuracoes/mini-vendor/editar?userId=${encodeURIComponent(row.userId)}`
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[10px] font-black uppercase text-blue-300 hover:bg-blue-500/20"
+                      >
+                        <Pencil size={12} />
+                        Editar dados
+                      </Link>
+                      <Link
+                        href={
+                          tenantSlug
+                            ? withTenantSlug(
+                                tenantSlug,
+                                `/configuracoes/mini-vendor/produtos?userId=${encodeURIComponent(row.userId)}`
+                              )
+                            : `/configuracoes/mini-vendor/produtos?userId=${encodeURIComponent(row.userId)}`
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20"
+                      >
+                        <Package size={12} />
+                        Editar produtos
+                      </Link>
+                    </div>
+                  )}
+
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex items-start gap-4">
                       <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-zinc-700 bg-black">
