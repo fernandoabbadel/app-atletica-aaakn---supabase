@@ -1,9 +1,10 @@
 import { LeaguePublicDetailClient } from "./_components/LeaguePublicDetailClient";
 
-export default function LeaguePublicDetailPage({
+export default async function LeaguePublicDetailPage({
   params,
 }: {
-  params: { leagueId: string };
+  params: Promise<{ leagueId: string }>;
 }) {
-  return <LeaguePublicDetailClient leagueId={params.leagueId} activeTab="overview" />;
+  const { leagueId } = await params;
+  return <LeaguePublicDetailClient leagueId={leagueId} activeTab="overview" />;
 }

@@ -128,21 +128,21 @@ const QUESTIONS: QuizQuestion[] = [
     {
         id: 1,
         key: "scenario",
-        text: "Qual cenario faz seus olhos brilharem?",
+        text: "Qual cen\u00e1rio faz seus olhos brilharem?",
         options: [
-            { label: "Centro Cirurgico", keywords: ["trauma", "cirurgia", "laparoscopia", "robotica", "ortopedia"] },
-            { label: "Emergencia", keywords: ["emergencia", "urgencia", "trauma", "intensiva", "resgate"] },
-            { label: "Consultorio", keywords: ["clinica", "endocrino", "dermato", "gastro", "ambulatorio"] },
+            { label: "Centro Cir\u00fargico", keywords: ["trauma", "cirurgia", "laparoscopia", "robotica", "ortopedia"] },
+            { label: "Emerg\u00eancia", keywords: ["emergencia", "urgencia", "trauma", "intensiva", "resgate"] },
+            { label: "Consult\u00f3rio", keywords: ["clinica", "endocrino", "dermato", "gastro", "ambulatorio"] },
             { label: "Comunidade", keywords: ["familia", "comunidade", "pediatria", "gineco", "humanidades"] },
-            { label: "Laboratorio", keywords: ["patologia", "radiologia", "genetica", "anatomia", "simulacao"] },
+            { label: "Laborat\u00f3rio", keywords: ["patologia", "radiologia", "genetica", "anatomia", "simulacao"] },
         ],
     },
     {
         id: 2,
         key: "audience",
-        text: "Com qual publico voce tem mais afinidade?",
+        text: "Com qual p\u00fablico voc\u00ea tem mais afinidade?",
         options: [
-            { label: "Criancas", keywords: ["pediatria", "neonatologia", "infancia"] },
+            { label: "Crian\u00e7as", keywords: ["pediatria", "neonatologia", "infancia"] },
             { label: "Mulheres", keywords: ["gineco", "obstetricia", "saude da mulher"] },
             { label: "Adultos", keywords: ["geriatria", "clinica", "cardio", "oncologia"] },
             { label: "Graves", keywords: ["intensiva", "anestesiologia", "trauma", "urgencia"] },
@@ -154,43 +154,44 @@ const QUESTIONS: QuizQuestion[] = [
         key: "system",
         text: "Qual sistema te fascina?",
         options: [
-            { label: "Cerebro", keywords: ["neuro", "psiquiatria", "neurologia"] },
-            { label: "Coracao", keywords: ["cardio", "coracao", "cardiovascular"] },
+            { label: "C\u00e9rebro", keywords: ["neuro", "psiquiatria", "neurologia"] },
+            { label: "Cora\u00e7\u00e3o", keywords: ["cardio", "coracao", "cardiovascular"] },
             { label: "Ossos", keywords: ["ortopedia", "anatomia", "ossos"] },
-            { label: "Hormonios", keywords: ["gastro", "endocrino", "metabolismo", "obstetricia"] },
+            { label: "Horm\u00f4nios", keywords: ["gastro", "endocrino", "metabolismo", "obstetricia"] },
             { label: "Rins", keywords: ["nefro", "urologia", "rins"] },
         ],
     },
     {
         id: 4,
         key: "style",
-        text: "Qual e o seu estilo de pratica?",
+        text: "Qual \u00e9 o seu estilo de pr\u00e1tica?",
         options: [
             { label: "Manual", keywords: ["cirurgia", "trauma", "procedimento", "tecnica"] },
-            { label: "Raciocinio", keywords: ["clinica", "diagnostico", "investigacao"] },
-            { label: "Prevencao", keywords: ["familia", "pediatria", "promocao", "saude coletiva"] },
+            { label: "Racioc\u00ednio", keywords: ["clinica", "diagnostico", "investigacao"] },
+            { label: "Preven\u00e7\u00e3o", keywords: ["familia", "pediatria", "promocao", "saude coletiva"] },
             { label: "Tecnologia", keywords: ["radiologia", "cardio", "robotica", "simulacao"] },
-            { label: "Gestao", keywords: ["legal", "trabalho", "militar", "organizacao"] },
+            { label: "Gest\u00e3o", keywords: ["legal", "trabalho", "militar", "organizacao"] },
         ],
     },
     {
         id: 5,
         key: "impact",
-        text: "Qual impacto voce mais quer causar?",
+        text: "Qual impacto voc\u00ea mais quer causar?",
         options: [
             { label: "Salvar vidas", keywords: ["emergencia", "trauma", "ressuscitacao", "uti"] },
-            { label: "Paciencia", keywords: ["psiquiatria", "oncologia", "seguimento"] },
+            { label: "Paci\u00eancia", keywords: ["psiquiatria", "oncologia", "seguimento"] },
             { label: "Detalhe", keywords: ["oftalmo", "dermato", "microcirurgia", "precisao"] },
             { label: "Curiosidade", keywords: ["genetica", "patologia", "anatomia", "simulacao"] },
-            { label: "Vinculo", keywords: ["familia", "onco", "comunidade", "acolhimento"] },
+            { label: "V\u00ednculo", keywords: ["familia", "onco", "comunidade", "acolhimento"] },
         ],
     },
 ];
 
-export default function LigasUnitauPage() {
+export default function LigasUscPage() {
   const { user } = useAuth();
   const { tenantId, tenantSlug } = useTenantTheme();
   const router = useRouter();
+  const cleanTenantSlug = typeof tenantSlug === "string" ? tenantSlug.trim() : "";
   const [leagues, setLeagues] = useState<League[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLeague, setSelectedLeague] = useState<League | null>(null);
@@ -207,7 +208,7 @@ export default function LigasUnitauPage() {
   const [quizKeywords, setQuizKeywords] = useState<string[]>([]);
   const [topMatches, setTopMatches] = useState<League[]>([]);
   const tenantPath = (path: string): string =>
-    tenantSlug.trim() ? withTenantSlug(tenantSlug, path) : path;
+    cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path;
 
   useEffect(() => {
     let mounted = true;
@@ -473,7 +474,7 @@ export default function LigasUnitauPage() {
       <header className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-3">
             <Link href={tenantPath("/dashboard")} className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400"/></Link>
-            <div><h1 className="text-2xl font-black uppercase flex items-center gap-2">Ligas <span className="text-emerald-500">Unitau</span></h1><p className="text-[10px] font-bold text-zinc-500 uppercase">Ecossistema Acadêmico</p></div>
+            <div><h1 className="text-2xl font-black uppercase flex items-center gap-2">Ligas <span className="text-emerald-500">USC</span></h1><p className="text-[10px] font-bold text-zinc-500 uppercase">{"Ecossistema Acad\u00eamico"}</p></div>
         </div>
         <Link href={tenantPath("/ligas")} className="bg-zinc-900 border border-zinc-700 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase hover:bg-zinc-800 transition">Gerenciar</Link>
       </header>
@@ -481,7 +482,7 @@ export default function LigasUnitauPage() {
       {loading ? (
         <div className="h-60 flex flex-col items-center justify-center">
             <Loader2 className="animate-spin text-emerald-500 mb-2 w-8 h-8"/>
-            <p className="text-xs uppercase font-bold text-zinc-500">Carregando Ligas...</p>
+            <p className="text-xs uppercase font-bold text-zinc-500">Carregando ligas...</p>
         </div>
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -489,9 +490,9 @@ export default function LigasUnitauPage() {
         <div className={`bg-gradient-to-br from-indigo-900/40 via-zinc-900 to-zinc-900 border border-indigo-500/30 rounded-3xl p-6 min-h-[350px] ${showQuizResult ? 'col-span-1 md:col-span-2' : ''}`}>
             {!showQuizResult ? (
                 <>
-                    <div className="mb-4"><span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1"><Brain size={12}/> Oráculo</span><h3 className="text-lg font-black italic">{QUESTIONS[quizStep].text}</h3><p className="text-[10px] text-zinc-500">Selecione até 3 opções:</p></div>
+                    <div className="mb-4"><span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1"><Brain size={12}/> {"Or\u00e1culo"}</span><h3 className="text-lg font-black italic">{QUESTIONS[quizStep].text}</h3><p className="text-[10px] text-zinc-500">{"Selecione at\u00e9 3 op\u00e7\u00f5es:"}</p></div>
                     <div className="space-y-2">{QUESTIONS[quizStep].options.map((opt, i) => (<button key={i} onClick={() => toggleOption(opt.label)} className={`w-full text-left px-4 py-3 rounded-xl border text-xs font-bold transition flex justify-between ${selectedOptions.includes(opt.label) ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-900/50' : 'bg-black/40 border-zinc-800 text-zinc-400 hover:bg-zinc-800'}`}>{opt.label} {selectedOptions.includes(opt.label) && <CheckCircle2 size={14}/>}</button>))}</div>
-                    <div className="mt-6 flex justify-between items-center"><div className="flex gap-1">{QUESTIONS.map((_, i) => <div key={i} className={`h-1 w-6 rounded-full transition-all ${i <= quizStep ? 'bg-indigo-500' : 'bg-zinc-800'}`}/>)}</div><button onClick={handleNextStep} disabled={selectedOptions.length === 0} className="bg-white hover:bg-zinc-200 text-indigo-900 px-6 py-2 rounded-xl text-xs font-black uppercase disabled:opacity-50 transition shadow-lg">Próxima</button></div>
+                    <div className="mt-6 flex justify-between items-center"><div className="flex gap-1">{QUESTIONS.map((_, i) => <div key={i} className={`h-1 w-6 rounded-full transition-all ${i <= quizStep ? 'bg-indigo-500' : 'bg-zinc-800'}`}/>)}</div><button onClick={handleNextStep} disabled={selectedOptions.length === 0} className="bg-white hover:bg-zinc-200 text-indigo-900 px-6 py-2 rounded-xl text-xs font-black uppercase disabled:opacity-50 transition shadow-lg">{"Pr\u00f3xima"}</button></div>
                 </>
             ) : (
                 <div className="space-y-4 animate-in fade-in">
@@ -549,7 +550,7 @@ export default function LigasUnitauPage() {
                     </div>
                 </div>
                 <div className="flex flex-1 flex-col bg-[#050505] p-5">
-                    <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed">{l.descricao || "Sem descrição disponível."}</p>
+                    <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed">{l.descricao || "Sem descri\u00e7\u00e3o dispon\u00edvel."}</p>
                     {l.bizu ? (
                         <div className="mt-4 rounded-[1.4rem] border border-amber-500/20 bg-amber-500/10 p-3">
                             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-200">Bizu da liga</p>
@@ -610,7 +611,7 @@ export default function LigasUnitauPage() {
                       {loadingSelectedLeague && (
                           <div className="bg-zinc-900/70 border border-zinc-800 rounded-xl p-3 flex items-center gap-2 text-zinc-400 text-xs">
                               <Loader2 size={14} className="animate-spin text-emerald-500" />
-                              Carregando detalhes da liga...
+                              {"Carregando detalhes da liga..."}
                           </div>
                       )}
 
@@ -622,8 +623,8 @@ export default function LigasUnitauPage() {
                           </div>
                       )}
 
-                      {/* DESCRIÇÃO */}
-                      <div><h3 className="text-xs font-bold text-zinc-500 uppercase border-b border-zinc-800 pb-1 mb-2">Sobre</h3><p className="text-sm text-zinc-300 leading-relaxed">{selectedLeague.descricao || "Nenhuma descrição informada."}</p></div>
+                      {/* DESCRICAO */}
+                      <div><h3 className="text-xs font-bold text-zinc-500 uppercase border-b border-zinc-800 pb-1 mb-2">Sobre</h3><p className="text-sm text-zinc-300 leading-relaxed">{selectedLeague.descricao || "Nenhuma descri\u00e7\u00e3o informada."}</p></div>
                       
                       {/* MEMBROS */}
                       {selectedLeague.membros && selectedLeague.membros.length > 0 && (
@@ -658,7 +659,7 @@ export default function LigasUnitauPage() {
                                   {selectedLeague.eventos.map((ev, i) => (
                                       <Link key={i} href={ev.linkEvento?.startsWith("/") ? tenantPath(ev.linkEvento) : (ev.linkEvento || "#")} className="bg-zinc-900 p-3 rounded-xl border border-zinc-800 flex items-center gap-4 hover:border-emerald-500 transition group">
                                           <div className="bg-emerald-900/30 text-emerald-500 p-2 rounded-lg group-hover:scale-110 transition"><Calendar size={20}/></div>
-                                          <div><h4 className="font-bold text-sm text-white group-hover:text-emerald-400">{ev.titulo}</h4><p className="text-xs text-zinc-400">{ev.data} • {ev.local}</p></div>
+                                          <div><h4 className="font-bold text-sm text-white group-hover:text-emerald-400">{ev.titulo}</h4><p className="text-xs text-zinc-400">{ev.data} {"\u2022"} {ev.local}</p></div>
                                       </Link>
                                   ))}
                               </div>

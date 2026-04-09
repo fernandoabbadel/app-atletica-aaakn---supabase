@@ -859,7 +859,7 @@ export default function CadastroPage() {
                     </label>
                 </div>
 
-                <h1 className="text-3xl font-black uppercase italic tracking-tighter">Perfil do <span className="text-emerald-500">Atleta</span></h1>
+                <h1 className="text-3xl font-black uppercase italic tracking-tighter text-emerald-500">Cadastro</h1>
                 {/* AVISO DE FOTO */}
                 <div className="mt-4 bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl max-w-sm mx-auto">
                     <p className="text-[10px] text-yellow-400 font-bold uppercase tracking-wide flex items-center justify-center gap-2">

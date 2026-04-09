@@ -73,13 +73,13 @@ export default function AguardandoAprovacaoPage() {
         }
 
         if (nextMembership.status === "rejected") {
-          addToast("Seu pedido foi rejeitado. Contate o responsavel da atletica.", "error");
+          addToast("Seu pedido foi rejeitado. Contate o respons\u00e1vel da atl\u00e9tica.", "error");
         }
       } catch (statusError: unknown) {
         const message =
           statusError instanceof Error && statusError.message
             ? statusError.message
-            : "Falha ao carregar status de aprovacao.";
+            : "Falha ao carregar status de aprova\u00e7\u00e3o.";
         setError(message);
       } finally {
         if (mode === "initial") setLoading(false);
@@ -101,7 +101,7 @@ export default function AguardandoAprovacaoPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center text-sm font-black uppercase">
-        Consultando status da sua aprovacao...
+        {"Consultando status da sua aprova\u00e7\u00e3o..."}
       </div>
     );
   }
@@ -117,11 +117,9 @@ export default function AguardandoAprovacaoPage() {
           <div>
             <h1 className="text-2xl font-black uppercase tracking-tight inline-flex items-center gap-2">
               <Clock3 size={20} className="text-cyan-300" />
-              Aguardando Aprovacao
+              {"Aguardando Aprova\u00e7\u00e3o"}
             </h1>
-            <p className="text-sm text-zinc-400 mt-1">
-              Essa tela aparece quando o seu pedido de entrada em uma atletica ainda depende da aprovacao da diretoria.
-            </p>
+            <p className="mt-1 text-sm text-zinc-400">Aguarde seu pedido ser liberado</p>
           </div>
           <button
             onClick={() => void loadStatus("refresh")}
@@ -135,9 +133,9 @@ export default function AguardandoAprovacaoPage() {
 
         <div className="mt-6 space-y-3">
           <div className="rounded-xl border border-zinc-800 bg-black/50 px-4 py-3">
-            <p className="text-[11px] text-zinc-500 font-bold uppercase">Atletica</p>
+            <p className="text-[11px] text-zinc-500 font-bold uppercase">{"Atl\u00e9tica"}</p>
             <p className="text-sm font-bold text-white mt-1">
-              {tenant ? `${tenant.sigla} - ${tenant.nome}` : membership?.tenantId || "Nao identificada"}
+              {tenant ? `${tenant.sigla} - ${tenant.nome}` : membership?.tenantId || "N\u00e3o identificada"}
             </p>
           </div>
 

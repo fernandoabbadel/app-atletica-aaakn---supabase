@@ -1218,10 +1218,10 @@ export async function fetchLeagueSummaries(options?: {
 }
 
 export async function fetchLeagueById(
-  leagueId: string,
+  leagueId: string | null | undefined,
   options?: { forceRefresh?: boolean; tenantId?: string | null }
 ): Promise<LeagueRecord | null> {
-  const cleanId = leagueId.trim();
+  const cleanId = typeof leagueId === "string" ? leagueId.trim() : "";
   if (!cleanId) return null;
 
   const forceRefresh = options?.forceRefresh ?? false;
