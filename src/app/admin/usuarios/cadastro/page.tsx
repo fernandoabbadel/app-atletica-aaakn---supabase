@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -8,7 +8,6 @@ import {
   Plus,
   Save,
   SlidersHorizontal,
-  Sparkles,
   Trophy,
 } from "lucide-react";
 
@@ -69,10 +68,6 @@ export default function AdminUsuariosCadastroPage() {
   const [newSportIcon, setNewSportIcon] = useState("");
 
   const backHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/usuarios") : "/admin/usuarios";
-  const visibleSportsCount = useMemo(
-    () => draft.sportOptions.filter((option) => option.enabled).length,
-    [draft.sportOptions]
-  );
 
   useEffect(() => {
     let mounted = true;
@@ -204,7 +199,7 @@ export default function AdminUsuariosCadastroPage() {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
-        <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+        <section>
           <article className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
             <div className="flex items-center gap-3">
               <div className="rounded-2xl border border-zinc-700 bg-zinc-950 p-3 text-emerald-400">
@@ -260,45 +255,6 @@ export default function AdminUsuariosCadastroPage() {
                   </div>
                 );
               })}
-            </div>
-          </article>
-
-          <article className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
-            <div className="flex items-center gap-3">
-              <div className="rounded-2xl border border-zinc-700 bg-zinc-950 p-3 text-emerald-400">
-                <Sparkles size={18} />
-              </div>
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                  Resumo
-                </p>
-                <h2 className="text-sm font-black uppercase">Como o cadastro vai aparecer</h2>
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-3">
-              <div className="rounded-2xl border border-zinc-800 bg-black/30 p-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                  Blocos visiveis
-                </p>
-                <p className="mt-2 text-3xl font-black text-white">
-                  {FIELD_DEFINITIONS.filter((field) => draft.fields[field.key].enabled).length}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-zinc-800 bg-black/30 p-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                  Modalidades ativas
-                </p>
-                <p className="mt-2 text-3xl font-black text-white">{visibleSportsCount}</p>
-              </div>
-              <div className="rounded-2xl border border-zinc-800 bg-black/30 p-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                  Modalidade destaque
-                </p>
-                <p className="mt-2 text-sm font-black uppercase text-emerald-300">
-                  {draft.sportOptions.find((option) => option.enabled)?.label || "Nenhuma ativa"}
-                </p>
-              </div>
             </div>
           </article>
         </section>

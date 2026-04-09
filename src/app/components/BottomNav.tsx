@@ -500,10 +500,21 @@ export default function BottomNavbar() {
 
   return (
     <>
-      <div className={cn("fixed inset-0 bg-black/80 backdrop-blur-md z-[60] transition-opacity duration-500", isSidebarOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none")} onClick={() => setIsSidebarOpen(false)}/>
+      <div
+        className={cn(
+          "fixed inset-x-0 bottom-0 top-[var(--master-topbar-height)] bg-black/80 backdrop-blur-md z-[60] transition-opacity duration-500",
+          isSidebarOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+        )}
+        onClick={() => setIsSidebarOpen(false)}
+      />
       
       {/* SIDEBAR */}
-      <div className={cn("fixed top-0 left-0 h-full w-[85%] max-w-[320px] bg-zinc-950 border-r border-zinc-800 z-[70] transform transition-transform duration-500 flex flex-col shadow-2xl", isSidebarOpen ? "translate-x-0" : "-translate-x-full")}>
+      <div
+        className={cn(
+          "fixed bottom-0 left-0 top-[var(--master-topbar-height)] w-[85%] max-w-[320px] bg-zinc-950 border-r border-zinc-800 z-[70] transform transition-transform duration-500 flex flex-col shadow-2xl",
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
         
         {/* HEADER */}
         <div className="p-6 pb-4 border-b border-zinc-800 bg-black/40 backdrop-blur-sm flex justify-between items-center">

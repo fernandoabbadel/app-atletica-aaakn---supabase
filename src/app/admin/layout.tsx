@@ -286,7 +286,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <button
         type="button"
         onClick={() => setIsMobileSidebarOpen(true)}
-        className="fixed left-4 top-4 z-50 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/95 text-zinc-200 shadow-2xl backdrop-blur-xl transition hover:border-brand hover:text-white lg:hidden"
+        className="fixed left-4 top-[calc(var(--master-topbar-height)+1rem)] z-50 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/95 text-zinc-200 shadow-2xl backdrop-blur-xl transition hover:border-brand hover:text-white lg:top-4 lg:hidden"
         aria-label="Abrir menu admin"
       >
         <PanelLeftOpen size={18} />
@@ -295,14 +295,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <button
         type="button"
         onClick={() => setIsMobileSidebarOpen(false)}
-        className={`fixed inset-0 z-30 bg-black/70 backdrop-blur-sm transition duration-300 lg:hidden ${
+        className={`fixed inset-x-0 bottom-0 top-[var(--master-topbar-height)] z-30 bg-black/70 backdrop-blur-sm transition duration-300 lg:inset-0 lg:hidden ${
           isMobileSidebarOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
         }`}
         aria-label="Fechar menu admin"
       />
 
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-full w-[min(86vw,18rem)] flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 lg:translate-x-0 ${
+        className={`fixed bottom-0 left-0 top-[var(--master-topbar-height)] z-40 flex w-[min(86vw,18rem)] flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 lg:top-0 lg:translate-x-0 ${
           isMobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
         } ${desktopSidebarWidthClass}`}
       >

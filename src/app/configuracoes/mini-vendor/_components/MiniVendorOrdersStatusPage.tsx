@@ -28,13 +28,14 @@ import { getVendorStatusClass, getVendorStatusLabel, type OrderRow } from "../_s
 import { MiniVendorShell } from "./MiniVendorShell";
 
 type OrdersMode = "pending" | "approved";
+type OrderStatus = "pendente" | "approved" | "rejected" | "delivered";
 
 const PAGE_COPY: Record<
   OrdersMode,
   {
     title: string;
     subtitle: string;
-    status: "pendente" | "approved";
+    statuses: OrderStatus[];
     accentClass: string;
     emptyText: string;
   }
@@ -42,17 +43,53 @@ const PAGE_COPY: Record<
   pending: {
     title: "Pedidos Pendentes",
     subtitle: "Aprove ou rejeite comprovantes sem carregar os pedidos aprovados.",
-    status: "pendente",
+    statuses: ["pendente"],
     accentClass: "border-yellow-500/20 bg-yellow-500/5 text-yellow-300",
     emptyText: "Sem pedidos pendentes.",
   },
   approved: {
     title: "Pedidos Aprovados",
-    subtitle: "Historico enxuto dos pedidos que ja foram confirmados.",
-    status: "approved",
+    subtitle: "Historico editavel dos pedidos que ja passaram por aprovacao.",
+    statuses: ["approved", "delivered", "rejected"],
     accentClass: "border-blue-500/20 bg-blue-500/5 text-blue-300",
-    emptyText: "Nenhum pedido aprovado ainda.",
+    emptyText: "Nenhum pedido revisado ainda.",
   },
+};
+
+const normalizeOrderStatus = (value: unknown): OrderStatus => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "approved" || normalized === "rejected" || normalized === "delivered") {
+    return normalized;
+  }
+  return "pendente";
+};
+
+const getOrderStatusMeta = (
+  value: unknown
+): { label: string; className: string } => {
+  const status = normalizeOrderStatus(value);
+  if (status === "approved") {
+    return {
+      label: "Confirmado",
+      className: "border-blue-500/30 bg-blue-500/10 text-blue-300",
+    };
+  }
+  if (status === "delivered") {
+    return {
+      label: "Entregue",
+      className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+    };
+  }
+  if (status === "rejected") {
+    return {
+      label: "Rejeitado",
+      className: "border-red-500/30 bg-red-500/10 text-red-300",
+    };
+  }
+  return {
+    label: "Pendente",
+    className: "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
+  };
 };
 
 const formatDateTime = (value?: string): string => {
@@ -109,7 +146,7 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
     const rows = await fetchMiniVendorOrders({
       tenantId: cleanTenantId,
       sellerId: vendorProfile.id,
-      statuses: [pageCopy.status],
+      statuses: pageCopy.statuses,
       forceRefresh,
       limit: 80,
     });
@@ -140,7 +177,7 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
       nextNames[id] = visual?.nome || compactUserId(id);
     });
     setApproverNames(nextNames);
-  }, [mode, pageCopy.status, tenantId, user?.uid]);
+  }, [mode, pageCopy.statuses, tenantId, user?.uid]);
 
   useEffect(() => {
     let mounted = true;
@@ -315,6 +352,19 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
                       key={row.id}
                       className="rounded-2xl border border-zinc-800 bg-black/20 p-4"
                     >
+                      {(() => {
+                        const statusMeta = getOrderStatusMeta(row.status);
+                        return (
+                          <div className="mb-3 flex flex-wrap items-center gap-2">
+                            <span
+                              className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase ${statusMeta.className}`}
+                            >
+                              {statusMeta.label}
+                            </span>
+                          </div>
+                        );
+                      })()}
+
                       {mode === "approved" && (
                         <div className="mb-3 grid gap-2 text-[11px] text-zinc-400 sm:grid-cols-2">
                           <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
@@ -378,9 +428,6 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
                             </>
                           ) : (
                             <div className="w-full min-w-[220px] space-y-2">
-                              <span className="inline-flex w-full justify-center rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[10px] font-black uppercase text-blue-300">
-                                Confirmado
-                              </span>
                               <button
                                 type="button"
                                 onClick={() => setEditingId((prev) => (prev === row.id ? "" : row.id))}

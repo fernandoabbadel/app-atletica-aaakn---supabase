@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Building2, ShieldAlert, Waypoints } from "lucide-react";
@@ -80,6 +80,7 @@ export default function MasterTopBar() {
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(true);
   const [loadingChange, setLoadingChange] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   const isPlatformMasterUser = isPlatformMaster(user);
   const pathInfo = useMemo(() => parseTenantScopedPath(pathname), [pathname]);
@@ -130,6 +131,38 @@ export default function MasterTopBar() {
     };
   }, [isPlatformMasterUser]);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const root = document.documentElement;
+    if (!isPlatformMasterUser) {
+      root.style.setProperty("--master-topbar-height", "0px");
+      return;
+    }
+
+    const syncHeight = () => {
+      const nextHeight = rootRef.current?.offsetHeight ?? 0;
+      root.style.setProperty("--master-topbar-height", `${nextHeight}px`);
+    };
+
+    syncHeight();
+    const observer =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => syncHeight())
+        : null;
+
+    if (observer && rootRef.current) {
+      observer.observe(rootRef.current);
+    }
+
+    window.addEventListener("resize", syncHeight);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", syncHeight);
+      root.style.setProperty("--master-topbar-height", "0px");
+    };
+  }, [isPlatformMasterUser, loadingChange, loadingTenants, pathname, previewRole, selectedTenantId]);
+
   if (!isPlatformMasterUser) return null;
 
   const persistRolePreview = (nextRole: string) => {
@@ -176,7 +209,10 @@ export default function MasterTopBar() {
   };
 
   return (
-    <div className="sticky top-0 z-[90] border-b border-red-500/20 bg-[linear-gradient(90deg,#2f0505,#120606_28%,#0a0a0a_55%,#120606_78%,#2f0505)] shadow-[0_16px_50px_rgba(127,29,29,0.28)]">
+    <div
+      ref={rootRef}
+      className="sticky top-0 z-[90] border-b border-red-500/20 bg-[linear-gradient(90deg,#2f0505,#120606_28%,#0a0a0a_55%,#120606_78%,#2f0505)] shadow-[0_16px_50px_rgba(127,29,29,0.28)]"
+    >
       <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.14em] text-white sm:text-[10px] md:flex-nowrap md:px-5 md:tracking-[0.16em]">
         <span className="inline-flex shrink-0 items-center gap-2 rounded-full border border-red-300/30 bg-red-500/12 px-3 py-1 text-red-100">
           <ShieldAlert size={11} />

@@ -49,6 +49,7 @@ export default function RootLayout({
     <html lang="pt-br" className="dark" data-scroll-behavior="smooth">
       <body
         className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-[#050505] text-white antialiased`}
+        style={{ ["--master-topbar-height" as string]: "0px" }}
       >
         <AuthProvider>
           <TenantThemeProvider>

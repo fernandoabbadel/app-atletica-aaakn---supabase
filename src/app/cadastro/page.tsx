@@ -496,51 +496,90 @@ export default function CadastroPage() {
       });
   };
 
+  const failValidation = (message: string) => {
+    setLoading(false);
+    setError(message);
+    addToast(message, "error");
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
 
-    if (hasInviteToken && inviteContextLoading) { setLoading(false); return setError("Ainda estou validando a atletica desse convite. Tente novamente em alguns segundos."); }
-    if (hasInviteToken && !inviteResolvedContext) { setLoading(false); return setError("Nao consegui identificar a atletica desse convite. Abra novamente o link original."); }
-    if (!formData.nome.trim()) { setLoading(false); return setError("Informe seu nome completo."); }
-    if (!formData.apelido.trim()) { setLoading(false); return setError("O 'Apelido' e obrigatorio, soldado!"); }
-    if (!formData.matricula.trim()) { setLoading(false); return setError("A matricula e obrigatoria!"); }
-    if (!formData.dataNascimento) { setLoading(false); return setError("Data de nascimento e necessaria!"); }
-    if (!formData.cidadeOrigem) { setLoading(false); return setError("Selecione sua cidade de origem!"); }
-    if (!formData.telefone) { setLoading(false); return setError("Telefone e obrigatorio para contato!"); }
-    if (!/^\+55\d{10,11}$/.test(formData.telefone)) { setLoading(false); return setError("Telefone deve estar no formato +5512912345678."); }
-    if (!formData.turma) { setLoading(false); return setError("Selecione sua turma!"); }
+    if (hasInviteToken && inviteContextLoading) {
+      failValidation("Ainda estou validando a atletica desse convite. Tente novamente em alguns segundos.");
+      return;
+    }
+    if (hasInviteToken && !inviteResolvedContext) {
+      failValidation("Nao consegui identificar a atletica desse convite. Abra novamente o link original.");
+      return;
+    }
+    if (!formData.nome.trim()) {
+      failValidation("Campo obrigatorio pendente: nome completo.");
+      return;
+    }
+    if (!formData.apelido.trim()) {
+      failValidation("Campo obrigatorio pendente: apelido.");
+      return;
+    }
+    if (!formData.matricula.trim()) {
+      failValidation("Campo obrigatorio pendente: matricula.");
+      return;
+    }
+    if (!formData.dataNascimento) {
+      failValidation("Campo obrigatorio pendente: data de nascimento.");
+      return;
+    }
+    if (!formData.cidadeOrigem) {
+      failValidation("Campo obrigatorio pendente: cidade de origem.");
+      return;
+    }
+    if (!formData.telefone) {
+      failValidation("Campo obrigatorio pendente: telefone.");
+      return;
+    }
+    if (!/^\+55\d{10,11}$/.test(formData.telefone)) {
+      failValidation("Telefone deve estar no formato +5512912345678.");
+      return;
+    }
+    if (!formData.turma) {
+      failValidation("Campo obrigatorio pendente: turma.");
+      return;
+    }
     if (cadastroFields.instagram.enabled && cadastroFields.instagram.required && !formData.instagram.trim()) {
-      setLoading(false);
-      return setError("Instagram obrigatorio neste cadastro.");
+      failValidation("Campo obrigatorio pendente: Instagram.");
+      return;
     }
     if (cadastroFields.bio.enabled && cadastroFields.bio.required && !formData.bio.trim()) {
-      setLoading(false);
-      return setError("Preencha sua bio antes de continuar.");
+      failValidation("Campo obrigatorio pendente: bio.");
+      return;
     }
     if (
       cadastroFields.statusRelacionamento.enabled &&
       cadastroFields.statusRelacionamento.required &&
       !formData.statusRelacionamento.trim()
     ) {
-      setLoading(false);
-      return setError("Selecione seu status de relacionamento.");
+      failValidation("Campo obrigatorio pendente: status de relacionamento.");
+      return;
     }
     if (cadastroFields.pets.enabled && cadastroFields.pets.required && !formData.pets.trim()) {
-      setLoading(false);
-      return setError("Selecione uma opcao de mascote.");
+      failValidation("Campo obrigatorio pendente: mascote.");
+      return;
     }
     if (
       cadastroFields.esportes.enabled &&
       cadastroFields.esportes.required &&
       formData.esportes.length === 0
     ) {
-      setLoading(false);
-      return setError("Selecione pelo menos uma modalidade.");
+      failValidation("Campo obrigatorio pendente: modalidade.");
+      return;
     }
 
-    if (!formData.foto) { setLoading(false); return setError("A foto de perfil e obrigatoria!"); }
+    if (!formData.foto) {
+      failValidation("Campo obrigatorio pendente: foto de perfil.");
+      return;
+    }
 
     try {
       // 1. Atualiza dados do usuário
