@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useRouter } from "next/navigation";
 import { 
   Lock, ArrowRight, Upload, Plus, Trash2, Save, LogOut, 
   Image as ImageIcon, Layout, Edit3, Bell, 
@@ -21,12 +22,14 @@ import {
   fetchLeagueById,
   fetchLeagueSummaries,
   fetchLeagueUsers,
+  syncLeagueEvents,
   syncLeagueMembers,
   uploadLeagueImageToStorage,
   updateEventPollOptions,
   type LeaguePollRecord,
 } from "../../lib/leaguesService";
 import { resolveLeagueLogoSrc } from "../../lib/leagueMedia";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGEM ESTRITA (Sem 'any') ---
 
@@ -118,6 +121,7 @@ interface LigaEditorDraftSnapshot {
     savedAt: number;
     ligaSenha: string;
     activeTab: LigaAdminTab;
+    savedMemberIds?: string[];
     sendNotification: boolean;
     ligaDraft: Omit<LigaData, "senha">;
     eventModal: boolean;
@@ -185,6 +189,9 @@ const readLigaEditorDraft = (ligaId: string, tenantScopeId?: string | null): Lig
             savedAt: snapshot.savedAt,
             ligaSenha: typeof snapshot.ligaSenha === "string" ? snapshot.ligaSenha : "",
             activeTab: snapshot.activeTab,
+            savedMemberIds: Array.isArray(snapshot.savedMemberIds)
+                ? snapshot.savedMemberIds.filter((entry): entry is string => typeof entry === "string")
+                : undefined,
             sendNotification: Boolean(snapshot.sendNotification),
             ligaDraft: snapshot.ligaDraft as Omit<LigaData, "senha">,
             eventModal: Boolean(snapshot.eventModal),
@@ -237,36 +244,25 @@ const sanitizeQuestionDrafts = (questions: PerguntaLiga[]): PerguntaLiga[] =>
         };
     });
 
-const extractMissingSchemaColumn = (error: unknown): string | null => {
-    if (!error || typeof error !== "object") return null;
-    const raw = error as { message?: unknown; details?: unknown; hint?: unknown };
-    const message = [raw.message, raw.details, raw.hint]
-        .map((entry) => (typeof entry === "string" ? entry : ""))
-        .filter((entry) => entry.length > 0)
-        .join(" | ");
-    if (!message) return null;
+const extractMemberIds = (members?: Member[]): string[] =>
+    Array.from(
+        new Set(
+            (members || [])
+                .map((member) => (typeof member.id === "string" ? member.id.trim() : ""))
+                .filter((memberId) => memberId.length > 0)
+        )
+    );
 
-    const normalized = message.toLowerCase();
-    const isMissingColumn =
-        (normalized.includes("column") && normalized.includes("does not exist")) ||
-        normalized.includes("could not find the");
-    if (!isMissingColumn) return null;
-
-    const patterns = [
-        /column\s+[a-z0-9_]+\.(["']?)([a-z0-9_]+)\1\s+does not exist/i,
-        /column\s+(["']?)([a-z0-9_]+)\1\s+does not exist/i,
-        /could not find the ['"]?([a-z0-9_]+)['"]? column/i,
-    ];
-
-    for (const pattern of patterns) {
-        const match = message.match(pattern);
-        if (!match) continue;
-        const extracted = match[2] ?? match[1];
-        if (extracted) return extracted;
-    }
-
-    return null;
+const buildLeagueSectionPath = (tab: LigaAdminTab): string => {
+    if (tab === "members") return "/ligas/membros";
+    if (tab === "events") return "/ligas/eventos";
+    if (tab === "shark") return "/ligas/board-round";
+    return "/ligas/informacoes";
 };
+
+interface LigasAdminPageContentProps {
+    initialTab?: LigaAdminTab;
+}
 
 const extractErrorMessage = (error: unknown): string => {
     if (error instanceof Error) return error.message || "Erro inesperado.";
@@ -288,23 +284,12 @@ const extractErrorMessage = (error: unknown): string => {
     return "Erro inesperado.";
 };
 
-const removeMissingColumnFromPayload = (
-    payload: Record<string, unknown>,
-    missingColumn: string
-): Record<string, unknown> | null => {
-    const normalizedMissing = missingColumn.trim().toLowerCase();
-    if (!normalizedMissing) return null;
-
-    const nextEntries = Object.entries(payload).filter(
-        ([key]) => key.trim().toLowerCase() !== normalizedMissing
-    );
-    if (nextEntries.length === Object.keys(payload).length) return null;
-    return Object.fromEntries(nextEntries);
-};
-
-export default function LigasAdminPage() {
+export function LigasAdminPageContent({
+    initialTab = "visual",
+}: LigasAdminPageContentProps) {
   const { user } = useAuth();
-  const { tenantId } = useTenantTheme();
+  const router = useRouter();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const tenantScopeId =
     tenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
@@ -313,7 +298,7 @@ export default function LigasAdminPage() {
   // --- ESTADOS DE CONTROLE ---
   const [loading, setLoading] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [activeTab, setActiveTab] = useState<LigaAdminTab>('visual');
+  const [activeTab, setActiveTab] = useState<LigaAdminTab>(initialTab);
   
   // Login
   const [ligasDisponiveis, setLigasDisponiveis] = useState<{id: string, nome: string}[]>([]);
@@ -329,6 +314,7 @@ export default function LigasAdminPage() {
   const [searchUserModal, setSearchUserModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [allUsers, setAllUsers] = useState<UserSearch[]>([]); 
+  const [savedMemberIds, setSavedMemberIds] = useState<string[]>([]);
 
   // --- MODAL DE EVENTOS (CRIAR/EDITAR) ---
   const [eventModal, setEventModal] = useState(false);
@@ -344,6 +330,10 @@ export default function LigasAdminPage() {
   const [pollModal, setPollModal] = useState<string | null>(null); 
   const [polls, setPolls] = useState<Poll[]>([]);
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
+
+  useEffect(() => {
+      setActiveTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
       const lastSelected = readSessionStorageValue(lastSelectedStorageKey);
@@ -367,7 +357,12 @@ export default function LigasAdminPage() {
       } as LigaData);
       setSelectedLigaId(lastSelected);
       setSenhaInput(restoredDraft.ligaSenha);
-      setActiveTab(restoredDraft.activeTab);
+      setActiveTab(initialTab);
+      setSavedMemberIds(
+          Array.isArray(restoredDraft.savedMemberIds)
+              ? restoredDraft.savedMemberIds
+              : extractMemberIds((restoredDraft.ligaDraft as Partial<LigaData>).membros as Member[] | undefined)
+      );
       setSendNotification(restoredDraft.sendNotification);
       setEventModal(restoredDraft.eventModal);
       setEditingEventIdx(restoredDraft.editingEventIdx);
@@ -375,7 +370,7 @@ export default function LigasAdminPage() {
       setNovoLote(restoredDraft.novoLote);
       setIsLoggedIn(true);
       addToast("Sessao da liga restaurada.", "info");
-  }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, tenantScopeId]);
+  }, [addToast, initialTab, isLoggedIn, lastSelectedStorageKey, ligaData, tenantScopeId]);
 
   useEffect(() => {
       if (!selectedLigaId) return;
@@ -394,6 +389,7 @@ export default function LigasAdminPage() {
               savedAt: Date.now(),
               ligaSenha: ligaData.senha,
               activeTab,
+              savedMemberIds,
               sendNotification,
               ligaDraft,
               eventModal,
@@ -417,6 +413,7 @@ export default function LigasAdminPage() {
       isLoggedIn,
       ligaData,
       novoLote,
+      savedMemberIds,
       sendNotification,
       tenantScopeId,
   ]);
@@ -514,6 +511,7 @@ export default function LigasAdminPage() {
                   eventos: (target.eventos || []) as LeagueEvent[],
                   membersCount: target.membersCount,
               };
+              const persistedMemberIds = extractMemberIds(baseLigaData.membros);
               const restoredDraft = readLigaEditorDraft(target.id, tenantScopeId);
               const mergedLigaData: LigaData = restoredDraft
                   ? {
@@ -526,14 +524,20 @@ export default function LigasAdminPage() {
 
               setLigaData(mergedLigaData);
               if (restoredDraft) {
-                  setActiveTab(restoredDraft.activeTab);
+                  setActiveTab(initialTab);
+                  setSavedMemberIds(
+                      Array.isArray(restoredDraft.savedMemberIds)
+                          ? restoredDraft.savedMemberIds
+                          : persistedMemberIds
+                  );
                   setSendNotification(restoredDraft.sendNotification);
                   setEventModal(restoredDraft.eventModal);
                   setEditingEventIdx(restoredDraft.editingEventIdx);
                   setCurrentEvent(restoredDraft.currentEvent);
                   setNovoLote(restoredDraft.novoLote);
               } else {
-                  setActiveTab("visual");
+                  setActiveTab(initialTab);
+                  setSavedMemberIds(persistedMemberIds);
                   setSendNotification(false);
                   setEventModal(false);
                   setEditingEventIdx(null);
@@ -767,7 +771,7 @@ export default function LigasAdminPage() {
           const supabase = getSupabaseClient();
           const timestamp = nowIso();
           const actorTenantId =
-              typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "";
+              tenantScopeId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
           const leagueLogoUrl = resolveLeagueLogoSrc(ligaData) || "";
           const sanitizedQuestions = sanitizeQuestionDrafts(ligaData.perguntas);
 
@@ -806,94 +810,21 @@ export default function LigasAdminPage() {
 
           // 3. Sincroniza Eventos (Cria/Atualiza no Global)
           if (ligaData.eventos && ligaData.eventos.length > 0) {
-              const batchPromises = ligaData.eventos.map(async (ev) => {
-                  const alreadyLinkedToGlobal = Boolean(ev.globalEventId);
-                  const eventId = ev.globalEventId || crypto.randomUUID();
-                  ev.globalEventId = eventId;
-                  ev.linkEvento = `/eventos/${eventId}`;
-                  
-                  let eventPayload: Record<string, unknown> = {
-                      id: eventId,
-                      titulo: `[${ligaData.sigla}] ${ev.titulo}` ,
-                      data: ev.data,
-                      hora: ev.hora,
-                      local: ev.local,
-                      tipo: "Liga", 
-                      destaque: ev.destaque,
-                      imagem: ev.imagem || leagueLogoUrl || "",
-                      imagePositionY: ev.imagePositionY,
-                      lotes: ev.lotes,
-                      descricao: ev.descricao, 
-                      categoria: "Liga",
-                      status: "ativo",
-                      updatedAt: timestamp,
-                      ...(actorTenantId ? { tenant_id: actorTenantId } : {}),
-                  };
-                  if (!alreadyLinkedToGlobal) {
-                      eventPayload.createdAt = timestamp;
-                  }
-
-                  while (Object.keys(eventPayload).length > 0) {
-                      const { error: eventUpsertError } = await supabase
-                        .from("eventos")
-                        .upsert(eventPayload, { onConflict: "id" });
-                      if (!eventUpsertError) break;
-
-                      const missingColumn = extractMissingSchemaColumn(eventUpsertError);
-                      if (!missingColumn) throw new Error(extractErrorMessage(eventUpsertError));
-                      const nextPayload = removeMissingColumnFromPayload(
-                          eventPayload,
-                          missingColumn
-                      );
-                      if (!nextPayload) throw new Error(extractErrorMessage(eventUpsertError));
-                      eventPayload = nextPayload;
-                  }
-
-                  if (ev.pollQuestion) {
-                      let pollInsertPayload: Record<string, unknown> = {
-                          eventoId: eventId,
-                          question: ev.pollQuestion,
-                          options: [],
-                          allowUserOptions: true,
-                          createdAt: timestamp,
-                          updatedAt: timestamp,
-                          creatorId: ligaData.id,
-                          isOfficial: true,
-                          ...(actorTenantId ? { tenant_id: actorTenantId } : {}),
-                      };
-
-                      while (Object.keys(pollInsertPayload).length > 0) {
-                          const { error: pollInsertError } = await supabase
-                            .from("eventos_enquetes")
-                            .insert(pollInsertPayload);
-                          if (!pollInsertError) {
-                              ev.pollQuestion = "";
-                              break;
-                          }
-
-                          const missingColumn = extractMissingSchemaColumn(pollInsertError);
-                          if (!missingColumn) throw new Error(extractErrorMessage(pollInsertError));
-                          const nextPayload = removeMissingColumnFromPayload(
-                              pollInsertPayload,
-                              missingColumn
-                          );
-                          if (!nextPayload) throw new Error(extractErrorMessage(pollInsertError));
-                          pollInsertPayload = nextPayload;
-                      }
-
-                      if (ev.pollQuestion) {
-                          throw new Error("Nao foi possivel salvar a enquete do evento.");
-                      }
-                  }
+              const syncedEvents = await syncLeagueEvents({
+                  leagueId: ligaData.id,
+                  events: ligaData.eventos,
+                  leagueLogoUrl,
+                  leagueSigla: ligaData.sigla,
+                  tenantId: actorTenantId || undefined,
               });
-              
-              await Promise.all(batchPromises);
-              // Salva de novo a liga para garantir IDs de eventos atualizados
+
               const { error: ligaEventsUpdateError } = await supabase
                 .from("ligas_config")
-                .update({ eventos: ligaData.eventos, updatedAt: timestamp })
+                .update({ eventos: syncedEvents, updatedAt: timestamp })
                 .eq("id", ligaData.id);
               if (ligaEventsUpdateError) throw new Error(extractErrorMessage(ligaEventsUpdateError));
+
+              setLigaData((prev) => (prev ? { ...prev, eventos: syncedEvents } : prev));
           }
 
           // 4. Notificacao Bizu
@@ -913,7 +844,8 @@ export default function LigasAdminPage() {
           }
 
           addToast("Salvo e Sincronizado!", "success");
-          clearLigaEditorDraft(ligaData.id);
+          setSavedMemberIds(extractMemberIds(ligaData.membros));
+          clearLigaEditorDraft(ligaData.id, tenantScopeId);
           
           // LOG CORRIGIDO
           await logActivity(
@@ -950,6 +882,21 @@ export default function LigasAdminPage() {
   };
 
   // --- RENDERIZAÇÃO ---
+  const tenantPath = (path: string) =>
+      tenantSlug ? withTenantSlug(tenantSlug, path) : path;
+  const navigateToSection = (tab: LigaAdminTab) => {
+      setActiveTab(tab);
+      router.push(tenantPath(buildLeagueSectionPath(tab)));
+  };
+  const savedMemberIdSet = new Set(savedMemberIds);
+  const allLeagueMembers = ligaData?.membros || [];
+  const newlyAddedMembers = allLeagueMembers.filter(
+      (member) => !savedMemberIdSet.has((member.id || "").trim())
+  );
+  const persistedMembers = allLeagueMembers.filter((member) =>
+      savedMemberIdSet.has((member.id || "").trim())
+  );
+
   if (!isLoggedIn) return (
       <div className="min-h-screen bg-black flex items-center justify-center p-4 font-sans text-white">
           <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 p-8 rounded-3xl shadow-2xl space-y-4">
@@ -994,11 +941,23 @@ export default function LigasAdminPage() {
                 </button>
             </div>
 
-            <div className="flex bg-zinc-900 p-1 rounded-xl border border-zinc-800 overflow-x-auto">
-                <button onClick={() => setActiveTab('visual')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'visual' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>1. Informações</button>
-                <button onClick={() => setActiveTab('members')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'members' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>2. Membros</button>
-                <button onClick={() => setActiveTab('events')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'events' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>3. Eventos</button>
-                <button onClick={() => setActiveTab('shark')} className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold uppercase whitespace-nowrap transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>4. BoardRound</button>
+            <div className="grid grid-cols-1 gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-2 md:grid-cols-4">
+                <button onClick={() => navigateToSection('visual')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'visual' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                    <span className="block text-[10px] text-zinc-500">1.</span>
+                    Informações
+                </button>
+                <button onClick={() => navigateToSection('members')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'members' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                    <span className="block text-[10px] text-zinc-500">2.</span>
+                    Membros
+                </button>
+                <button onClick={() => navigateToSection('events')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'events' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                    <span className="block text-[10px] text-zinc-500">3.</span>
+                    Eventos
+                </button>
+                <button onClick={() => navigateToSection('shark')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                    <span className="block text-[10px] text-zinc-500">4.</span>
+                    Board Round
+                </button>
             </div>
           </header>
 
@@ -1060,25 +1019,75 @@ export default function LigasAdminPage() {
                       <div><h3 className="text-sm font-bold uppercase text-white">Diretoria</h3><p className="text-[10px] text-zinc-500">Adicione os membros oficiais.</p></div>
                       <button onClick={() => setSearchUserModal(true)} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition"><UserPlus size={14}/> Adicionar Aluno</button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {ligaData.membros?.map((m, idx) => (
-                          <div key={idx} className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 flex items-center gap-4 relative group hover:border-zinc-600 transition">
-                              <button onClick={() => removeMember(idx)} className="absolute top-2 right-2 text-zinc-600 hover:text-red-500"><Trash2 size={14}/></button>
-                              <div className="w-12 h-12 rounded-full bg-black border border-zinc-700 overflow-hidden shrink-0 relative">
-                                <Image
-                                  src={m.foto || "https://github.com/shadcn.png"}
-                                  alt={m.nome}
-                                  fill
-                                  sizes="48px"
-                                  className="object-cover"
-                                />
-                              </div>
-                              <div className="flex-1 space-y-1">
-                                  <p className="text-sm font-bold text-white">{m.nome}</p>
-                                  <input type="text" placeholder="Cargo (Ex: Presidente)" className="w-full bg-transparent border-b border-zinc-700 text-xs text-emerald-500 outline-none focus:border-emerald-500 font-medium" value={m.cargo} onChange={e => updateMemberCargo(idx, e.target.value)}/>
-                              </div>
+                  <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="space-y-4">
+                          <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-4">
+                              <h4 className="text-xs font-black uppercase text-emerald-400">Novos adicionados agora</h4>
+                              <p className="mt-1 text-[10px] uppercase text-zinc-500">Entram na sincronização quando você clicar em salvar tudo.</p>
                           </div>
-                      ))}
+                          <div className="grid grid-cols-1 gap-4">
+                              {newlyAddedMembers.map((m) => {
+                                  const idx = allLeagueMembers.findIndex((item) => item.id === m.id);
+                                  return (
+                                      <div key={`new-${m.id}-${idx}`} className="bg-zinc-900 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-4 relative group hover:border-emerald-500/40 transition">
+                                          <button onClick={() => removeMember(idx)} className="absolute top-2 right-2 text-zinc-600 hover:text-red-500"><Trash2 size={14}/></button>
+                                          <div className="w-12 h-12 rounded-full bg-black border border-zinc-700 overflow-hidden shrink-0 relative">
+                                            <Image
+                                              src={m.foto || "https://github.com/shadcn.png"}
+                                              alt={m.nome}
+                                              fill
+                                              sizes="48px"
+                                              className="object-cover"
+                                            />
+                                          </div>
+                                          <div className="flex-1 space-y-1">
+                                              <p className="text-sm font-bold text-white">{m.nome}</p>
+                                              <input type="text" placeholder="Cargo (Ex: Presidente)" className="w-full bg-transparent border-b border-zinc-700 text-xs text-emerald-500 outline-none focus:border-emerald-500 font-medium" value={m.cargo} onChange={e => updateMemberCargo(idx, e.target.value)}/>
+                                          </div>
+                                      </div>
+                                  );
+                              })}
+                              {newlyAddedMembers.length === 0 && (
+                                  <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/70 p-6 text-center text-xs text-zinc-500">
+                                      Nenhum novo membro no rascunho.
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+                      <div className="space-y-4">
+                          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+                              <h4 className="text-xs font-black uppercase text-white">Membros já salvos</h4>
+                              <p className="mt-1 text-[10px] uppercase text-zinc-500">Base atual da liga antes das novas alterações.</p>
+                          </div>
+                          <div className="grid grid-cols-1 gap-4">
+                              {persistedMembers.map((m) => {
+                                  const idx = allLeagueMembers.findIndex((item) => item.id === m.id);
+                                  return (
+                                      <div key={`saved-${m.id}-${idx}`} className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 flex items-center gap-4 relative group hover:border-zinc-600 transition">
+                                          <button onClick={() => removeMember(idx)} className="absolute top-2 right-2 text-zinc-600 hover:text-red-500"><Trash2 size={14}/></button>
+                                          <div className="w-12 h-12 rounded-full bg-black border border-zinc-700 overflow-hidden shrink-0 relative">
+                                            <Image
+                                              src={m.foto || "https://github.com/shadcn.png"}
+                                              alt={m.nome}
+                                              fill
+                                              sizes="48px"
+                                              className="object-cover"
+                                            />
+                                          </div>
+                                          <div className="flex-1 space-y-1">
+                                              <p className="text-sm font-bold text-white">{m.nome}</p>
+                                              <input type="text" placeholder="Cargo (Ex: Presidente)" className="w-full bg-transparent border-b border-zinc-700 text-xs text-emerald-500 outline-none focus:border-emerald-500 font-medium" value={m.cargo} onChange={e => updateMemberCargo(idx, e.target.value)}/>
+                                          </div>
+                                      </div>
+                                  );
+                              })}
+                              {persistedMembers.length === 0 && (
+                                  <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/70 p-6 text-center text-xs text-zinc-500">
+                                      Ainda não há membros persistidos nessa liga.
+                                  </div>
+                              )}
+                          </div>
+                      </div>
                   </div>
               </div>
           )}
@@ -1209,33 +1218,37 @@ export default function LigasAdminPage() {
                               </div>
                               <button onClick={async () => {
                                   if (!novaEnquete.question) return;
-                                  const ref = await createEventPoll({
-                                      eventId: pollModal,
-                                      question: novaEnquete.question,
-                                      allowUserOptions: novaEnquete.allowUserOptions,
-                                      creatorId: ligaData?.id,
-                                      tenantId: tenantScopeId || undefined,
-                                  });
-                                  setPolls((prev) => [
-                                      ...prev,
-                                      {
-                                          id: ref.id,
-                                          question: novaEnquete.question,
+                                  try {
+                                      const question = novaEnquete.question;
+                                      const ref = await createEventPoll({
+                                          eventId: pollModal,
+                                          question,
                                           allowUserOptions: novaEnquete.allowUserOptions,
-                                          options: [],
-                                          voters: [],
-                                      },
-                                  ]);
-                                  setNovaEnquete({ question: "", allowUserOptions: true });
-                                  addToast("Enquete criada!", "success");
-                                  // LOG CORRIGIDO (5 Args)
-                                  await logActivity(
-                                      ligaData?.id || 'sys', 
-                                      ligaData?.nome || 'Sistema', 
-                                      "CREATE", 
-                                      "events_polls", 
-                                      { pollId: ref.id, eventId: pollModal, question: novaEnquete.question }
-                                  );
+                                          creatorId: ligaData?.id,
+                                          tenantId: tenantScopeId || undefined,
+                                      });
+                                      setPolls((prev) => [
+                                          ...prev,
+                                          {
+                                              id: ref.id,
+                                              question,
+                                              allowUserOptions: novaEnquete.allowUserOptions,
+                                              options: [],
+                                              voters: [],
+                                          },
+                                      ]);
+                                      setNovaEnquete({ question: "", allowUserOptions: true });
+                                      addToast("Enquete criada!", "success");
+                                      await logActivity(
+                                          ligaData?.id || 'sys', 
+                                          ligaData?.nome || 'Sistema', 
+                                          "CREATE", 
+                                          "events_polls", 
+                                          { pollId: ref.id, eventId: pollModal, question }
+                                      );
+                                  } catch (error: unknown) {
+                                      addToast(`Erro ao criar enquete: ${extractErrorMessage(error)}`, "error");
+                                  }
                               }} className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 rounded-lg text-xs uppercase">Criar Enquete</button>
                           </div>
 
@@ -1249,16 +1262,19 @@ export default function LigasAdminPage() {
                                           </div>
                                           <button onClick={async () => {
                                               if(confirm("Excluir enquete?")) {
-                                                  await deleteEventPoll({ eventId: pollModal, pollId: poll.id, tenantId: tenantScopeId || undefined });
-                                                  setPolls((prev) => prev.filter((item) => item.id !== poll.id));
-                                                  // LOG CORRIGIDO
-                                                  await logActivity(
-                                                      ligaData?.id || 'sys', 
-                                                      ligaData?.nome || 'Sistema', 
-                                                      "DELETE", 
-                                                      "events_polls", 
-                                                      { pollId: poll.id, eventId: pollModal }
-                                                  );
+                                                  try {
+                                                      await deleteEventPoll({ eventId: pollModal, pollId: poll.id, tenantId: tenantScopeId || undefined });
+                                                      setPolls((prev) => prev.filter((item) => item.id !== poll.id));
+                                                      await logActivity(
+                                                          ligaData?.id || 'sys', 
+                                                          ligaData?.nome || 'Sistema', 
+                                                          "DELETE", 
+                                                          "events_polls", 
+                                                          { pollId: poll.id, eventId: pollModal }
+                                                      );
+                                                  } catch (error: unknown) {
+                                                      addToast(`Erro ao excluir enquete: ${extractErrorMessage(error)}`, "error");
+                                                  }
                                               }
                                           }} className="text-zinc-600 hover:text-red-500 transition"><Trash2 size={16}/></button>
                                       </div>
@@ -1281,20 +1297,24 @@ export default function LigasAdminPage() {
                                                   </div>
                                                   <button onClick={async () => {
                                                       if(!confirm("Remover opção?")) return;
-                                                      const newOptions = poll.options.filter((_, i) => i !== idx);
-                                                      await updateEventPollOptions({
-                                                          eventId: pollModal,
-                                                          pollId: poll.id,
-                                                          options: newOptions as PollOption[],
-                                                          tenantId: tenantScopeId || undefined,
-                                                      });
-                                                      setPolls((prev) =>
-                                                          prev.map((item) =>
-                                                              item.id === poll.id
-                                                                  ? { ...item, options: newOptions }
-                                                                  : item
-                                                          )
-                                                      );
+                                                      try {
+                                                          const newOptions = poll.options.filter((_, i) => i !== idx);
+                                                          await updateEventPollOptions({
+                                                              eventId: pollModal,
+                                                              pollId: poll.id,
+                                                              options: newOptions as PollOption[],
+                                                              tenantId: tenantScopeId || undefined,
+                                                          });
+                                                          setPolls((prev) =>
+                                                              prev.map((item) =>
+                                                                  item.id === poll.id
+                                                                      ? { ...item, options: newOptions }
+                                                                      : item
+                                                              )
+                                                          );
+                                                      } catch (error: unknown) {
+                                                          addToast(`Erro ao atualizar enquete: ${extractErrorMessage(error)}`, "error");
+                                                      }
                                                   }} className="text-zinc-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={12}/></button>
                                               </div>
                                           ))}
@@ -1385,6 +1405,10 @@ export default function LigasAdminPage() {
           )}
       </div>
   );
+}
+
+export default function LigasAdminPage() {
+    return <LigasAdminPageContent initialTab="visual" />;
 }
 
 

@@ -220,6 +220,172 @@ const removeMissingColumnFromPayload = (
 
 const nowIso = (): string => new Date().toISOString();
 
+const getCurrentSessionAccessToken = async (): Promise<string> => {
+  if (typeof window === "undefined") return "";
+
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return "";
+    return asString(data.session?.access_token).trim();
+  } catch {
+    return "";
+  }
+};
+
+const callLeagueAdminRoute = async <TReq, TRes>(payload: {
+  path: string;
+  method?: "POST" | "PATCH" | "DELETE";
+  body: TReq;
+  fallbackMessage: string;
+}): Promise<TRes | null> => {
+  if (typeof window === "undefined") return null;
+
+  const accessToken = await getCurrentSessionAccessToken();
+  if (!accessToken) return null;
+
+  let response: Response;
+  try {
+    response = await fetch(payload.path, {
+      method: payload.method ?? "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload.body),
+      cache: "no-store",
+    });
+  } catch {
+    return null;
+  }
+
+  if (response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      return {} as TRes;
+    }
+
+    try {
+      return (await response.json()) as TRes;
+    } catch {
+      return {} as TRes;
+    }
+  }
+
+  if ([404, 405, 501].includes(response.status)) return null;
+
+  let message = `${payload.fallbackMessage} (${response.status}).`;
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    const apiMessage = asString(body?.error).trim();
+    if (apiMessage) {
+      message = apiMessage;
+    }
+  } catch {
+    // Mantem a mensagem padrao quando o body nao vier em JSON.
+  }
+
+  throw new Error(message);
+};
+
+const syncLeagueMembersViaAdminRoute = async (payload: {
+  leagueId: string;
+  members: LeagueMemberRecord[];
+  tenantId?: string | null;
+}): Promise<boolean> => {
+  const response = await callLeagueAdminRoute<
+    { leagueId: string; members: LeagueMemberRecord[]; tenantId?: string | null },
+    { ok: boolean }
+  >({
+    path: "/api/admin/ligas/sync-members",
+    body: {
+      leagueId: payload.leagueId,
+      members: payload.members,
+      tenantId: payload.tenantId || undefined,
+    },
+    fallbackMessage: "Falha ao sincronizar membros da liga",
+  });
+
+  return Boolean(response);
+};
+
+const syncLeagueEventsViaAdminRoute = async (payload: {
+  leagueId: string;
+  events: LeagueEventRecord[];
+  leagueLogoUrl?: string;
+  tenantId?: string | null;
+}): Promise<LeagueEventRecord[] | null> => {
+  const response = await callLeagueAdminRoute<
+    {
+      leagueId: string;
+      events: LeagueEventRecord[];
+      leagueLogoUrl?: string;
+      tenantId?: string | null;
+    },
+    { events?: unknown }
+  >({
+    path: "/api/admin/ligas/sync-events",
+    body: {
+      leagueId: payload.leagueId,
+      events: payload.events,
+      leagueLogoUrl: payload.leagueLogoUrl || undefined,
+      tenantId: payload.tenantId || undefined,
+    },
+    fallbackMessage: "Falha ao sincronizar eventos da liga",
+  });
+
+  if (!response) return null;
+  if (!Array.isArray(response.events)) return [];
+
+  return response.events
+    .map((row) => normalizeLeague("temp", { eventos: [row] })?.eventos?.[0] ?? null)
+    .filter((entry): entry is LeagueEventRecord => entry !== null);
+};
+
+const createEventPollViaAdminRoute = async (payload: {
+  eventId: string;
+  question: string;
+  allowUserOptions: boolean;
+  creatorId?: string;
+  tenantId?: string | null;
+}): Promise<{ id: string } | null> =>
+  callLeagueAdminRoute<typeof payload, { id: string }>({
+    path: "/api/admin/ligas/event-polls",
+    body: payload,
+    fallbackMessage: "Falha ao criar enquete do evento",
+  });
+
+const deleteEventPollViaAdminRoute = async (payload: {
+  eventId: string;
+  pollId: string;
+  tenantId?: string | null;
+}): Promise<boolean> => {
+  const response = await callLeagueAdminRoute<typeof payload, { ok: boolean }>({
+    path: "/api/admin/ligas/event-polls",
+    method: "DELETE",
+    body: payload,
+    fallbackMessage: "Falha ao remover enquete do evento",
+  });
+
+  return Boolean(response);
+};
+
+const updateEventPollOptionsViaAdminRoute = async (payload: {
+  eventId: string;
+  pollId: string;
+  options: LeaguePollOptionRecord[];
+  tenantId?: string | null;
+}): Promise<boolean> => {
+  const response = await callLeagueAdminRoute<typeof payload, { ok: boolean }>({
+    path: "/api/admin/ligas/event-polls",
+    method: "PATCH",
+    body: payload,
+    fallbackMessage: "Falha ao atualizar enquete do evento",
+  });
+
+  return Boolean(response);
+};
+
 export async function syncLeagueMembers(payload: {
   leagueId: string;
   members: LeagueMemberRecord[];
@@ -238,10 +404,20 @@ export async function syncLeagueMembers(payload: {
     )
   );
 
+  if (
+    await syncLeagueMembersViaAdminRoute({
+      leagueId,
+      members: nextMembers,
+      tenantId: scopedTenantId || undefined,
+    })
+  ) {
+    return;
+  }
+
   const supabase = getSupabaseClient();
   let existingQuery = supabase
     .from("ligas_membros")
-    .select("id, userId")
+    .select("id, userId, cargo")
     .eq("ligaId", leagueId);
   if (scopedTenantId) {
     existingQuery = existingQuery.eq("tenant_id", scopedTenantId);
@@ -249,14 +425,21 @@ export async function syncLeagueMembers(payload: {
   const { data: existingRows, error: existingError } = await existingQuery;
   if (existingError) throw existingError;
 
-  const existingMemberIds = new Set(
+  const existingByUserId = new Map(
     ((existingRows ?? []) as Record<string, unknown>[])
-      .map((row) => asString(row.userId).trim())
-      .filter((value) => value.length > 0)
+      .map((row) => {
+        const userId = asString(row.userId).trim();
+        if (!userId) return null;
+        return [userId, row] as const;
+      })
+      .filter((entry): entry is readonly [string, Record<string, unknown>] => entry !== null)
   );
 
-  const membersToUpsert = nextMembers
-    .filter((member) => nextMemberIds.includes(asString(member.id).trim()))
+  const membersToInsert = nextMembers
+    .filter((member) => {
+      const memberId = asString(member.id).trim();
+      return memberId.length > 0 && !existingByUserId.has(memberId);
+    })
     .map((member) => ({
       ligaId: leagueId,
       userId: asString(member.id).trim(),
@@ -265,14 +448,44 @@ export async function syncLeagueMembers(payload: {
       joinedAt: nowIso(),
     }));
 
-  if (membersToUpsert.length > 0) {
-    const { error: upsertError } = await supabase.from("ligas_membros").upsert(membersToUpsert, {
-      onConflict: "ligaId,userId",
-    });
-    if (upsertError) throw upsertError;
+  if (membersToInsert.length > 0) {
+    const { error: insertError } = await supabase.from("ligas_membros").insert(membersToInsert);
+    if (insertError) throw insertError;
   }
 
-  const removedMemberIds = Array.from(existingMemberIds).filter((memberId) => !nextMemberIds.includes(memberId));
+  const membersToUpdate = nextMembers
+    .map((member) => {
+      const memberId = asString(member.id).trim();
+      const existingRow = memberId ? existingByUserId.get(memberId) : null;
+      if (!memberId || !existingRow) return null;
+
+      const nextCargo = asString(member.cargo, "Membro").trim().slice(0, 80) || "Membro";
+      const currentCargo = asString(existingRow.cargo, "Membro").trim().slice(0, 80) || "Membro";
+      if (nextCargo === currentCargo) return null;
+
+      return { userId: memberId, cargo: nextCargo };
+    })
+    .filter((entry): entry is { userId: string; cargo: string } => entry !== null);
+
+  for (const member of membersToUpdate) {
+    let updateMemberQuery = supabase
+      .from("ligas_membros")
+      .update({
+        cargo: member.cargo,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+      })
+      .eq("ligaId", leagueId)
+      .eq("userId", member.userId);
+    if (scopedTenantId) {
+      updateMemberQuery = updateMemberQuery.eq("tenant_id", scopedTenantId);
+    }
+    const { error: updateMemberError } = await updateMemberQuery;
+    if (updateMemberError) throw updateMemberError;
+  }
+
+  const removedMemberIds = Array.from(existingByUserId.keys()).filter(
+    (memberId) => !nextMemberIds.includes(memberId)
+  );
   if (removedMemberIds.length > 0) {
     let deleteQuery = supabase
       .from("ligas_membros")
@@ -298,6 +511,149 @@ export async function syncLeagueMembers(payload: {
   }
   const { error: updateError } = await updateQuery;
   if (updateError) throw updateError;
+}
+
+export async function syncLeagueEvents(payload: {
+  leagueId: string;
+  events: LeagueEventRecord[];
+  leagueLogoUrl?: string;
+  leagueSigla?: string;
+  tenantId?: string | null;
+}): Promise<LeagueEventRecord[]> {
+  const leagueId = payload.leagueId.trim();
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  const nextEvents = Array.isArray(payload.events) ? payload.events : [];
+
+  if (!leagueId) {
+    return nextEvents;
+  }
+
+  const syncedViaRoute = await syncLeagueEventsViaAdminRoute({
+    leagueId,
+    events: nextEvents,
+    leagueLogoUrl: payload.leagueLogoUrl,
+    tenantId: scopedTenantId || undefined,
+  });
+  if (syncedViaRoute) {
+    return syncedViaRoute;
+  }
+
+  const supabase = getSupabaseClient();
+  const timestamp = nowIso();
+  const leagueLogoUrl = asString(payload.leagueLogoUrl).trim();
+  const leagueSigla = asString(payload.leagueSigla).trim();
+  const syncedEvents: LeagueEventRecord[] = [];
+  const normalizeQuestion = (value: string): string => value.trim().toLowerCase();
+
+  for (const event of nextEvents) {
+    const alreadyLinkedToGlobal = Boolean(asString(event.globalEventId).trim());
+    const eventId = asString(event.globalEventId).trim() || crypto.randomUUID();
+    const nextEvent: LeagueEventRecord = {
+      ...event,
+      globalEventId: eventId,
+      linkEvento: `/eventos/${eventId}`,
+      imagem: asString(event.imagem).trim() || leagueLogoUrl,
+      imagePositionY: Math.max(0, Math.min(100, asNumber(event.imagePositionY, 50))),
+      lotes: Array.isArray(event.lotes) ? event.lotes : [],
+      pollQuestion: asString(event.pollQuestion).trim(),
+    };
+
+    let eventPayload: Record<string, unknown> = {
+      id: eventId,
+      titulo: leagueSigla ? `[${leagueSigla}] ${nextEvent.titulo}` : nextEvent.titulo,
+      data: nextEvent.data,
+      hora: nextEvent.hora,
+      local: nextEvent.local,
+      tipo: "Liga",
+      destaque: nextEvent.destaque,
+      imagem: nextEvent.imagem || leagueLogoUrl || "",
+      imagePositionY: nextEvent.imagePositionY,
+      lotes: nextEvent.lotes,
+      descricao: nextEvent.descricao,
+      categoria: "Liga",
+      status: "ativo",
+      sale_status: "ativo",
+      updatedAt: timestamp,
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+    };
+    if (!alreadyLinkedToGlobal) {
+      eventPayload.createdAt = timestamp;
+    }
+
+    while (Object.keys(eventPayload).length > 0) {
+      const { error: eventUpsertError } = await supabase
+        .from("eventos")
+        .upsert(eventPayload, { onConflict: "id" });
+      if (!eventUpsertError) break;
+
+      const missingColumn = extractMissingSchemaColumn(eventUpsertError);
+      if (!missingColumn) throwSupabaseError(eventUpsertError);
+      const safeMissingColumn = missingColumn as string;
+      const nextPayload = removeMissingColumnFromPayload(eventPayload, safeMissingColumn);
+      if (!nextPayload) throwSupabaseError(eventUpsertError);
+      eventPayload = nextPayload as Record<string, unknown>;
+    }
+
+    if (nextEvent.pollQuestion) {
+      let existingPollsQuery = supabase
+        .from("eventos_enquetes")
+        .select("id,question")
+        .eq("eventoId", eventId)
+        .limit(40);
+      if (scopedTenantId) {
+        existingPollsQuery = existingPollsQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { data: existingPolls, error: existingPollsError } = await existingPollsQuery;
+      if (existingPollsError) throwSupabaseError(existingPollsError);
+
+      const hasSameQuestion = (existingPolls ?? []).some((row) => {
+        const raw = asObject(row);
+        return (
+          raw &&
+          normalizeQuestion(asString(raw.question)) === normalizeQuestion(nextEvent.pollQuestion || "")
+        );
+      });
+
+      if (!hasSameQuestion) {
+        let pollInsertPayload: Record<string, unknown> = {
+          eventoId: eventId,
+          question: nextEvent.pollQuestion,
+          options: [],
+          allowUserOptions: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          creatorId: leagueId,
+          isOfficial: true,
+          ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+        };
+
+        while (Object.keys(pollInsertPayload).length > 0) {
+          const { error: pollInsertError } = await supabase
+            .from("eventos_enquetes")
+            .insert(pollInsertPayload);
+          if (!pollInsertError) {
+            break;
+          }
+
+          const missingColumn = extractMissingSchemaColumn(pollInsertError);
+          if (!missingColumn) throwSupabaseError(pollInsertError);
+          const safeMissingColumn = missingColumn as string;
+          const nextPayload = removeMissingColumnFromPayload(
+            pollInsertPayload,
+            safeMissingColumn
+          );
+          if (!nextPayload) throwSupabaseError(pollInsertError);
+          pollInsertPayload = nextPayload as Record<string, unknown>;
+        }
+      }
+
+      nextEvent.pollQuestion = "";
+    }
+
+    syncedEvents.push(nextEvent);
+  }
+
+  return syncedEvents;
 }
 
 const shouldFallbackToClientWrites = (error: unknown): boolean => {
@@ -1331,6 +1687,12 @@ export async function createEventPoll(payload: {
     tenantId: scopedTenantId || undefined,
   };
 
+  const routeResult = await createEventPollViaAdminRoute(requestPayload);
+  if (routeResult?.id) {
+    pollsCache.clear();
+    return routeResult;
+  }
+
   const result = await callWithFallback<typeof requestPayload, { id: string }>(
     LEAGUE_POLL_CREATE_CALLABLE,
     requestPayload,
@@ -1384,6 +1746,17 @@ export async function deleteEventPoll(payload: {
   if (!eventId || !pollId) return;
   const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
 
+  if (
+    await deleteEventPollViaAdminRoute({
+      eventId,
+      pollId,
+      tenantId: scopedTenantId || undefined,
+    })
+  ) {
+    pollsCache.clear();
+    return;
+  }
+
   await callWithFallback<typeof payload, { ok: boolean }>(
     LEAGUE_POLL_DELETE_CALLABLE,
     payload,
@@ -1426,6 +1799,18 @@ export async function updateEventPollOptions(payload: {
   }));
 
   const requestPayload = { ...payload, options: normalizedOptions };
+  if (
+    await updateEventPollOptionsViaAdminRoute({
+      eventId,
+      pollId,
+      options: normalizedOptions,
+      tenantId: scopedTenantId || undefined,
+    })
+  ) {
+    pollsCache.clear();
+    return;
+  }
+
   await callWithFallback<typeof requestPayload, { ok: boolean }>(
     LEAGUE_POLL_UPDATE_CALLABLE,
     requestPayload,

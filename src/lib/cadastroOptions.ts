@@ -75,7 +75,6 @@ export const DEFAULT_STATUS_RELACIONAMENTO_OPTIONS = [
   "Namorando",
   "Casado(a)",
   "Enrolado(a)",
-  "No QG da Atletica",
 ] as const;
 
 export const DEFAULT_PET_OPTIONS = [
