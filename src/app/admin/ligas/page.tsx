@@ -22,6 +22,11 @@ import {
   type LeagueUserRecord,
 } from "../../../lib/leaguesService";
 import { resolveLeagueLogoSrc } from "../../../lib/leagueMedia";
+import {
+  DEFAULT_LEAGUE_ROLE,
+  LEAGUE_ROLE_OPTIONS,
+  resolveLeagueRoleLabel,
+} from "../../../lib/leagueRoles";
 
 // --- TIPAGEM ---
 interface Member { 
@@ -256,7 +261,7 @@ export default function AdminLigasPage() {
       const newMember: Member = { 
           id: u.id, 
           nome: u.nome || "Sem Nome", 
-          cargo: "Membro", 
+          cargo: DEFAULT_LEAGUE_ROLE, 
           foto: u.foto || "", 
           linkPerfil: `/perfil/${u.id}` 
       };
@@ -271,7 +276,7 @@ export default function AdminLigasPage() {
 
   const updateMemberCargo = (idx: number, val: string) => {
       const novos = [...(formData.membros || [])];
-      novos[idx].cargo = val;
+      novos[idx].cargo = resolveLeagueRoleLabel(val);
       setFormData({ ...formData, membros: novos });
   };
 
@@ -474,7 +479,17 @@ export default function AdminLigasPage() {
                                 </div>
                                 <div className="flex-1">
                                     <p className="text-sm font-bold text-white">{m.nome}</p>
-                                    <input type="text" placeholder="Cargo" value={m.cargo} onChange={e => updateMemberCargo(idx, e.target.value)} className="bg-transparent text-xs text-emerald-500 outline-none w-full"/>
+                                    <select
+                                      value={resolveLeagueRoleLabel(m.cargo)}
+                                      onChange={e => updateMemberCargo(idx, e.target.value)}
+                                      className="mt-1 w-full rounded-lg border border-zinc-800 bg-black/40 px-2 py-2 text-xs font-bold uppercase text-emerald-400 outline-none focus:border-emerald-500"
+                                    >
+                                      {LEAGUE_ROLE_OPTIONS.map((role) => (
+                                        <option key={role} value={role} className="bg-zinc-950 text-white">
+                                          {role}
+                                        </option>
+                                      ))}
+                                    </select>
                                 </div>
                                 <button onClick={() => removeMember(idx)} className="text-zinc-600 hover:text-red-500"><Trash2 size={16}/></button>
                             </div>

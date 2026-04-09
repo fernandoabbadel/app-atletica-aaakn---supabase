@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { DEFAULT_LEAGUE_ROLE, resolveLeagueRoleLabel } from "@/lib/leagueRoles";
 
 export const runtime = "nodejs";
 
@@ -88,7 +89,9 @@ const normalizeMembers = (value: unknown): Array<{ userId: string; cargo: string
 
     normalized.push({
       userId,
-      cargo: asString(raw?.cargo, "Membro").trim().slice(0, 80) || "Membro",
+      cargo:
+        resolveLeagueRoleLabel(asString(raw?.cargo, DEFAULT_LEAGUE_ROLE)).slice(0, 80) ||
+        DEFAULT_LEAGUE_ROLE,
     });
   }
 

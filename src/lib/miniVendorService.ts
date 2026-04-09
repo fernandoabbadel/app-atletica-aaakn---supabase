@@ -772,6 +772,61 @@ export async function setMiniVendorStatus(payload: {
   return normalized;
 }
 
+export async function setMiniVendorCategoryVisibility(payload: {
+  miniVendorId: string;
+  categoryVisible: boolean;
+  tenantId?: string | null;
+}): Promise<MiniVendorProfile> {
+  const miniVendorId = payload.miniVendorId.trim();
+  if (!miniVendorId) {
+    throw new Error("Mini vendor invalido.");
+  }
+
+  const current = await fetchMiniVendorProfileById({
+    tenantId: asString(payload.tenantId).trim(),
+    miniVendorId,
+    forceRefresh: true,
+  });
+  if (!current) {
+    throw new Error("Mini vendor nao encontrado.");
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("mini_vendors")
+    .update({
+      category_visible: payload.categoryVisible,
+      updated_at: nowIso(),
+    })
+    .eq("id", current.id)
+    .eq("tenant_id", current.tenantId)
+    .select(MINI_VENDOR_SELECT_COLUMNS)
+    .single();
+  if (error) throwSupabaseError(error);
+
+  const normalized = normalizeMiniVendorProfile(asObject(data));
+  if (!normalized) {
+    throw new Error("Nao foi possivel atualizar a categoria do mini vendor.");
+  }
+
+  if (normalized.status === "approved") {
+    await syncMiniVendorStoreCategory(normalized);
+  }
+
+  invalidateMiniVendorCaches(normalized.tenantId, normalized.userId);
+  setCache(
+    currentMiniVendorCache,
+    buildScopedCacheKey(normalized.tenantId, normalized.userId),
+    normalized
+  );
+  setCache(
+    miniVendorByIdCache,
+    buildScopedCacheKey(normalized.tenantId, normalized.id),
+    normalized
+  );
+  return normalized;
+}
+
 export async function fetchMiniVendorOrders(options: {
   tenantId: string;
   sellerId: string;

@@ -6,6 +6,8 @@ import Link from "next/link";
 import {
   ArrowLeft,
   CheckCircle2,
+  Eye,
+  EyeOff,
   ExternalLink,
   Loader2,
   LogOut,
@@ -20,6 +22,7 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
   fetchTenantMiniVendors,
+  setMiniVendorCategoryVisibility,
   setMiniVendorStatus,
   type MiniVendorProfile,
 } from "@/lib/miniVendorService";
@@ -137,6 +140,29 @@ export default function MiniVendorAdminDirectoryPage({
     } catch (error: unknown) {
       console.error(error);
       addToast("Erro ao atualizar mini vendor.", "error");
+    } finally {
+      setActionId("");
+    }
+  };
+
+  const handleToggleCategoryVisibility = async (row: MiniVendorProfile) => {
+    try {
+      setActionId(`category:${row.id}`);
+      await setMiniVendorCategoryVisibility({
+        miniVendorId: row.id,
+        categoryVisible: !row.categoryVisible,
+        tenantId,
+      });
+      await load(true);
+      addToast(
+        row.categoryVisible
+          ? "Categoria ocultada da loja."
+          : "Categoria exibida na loja.",
+        "success"
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao atualizar a categoria publica.", "error");
     } finally {
       setActionId("");
     }
@@ -288,6 +314,25 @@ export default function MiniVendorAdminDirectoryPage({
                         <Package size={12} />
                         Editar produtos
                       </Link>
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleCategoryVisibility(row)}
+                        disabled={actionId === `category:${row.id}`}
+                        className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[10px] font-black uppercase transition disabled:opacity-60 ${
+                          row.categoryVisible
+                            ? "border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20"
+                            : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                        }`}
+                      >
+                        {actionId === `category:${row.id}` ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : row.categoryVisible ? (
+                          <EyeOff size={12} />
+                        ) : (
+                          <Eye size={12} />
+                        )}
+                        {row.categoryVisible ? "Ocultar categoria" : "Exibir categoria"}
+                      </button>
                     </div>
                   )}
 
@@ -318,6 +363,12 @@ export default function MiniVendorAdminDirectoryPage({
                         </p>
                         <p className="text-[11px] text-zinc-500">
                           PIX: {row.pixKey || "-"} | Banco: {row.pixBank || "-"}
+                        </p>
+                        <p className="mt-2 text-[11px] text-zinc-400">
+                          Categoria na loja:{" "}
+                          <span className={row.categoryVisible ? "text-emerald-300" : "text-red-300"}>
+                            {row.categoryVisible ? "visivel" : "oculta"}
+                          </span>
                         </p>
                         <p className="text-[11px] text-zinc-500">
                           Instagram:{" "}

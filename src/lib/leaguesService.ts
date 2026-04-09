@@ -9,6 +9,11 @@ import { uploadImage, VERSIONED_PUBLIC_ASSET_CACHE_CONTROL } from "./upload";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { hydrateEventPollRows, isMissingRelationError } from "./hotPathRelations";
 import { resolveLeagueLogoSrc } from "./leagueMedia";
+import {
+  DEFAULT_LEAGUE_ROLE,
+  resolveLeagueRoleLabel,
+  sortLeagueMembersByRole,
+} from "./leagueRoles";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -443,7 +448,9 @@ export async function syncLeagueMembers(payload: {
     .map((member) => ({
       ligaId: leagueId,
       userId: asString(member.id).trim(),
-      cargo: asString(member.cargo, "Membro").trim().slice(0, 80) || "Membro",
+      cargo:
+        resolveLeagueRoleLabel(asString(member.cargo, DEFAULT_LEAGUE_ROLE)).slice(0, 80) ||
+        DEFAULT_LEAGUE_ROLE,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       joinedAt: nowIso(),
     }));
@@ -459,8 +466,12 @@ export async function syncLeagueMembers(payload: {
       const existingRow = memberId ? existingByUserId.get(memberId) : null;
       if (!memberId || !existingRow) return null;
 
-      const nextCargo = asString(member.cargo, "Membro").trim().slice(0, 80) || "Membro";
-      const currentCargo = asString(existingRow.cargo, "Membro").trim().slice(0, 80) || "Membro";
+      const nextCargo =
+        resolveLeagueRoleLabel(asString(member.cargo, DEFAULT_LEAGUE_ROLE)).slice(0, 80) ||
+        DEFAULT_LEAGUE_ROLE;
+      const currentCargo =
+        resolveLeagueRoleLabel(asString(existingRow.cargo, DEFAULT_LEAGUE_ROLE)).slice(0, 80) ||
+        DEFAULT_LEAGUE_ROLE;
       if (nextCargo === currentCargo) return null;
 
       return { userId: memberId, cargo: nextCargo };
@@ -802,7 +813,8 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
   if (!data) return null;
 
   const membros = Array.isArray(data.membros)
-    ? data.membros
+    ? sortLeagueMembersByRole(
+        data.membros
         .map((row) => {
           const member = asObject(row);
           if (!member) return null;
@@ -810,12 +822,13 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
           return {
             id: asString(member.id),
             nome: asString(member.nome, "Sem nome"),
-            cargo: asString(member.cargo, "Membro"),
+            cargo: resolveLeagueRoleLabel(asString(member.cargo, DEFAULT_LEAGUE_ROLE)),
             foto: asString(member.foto),
             ...(linkPerfil ? { linkPerfil } : {}),
           } as LeagueMemberRecord;
         })
         .filter((row): row is LeagueMemberRecord => row !== null)
+      )
     : [];
 
   const perguntas = Array.isArray(data.perguntas)
@@ -962,6 +975,28 @@ const normalizeLeaguePayload = (
 ): Record<string, unknown> => {
   const logoUrl = resolveLeagueLogoSrc(payload) || undefined;
   const foto = asString(payload.foto) || logoUrl || "";
+  const membros = Array.isArray(payload.membros)
+    ? sortLeagueMembersByRole(
+        payload.membros
+          .map((member) => {
+            const memberId = asString(member?.id).trim();
+            if (!memberId) return null;
+
+            const linkPerfil = asString(member?.linkPerfil) || undefined;
+            return {
+              id: memberId,
+              nome: asString(member?.nome, "Sem nome").trim().slice(0, 160) || "Sem nome",
+              cargo: resolveLeagueRoleLabel(asString(member?.cargo, DEFAULT_LEAGUE_ROLE)).slice(
+                0,
+                80
+              ),
+              foto: asString(member?.foto).trim().slice(0, 400),
+              ...(linkPerfil ? { linkPerfil } : {}),
+            } satisfies LeagueMemberRecord;
+          })
+          .filter((member): member is LeagueMemberRecord => member !== null)
+      )
+    : [];
   const perguntas = Array.isArray(payload.perguntas)
     ? payload.perguntas.map((question) => {
         const imageUrl = asString(question.imageUrl) || undefined;
@@ -989,7 +1024,7 @@ const normalizeLeaguePayload = (
     ...(logoUrl ? { logoUrl, logo: logoUrl } : { logoUrl: undefined, logo: undefined }),
     visivel: Boolean(payload.visivel),
     ativa: Boolean(payload.ativa),
-    membros: Array.isArray(payload.membros) ? payload.membros : [],
+    membros,
     eventos: Array.isArray(payload.eventos) ? payload.eventos : [],
     perguntas,
     bizu: asString(payload.bizu).slice(0, 500),
@@ -998,7 +1033,7 @@ const normalizeLeaguePayload = (
       0,
       asNumber(
         payload.membersCount,
-        Array.isArray(payload.membros) ? payload.membros.length : 0
+        membros.length
       )
     ),
   };

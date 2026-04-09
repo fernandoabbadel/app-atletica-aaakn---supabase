@@ -31,6 +31,12 @@ import {
   type LeaguePollRecord,
 } from "../../lib/leaguesService";
 import { resolveLeagueLogoSrc } from "../../lib/leagueMedia";
+import {
+  DEFAULT_LEAGUE_ROLE,
+  LEAGUE_ROLE_OPTIONS,
+  resolveLeagueRoleLabel,
+  sortLeagueMembersByRole,
+} from "../../lib/leagueRoles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGEM ESTRITA (Sem 'any') ---
@@ -713,7 +719,7 @@ export function LigasAdminPageContent() {
       const newMember: Member = { 
           id: u.id, 
           nome: u.nome || "Sem Nome", 
-          cargo: "Membro", 
+          cargo: DEFAULT_LEAGUE_ROLE, 
           foto: u.foto || "", 
           linkPerfil: `/perfil/${u.id}` 
       };
@@ -731,7 +737,7 @@ export function LigasAdminPageContent() {
   const updateMemberCargo = (idx: number, newCargo: string) => {
       if(!ligaData?.membros) return;
       const novos = [...ligaData.membros];
-      novos[idx].cargo = newCargo;
+      novos[idx].cargo = resolveLeagueRoleLabel(newCargo);
       setLigaData({ ...ligaData, membros: novos });
   };
 
@@ -858,7 +864,12 @@ export function LigasAdminPageContent() {
       await runSectionSave("SALVANDO MEMBROS...", async () => {
           const actorTenantId =
               tenantScopeId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
-          const members = ligaData.membros || [];
+          const members = sortLeagueMembersByRole(
+              (ligaData.membros || []).map((member) => ({
+                  ...member,
+                  cargo: resolveLeagueRoleLabel(member.cargo),
+              }))
+          );
           const memberIds = extractMemberIds(members);
 
           await persistLeagueConfigPatch({
@@ -873,7 +884,9 @@ export function LigasAdminPageContent() {
           });
 
           setSavedMemberIds(memberIds);
-          setLigaData((prev) => (prev ? { ...prev, membersCount: members.length } : prev));
+          setLigaData((prev) =>
+              prev ? { ...prev, membros: members, membersCount: members.length } : prev
+          );
           addToast("Membros sincronizados.", "success");
 
           await logActivity(
@@ -1149,7 +1162,17 @@ export function LigasAdminPageContent() {
                                           </div>
                                           <div className="flex-1 space-y-1">
                                               <p className="text-sm font-bold text-white">{m.nome}</p>
-                                              <input type="text" placeholder="Cargo (Ex: Presidente)" className="w-full bg-transparent border-b border-zinc-700 text-xs text-emerald-500 outline-none focus:border-emerald-500 font-medium" value={m.cargo} onChange={e => updateMemberCargo(idx, e.target.value)}/>
+                                              <select
+                                                value={resolveLeagueRoleLabel(m.cargo)}
+                                                onChange={e => updateMemberCargo(idx, e.target.value)}
+                                                className="w-full rounded-lg border border-zinc-800 bg-black/40 px-3 py-2 text-xs font-bold uppercase text-emerald-400 outline-none focus:border-emerald-500"
+                                              >
+                                                {LEAGUE_ROLE_OPTIONS.map((role) => (
+                                                  <option key={role} value={role} className="bg-zinc-950 text-white">
+                                                    {role}
+                                                  </option>
+                                                ))}
+                                              </select>
                                           </div>
                                       </div>
                                   );
@@ -1183,7 +1206,17 @@ export function LigasAdminPageContent() {
                                           </div>
                                           <div className="flex-1 space-y-1">
                                               <p className="text-sm font-bold text-white">{m.nome}</p>
-                                              <input type="text" placeholder="Cargo (Ex: Presidente)" className="w-full bg-transparent border-b border-zinc-700 text-xs text-emerald-500 outline-none focus:border-emerald-500 font-medium" value={m.cargo} onChange={e => updateMemberCargo(idx, e.target.value)}/>
+                                              <select
+                                                value={resolveLeagueRoleLabel(m.cargo)}
+                                                onChange={e => updateMemberCargo(idx, e.target.value)}
+                                                className="w-full rounded-lg border border-zinc-800 bg-black/40 px-3 py-2 text-xs font-bold uppercase text-emerald-400 outline-none focus:border-emerald-500"
+                                              >
+                                                {LEAGUE_ROLE_OPTIONS.map((role) => (
+                                                  <option key={role} value={role} className="bg-zinc-950 text-white">
+                                                    {role}
+                                                  </option>
+                                                ))}
+                                              </select>
                                           </div>
                                       </div>
                                   );

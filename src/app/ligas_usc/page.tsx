@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { 
   Heart, X, Calendar, 
   Lightbulb, Trophy, ArrowLeft, Users, Loader2, Brain, CheckCircle2, RotateCcw 
@@ -19,7 +20,6 @@ import {
 import {
   addLeagueQuizHistory,
   changeLeagueLikeCount,
-  fetchLeagueById,
   fetchLeagueSummaries,
   resolveFollowedLeagueIdsFromUserExtra,
   toggleUserLeagueFollow,
@@ -190,6 +190,7 @@ const QUESTIONS: QuizQuestion[] = [
 export default function LigasUnitauPage() {
   const { user } = useAuth();
   const { tenantId, tenantSlug } = useTenantTheme();
+  const router = useRouter();
   const [leagues, setLeagues] = useState<League[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLeague, setSelectedLeague] = useState<League | null>(null);
@@ -244,23 +245,8 @@ export default function LigasUnitauPage() {
   }, [followedLeagueIds, selectedLeague]);
 
   const openLeagueDetails = async (league: League): Promise<void> => {
-      setIsJoined(followedLeagueIds.includes(league.id));
-      setSelectedLeague(league);
       setLoadingSelectedLeague(true);
-      try {
-          const fullLeague = await fetchLeagueById(league.id, {
-            forceRefresh: true,
-            tenantId: tenantId || undefined,
-          });
-          if (fullLeague) {
-              setIsJoined(followedLeagueIds.includes(fullLeague.id));
-              setSelectedLeague(fullLeague as League);
-          }
-      } catch (error: unknown) {
-          console.error(error);
-      } finally {
-          setLoadingSelectedLeague(false);
-      }
+      router.push(tenantPath(`/ligas_usc/${league.id}`));
   };
 
   const handleLike = async (e: React.MouseEvent, leagueId: string) => {
@@ -448,6 +434,38 @@ export default function LigasUnitauPage() {
       }
   };
 
+  const handleFollowFromCard = async (e: React.MouseEvent, league: League) => {
+      e.stopPropagation();
+      if (!user) return;
+
+      const isCurrentlyFollowing = followedLeagueIds.includes(league.id);
+      const previousFollowedIds = followedLeagueIds;
+      const nextFollowedIds = isCurrentlyFollowing
+        ? previousFollowedIds.filter((entry) => entry !== league.id)
+        : Array.from(new Set([...previousFollowedIds, league.id]));
+
+      setFollowedLeagueIds(nextFollowedIds);
+
+      try {
+        await toggleUserLeagueFollow({
+          leagueId: league.id,
+          userId: user.uid,
+          currentlyFollowing: isCurrentlyFollowing,
+          tenantId: tenantId || undefined,
+        });
+        void logActivity(
+          user.uid,
+          user.nome || "Atleta",
+          isCurrentlyFollowing ? "UNFOLLOW" : "FOLLOW",
+          "Ligas",
+          `${isCurrentlyFollowing ? "Parou de seguir" : "Seguiu"} a liga ${league.sigla || league.nome}`
+        );
+      } catch (error: unknown) {
+        console.error(error);
+        setFollowedLeagueIds(previousFollowedIds);
+      }
+  };
+
   const getRankStyle = (i: number) => i === 0 ? "border-yellow-500 shadow-yellow-500/20" : i === 1 ? "border-zinc-400" : i === 2 ? "border-orange-700" : "border-zinc-800";
   
   return (
@@ -502,24 +520,63 @@ export default function LigasUnitauPage() {
 
         {/* LISTA DE LIGAS */}
         {leagues.map((l, i) => (
-            <div key={l.id} onClick={() => { void openLeagueDetails(l); }} className={`relative rounded-3xl p-1 border transition hover:scale-[1.02] cursor-pointer flex flex-col h-[320px] shadow-2xl ${getRankStyle(i)}`}>
-                <div className="h-40 w-full bg-black rounded-t-[20px] overflow-hidden relative shrink-0">
+            <div key={l.id} onClick={() => { void openLeagueDetails(l); }} className={`relative overflow-hidden rounded-[2rem] border transition hover:scale-[1.01] cursor-pointer flex flex-col shadow-2xl ${getRankStyle(i)}`}>
+                <div className="relative h-44 w-full bg-black shrink-0">
                     <Image
                       src={getLeagueLogoSrc(l)}
                       alt={l.nome}
                       fill
                       sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
-                      className="object-cover opacity-60 transition duration-500 hover:opacity-80"
+                      className="object-cover opacity-70 transition duration-500 hover:opacity-85"
                       
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#050505] to-transparent"/>
-                    <div className="absolute bottom-2 left-4"><h2 className="text-3xl font-black italic uppercase tracking-tighter text-white drop-shadow-md">{l.sigla || l.nome}</h2></div>
+                    <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.12),rgba(5,5,5,0.96))]"/>
+                    <div className="absolute left-4 top-4 flex items-center gap-3">
+                        <div className="relative h-16 w-16 overflow-hidden rounded-[1.35rem] border border-white/15 bg-black/40 shadow-[0_18px_40px_rgba(0,0,0,0.35)]">
+                            <Image
+                              src={getLeagueLogoSrc(l)}
+                              alt={l.nome}
+                              fill
+                              sizes="64px"
+                              className="object-cover"
+                            />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">Liga USC</p>
+                            <h2 className="truncate text-xl font-black uppercase tracking-tight text-white">{l.nome}</h2>
+                            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200">{l.sigla || l.nome}</p>
+                        </div>
+                    </div>
                 </div>
-                <div className="p-4 bg-[#050505] rounded-b-[20px] flex-1 flex flex-col justify-between">
+                <div className="flex flex-1 flex-col bg-[#050505] p-5">
                     <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed">{l.descricao || "Sem descrição disponível."}</p>
-                    <div className="flex justify-between items-center border-t border-zinc-800 pt-3 mt-auto">
-                        <div className="flex items-center gap-1 text-zinc-400"><Users size={14} className="text-emerald-500"/><span className="text-[10px] font-bold uppercase">Membros: {l.membersCount ?? l.membros?.length ?? 0}</span></div>
-                        <button onClick={(e) => handleLike(e, l.id)} className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-500 hover:text-red-500 hover:border-red-500/50 transition active:scale-95"><Heart size={14} className={likedLeagues.includes(l.id) ? "fill-current text-red-500" : ""}/><span className="text-xs font-black">{l.likes || 0}</span></button>
+                    {l.bizu ? (
+                        <div className="mt-4 rounded-[1.4rem] border border-amber-500/20 bg-amber-500/10 p-3">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-200">Bizu da liga</p>
+                            <p className="mt-2 text-xs leading-5 text-amber-50/90 line-clamp-2">{l.bizu}</p>
+                        </div>
+                    ) : null}
+                    <div className="mt-4 flex items-center gap-2 text-zinc-300">
+                        <Users size={15} className="text-emerald-400"/>
+                        <span className="text-[11px] font-black uppercase tracking-[0.2em]">
+                            {l.membersCount ?? l.membros?.length ?? 0} membros
+                        </span>
+                    </div>
+                    <div className="mt-5 grid grid-cols-2 gap-3 border-t border-zinc-800 pt-4">
+                        <button onClick={(e) => handleLike(e, l.id)} className="flex items-center justify-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-300 hover:text-red-400 hover:border-red-500/40 transition active:scale-95">
+                            <Heart size={14} className={likedLeagues.includes(l.id) ? "fill-current text-red-500" : ""}/>
+                            <span className="text-[11px] font-black uppercase">{l.likes || 0}</span>
+                        </button>
+                        <button
+                          onClick={(e) => void handleFollowFromCard(e, l)}
+                          className={`rounded-full border px-3 py-2 text-[11px] font-black uppercase transition ${
+                            followedLeagueIds.includes(l.id)
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                              : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-emerald-500/40 hover:text-emerald-200"
+                          }`}
+                        >
+                          {followedLeagueIds.includes(l.id) ? "Seguindo" : "Seguir"}
+                        </button>
                     </div>
                 </div>
             </div>

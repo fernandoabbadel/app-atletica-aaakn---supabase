@@ -6,6 +6,8 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ChevronDown,
+  Eye,
+  EyeOff,
   ExternalLink,
   GripVertical,
   ImagePlus,
@@ -19,6 +21,11 @@ import {
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
+import {
+  fetchTenantMiniVendors,
+  setMiniVendorCategoryVisibility,
+  type MiniVendorProfile,
+} from "@/lib/miniVendorService";
 import {
   fetchAdminStoreBundle,
   renameStoreProductsCategory,
@@ -70,6 +77,7 @@ type DisplayCategory = {
   sellerType: "tenant" | "mini_vendor";
   sellerId: string;
   derivedOnly: boolean;
+  categoryVisible: boolean;
 };
 
 const CATEGORY_NAME_MAX_LENGTH = 80;
@@ -136,10 +144,12 @@ export default function AdminLojaCategoriasPage() {
   const [savingOrder, setSavingOrder] = useState(false);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
+  const [miniVendors, setMiniVendors] = useState<MiniVendorProfile[]>([]);
   const [editingCategoryKey, setEditingCategoryKey] = useState<string | null>(null);
   const [orderedCategoryKeys, setOrderedCategoryKeys] = useState<string[]>([]);
   const [draggingCategoryKey, setDraggingCategoryKey] = useState<string | null>(null);
   const [isOrderPanelOpen, setIsOrderPanelOpen] = useState(true);
+  const [visibilityActionKey, setVisibilityActionKey] = useState("");
   const [form, setForm] = useState<CategoryFormState>(() => buildEmptyForm(tenantCategoryColor));
 
   useEffect(() => {
@@ -163,17 +173,26 @@ export default function AdminLojaCategoriasPage() {
     : "/admin/mini-vendors/cadastros";
 
   const loadData = useCallback(async (forceRefresh = true) => {
-    const bundle = await fetchAdminStoreBundle({
-      productsLimit: 240,
-      categoriesLimit: 240,
-      ordersLimit: 1,
-      reviewsLimit: 1,
-      forceRefresh,
-    });
+    const [bundle, tenantMiniVendors] = await Promise.all([
+      fetchAdminStoreBundle({
+        productsLimit: 240,
+        categoriesLimit: 240,
+        ordersLimit: 1,
+        reviewsLimit: 1,
+        forceRefresh,
+      }),
+      activeTenantId.trim()
+        ? fetchTenantMiniVendors({
+            tenantId: activeTenantId,
+            forceRefresh,
+          })
+        : Promise.resolve([]),
+    ]);
 
     setCategories(bundle.categorias as CategoryRow[]);
     setProducts(bundle.produtos as ProductRow[]);
-  }, []);
+    setMiniVendors(tenantMiniVendors);
+  }, [activeTenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -198,6 +217,9 @@ export default function AdminLojaCategoriasPage() {
     const rows = new Map<string, DisplayCategory>();
     const cleanTenantId = activeTenantId.trim();
     const cleanTenantLogoUrl = tenantLogoUrl.trim();
+    const miniVendorVisibilityMap = new Map(
+      miniVendors.map((vendor) => [vendor.id, vendor.categoryVisible] as const)
+    );
 
     categories.forEach((row) => {
       const nome = asString(row.nome).trim();
@@ -223,6 +245,10 @@ export default function AdminLojaCategoriasPage() {
         sellerType,
         sellerId,
         derivedOnly: false,
+        categoryVisible:
+          sellerType === "mini_vendor"
+            ? miniVendorVisibilityMap.get(sellerId) ?? true
+            : true,
       });
     });
 
@@ -260,6 +286,10 @@ export default function AdminLojaCategoriasPage() {
         sellerType,
         sellerId,
         derivedOnly: true,
+        categoryVisible:
+          sellerType === "mini_vendor"
+            ? miniVendorVisibilityMap.get(sellerId) ?? true
+            : true,
       });
     });
 
@@ -276,7 +306,7 @@ export default function AdminLojaCategoriasPage() {
       }
       return left.nome.localeCompare(right.nome, "pt-BR", { sensitivity: "base" });
     });
-  }, [activeTenantId, categories, products, tenantCategoryColor, tenantLogoUrl]);
+  }, [activeTenantId, categories, miniVendors, products, tenantCategoryColor, tenantLogoUrl]);
 
   const productCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -496,6 +526,31 @@ export default function AdminLojaCategoriasPage() {
       addToast("Erro ao salvar a ordem das categorias.", "error");
     } finally {
       setSavingOrder(false);
+    }
+  };
+
+  const handleToggleMiniVendorCategoryVisibility = async (row: DisplayCategory) => {
+    if (row.sellerType !== "mini_vendor" || !row.sellerId) return;
+
+    try {
+      setVisibilityActionKey(row.key);
+      await setMiniVendorCategoryVisibility({
+        miniVendorId: row.sellerId,
+        categoryVisible: !row.categoryVisible,
+        tenantId: activeTenantId,
+      });
+      await loadData(true);
+      addToast(
+        row.categoryVisible
+          ? "Categoria do mini vendor ocultada na loja."
+          : "Categoria do mini vendor exibida na loja.",
+        "success"
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao atualizar visibilidade da categoria.", "error");
+    } finally {
+      setVisibilityActionKey("");
     }
   };
 
@@ -942,6 +997,17 @@ export default function AdminLojaCategoriasPage() {
                             >
                               {row.sellerType === "mini_vendor" ? "Mini Vendor" : "Tenant"}
                             </span>
+                            {row.sellerType === "mini_vendor" ? (
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${
+                                  row.categoryVisible
+                                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                    : "border-red-500/30 bg-red-500/10 text-red-200"
+                                }`}
+                              >
+                                {row.categoryVisible ? "Categoria visivel" : "Categoria oculta"}
+                              </span>
+                            ) : null}
                           </div>
                           <p className="mt-1 text-[11px] text-zinc-500">
                             {row.sellerType === "mini_vendor"
@@ -953,13 +1019,34 @@ export default function AdminLojaCategoriasPage() {
                         </div>
 
                         {row.sellerType === "mini_vendor" ? (
-                          <Link
-                            href={miniVendorAdminHref}
-                            className="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[11px] font-black uppercase text-blue-300 hover:bg-blue-500/20"
-                          >
-                            <ExternalLink size={14} />
-                            Editar logo
-                          </Link>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void handleToggleMiniVendorCategoryVisibility(row)}
+                              disabled={visibilityActionKey === row.key}
+                              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase transition disabled:opacity-60 ${
+                                row.categoryVisible
+                                  ? "border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20"
+                                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                              }`}
+                            >
+                              {visibilityActionKey === row.key ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : row.categoryVisible ? (
+                                <EyeOff size={14} />
+                              ) : (
+                                <Eye size={14} />
+                              )}
+                              {row.categoryVisible ? "Ocultar categoria" : "Exibir categoria"}
+                            </button>
+                            <Link
+                              href={miniVendorAdminHref}
+                              className="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[11px] font-black uppercase text-blue-300 hover:bg-blue-500/20"
+                            >
+                              <ExternalLink size={14} />
+                              Abrir mini vendor
+                            </Link>
+                          </div>
                         ) : (
                           <button
                             type="button"
