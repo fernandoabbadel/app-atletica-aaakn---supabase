@@ -32,6 +32,7 @@ import {
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { collectUserPlanScope } from "@/lib/userPlanScope";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import {
   buildTenantFinanceFallback,
   resolveTenantBrandLabel,
@@ -165,6 +166,18 @@ export default function DetalheProdutoPage() {
   const { addToast } = useToast();
   const { tenantId, tenantSigla, tenantName, tenantSlug, tenantLogoUrl } = useTenantTheme();
   const { userPlanNames, userPlanIds } = useMemo(() => collectUserPlanScope(user), [user]);
+  const isPrivilegedViewer = useMemo(
+    () => isAdminLikeRole(resolveEffectiveAccessRole(user)),
+    [user]
+  );
+  const effectiveUserPlanNames = useMemo(
+    () => (isPrivilegedViewer ? [] : userPlanNames),
+    [isPrivilegedViewer, userPlanNames]
+  );
+  const effectiveUserPlanIds = useMemo(
+    () => (isPrivilegedViewer ? [] : userPlanIds),
+    [isPrivilegedViewer, userPlanIds]
+  );
 
   const [produto, setProduto] = useState<Produto | null>(null);
   const [userOrders, setUserOrders] = useState<Order[]>([]);
@@ -286,8 +299,8 @@ export default function DetalheProdutoPage() {
           ordersLimit: 50,
           forceRefresh,
           tenantId: tenantId || undefined,
-          userPlanNames,
-          userPlanIds,
+          userPlanNames: effectiveUserPlanNames,
+          userPlanIds: effectiveUserPlanIds,
         });
 
         setProduto(bundle.produto as unknown as Produto | null);
@@ -303,7 +316,7 @@ export default function DetalheProdutoPage() {
         setLoading(false);
       }
     },
-    [addToast, productId, tenantId, user?.uid, userPlanIds, userPlanNames]
+    [addToast, effectiveUserPlanIds, effectiveUserPlanNames, productId, tenantId, user?.uid]
   );
 
   useEffect(() => {

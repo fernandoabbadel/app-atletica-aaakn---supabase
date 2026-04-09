@@ -16,6 +16,7 @@ import { ClientCache } from "@/lib/clientCache";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useCart } from "@/context/CartContext";
 import { resolveTenantBrandLabel } from "@/lib/tenantBranding";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { collectUserPlanScope } from "@/lib/userPlanScope";
 // --- TIPAGEM EXATA DO SEU SUPABASE ---
@@ -154,9 +155,24 @@ export default function LojaClientPage({
     () => collectUserPlanScope(user),
     [user]
   );
+  const isPrivilegedViewer = useMemo(
+    () => isAdminLikeRole(resolveEffectiveAccessRole(user)),
+    [user]
+  );
+  const effectiveUserPlanNames = useMemo(
+    () => (isPrivilegedViewer ? [] : userPlanNames),
+    [isPrivilegedViewer, userPlanNames]
+  );
+  const effectiveUserPlanIds = useMemo(
+    () => (isPrivilegedViewer ? [] : userPlanIds),
+    [isPrivilegedViewer, userPlanIds]
+  );
   const currentPlanScopeKey = useMemo(
-    () => [...userPlanNames].sort((left, right) => left.localeCompare(right, "pt-BR")).join("|"),
-    [userPlanNames]
+    () =>
+      [...effectiveUserPlanNames]
+        .sort((left, right) => left.localeCompare(right, "pt-BR"))
+        .join("|"),
+    [effectiveUserPlanNames]
   );
   const skipInitialCategoryFetch = useRef(initialCategoriesHydrated && initialCategories.length > 0);
   const skippedInitialProductsFetch = useRef(false);
@@ -227,7 +243,7 @@ export default function LojaClientPage({
     const loadFirstPage = async () => {
       setLoading(true);
       try {
-        const planIdsKey = [...userPlanIds]
+        const planIdsKey = [...effectiveUserPlanIds]
           .sort((left, right) => left.localeCompare(right))
           .join("|");
         const page = await ClientCache.getOrSet(
@@ -247,8 +263,8 @@ export default function LojaClientPage({
               category: filtroCategoria,
               forceRefresh: false,
               tenantId: activeTenantId || undefined,
-              userPlanNames,
-              userPlanIds,
+              userPlanNames: effectiveUserPlanNames,
+              userPlanIds: effectiveUserPlanIds,
             }),
           STORE_CLIENT_CACHE_TTL_MS
         );
@@ -274,8 +290,8 @@ export default function LojaClientPage({
     initialPlanScopeKey,
     initialProducts,
     initialProductsHydrated,
-    userPlanIds,
-    userPlanNames,
+    effectiveUserPlanIds,
+    effectiveUserPlanNames,
   ]);
 
   const handleLoadMore = async () => {
@@ -290,8 +306,8 @@ export default function LojaClientPage({
         category: filtroCategoria,
         forceRefresh: false,
         tenantId: activeTenantId || undefined,
-        userPlanNames,
-        userPlanIds,
+        userPlanNames: effectiveUserPlanNames,
+        userPlanIds: effectiveUserPlanIds,
       });
 
       setProdutos((prev) => {

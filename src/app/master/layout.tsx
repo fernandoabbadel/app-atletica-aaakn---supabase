@@ -131,7 +131,7 @@ export default function MasterLayout({
   return (
     <div className="flex min-h-screen bg-[#050505]">
       <aside
-        className={`fixed top-16 z-40 flex h-[calc(100vh-4rem)] flex-col overflow-hidden border-r border-red-500/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] backdrop-blur-xl transition-all duration-300 ${
+        className={`fixed top-[var(--master-topbar-height)] z-40 flex h-[calc(100vh-var(--master-topbar-height))] flex-col overflow-hidden border-r border-red-500/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] backdrop-blur-xl transition-all duration-300 ${
           collapsed ? "w-[92px]" : "w-[280px]"
         }`}
       >

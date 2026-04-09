@@ -1,3 +1,5 @@
+import { parseTenantScopedRowId } from "./tenantScopedCatalog";
+
 export type CommerceAvailabilityStatus = "ativo" | "em_breve" | "esgotado";
 
 export interface CommercePlanEntry {
@@ -42,6 +44,9 @@ const normalizePlanName = (value: string): string =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+
+const normalizePlanMatchToken = (value: string): string =>
+  normalizePlanName(value).replace(/[^a-z0-9]+/g, "");
 
 const normalizePrice = (value: unknown): number => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -155,18 +160,51 @@ export const normalizeSellerSnapshot = (
   };
 };
 
+const addPlanMatchKeys = (keys: Set<string>, value: unknown): void => {
+  const raw = normalizeString(value);
+  if (!raw) return;
+
+  const lowered = raw.toLowerCase();
+  if (lowered) keys.add(lowered);
+
+  const token = normalizePlanMatchToken(raw);
+  if (token) keys.add(token);
+
+  const baseId = parseTenantScopedRowId(raw).baseId;
+  if (!baseId || baseId === raw) return;
+
+  const loweredBaseId = baseId.toLowerCase();
+  if (loweredBaseId) keys.add(loweredBaseId);
+
+  const baseToken = normalizePlanMatchToken(baseId);
+  if (baseToken) keys.add(baseToken);
+};
+
+const buildPlanReferenceKeys = (
+  planIds?: string[],
+  planNames?: string[]
+): Set<string> => {
+  const keys = new Set<string>();
+  (planIds ?? []).forEach((value) => addPlanMatchKeys(keys, value));
+  (planNames ?? []).forEach((value) => addPlanMatchKeys(keys, value));
+  return keys;
+};
+
 const matchesPlanEntry = (
   entry: CommercePlanEntry,
-  planIds: string[],
-  normalizedPlanNames: string[]
+  referenceKeys: ReadonlySet<string>
 ): boolean => {
-  const entryPlanId = normalizeString(entry.planId).toLowerCase();
-  const entryPlanName = normalizePlanName(entry.planName);
+  if (referenceKeys.size === 0) return false;
 
-  return Boolean(
-    (entryPlanId && planIds.includes(entryPlanId)) ||
-      (entryPlanName && normalizedPlanNames.includes(entryPlanName))
-  );
+  const entryKeys = new Set<string>();
+  addPlanMatchKeys(entryKeys, entry.planId);
+  addPlanMatchKeys(entryKeys, entry.planName);
+
+  for (const key of entryKeys) {
+    if (referenceKeys.has(key)) return true;
+  }
+
+  return false;
 };
 
 export const resolvePlanScopedPriceInfo = (options: {
@@ -175,15 +213,13 @@ export const resolvePlanScopedPriceInfo = (options: {
   userPlanIds?: string[];
   userPlanNames?: string[];
 }): CommerceResolvedPlanPrice => {
-  const userPlanIds = (options.userPlanIds ?? [])
-    .map((entry) => normalizeString(entry).toLowerCase())
-    .filter((entry) => entry.length > 0);
-  const normalizedPlanNames = (options.userPlanNames ?? [])
-    .map((entry) => normalizePlanName(entry))
-    .filter((entry) => entry.length > 0);
+  const referenceKeys = buildPlanReferenceKeys(
+    options.userPlanIds,
+    options.userPlanNames
+  );
 
   const match = options.entries.find((entry) =>
-    matchesPlanEntry(entry, userPlanIds, normalizedPlanNames)
+    matchesPlanEntry(entry, referenceKeys)
   );
 
   return {
@@ -209,20 +245,22 @@ export const canAccessCommerceItem = (options: {
 }): boolean => {
   if (options.entries.length === 0) return true;
 
-  const userPlanIds = (options.userPlanIds ?? [])
-    .map((entry) => normalizeString(entry).toLowerCase())
-    .filter((entry) => entry.length > 0);
-  const normalizedPlanNames = (options.userPlanNames ?? [])
-    .map((entry) => normalizePlanName(entry))
-    .filter((entry) => entry.length > 0);
+  const referenceKeys = buildPlanReferenceKeys(
+    options.userPlanIds,
+    options.userPlanNames
+  );
 
-  if (userPlanIds.length === 0 && normalizedPlanNames.length === 0) {
+  if (referenceKeys.size === 0) {
     return options.entries.some((entry) => entry.visible);
   }
 
   const match = options.entries.find((entry) =>
-    matchesPlanEntry(entry, userPlanIds, normalizedPlanNames)
+    matchesPlanEntry(entry, referenceKeys)
   );
 
-  return match ? match.visible : false;
+  if (match) return match.visible;
+
+  // Se todas as entradas estiverem liberadas, nao escondemos o item por uma
+  // simples divergencia historica de nome/slug do plano.
+  return options.entries.every((entry) => entry.visible);
 };

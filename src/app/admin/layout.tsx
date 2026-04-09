@@ -302,7 +302,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       />
 
       <aside
-        className={`fixed bottom-0 left-0 top-[var(--master-topbar-height)] z-40 flex w-[min(86vw,18rem)] flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 lg:top-0 lg:translate-x-0 ${
+        className={`fixed bottom-0 left-0 top-[var(--master-topbar-height)] z-40 flex w-[min(86vw,18rem)] flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 lg:translate-x-0 ${
           isMobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
         } ${desktopSidebarWidthClass}`}
       >
