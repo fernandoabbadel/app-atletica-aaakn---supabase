@@ -24,6 +24,7 @@ import {
   fetchLeagueById,
   fetchLeagueSummaries,
   fetchLeagueUsers,
+  LEAGUE_NAME_MAX_LENGTH,
   syncLeagueEvents,
   syncLeagueMembers,
   uploadLeagueImageToStorage,
@@ -1086,7 +1087,19 @@ export function LigasAdminPageContent() {
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl space-y-6">
                   <div className="grid grid-cols-2 gap-4">
                       <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Sigla</label><input type="text" className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500 font-bold uppercase" value={ligaData.sigla} onChange={e => setLigaData({...ligaData, sigla: e.target.value})} maxLength={6}/></div>
-                      <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Nome Completo</label><input type="text" className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500" value={ligaData.nome} onChange={e => setLigaData({...ligaData, nome: e.target.value})}/></div>
+                      <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Nome Completo</label>
+                        <input
+                          type="text"
+                          className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500"
+                          value={ligaData.nome}
+                          onChange={e => setLigaData({...ligaData, nome: e.target.value})}
+                          maxLength={LEAGUE_NAME_MAX_LENGTH}
+                        />
+                        <p className="mt-1 text-[10px] text-zinc-500">
+                          Maximo de {LEAGUE_NAME_MAX_LENGTH} caracteres para o nome caber melhor nos cards.
+                        </p>
+                      </div>
                   </div>
                   <div>
                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Logo da Liga</label>

@@ -21,11 +21,16 @@ import {
   addLeagueQuizHistory,
   changeLeagueLikeCount,
   fetchLeagueSummaries,
+  LEAGUE_NAME_MAX_LENGTH,
   resolveFollowedLeagueIdsFromUserExtra,
   toggleUserLeagueFollow,
   type LeagueRecord,
 } from "../../lib/leaguesService";
 import { resolveLeagueLogoSrc } from "../../lib/leagueMedia";
+import {
+  DEFAULT_LIGAS_USC_UI_CONFIG,
+  fetchLigasUscUiConfig,
+} from "../../lib/ligasUscUiService";
 import { withTenantSlug } from "../../lib/tenantRouting";
 
 // --- 1. INTERFACES (Fim dos 'any') ---
@@ -64,6 +69,20 @@ const splitLeagueTokens = (value: string): string[] =>
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter((token) => token.length >= 3);
+
+const clampLeagueCardName = (value: string): string => {
+  const cleanValue = value.trim();
+  if (cleanValue.length <= LEAGUE_NAME_MAX_LENGTH) return cleanValue;
+
+  const slicedValue = cleanValue.slice(0, LEAGUE_NAME_MAX_LENGTH + 1);
+  const lastSpaceIndex = slicedValue.lastIndexOf(" ");
+  const cutIndex =
+    lastSpaceIndex >= Math.floor(LEAGUE_NAME_MAX_LENGTH * 0.6)
+      ? lastSpaceIndex
+      : LEAGUE_NAME_MAX_LENGTH;
+
+  return `${slicedValue.slice(0, cutIndex).trim()}...`;
+};
 
 const KEYWORD_SYNONYMS: Record<string, string[]> = {
   clinica: ["consultorio", "diagnostico"],
@@ -192,6 +211,7 @@ export default function LigasUscPage() {
   const { tenantId, tenantSlug } = useTenantTheme();
   const router = useRouter();
   const cleanTenantSlug = typeof tenantSlug === "string" ? tenantSlug.trim() : "";
+  const [pageConfig, setPageConfig] = useState(DEFAULT_LIGAS_USC_UI_CONFIG);
   const [leagues, setLeagues] = useState<League[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLeague, setSelectedLeague] = useState<League | null>(null);
@@ -231,6 +251,28 @@ export default function LigasUscPage() {
     };
 
     void loadLeagues();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPageConfig = async () => {
+      try {
+        const config = await fetchLigasUscUiConfig({
+          tenantId: tenantId || undefined,
+        });
+        if (!mounted) return;
+        setPageConfig(config);
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) setPageConfig(DEFAULT_LIGAS_USC_UI_CONFIG);
+      }
+    };
+
+    void loadPageConfig();
     return () => {
       mounted = false;
     };
@@ -471,10 +513,17 @@ export default function LigasUscPage() {
   
   return (
     <div className="min-h-screen bg-[#050505] text-white p-6 font-sans pb-24">
-      <header className="flex justify-between items-center mb-8">
-        <div className="flex items-center gap-3">
+      <header className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex items-start gap-3">
             <Link href={tenantPath("/dashboard")} className="bg-zinc-900 p-2 rounded-full hover:bg-zinc-800 transition"><ArrowLeft size={20} className="text-zinc-400"/></Link>
-            <div><h1 className="text-2xl font-black uppercase flex items-center gap-2">Ligas <span className="text-emerald-500">USC</span></h1><p className="text-[10px] font-bold text-zinc-500 uppercase">{"Ecossistema Acad\u00eamico"}</p></div>
+            <div className="pt-1">
+              <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">
+                {pageConfig.titulo}
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm font-semibold text-zinc-400 sm:text-base">
+                {pageConfig.subtitulo}
+              </p>
+            </div>
         </div>
         <Link href={tenantPath("/ligas")} className="bg-zinc-900 border border-zinc-700 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase hover:bg-zinc-800 transition">Gerenciar</Link>
       </header>
@@ -543,9 +592,13 @@ export default function LigasUscPage() {
                             />
                         </div>
                         <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">Liga USC</p>
-                            <h2 className="truncate text-xl font-black uppercase tracking-tight text-white">{l.nome}</h2>
-                            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200">{l.sigla || l.nome}</p>
+                            <p className="truncate text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">
+                              {pageConfig.rotuloCard}
+                            </p>
+                            <h2 title={l.nome} className="line-clamp-2 text-lg font-black uppercase leading-tight tracking-tight text-white sm:text-xl">
+                              {clampLeagueCardName(l.nome)}
+                            </h2>
+                            <p className="truncate text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200">{l.sigla || l.nome}</p>
                         </div>
                     </div>
                 </div>

@@ -758,6 +758,8 @@ export interface LeagueRecord {
   membersCount?: number;
 }
 
+export const LEAGUE_NAME_MAX_LENGTH = 42;
+
 export interface LeagueUserRecord {
   id: string;
   nome?: string;
@@ -1015,7 +1017,7 @@ const normalizeLeaguePayload = (
     : [];
 
   return {
-    nome: asString(payload.nome, "Liga").trim().slice(0, 120),
+    nome: asString(payload.nome, "Liga").trim().slice(0, LEAGUE_NAME_MAX_LENGTH),
     sigla: asString(payload.sigla).trim().slice(0, 20),
     presidente: asString(payload.presidente).trim().slice(0, 120),
     descricao: asString(payload.descricao).slice(0, 4_000),

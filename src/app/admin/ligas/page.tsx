@@ -15,6 +15,7 @@ import {
   deleteLeagueConfig,
   fetchLeagueUsers,
   fetchLeagues,
+  LEAGUE_NAME_MAX_LENGTH,
   saveLeagueConfig,
   setLeagueVisibility,
   uploadLeagueImageToStorage,
@@ -340,9 +341,17 @@ export default function AdminLigasPage() {
             <Shield size={20} className="text-emerald-500"/> Gestão de Ligas
           </h1>
         </div>
-        <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
-          <Plus size={16} /> Nova Liga
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/ligas/customizacao"
+            className="bg-zinc-900 border border-zinc-700 px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-zinc-800 transition"
+          >
+            <Edit3 size={16} /> Customizar Vitrine
+          </Link>
+          <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
+            <Plus size={16} /> Nova Liga
+          </button>
+        </div>
       </header>
 
       <main className="p-6 max-w-7xl mx-auto">
@@ -442,9 +451,12 @@ export default function AdminLigasPage() {
                             </label>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                            <input type="text" placeholder="Nome da Liga" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none" value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})}/>
+                            <input type="text" placeholder="Nome da Liga" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none" value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})} maxLength={LEAGUE_NAME_MAX_LENGTH}/>
                             <input type="text" placeholder="Sigla" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none uppercase" value={formData.sigla} onChange={e => setFormData({...formData, sigla: e.target.value})}/>
                         </div>
+                        <p className="text-[10px] text-zinc-500">
+                            Maximo de {LEAGUE_NAME_MAX_LENGTH} caracteres para o nome caber melhor nos cards.
+                        </p>
                         
                         {/* CHECKBOX VISIBILIDADE NO DASHBOARD */}
                         <div className="flex items-center gap-2 bg-zinc-900 p-3 rounded-xl border border-zinc-800">

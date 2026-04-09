@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, CalendarDays, Heart, Lightbulb, Loader2, MapPin, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, Heart, Lightbulb, Loader2, Users } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -107,6 +107,8 @@ export function LeaguePublicDetailClient({
     [league]
   );
   const sortedEvents = useMemo(() => sortEvents(league?.eventos || []), [league]);
+  const presidentName =
+    sortedMembers.find((member) => member.cargo.trim().toLowerCase() === "presidente")?.nome || league?.presidente;
   const isLiked = Boolean(league && likedIds.includes(league.id));
   const isFollowing = Boolean(league && followedIds.includes(league.id));
 
@@ -232,7 +234,7 @@ export function LeaguePublicDetailClient({
                   <div className="mt-4 flex flex-wrap gap-2">
                     <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200">{league.sigla || "Liga"}</span>
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300">{league.membersCount ?? sortedMembers.length} membros</span>
-                    {league.presidente ? <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-amber-200">Presidente: {league.presidente}</span> : null}
+                    {presidentName ? <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-amber-200">Presidente: {presidentName}</span> : null}
                   </div>
                 </div>
               </div>
@@ -251,14 +253,12 @@ export function LeaguePublicDetailClient({
                     <Heart size={18} className={isLiked ? "fill-current" : ""} />
                     <span className="text-[10px] font-black uppercase tracking-[0.24em]">{isLiked ? "Curtida" : "Curtir"}</span>
                   </div>
-                  <p className="mt-4 text-sm font-bold">{user ? "Mostrar que voc\u00ea curtiu a liga" : "Entre para curtir"}</p>
                 </button>
                 <button type="button" onClick={() => void handleFollow()} disabled={!user} className={`rounded-[1.5rem] border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${isFollowing ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100" : "border-white/10 bg-white/5 text-zinc-100 hover:border-emerald-500/30 hover:bg-emerald-500/10"}`}>
                   <div className="flex items-center justify-between">
                     <Users size={18} />
                     <span className="text-[10px] font-black uppercase tracking-[0.24em]">{isFollowing ? "Seguindo" : "Seguir"}</span>
                   </div>
-                  <p className="mt-4 text-sm font-bold">{user ? "Receber novidades da liga" : "Entre para seguir"}</p>
                 </button>
               </div>
             </div>
@@ -294,57 +294,25 @@ export function LeaguePublicDetailClient({
         </nav>
 
         {activeTab === "overview" ? (
-          <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-            <section className="space-y-6">
-              <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(22,22,22,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">Sobre a liga</p>
-                <h2 className="mt-3 text-2xl font-black text-white">Identidade, vibe e proposta</h2>
-                <p className="mt-4 text-sm leading-7 text-zinc-300">{league.descricao || "Essa liga ainda n\u00e3o publicou um texto de apresenta\u00e7\u00e3o completo."}</p>
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Sigla</p><p className="mt-3 text-xl font-black text-white">{league.sigla || "Liga"}</p></div>
-                  <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Membros</p><p className="mt-3 text-xl font-black text-white">{league.membersCount ?? sortedMembers.length}</p></div>
-                </div>
-              </article>
-
-              <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(22,22,22,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
-                <div className="flex items-center justify-between gap-3">
-                  <div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">Membros em destaque</p><h2 className="mt-3 text-2xl font-black text-white">{"Lideran\u00e7as da liga"}</h2></div>
-                  <Link href={membersHref} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-zinc-300 hover:bg-white/10">Ver todos</Link>
-                </div>
-                <div className="mt-5 grid gap-3 md:grid-cols-2">
-                  {sortedMembers.slice(0, 4).map((member) => (
-                    <div key={`${member.id}-${member.nome}`} className="flex items-center gap-3 rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
-                      <div className="relative h-12 w-12 overflow-hidden rounded-2xl border border-white/10 bg-black/40"><Image src={member.foto || "/logo.png"} alt={member.nome} fill sizes="48px" className="object-cover" /></div>
-                      <div className="min-w-0"><p className="truncate text-sm font-black text-white">{member.nome}</p><p className="mt-1 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">{member.cargo}</p></div>
-                    </div>
-                  ))}
-                  {sortedMembers.length === 0 ? <p className="rounded-[1.5rem] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-zinc-500">Nenhum membro oficial publicado.</p> : null}
-                </div>
-              </article>
-            </section>
-
-            <section className="space-y-6">
-              <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,24,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
-                <div className="flex items-center gap-3"><div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-200"><CalendarDays size={18} /></div><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Agenda da liga</p><h2 className="mt-2 text-2xl font-black text-white">{"O que vem por a\u00ed"}</h2></div></div>
-                <div className="mt-5 space-y-3">
-                  {sortedEvents.slice(0, 3).map((event) => (
-                    <div key={event.id || event.titulo} className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
-                      <p className="text-sm font-black text-white">{event.titulo}</p>
-                      <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">{event.data ? <span>{event.data}</span> : null}{event.hora ? <span>{event.hora}</span> : null}{event.local ? <span>{event.local}</span> : null}</div>
-                    </div>
-                  ))}
-                  {sortedEvents.length === 0 ? <p className="rounded-[1.5rem] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-zinc-500">Nenhum evento publicado no momento.</p> : null}
-                </div>
-                <Link href={agendaHref} className="mt-5 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20">Abrir agenda completa</Link>
-              </article>
-            </section>
-          </div>
+          <section className="space-y-6">
+            <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,24,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
+              <div className="flex items-center gap-3"><div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-200"><CalendarDays size={18} /></div><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Agenda da liga</p><h2 className="mt-2 text-2xl font-black text-white">{"O que vem por a\u00ed"}</h2></div></div>
+              <div className="mt-5 space-y-3">
+                {sortedEvents.slice(0, 3).map((event) => (
+                  <div key={event.id || event.titulo} className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
+                    <p className="text-sm font-black text-white">{event.titulo}</p>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">{event.data ? <span>{event.data}</span> : null}{event.hora ? <span>{event.hora}</span> : null}{event.local ? <span>{event.local}</span> : null}</div>
+                  </div>
+                ))}
+                {sortedEvents.length === 0 ? <p className="rounded-[1.5rem] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-zinc-500">Nenhum evento publicado no momento.</p> : null}
+              </div>
+              <Link href={agendaHref} className="mt-5 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20">Abrir agenda completa</Link>
+            </article>
+          </section>
         ) : activeTab === "membros" ? (
           <section className="space-y-5">
             <div className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(22,22,22,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">Membros oficiais</p>
-              <h2 className="mt-3 text-2xl font-black text-white">{"Ordem de import\u00e2ncia da gest\u00e3o"}</h2>
-              <p className="mt-3 text-sm leading-7 text-zinc-400">{"Presidente, vice-presid\u00eancia, secretaria, tesouraria, diretoria e membros."}</p>
+              <h2 className="text-2xl font-black text-white">Membros</h2>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {sortedMembers.map((member) => {
@@ -382,14 +350,6 @@ export function LeaguePublicDetailClient({
             </div>
           </section>
         )}
-
-        <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(22,22,22,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4"><div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500"><Users size={12} />Membros</div><p className="mt-3 text-xl font-black text-white">{league.membersCount ?? sortedMembers.length}</p></div>
-            <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4"><div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500"><CalendarDays size={12} />Agenda</div><p className="mt-3 text-xl font-black text-white">{sortedEvents.length}</p></div>
-            <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4"><div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500"><MapPin size={12} />Sigla</div><p className="mt-3 text-xl font-black text-white">{league.sigla || "-"}</p></div>
-          </div>
-        </section>
       </main>
     </div>
   );
