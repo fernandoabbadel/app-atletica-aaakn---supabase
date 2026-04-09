@@ -1,5 +1,6 @@
 ﻿import { getSupabaseClient } from "./supabase";
 
+import { getSupabasePublicClient } from "./supabase";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import {
   canAccessCommerceItem,
@@ -13,10 +14,6 @@ import {
 } from "./commerceCatalog";
 import {
   fetchMiniVendorProfileById,
-  fetchTenantMiniVendors,
-  isMiniVendorCategoryPublic,
-  isMiniVendorProductsPublic,
-  isMiniVendorReceivingOrders,
   resolveMiniVendorPaymentConfig,
 } from "./miniVendorService";
 import { incrementUserStats } from "./supabaseData";
@@ -308,59 +305,15 @@ const sortStoreCategoryRows = <T extends Row>(rows: T[]): T[] =>
     });
   });
 
-async function fetchApprovedMiniVendorProfileMap(
-  tenantId?: string | null,
-  forceRefresh = false
-): Promise<Map<string, Awaited<ReturnType<typeof fetchTenantMiniVendors>>[number]>> {
-  const scopedTenantId = resolveStoreTenantId(tenantId);
-  if (!scopedTenantId) return new Map();
-
-  const profiles = await fetchTenantMiniVendors({
-    tenantId: scopedTenantId,
-    statuses: ["approved"],
-    forceRefresh,
-  });
-  return new Map(profiles.map((profile) => [profile.id, profile]));
-}
-
-const filterApprovedMiniVendorRows = async (
-  rows: Row[],
-  tenantId?: string | null,
-  scope: "category" | "product" = "product",
-  forceRefresh = false
-): Promise<Row[]> => {
-  const hasMiniVendorRows = rows.some(
-    (row) => asString(row.seller_type).trim().toLowerCase() === "mini_vendor"
-  );
-  if (!hasMiniVendorRows) return rows;
-
-  const scopedTenantId = resolveStoreTenantId(tenantId);
-  if (!scopedTenantId) return rows.filter((row) => asString(row.seller_type).trim().toLowerCase() !== "mini_vendor");
-
-  const approvedProfiles = await fetchApprovedMiniVendorProfileMap(scopedTenantId, forceRefresh);
-
-  return rows.filter((row) => {
-    const sellerType = asString(row.seller_type).trim().toLowerCase();
-    if (sellerType !== "mini_vendor") return true;
-    const sellerId = asString(row.seller_id).trim();
-    if (!sellerId) return false;
-
-    const profile = approvedProfiles.get(sellerId) ?? null;
-    if (!profile) return false;
-    return scope === "category"
-      ? isMiniVendorCategoryPublic(profile)
-      : isMiniVendorProductsPublic(profile);
-  });
-};
-
 async function queryRows(table: string, options?: {
   selectColumns?: string;
   eq?: Record<string, string | number | boolean>;
   orderBy?: { column: string; ascending: boolean };
   limit?: number;
   tenantId?: string | null;
+  client?: ReturnType<typeof getSupabaseClient>;
 }): Promise<Row[]> {
-  const supabase = getSupabaseClient();
+  const supabase = options?.client ?? getSupabaseClient();
   const selectColumns = options?.selectColumns ?? "id";
   const scopedTenantId = resolveStoreTenantId(options?.tenantId);
   let query = supabase.from(table).select(selectColumns);
@@ -428,6 +381,7 @@ export async function fetchStoreCategories(options?: {
     if (cached) return cached;
   }
 
+  const publicSupabase = getSupabasePublicClient();
   let rows: Row[] = [];
   try {
     rows = await queryRows("categorias", {
@@ -435,72 +389,25 @@ export async function fetchStoreCategories(options?: {
       orderBy: { column: "display_order", ascending: true },
       limit: maxResults,
       tenantId: scopedTenantId,
+      client: publicSupabase,
     });
   } catch {
     rows = await queryRows("categorias", {
       selectColumns: STORE_CATEGORY_SELECT_COLUMNS,
       limit: maxResults,
       tenantId: scopedTenantId,
+      client: publicSupabase,
     });
   }
 
-  const vendorProfileMap = await fetchApprovedMiniVendorProfileMap(scopedTenantId, forceRefresh);
-  const approvedMiniVendors = Array.from(vendorProfileMap.values());
-  const visibleRows = await filterApprovedMiniVendorRows(
-    rows,
-    scopedTenantId,
-    "category",
-    forceRefresh
-  );
   const categoryMap = new Map<string, Row>();
 
-  visibleRows.forEach((row) => {
-    const sellerType = asString(row.seller_type).trim().toLowerCase();
-    const sellerId = asString(row.seller_id).trim();
-    const profile = sellerType === "mini_vendor" ? vendorProfileMap.get(sellerId) : null;
-    const normalized = normalizeCategoryRow({
-      ...row,
-      cover_img:
-        asString(row.cover_img).trim() ||
-        profile?.coverUrl ||
-        profile?.logoUrl ||
-        asString(row.logo_url).trim(),
-      button_color:
-        asString(row.button_color).trim() ||
-        profile?.categoryButtonColor ||
-        asString(row.button_color).trim(),
-      logo_url:
-        asString(row.logo_url).trim() ||
-        profile?.logoUrl ||
-        asString(row.logo_url).trim(),
-      is_receiving_orders: profile ? isMiniVendorReceivingOrders(profile) : false,
-    });
+  rows.forEach((row) => {
+    const normalized = normalizeCategoryRow(row);
     const key = `${asString(normalized.seller_type).trim().toLowerCase()}:${asString(
       normalized.seller_id
     ).trim() || "_"}:${asString(normalized.nome).trim().toLowerCase()}`;
     categoryMap.set(key, normalized);
-  });
-
-  approvedMiniVendors.forEach((profile) => {
-    if (!isMiniVendorCategoryPublic(profile)) return;
-    const nome = profile.storeName.trim();
-    if (!nome) return;
-    const key = `mini_vendor:${profile.id}:${nome.toLowerCase()}`;
-    if (categoryMap.has(key)) return;
-    categoryMap.set(
-      key,
-      normalizeCategoryRow({
-        id: profile.id,
-        tenant_id: profile.tenantId,
-        nome,
-        cover_img: profile.coverUrl || profile.logoUrl,
-        button_color: profile.categoryButtonColor || "#2563eb",
-        logo_url: profile.logoUrl,
-        seller_type: "mini_vendor",
-        seller_id: profile.id,
-        is_receiving_orders: isMiniVendorReceivingOrders(profile),
-      })
-    );
   });
 
   const normalizedRows = sortStoreCategoryRows(Array.from(categoryMap.values()));
@@ -517,7 +424,7 @@ export async function fetchStoreProductsPage(options?: {
   userPlanNames?: Array<string | null | undefined>;
   userPlanIds?: Array<string | null | undefined>;
 }): Promise<StoreProductsPageResult> {
-  const supabase = getSupabaseClient();
+  const supabase = getSupabasePublicClient();
   const scopedTenantId = resolveStoreTenantId(options?.tenantId);
   const page = Math.max(1, Math.floor(options?.page ?? 1));
   const pageSize = boundedLimit(options?.pageSize ?? 20, 60);
@@ -563,13 +470,7 @@ export async function fetchStoreProductsPage(options?: {
     rows = await runQuery(false);
   }
 
-  const approvedRows = await filterApprovedMiniVendorRows(
-    rows,
-    scopedTenantId,
-    "product",
-    forceRefresh
-  );
-  const visibleRows = approvedRows
+  const visibleRows = rows
     .map((row) =>
       normalizeProductRow(row, {
         userPlanNames: options?.userPlanNames,
@@ -609,6 +510,7 @@ export async function fetchStoreProducts(options?: {
     if (cached) return cached;
   }
 
+  const publicSupabase = getSupabasePublicClient();
   const runQuery = async (withOrder: boolean): Promise<Row[]> => {
     return queryRows("produtos", withOrder
       ? {
@@ -617,12 +519,14 @@ export async function fetchStoreProducts(options?: {
           orderBy: { column: "nome", ascending: true },
           limit: maxResults,
           tenantId: scopedTenantId,
+          client: publicSupabase,
         }
       : {
           selectColumns: STORE_PRODUCT_SELECT_COLUMNS,
           eq: { active: true, aprovado: true },
           limit: maxResults,
           tenantId: scopedTenantId,
+          client: publicSupabase,
         });
   };
 
@@ -633,13 +537,7 @@ export async function fetchStoreProducts(options?: {
     rows = await runQuery(false);
   }
 
-  const approvedRows = await filterApprovedMiniVendorRows(
-    rows,
-    scopedTenantId,
-    "product",
-    forceRefresh
-  );
-  const normalizedRows = approvedRows
+  const normalizedRows = rows
     .map((row) =>
       normalizeProductRow(row, {
         userPlanNames: options?.userPlanNames,
@@ -676,6 +574,7 @@ export async function fetchStoreProductsBySeller(options: {
     if (cached) return cached;
   }
 
+  const publicSupabase = getSupabasePublicClient();
   const runQuery = async (withOrder: boolean): Promise<Row[]> => {
     return queryRows(
       "produtos",
@@ -691,6 +590,7 @@ export async function fetchStoreProductsBySeller(options: {
             orderBy: { column: "nome", ascending: true },
             limit: maxResults,
             tenantId: scopedTenantId,
+            client: publicSupabase,
           }
         : {
             selectColumns: STORE_PRODUCT_SELECT_COLUMNS,
@@ -702,6 +602,7 @@ export async function fetchStoreProductsBySeller(options: {
             },
             limit: maxResults,
             tenantId: scopedTenantId,
+            client: publicSupabase,
           }
     );
   };
@@ -713,13 +614,7 @@ export async function fetchStoreProductsBySeller(options: {
     rows = await runQuery(false);
   }
 
-  const approvedRows = await filterApprovedMiniVendorRows(
-    rows,
-    scopedTenantId,
-    "product",
-    forceRefresh
-  );
-  const normalizedRows = approvedRows
+  const normalizedRows = rows
     .map((row) =>
       normalizeProductRow(row, {
         userPlanNames: options?.userPlanNames,
@@ -742,7 +637,7 @@ export async function fetchStoreProductDetail(options: {
   userPlanNames?: Array<string | null | undefined>;
   userPlanIds?: Array<string | null | undefined>;
 }): Promise<StoreProductDetailBundle> {
-  const supabase = getSupabaseClient();
+  const supabase = getSupabasePublicClient();
   const scopedTenantId = resolveStoreTenantId(options.tenantId);
   const productId = options.productId.trim();
   const userId = options.userId?.trim() || "";
@@ -778,16 +673,8 @@ export async function fetchStoreProductDetail(options: {
     }
     throwSupabaseError(productError);
   }
-  const visibleProductRows = productData
-    ? await filterApprovedMiniVendorRows(
-        [productData as Row],
-        scopedTenantId,
-        "product",
-        forceRefresh
-      )
-    : [];
-  const produtoCandidate = visibleProductRows[0]
-    ? normalizeProductRow(visibleProductRows[0], {
+  const produtoCandidate = productData
+    ? normalizeProductRow(productData as Row, {
         userPlanNames: options.userPlanNames,
         userPlanIds: options.userPlanIds,
       })
@@ -805,16 +692,19 @@ export async function fetchStoreProductDetail(options: {
       orderBy: { column: "createdAt", ascending: false },
       limit: reviewsLimit,
       tenantId: scopedTenantId,
+      client: supabase,
     }).catch(() =>
       queryRows("reviews", {
         selectColumns: STORE_REVIEW_SELECT_COLUMNS,
         eq: { productId },
         limit: reviewsLimit,
         tenantId: scopedTenantId,
+        client: supabase,
       })
     )
     : Promise.resolve([] as Row[]);
 
+  const sessionSupabase = getSupabaseClient();
   const ordersPromise = userId
     ? queryRows("orders", {
         selectColumns: STORE_ORDER_SELECT_COLUMNS,
@@ -822,12 +712,14 @@ export async function fetchStoreProductDetail(options: {
         orderBy: { column: "createdAt", ascending: false },
         limit: ordersLimit,
         tenantId: scopedTenantId,
+        client: sessionSupabase,
       }).catch(() =>
         queryRows("orders", {
           selectColumns: STORE_ORDER_SELECT_COLUMNS,
           eq: { userId, productId },
           limit: ordersLimit,
           tenantId: scopedTenantId,
+          client: sessionSupabase,
         })
       )
     : Promise.resolve([] as Row[]);
@@ -849,7 +741,7 @@ export async function fetchStoreProductReviewsPage(options: {
   forceRefresh?: boolean;
   tenantId?: string | null;
 }): Promise<StoreProductReviewsPageResult> {
-  const supabase = getSupabaseClient();
+  const supabase = getSupabasePublicClient();
   const scopedTenantId = resolveStoreTenantId(options.tenantId);
   const productId = options.productId.trim();
   if (!productId) {

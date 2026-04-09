@@ -3,6 +3,7 @@ import { processLock, type LockFunc } from "@supabase/auth-js";
 
 // Reutiliza um singleton no browser para evitar multiplas instancias do cliente.
 let browserClient: SupabaseClient | null = null;
+let browserPublicClient: SupabaseClient | null = null;
 const SUPABASE_AUTH_PARAM_KEYS = [
   "access_token",
   "refresh_token",
@@ -174,6 +175,18 @@ const createSupabaseBrowserClient = (): SupabaseClient => {
   });
 };
 
+const createSupabasePublicClient = (): SupabaseClient => {
+  const { url, anonKey } = getSupabaseEnv();
+
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+};
+
 export const clearSupabaseBrowserSessionStorage = (): void => {
   if (typeof window === "undefined") return;
 
@@ -192,4 +205,16 @@ export const getSupabaseClient = (): SupabaseClient => {
   }
 
   return browserClient;
+};
+
+export const getSupabasePublicClient = (): SupabaseClient => {
+  if (typeof window === "undefined") {
+    return createSupabasePublicClient();
+  }
+
+  if (!browserPublicClient) {
+    browserPublicClient = createSupabasePublicClient();
+  }
+
+  return browserPublicClient;
 };
