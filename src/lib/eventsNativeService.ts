@@ -1687,10 +1687,6 @@ export async function voteEventPollOption(payload: {
       const { error: deleteError } = await deleteQuery;
       if (deleteError) throw deleteError;
     } else {
-      if (currentVotes.length >= 3) {
-        throw new Error("Voce ja escolheu 3 opcoes!");
-      }
-
       const { error: insertError } = await supabase.from("eventos_enquete_votos").insert({
         enqueteId: payload.pollId,
         eventoId: payload.eventId,
@@ -1739,9 +1735,6 @@ export async function voteEventPollOption(payload: {
       legacyOptions[index] = optionObj;
       legacyUserVotesMap[payload.userId] = myVotes.filter((v) => v !== index);
     } else {
-      if (myVotes.length >= 3) {
-        throw new Error("Voce ja escolheu 3 opcoes!");
-      }
       optionObj.votes = asNum(optionObj.votes, 0) + 1;
       votesByTurma[turmaKey] = asNum(votesByTurma[turmaKey], 0) + 1;
       optionObj.votesByTurma = votesByTurma;
@@ -1789,6 +1782,8 @@ export async function addEventPollOption(payload: {
   eventId: string;
   pollId: string;
   option: Row;
+  autoVoteUserId?: string;
+  autoVoteUserTurma?: string;
   tenantId?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseClient();
@@ -1819,6 +1814,19 @@ export async function addEventPollOption(payload: {
   }
   const { error: updateError } = await updateQuery;
   if (updateError) throwSupabaseError(updateError);
+
+  const autoVoteUserId = asString(payload.autoVoteUserId).trim();
+  if (autoVoteUserId) {
+    await voteEventPollOption({
+      eventId: payload.eventId,
+      pollId: payload.pollId,
+      userId: autoVoteUserId,
+      userTurma: asString(payload.autoVoteUserTurma, "Geral").trim() || "Geral",
+      optionIndex: currentOptions.length,
+      tenantId: scopedTenantId,
+    });
+    return;
+  }
 
   invalidateEventCaches(payload.eventId);
 }

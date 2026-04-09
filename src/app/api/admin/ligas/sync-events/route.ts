@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
+import { clearEventsNativeCaches } from "@/lib/eventsNativeService";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 import {
@@ -329,6 +330,8 @@ export async function POST(request: NextRequest) {
         throw new LeagueAdminApiError(leaguePatchError.message, 400);
       }
     }
+
+    clearEventsNativeCaches();
 
     return NextResponse.json({
       ok: true,

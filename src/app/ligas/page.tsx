@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { 
   Lock, ArrowRight, Upload, Plus, Trash2, Save, LogOut, 
   Image as ImageIcon, Layout, Edit3, Bell, 
@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import Image from "next/image";
 import { useToast } from "../../context/ToastContext";
+import { ClientCache } from "@/lib/clientCache";
+import { clearEventsNativeCaches } from "@/lib/eventsNativeService";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -260,9 +262,13 @@ const buildLeagueSectionPath = (tab: LigaAdminTab): string => {
     return "/ligas/informacoes";
 };
 
-interface LigasAdminPageContentProps {
-    initialTab?: LigaAdminTab;
-}
+const resolveLeagueTabFromPathname = (pathname: string): LigaAdminTab => {
+    const normalized = pathname.toLowerCase().replace(/\/+$/, "");
+    if (normalized.endsWith("/ligas/membros")) return "members";
+    if (normalized.endsWith("/ligas/eventos")) return "events";
+    if (normalized.endsWith("/ligas/board-round")) return "shark";
+    return "visual";
+};
 
 const extractErrorMessage = (error: unknown): string => {
     if (error instanceof Error) return error.message || "Erro inesperado.";
@@ -284,21 +290,22 @@ const extractErrorMessage = (error: unknown): string => {
     return "Erro inesperado.";
 };
 
-export function LigasAdminPageContent({
-    initialTab = "visual",
-}: LigasAdminPageContentProps) {
+export function LigasAdminPageContent() {
   const { user } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { tenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const tenantScopeId =
     tenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
   const lastSelectedStorageKey = buildLigaEditorLastSelectedKey(tenantScopeId);
+  const routeTab = resolveLeagueTabFromPathname(pathname);
   
   // --- ESTADOS DE CONTROLE ---
   const [loading, setLoading] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [activeTab, setActiveTab] = useState<LigaAdminTab>(initialTab);
+  const [activeTab, setActiveTab] = useState<LigaAdminTab>(routeTab);
+  const [saveActionLabel, setSaveActionLabel] = useState("");
   
   // Login
   const [ligasDisponiveis, setLigasDisponiveis] = useState<{id: string, nome: string}[]>([]);
@@ -332,8 +339,8 @@ export function LigasAdminPageContent({
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
 
   useEffect(() => {
-      setActiveTab(initialTab);
-  }, [initialTab]);
+      setActiveTab(routeTab);
+  }, [routeTab]);
 
   useEffect(() => {
       const lastSelected = readSessionStorageValue(lastSelectedStorageKey);
@@ -357,7 +364,7 @@ export function LigasAdminPageContent({
       } as LigaData);
       setSelectedLigaId(lastSelected);
       setSenhaInput(restoredDraft.ligaSenha);
-      setActiveTab(initialTab);
+      setActiveTab(routeTab);
       setSavedMemberIds(
           Array.isArray(restoredDraft.savedMemberIds)
               ? restoredDraft.savedMemberIds
@@ -370,7 +377,7 @@ export function LigasAdminPageContent({
       setNovoLote(restoredDraft.novoLote);
       setIsLoggedIn(true);
       addToast("Sessao da liga restaurada.", "info");
-  }, [addToast, initialTab, isLoggedIn, lastSelectedStorageKey, ligaData, tenantScopeId]);
+  }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, routeTab, tenantScopeId]);
 
   useEffect(() => {
       if (!selectedLigaId) return;
@@ -524,7 +531,7 @@ export function LigasAdminPageContent({
 
               setLigaData(mergedLigaData);
               if (restoredDraft) {
-                  setActiveTab(initialTab);
+                  setActiveTab(routeTab);
                   setSavedMemberIds(
                       Array.isArray(restoredDraft.savedMemberIds)
                           ? restoredDraft.savedMemberIds
@@ -536,7 +543,7 @@ export function LigasAdminPageContent({
                   setCurrentEvent(restoredDraft.currentEvent);
                   setNovoLote(restoredDraft.novoLote);
               } else {
-                  setActiveTab(initialTab);
+                  setActiveTab(routeTab);
                   setSavedMemberIds(persistedMemberIds);
                   setSendNotification(false);
                   setEventModal(false);
@@ -756,29 +763,55 @@ export function LigasAdminPageContent({
       }
       setLigaData({ ...ligaData, eventos: novosEventos });
       setEventModal(false);
-      addToast("Evento salvo no rascunho.", "info");
+      addToast("Evento salvo no rascunho da seção.", "info");
   };
 
   // --- GESTÃO DE ENQUETES (SHARK FEATURE 🦈) ---
   
-  // --- SALVAR TUDO (AQUI ESTÁ O PULO DO GATO 🦈) ---
-  const handleSaveAll = async () => {
+  // --- SALVAMENTO POR SEÇÃO ---
+  const persistLeagueConfigPatch = async (patch: Record<string, unknown>) => {
       if (!ligaData) return;
-      if (ligaData.perguntas.length < 10) return addToast("Minimo 10 perguntas necessarias.", "error");
-      
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+          .from("ligas_config")
+          .update({
+              ...patch,
+              updatedAt: nowIso(),
+          })
+          .eq("id", ligaData.id);
+      if (error) {
+          throw new Error(extractErrorMessage(error));
+      }
+  };
+
+  const runSectionSave = async (
+      nextLabel: string,
+      action: () => Promise<void>
+  ) => {
+      if (!ligaData || loading) return;
+
       setLoading(true);
+      setSaveActionLabel(nextLabel);
       try {
+          await action();
+      } catch (error: unknown) {
+          console.error("Falha ao salvar seção da liga:", error);
+          addToast(`Erro ao salvar: ${extractErrorMessage(error)}`, "error");
+      } finally {
+          setLoading(false);
+          setSaveActionLabel("");
+      }
+  };
+
+  const handleSaveVisualSection = async () => {
+      if (!ligaData) return;
+
+      await runSectionSave("SALVANDO INFORMACOES...", async () => {
           const supabase = getSupabaseClient();
           const timestamp = nowIso();
-          const actorTenantId =
-              tenantScopeId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
           const leagueLogoUrl = resolveLeagueLogoSrc(ligaData) || "";
-          const sanitizedQuestions = sanitizeQuestionDrafts(ligaData.perguntas);
 
-          const membersCount = ligaData.membros?.length || 0;
-
-          // 2. Atualiza Config Liga sem duplicar membership em array quente
-          const ligaUpdatePayload: Record<string, unknown> = {
+          await persistLeagueConfigPatch({
               nome: ligaData.nome,
               sigla: ligaData.sigla,
               descricao: ligaData.descricao || "",
@@ -789,79 +822,145 @@ export function LigasAdminPageContent({
               logoUrl: leagueLogoUrl || null,
               logo: leagueLogoUrl || null,
               ativa: Boolean(ligaData.ativa),
-              perguntas: sanitizedQuestions,
-              membros: ligaData.membros || [],
-              eventos: ligaData.eventos || [],
-              membersCount,
-              updatedAt: timestamp,
-          };
-
-          const { error: ligaUpdateError } = await supabase
-            .from("ligas_config")
-            .update(ligaUpdatePayload)
-            .eq("id", ligaData.id);
-          if (ligaUpdateError) throw new Error(extractErrorMessage(ligaUpdateError));
-
-          await syncLeagueMembers({
-              leagueId: ligaData.id,
-              members: ligaData.membros || [],
-              tenantId: actorTenantId || undefined,
           });
 
-          // 3. Sincroniza Eventos (Cria/Atualiza no Global)
-          if (ligaData.eventos && ligaData.eventos.length > 0) {
-              const syncedEvents = await syncLeagueEvents({
-                  leagueId: ligaData.id,
-                  events: ligaData.eventos,
-                  leagueLogoUrl,
-                  leagueSigla: ligaData.sigla,
-                  tenantId: actorTenantId || undefined,
-              });
-
-              const { error: ligaEventsUpdateError } = await supabase
-                .from("ligas_config")
-                .update({ eventos: syncedEvents, updatedAt: timestamp })
-                .eq("id", ligaData.id);
-              if (ligaEventsUpdateError) throw new Error(extractErrorMessage(ligaEventsUpdateError));
-
-              setLigaData((prev) => (prev ? { ...prev, eventos: syncedEvents } : prev));
-          }
-
-          // 4. Notificacao Bizu
           if (sendNotification && ligaData.bizu) {
               const { error: notificationInsertError } = await supabase
-                .from("notifications")
-                .insert({
-                  title: `Novo destaque da ${ligaData.sigla}!`,
-                  message: ligaData.bizu,
-                  link: "/ligas_usc",
-                  read: false,
-                  createdAt: timestamp,
-                  userId: "GLOBAL"
-              });
-              if (notificationInsertError) throw new Error(extractErrorMessage(notificationInsertError));
+                  .from("notifications")
+                  .insert({
+                      title: `Novo destaque da ${ligaData.sigla}!`,
+                      message: ligaData.bizu,
+                      link: "/ligas_usc",
+                      read: false,
+                      createdAt: timestamp,
+                      userId: "GLOBAL",
+                  });
+              if (notificationInsertError) {
+                  throw new Error(extractErrorMessage(notificationInsertError));
+              }
               setSendNotification(false);
           }
 
-          addToast("Salvo e Sincronizado!", "success");
-          setSavedMemberIds(extractMemberIds(ligaData.membros));
-          clearLigaEditorDraft(ligaData.id, tenantScopeId);
-          
-          // LOG CORRIGIDO
+          addToast("Informações salvas.", "success");
           await logActivity(
-              ligaData.id, 
-              ligaData.nome, 
-              "UPDATE", 
-              "ligas_config", 
-              "Atualizacao de dados da Liga"
+              ligaData.id,
+              ligaData.nome,
+              "UPDATE",
+              "ligas_config",
+              "Atualização das informações da liga"
           );
+      });
+  };
 
-      } catch (error: unknown) { 
-          console.error("Falha ao salvar dados da liga:", error);
-          addToast(`Erro ao salvar: ${extractErrorMessage(error)}`, "error"); 
-      } finally {
-          setLoading(false);
+  const handleSaveMembersSection = async () => {
+      if (!ligaData) return;
+
+      await runSectionSave("SALVANDO MEMBROS...", async () => {
+          const actorTenantId =
+              tenantScopeId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
+          const members = ligaData.membros || [];
+          const memberIds = extractMemberIds(members);
+
+          await persistLeagueConfigPatch({
+              membros: members,
+              membersCount: members.length,
+          });
+
+          await syncLeagueMembers({
+              leagueId: ligaData.id,
+              members,
+              tenantId: actorTenantId || undefined,
+          });
+
+          setSavedMemberIds(memberIds);
+          setLigaData((prev) => (prev ? { ...prev, membersCount: members.length } : prev));
+          addToast("Membros sincronizados.", "success");
+
+          await logActivity(
+              ligaData.id,
+              ligaData.nome,
+              "UPDATE",
+              "ligas_membros",
+              { totalMembros: members.length }
+          );
+      });
+  };
+
+  const handleSaveEventsSection = async () => {
+      if (!ligaData) return;
+
+      await runSectionSave("PUBLICANDO EVENTOS...", async () => {
+          const actorTenantId =
+              tenantScopeId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
+          const leagueLogoUrl = resolveLeagueLogoSrc(ligaData) || "";
+          const syncedEvents = await syncLeagueEvents({
+              leagueId: ligaData.id,
+              events: ligaData.eventos || [],
+              leagueLogoUrl,
+              leagueSigla: ligaData.sigla,
+              tenantId: actorTenantId || undefined,
+          });
+
+          await persistLeagueConfigPatch({
+              eventos: syncedEvents,
+          });
+
+          clearEventsNativeCaches();
+          ClientCache.invalidatePattern("events:feed:*");
+          setLigaData((prev) => (prev ? { ...prev, eventos: syncedEvents } : prev));
+          addToast("Eventos publicados.", "success");
+
+          await logActivity(
+              ligaData.id,
+              ligaData.nome,
+              "UPDATE",
+              "eventos",
+              { totalEventos: syncedEvents.length }
+          );
+      });
+  };
+
+  const handleSaveBoardRoundSection = async () => {
+      if (!ligaData) return;
+      if (ligaData.perguntas.length < 10) {
+          addToast("Minimo 10 perguntas necessarias.", "error");
+          return;
       }
+
+      await runSectionSave("SALVANDO BOARD ROUND...", async () => {
+          const sanitizedQuestions = sanitizeQuestionDrafts(ligaData.perguntas);
+
+          await persistLeagueConfigPatch({
+              perguntas: sanitizedQuestions,
+          });
+
+          setLigaData((prev) => (prev ? { ...prev, perguntas: sanitizedQuestions } : prev));
+          addToast("Board Round salvo.", "success");
+
+          await logActivity(
+              ligaData.id,
+              ligaData.nome,
+              "UPDATE",
+              "ligas_board_round",
+              { totalPerguntas: sanitizedQuestions.length }
+          );
+      });
+  };
+
+  const handleSaveCurrentSection = async () => {
+      if (activeTab === "members") {
+          await handleSaveMembersSection();
+          return;
+      }
+      if (activeTab === "events") {
+          await handleSaveEventsSection();
+          return;
+      }
+      if (activeTab === "shark") {
+          await handleSaveBoardRoundSection();
+          return;
+      }
+      await handleSaveVisualSection();
   };
 
   // --- CRUD PERGUNTAS (BOARDROUND) ---
@@ -896,6 +995,14 @@ export function LigasAdminPageContent({
   const persistedMembers = allLeagueMembers.filter((member) =>
       savedMemberIdSet.has((member.id || "").trim())
   );
+  const currentSaveButtonLabel =
+      activeTab === "members"
+          ? "SALVAR MEMBROS"
+          : activeTab === "events"
+          ? "SALVAR EVENTOS"
+          : activeTab === "shark"
+          ? "SALVAR BOARD ROUND"
+          : "SALVAR INFORMACOES";
 
   if (!isLoggedIn) return (
       <div className="min-h-screen bg-black flex items-center justify-center p-4 font-sans text-white">
@@ -1023,7 +1130,7 @@ export function LigasAdminPageContent({
                       <div className="space-y-4">
                           <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-4">
                               <h4 className="text-xs font-black uppercase text-emerald-400">Novos adicionados agora</h4>
-                              <p className="mt-1 text-[10px] uppercase text-zinc-500">Entram na sincronização quando você clicar em salvar tudo.</p>
+                              <p className="mt-1 text-[10px] uppercase text-zinc-500">Entram na sincronização quando você clicar em salvar membros.</p>
                           </div>
                           <div className="grid grid-cols-1 gap-4">
                               {newlyAddedMembers.map((m) => {
@@ -1158,11 +1265,11 @@ export function LigasAdminPageContent({
               </div>
           )}
 
-          {/* --- BOTÃO SALVAR GERAL (FLUTUANTE) --- */}
+          {/* --- BOTÃO SALVAR DA SEÇÃO ATIVA --- */}
           {ligaData && (
               <div className="fixed bottom-6 left-0 right-0 px-4 flex justify-center z-50 pointer-events-none">
-                  <button onClick={handleSaveAll} disabled={loading} className="bg-emerald-500 hover:bg-emerald-400 text-black font-black py-4 px-10 rounded-full shadow-2xl flex items-center gap-2 transition transform hover:scale-105 active:scale-95 pointer-events-auto border-4 border-black">
-                      {loading ? <><Loader2 className="animate-spin"/> SALVANDO...</> : <><Save size={20}/> SALVAR TUDO</>}
+                  <button onClick={handleSaveCurrentSection} disabled={loading} className="bg-emerald-500 hover:bg-emerald-400 text-black font-black py-4 px-10 rounded-full shadow-2xl flex items-center gap-2 transition transform hover:scale-105 active:scale-95 pointer-events-auto border-4 border-black">
+                      {loading ? <><Loader2 className="animate-spin"/> {saveActionLabel || "SALVANDO..."}</> : <><Save size={20}/> {currentSaveButtonLabel}</>}
                   </button>
               </div>
           )}
@@ -1408,7 +1515,7 @@ export function LigasAdminPageContent({
 }
 
 export default function LigasAdminPage() {
-    return <LigasAdminPageContent initialTab="visual" />;
+    return null;
 }
 
 

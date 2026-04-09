@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { clearEventsNativeCaches } from "@/lib/eventsNativeService";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 import {
@@ -144,6 +145,7 @@ export async function POST(request: NextRequest) {
       tenant_id: effectiveTenantId,
     });
 
+    clearEventsNativeCaches();
     return NextResponse.json({ id: pollId });
   } catch (error: unknown) {
     if (error instanceof LeagueAdminApiError) {
@@ -184,6 +186,7 @@ export async function DELETE(request: NextRequest) {
       throw new LeagueAdminApiError(error.message, 400);
     }
 
+    clearEventsNativeCaches();
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {
     if (error instanceof LeagueAdminApiError) {
@@ -220,6 +223,7 @@ export async function PATCH(request: NextRequest) {
       updatedAt: new Date().toISOString(),
     });
 
+    clearEventsNativeCaches();
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {
     if (error instanceof LeagueAdminApiError) {

@@ -480,10 +480,11 @@ export default function DetalhesEventoPage() {
             userId: user.uid,
             userTurma: user.turma || "Geral",
             optionIndex,
+            tenantId: activeTenantId || undefined,
         });
         await refreshEventData();
       } catch (e: unknown) { 
-        const errorMsg = typeof e === 'string' ? e : "Erro ao votar.";
+        const errorMsg = e instanceof Error ? e.message : typeof e === 'string' ? e : "Erro ao votar.";
         addToast(errorMsg, "error"); 
       }
   };
@@ -508,21 +509,64 @@ export default function DetalhesEventoPage() {
           return;
       }
 
-      await addEventPollOption({
-          eventId: evento.id,
-          pollId,
-          option: { 
-              text: cleanOptionText,
-              votes: 0,
-              creatorId: user.uid,
-              creatorName: user.nome?.split(" ")[0] || "Anônimo",
-              creatorAvatar: user.foto || "",
-              votesByTurma: {},
-          },
-      });
+      const previousPolls = enquetes;
+      const userTurma = user.turma || "Geral";
+
+      setEnquetes((prev) =>
+          prev.map((poll) => {
+              if (poll.id !== pollId) return poll;
+
+              const nextOptionIndex = poll.options.length;
+              const currentUserVotes = Array.isArray(poll.userVotes?.[user.uid])
+                  ? poll.userVotes?.[user.uid] || []
+                  : [];
+
+              return {
+                  ...poll,
+                  options: [
+                      ...poll.options,
+                      {
+                          text: cleanOptionText,
+                          votes: 1,
+                          creatorId: user.uid,
+                          creatorName: user.nome?.split(" ")[0] || "Anonimo",
+                          creatorAvatar: user.foto || "",
+                          votesByTurma: { [userTurma]: 1 },
+                      },
+                  ],
+                  voters: poll.voters.includes(user.uid) ? poll.voters : [...poll.voters, user.uid],
+                  userVotes: {
+                      ...(poll.userVotes || {}),
+                      [user.uid]: Array.from(new Set([...currentUserVotes, nextOptionIndex])),
+                  },
+              };
+          })
+      );
       setNewPollOption("");
-      addToast("Opcao adicionada!", "success");
-      await refreshEventData();
+
+      try {
+          await addEventPollOption({
+              eventId: evento.id,
+              pollId,
+              option: { 
+                  text: cleanOptionText,
+                  votes: 0,
+                  creatorId: user.uid,
+                  creatorName: user.nome?.split(" ")[0] || "Anonimo",
+                  creatorAvatar: user.foto || "",
+                  votesByTurma: {},
+              },
+              autoVoteUserId: user.uid,
+              autoVoteUserTurma: userTurma,
+              tenantId: activeTenantId || undefined,
+          });
+          addToast("Opcao adicionada e voto registrado!", "success");
+          void refreshEventData();
+      } catch (error: unknown) {
+          setEnquetes(previousPolls);
+          setNewPollOption(cleanOptionText);
+          addToast(error instanceof Error ? error.message : "Erro ao adicionar opcao.", "error");
+      }
   };
 
   const handleReportPoll = async (_pollId: string) => { if(!user) return; void _pollId; addToast("Enquete reportada a moderacao.", "info"); };
@@ -842,7 +886,7 @@ export default function DetalhesEventoPage() {
                         <button onClick={() => handleCreatePollOption(currentPoll.id)} className="text-[10px] bg-purple-500/10 text-purple-400 px-2 rounded uppercase font-bold hover:bg-purple-500 hover:text-white transition">Add</button>
                     </div>
                     <p className="text-[8px] text-zinc-600 mt-1 italic text-center">
-                        * Maximo 3 escolhas por usuario e {POLL_OPTION_MAX_COUNT} respostas por enquete. ({newPollOption.length}/{POLL_OPTION_MAX_CHARS})
+                        * Vote em quantas respostas quiser, uma vez por resposta, e a enquete aceita ate {POLL_OPTION_MAX_COUNT} respostas. ({newPollOption.length}/{POLL_OPTION_MAX_CHARS})
                     </p>
                 </div>
             ) : (
