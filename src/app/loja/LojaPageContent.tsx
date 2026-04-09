@@ -1,5 +1,6 @@
 import LojaClientPage, { type Produto, type StoreCategory } from "./LojaClientPage";
 
+import { serializeForClient } from "@/lib/clientSerialization";
 import { resolveServerTenantScope } from "@/lib/serverTenantScope";
 import { fetchStoreCategories, fetchStoreProductsPage } from "@/lib/storePublicService";
 
@@ -35,13 +36,17 @@ export async function LojaPageContent({
   ]);
 
   if (productsResult.status === "fulfilled") {
-    initialProducts = productsResult.value.products as unknown as Produto[];
+    initialProducts = productsResult.value.products.map((product) =>
+      serializeForClient(product as unknown as Produto)
+    );
     initialHasMore = productsResult.value.hasMore;
     initialProductsHydrated = true;
   }
 
   if (categoriesResult.status === "fulfilled") {
-    initialCategories = categoriesResult.value as unknown as StoreCategory[];
+    initialCategories = categoriesResult.value.map((category) =>
+      serializeForClient(category as unknown as StoreCategory)
+    );
     initialCategoriesHydrated = true;
   }
 
