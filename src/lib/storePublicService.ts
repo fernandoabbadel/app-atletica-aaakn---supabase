@@ -289,18 +289,18 @@ const resolveMiniVendorProductPaymentConfig = async (options: {
 
 const sortStoreCategoryRows = <T extends Row>(rows: T[]): T[] =>
   [...rows].sort((left, right) => {
+    const leftMiniVendor = asString(left.seller_type).trim().toLowerCase() === "mini_vendor";
+    const rightMiniVendor = asString(right.seller_type).trim().toLowerCase() === "mini_vendor";
+    if (leftMiniVendor !== rightMiniVendor) {
+      return leftMiniVendor ? 1 : -1;
+    }
+
     const leftOrder = asInt(left.display_order);
     const rightOrder = asInt(right.display_order);
     if (leftOrder !== null || rightOrder !== null) {
       if (leftOrder === null) return 1;
       if (rightOrder === null) return -1;
       if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-    }
-
-    const leftMiniVendor = asString(left.seller_type).trim().toLowerCase() === "mini_vendor";
-    const rightMiniVendor = asString(right.seller_type).trim().toLowerCase() === "mini_vendor";
-    if (leftMiniVendor !== rightMiniVendor) {
-      return leftMiniVendor ? 1 : -1;
     }
 
     return asString(left.nome).localeCompare(asString(right.nome), "pt-BR", {

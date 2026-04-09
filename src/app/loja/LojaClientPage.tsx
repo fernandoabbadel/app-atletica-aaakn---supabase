@@ -130,6 +130,17 @@ const getCategoryDisplayOrder = (category: StoreCategory): number =>
     ? Math.max(0, Math.floor(category.display_order))
     : Number.MAX_SAFE_INTEGER;
 
+const buildCategoryListKey = (
+  category: Pick<StoreCategory, "nome" | "seller_type" | "seller_id">
+): string => {
+  const nome = String(category.nome || "").trim().toLowerCase();
+  const sellerType = category.seller_type === "mini_vendor" ? "mini_vendor" : "tenant";
+  const sellerId = String(category.seller_id || "").trim().toLowerCase();
+  return sellerType === "mini_vendor"
+    ? `mini_vendor:${sellerId || "_"}:${nome}`
+    : `tenant:${nome}`;
+};
+
 interface LojaClientPageProps {
   initialProducts: Produto[];
   initialCategories: StoreCategory[];
@@ -331,7 +342,7 @@ export default function LojaClientPage({
 
   // 3. FILTRAGEM
   const categoriasDisponiveis = useMemo(() => {
-      const categoriesByName = new Map<string, StoreCategory>();
+      const categoriesByKey = new Map<string, StoreCategory>();
       const tenantColor = palette.primary || "#10b981";
       const tenantLogo = tenantLogoUrl || "/logo.png";
 
@@ -349,7 +360,7 @@ export default function LojaClientPage({
           category.cover_img && category.cover_img.trim()
             ? category.cover_img
             : categoryLogo;
-        categoriesByName.set(nome, {
+        const normalizedCategory: StoreCategory = {
           ...category,
           nome,
           cover_img: categoryCover,
@@ -357,12 +368,13 @@ export default function LojaClientPage({
             category.button_color ||
             (sellerType === "tenant" ? tenantColor : "#2563eb"),
           logo_url: categoryLogo,
-        });
+        };
+        categoriesByKey.set(buildCategoryListKey(normalizedCategory), normalizedCategory);
       });
 
       produtos.forEach((product) => {
         const nome = String(product.categoria || "").trim();
-        if (!nome || categoriesByName.has(nome)) return;
+        if (!nome) return;
         const sellerType = product.seller?.type === "mini_vendor" ? "mini_vendor" : "tenant";
         const vendorCategory =
           sellerType === "mini_vendor"
@@ -372,7 +384,6 @@ export default function LojaClientPage({
                   String(category.seller_id || "").trim() === String(product.seller?.id || "").trim()
               )
             : null;
-        if (sellerType === "mini_vendor" && !vendorCategory) return;
         const categoryLogo =
           sellerType === "tenant"
             ? tenantLogo
@@ -384,29 +395,33 @@ export default function LojaClientPage({
         const categoryColor =
           (vendorCategory?.button_color && vendorCategory.button_color.trim()) ||
           (sellerType === "tenant" ? tenantColor : "#2563eb");
-        categoriesByName.set(nome, {
+        const fallbackCategory: StoreCategory = {
           id: nome,
           nome,
           cover_img: categoryCover,
           button_color: categoryColor,
           logo_url: categoryLogo,
           display_order: vendorCategory?.display_order,
-          is_receiving_orders: vendorCategory?.is_receiving_orders,
+          is_receiving_orders: vendorCategory?.is_receiving_orders ?? sellerType !== "mini_vendor",
           seller_type: sellerType,
           seller_id: product.seller?.id || "",
-        });
+        };
+        const categoryKey = buildCategoryListKey(fallbackCategory);
+        if (!categoriesByKey.has(categoryKey)) {
+          categoriesByKey.set(categoryKey, fallbackCategory);
+        }
       });
 
-      return Array.from(categoriesByName.values()).sort((left, right) => {
-        const leftOrder = getCategoryDisplayOrder(left);
-        const rightOrder = getCategoryDisplayOrder(right);
-        if (leftOrder !== rightOrder) {
-          return leftOrder - rightOrder;
-        }
+      return Array.from(categoriesByKey.values()).sort((left, right) => {
         const leftMiniVendor = left.seller_type === "mini_vendor";
         const rightMiniVendor = right.seller_type === "mini_vendor";
         if (leftMiniVendor !== rightMiniVendor) {
           return leftMiniVendor ? 1 : -1;
+        }
+        const leftOrder = getCategoryDisplayOrder(left);
+        const rightOrder = getCategoryDisplayOrder(right);
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder;
         }
         return left.nome.localeCompare(right.nome, "pt-BR");
       });

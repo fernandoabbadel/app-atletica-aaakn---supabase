@@ -286,7 +286,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <button
         type="button"
         onClick={() => setIsMobileSidebarOpen(true)}
-        className="fixed left-4 top-[calc(var(--master-topbar-height)+1rem)] z-50 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/95 text-zinc-200 shadow-2xl backdrop-blur-xl transition hover:border-brand hover:text-white lg:top-4 lg:hidden"
+        className="fixed left-4 top-[calc(var(--master-topbar-height)+1rem)] z-50 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/95 text-zinc-200 shadow-2xl backdrop-blur-xl transition hover:border-brand hover:text-white lg:hidden"
         aria-label="Abrir menu admin"
       >
         <PanelLeftOpen size={18} />
@@ -302,7 +302,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       />
 
       <aside
-        className={`fixed bottom-0 left-0 top-[var(--master-topbar-height)] z-40 flex w-[min(86vw,18rem)] flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 lg:translate-x-0 ${
+        className={`fixed left-0 top-[var(--master-topbar-height)] z-40 flex h-[calc(100vh-var(--master-topbar-height))] w-[min(86vw,18rem)] flex-col overflow-hidden border-r border-white/5 bg-zinc-900/95 backdrop-blur-xl transition-all duration-300 lg:translate-x-0 ${
           isMobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
         } ${desktopSidebarWidthClass}`}
       >
@@ -477,6 +477,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           isSidebarCollapsed ? "lg:ml-[88px]" : "lg:ml-64"
         }`}
       >
+        <div className="mb-4 flex items-center gap-3 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setIsMobileSidebarOpen(true)}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/95 text-zinc-200 shadow-xl backdrop-blur-xl transition hover:border-brand hover:text-white"
+            aria-label="Abrir menu admin"
+          >
+            <PanelLeftOpen size={18} />
+          </button>
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+              Painel Admin
+            </p>
+            <p className="truncate text-sm font-bold text-white">
+              Menu lateral e atalhos
+            </p>
+          </div>
+        </div>
         {children}
       </main>
     </div>
