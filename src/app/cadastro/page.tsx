@@ -929,7 +929,7 @@ export default function CadastroPage() {
 
                         <div className="relative group">
                             <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-emerald-500 transition" size={18} />
-                            <input type="text" placeholder="No. Matricula" className="input-field pl-14" value={formData.matricula} onChange={e => setFormData({...formData, matricula: e.target.value.replace(/\D/g, "")})} required />
+                            <input type="text" placeholder="No. Matricula (RA)" className="input-field pl-14" value={formData.matricula} onChange={e => setFormData({...formData, matricula: e.target.value.replace(/\D/g, "")})} required />
                         </div>
                     </div>
 

@@ -19,6 +19,7 @@ import {
 } from "../../constants/leagueQuizProfiles";
 import {
   addLeagueQuizHistory,
+  fetchUserLeagueInteractionState,
   fetchLeagueSummaries,
   LEAGUE_NAME_MAX_LENGTH,
   resolveFollowedLeagueIdsFromUserExtra,
@@ -280,12 +281,42 @@ export default function LigasUscPage() {
   }, [tenantId]);
 
   useEffect(() => {
-    setFollowedLeagueIds(resolveFollowedLeagueIdsFromUserExtra(user?.extra, tenantId));
-  }, [tenantId, user?.extra]);
+    let mounted = true;
+    if (!user?.uid) {
+      setFollowedLeagueIds([]);
+      setLikedLeagues([]);
+      return () => {
+        mounted = false;
+      };
+    }
 
-  useEffect(() => {
-    setLikedLeagues(resolveLikedLeagueIdsFromUserExtra(user?.extra, tenantId));
-  }, [tenantId, user?.extra]);
+    const fallbackFollowedIds = resolveFollowedLeagueIdsFromUserExtra(user.extra, tenantId);
+    const fallbackLikedIds = resolveLikedLeagueIdsFromUserExtra(user.extra, tenantId);
+    setFollowedLeagueIds(fallbackFollowedIds);
+    setLikedLeagues(fallbackLikedIds);
+
+    const syncInteractionState = async () => {
+      try {
+        const state = await fetchUserLeagueInteractionState({
+          userId: user.uid,
+          tenantId: tenantId || undefined,
+        });
+        if (!mounted) return;
+        setFollowedLeagueIds(state.followedIds);
+        setLikedLeagues(state.likedIds);
+      } catch (error: unknown) {
+        console.error(error);
+        if (!mounted) return;
+        setFollowedLeagueIds(fallbackFollowedIds);
+        setLikedLeagues(fallbackLikedIds);
+      }
+    };
+
+    void syncInteractionState();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId, user?.uid, user?.extra]);
 
   useEffect(() => {
     if (!selectedLeague) return;
@@ -302,12 +333,13 @@ export default function LigasUscPage() {
       if (!user) return;
       
       const isLiked = likedLeagues.includes(leagueId);
+      const optimisticDelta = isLiked ? -1 : 1;
       setLikedLeagues(prev => isLiked ? prev.filter(id => id !== leagueId) : [...prev, leagueId]);
       setLeagues((prev) =>
         prev
           .map((league) =>
             league.id === leagueId
-              ? { ...league, likes: Math.max(0, (league.likes || 0) + (isLiked ? -1 : 1)) }
+              ? { ...league, likes: Math.max(0, (league.likes || 0) + optimisticDelta) }
               : league
           )
           .sort((a, b) => (b.likes || 0) - (a.likes || 0))
@@ -320,6 +352,30 @@ export default function LigasUscPage() {
           tenantId: tenantId || undefined,
         });
         setLikedLeagues(result.likedIds);
+        if (result.isLiked !== !isLiked) {
+          const actualDelta = result.isLiked ? 1 : -1;
+          const correction = actualDelta - optimisticDelta;
+          if (correction !== 0) {
+            setLeagues((prev) =>
+              prev
+                .map((league) =>
+                  league.id === leagueId
+                    ? { ...league, likes: Math.max(0, (league.likes || 0) + correction) }
+                    : league
+                )
+                .sort((a, b) => (b.likes || 0) - (a.likes || 0))
+              );
+          }
+        }
+        if (result.isLiked) {
+          void logActivity(
+            user.uid,
+            user.nome || "Atleta",
+            "LIKE",
+            "Ligas",
+            `Curtiu a liga ${leagueId}`
+          );
+        }
       } catch (error: unknown) {
         console.error(error);
         setLikedLeagues((prev) =>
@@ -507,18 +563,20 @@ export default function LigasUscPage() {
       setFollowedLeagueIds(nextFollowedIds);
 
       try {
-        await toggleUserLeagueFollow({
+        const nextIds = await toggleUserLeagueFollow({
           leagueId: league.id,
           userId: user.uid,
           currentlyFollowing: isCurrentlyFollowing,
           tenantId: tenantId || undefined,
         });
+        setFollowedLeagueIds(nextIds);
+        const isFollowingNow = nextIds.includes(league.id);
         void logActivity(
           user.uid,
           user.nome || "Atleta",
-          isCurrentlyFollowing ? "UNFOLLOW" : "FOLLOW",
+          isFollowingNow ? "FOLLOW" : "UNFOLLOW",
           "Ligas",
-          `${isCurrentlyFollowing ? "Parou de seguir" : "Seguiu"} a liga ${league.sigla || league.nome}`
+          `${isFollowingNow ? "Seguiu" : "Parou de seguir"} a liga ${league.sigla || league.nome}`
         );
       } catch (error: unknown) {
         console.error(error);
@@ -744,7 +802,6 @@ export default function LigasUscPage() {
                       <span className="text-xs font-bold text-zinc-500 flex gap-2 items-center"><Heart size={14} className="text-red-500 fill-red-500"/> {selectedLeague.likes || 0} Curtidas</span>
                       <button onClick={() => { 
                           if (!user || !selectedLeague) return;
-                          const action = isJoined ? "UNFOLLOW" : "FOLLOW";
                           const nextJoined = !isJoined;
                           const previousFollowedIds = followedLeagueIds;
                           const nextFollowedIds = nextJoined
@@ -759,19 +816,24 @@ export default function LigasUscPage() {
                               userId: user.uid,
                               currentlyFollowing: isJoined,
                               tenantId: tenantId || undefined,
-                          }).catch((error: unknown) => {
+                          })
+                            .then((nextIds) => {
+                              const nextJoinedState = nextIds.includes(selectedLeague.id);
+                              setIsJoined(nextJoinedState);
+                              setFollowedLeagueIds(nextIds);
+                              void logActivity(
+                                user.uid,
+                                user.nome || 'Atleta',
+                                nextJoinedState ? "FOLLOW" : "UNFOLLOW",
+                                "Ligas",
+                                `${nextJoinedState ? 'Seguiu' : 'Deixou de seguir'} a liga ${selectedLeague.sigla || selectedLeague.nome}`
+                              );
+                            })
+                            .catch((error: unknown) => {
                               console.error(error);
                               setIsJoined(isJoined);
                               setFollowedLeagueIds(previousFollowedIds);
-                          });
-
-                          logActivity(
-                              user.uid,
-                              user.nome || 'Atleta',
-                              action,
-                              "Ligas",
-                              `${isJoined ? 'Deixou de seguir' : 'Seguiu'} a liga ${selectedLeague.sigla || selectedLeague.nome}`
-                          );
+                            });
                           if (Date.now() < 0) {
                           const action = isJoined ? "UNFOLLOW" : "FOLLOW";
                           setIsJoined(!isJoined); 

@@ -25,6 +25,8 @@ const asObject = (value: unknown): Row | null =>
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
 
+const asTrimmedId = (value: unknown): string => String(value ?? "").trim();
+
 const nowIso = (): string => new Date().toISOString();
 
 const throwSupabaseError = (error: {
@@ -188,7 +190,7 @@ export async function fetchEventCheckoutData(options: {
     (lotes.find((entry) => {
       const obj = asObject(entry);
       if (!obj) return false;
-      return asString(obj.id).trim() === loteId;
+      return asTrimmedId(obj.id) === loteId;
     }) as Row | undefined) ?? null;
 
   const tenantFinanceiro = await fetchFinanceiroConfig({
@@ -265,7 +267,7 @@ export async function createEventTicketRequest(payload: {
     const lotes = Array.isArray(eventRow.lotes) ? eventRow.lotes : [];
     const lote = lotes.find((entry) => {
       const row = asObject(entry);
-      return row && asString(row.id).trim() === String(payload.loteId).trim();
+      return row && asTrimmedId(row.id) === String(payload.loteId).trim();
     });
     if (lote) {
       const loteRow = asObject(lote);

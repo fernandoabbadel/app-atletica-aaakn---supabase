@@ -288,7 +288,7 @@ export default function AdminUsuarioDetalhePage() {
 
             <div>
               <label className="text-[11px] font-black uppercase text-zinc-500 block mb-1">
-                Matricula
+                Matricula (RA)
               </label>
               <input
                 value={form.matricula}

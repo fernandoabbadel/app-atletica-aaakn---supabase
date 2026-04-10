@@ -807,6 +807,31 @@ export const resolveLikedLeagueIdsFromUserExtra = (
   return normalizeLeagueInteractionIds(extraData.likedLeagueIds);
 };
 
+export async function fetchUserLeagueInteractionState(payload: {
+  userId?: string | null;
+  tenantId?: string | null;
+}): Promise<{ likedIds: string[]; followedIds: string[] }> {
+  const userId = payload.userId?.trim() || "";
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  if (!userId) {
+    return { likedIds: [], followedIds: [] };
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("extra")
+    .eq("uid", userId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const extra = asObject(asObject(data)?.extra) ?? {};
+  return {
+    likedIds: resolveLikedLeagueIdsFromUserExtra(extra, scopedTenantId),
+    followedIds: resolveFollowedLeagueIdsFromUserExtra(extra, scopedTenantId),
+  };
+}
+
 export interface LeaguePollOptionRecord {
   text: string;
   votes: number;

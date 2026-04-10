@@ -359,7 +359,7 @@ export default function AdminUsuariosPage() {
                       </td>
                       <td className="p-4">
                         <p>{row.turma || "-"}</p>
-                        <p className="text-zinc-500">Matricula: {row.matricula || "-"}</p>
+                        <p className="text-zinc-500">Matricula (RA): {row.matricula || "-"}</p>
                       </td>
                       <td className="p-4 uppercase font-black text-[11px]">{row.plano}</td>
                       <td className="p-4">

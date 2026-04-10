@@ -39,11 +39,17 @@ import {
   getDefaultTurmas,
   type TurmaConfig,
 } from "../../../lib/turmasService";
+import {
+  fetchCadastroConfig,
+  getDefaultCadastroConfig,
+  type CadastroConfig,
+} from "@/lib/cadastroConfigService";
 import { calculateAgeFromBirthDate } from "@/lib/birthDate";
 import {
   getBackendErrorCode,
   isPermissionError,
 } from "@/lib/backendErrors";
+import { getSportPresentation } from "@/lib/cadastroOptions";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 interface UserData {
@@ -159,6 +165,7 @@ export default function AlbumTurmaPage() {
   const [meuAlbum, setMeuAlbum] = useState<string[]>([]);
   const [turmaConfig, setTurmaConfig] = useState<AlbumCmsData | null>(null);
   const [albumUiConfig, setAlbumUiConfig] = useState<AlbumUiConfig | null>(null);
+  const [cadastroConfig, setCadastroConfig] = useState<CadastroConfig>(getDefaultCadastroConfig);
   const [coverSrc, setCoverSrc] = useState<string>("");
   const [showMyQr, setShowMyQr] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
@@ -180,6 +187,11 @@ export default function AlbumTurmaPage() {
     const idade = calculateAgeFromBirthDate(dataNasc);
     return idade === null ? "??" : String(idade);
   };
+
+  const resolveSportInfo = useCallback(
+    (sport: string) => getSportPresentation(sport, cadastroConfig.sportOptions),
+    [cadastroConfig.sportOptions]
+  );
 
   const stopScanner = useCallback(async () => {
     const scanner = scannerRef.current;
@@ -252,7 +264,7 @@ export default function AlbumTurmaPage() {
 
     const loadTurma = async () => {
       try {
-        const [usersResult, cmsResult, uiResult, turmasResult] = await Promise.allSettled([
+        const [usersResult, cmsResult, uiResult, turmasResult, cadastroResult] = await Promise.allSettled([
           fetchUsersByTurmaPage(turma, {
             pageSize: USERS_PAGE_SIZE,
             tenantId: effectiveTenantId || undefined,
@@ -260,6 +272,7 @@ export default function AlbumTurmaPage() {
           fetchAlbumConfig(turma, { tenantId: effectiveTenantId || undefined }),
           fetchAlbumUiConfig({ tenantId: effectiveTenantId || undefined }),
           fetchTurmasConfig({ tenantId: effectiveTenantId || undefined }),
+          fetchCadastroConfig({ tenantId: effectiveTenantId || undefined }),
         ]);
         if (!mounted) return;
 
@@ -290,6 +303,12 @@ export default function AlbumTurmaPage() {
 
         if (turmasResult.status === "fulfilled") {
           setTurmas(turmasResult.value);
+        }
+
+        if (cadastroResult.status === "fulfilled") {
+          setCadastroConfig(cadastroResult.value);
+        } else {
+          setCadastroConfig(getDefaultCadastroConfig());
         }
       } finally {
         if (mounted) setLoadingTurma(false);
@@ -702,6 +721,28 @@ export default function AlbumTurmaPage() {
                       </>
                     )}
                   </div>
+
+                  {isColada && Array.isArray(u.esportes) && u.esportes.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {u.esportes.slice(0, 3).map((sport) => {
+                        const info = resolveSportInfo(sport);
+                        return (
+                          <span
+                            key={`${u.id}:${info.id}`}
+                            className={`inline-flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${info.colorClass}`}
+                          >
+                            <span className="text-xs leading-none">{info.emoji}</span>
+                            <span className="truncate">{info.label}</span>
+                          </span>
+                        );
+                      })}
+                      {u.esportes.length > 3 && (
+                        <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-zinc-400">
+                          +{u.esportes.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   {isColada ? (
                     <div className="mt-3">

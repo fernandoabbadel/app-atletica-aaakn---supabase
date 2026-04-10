@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { logActivity } from "@/lib/logger";
 import {
+  fetchUserLeagueInteractionState,
   fetchLeagueById,
   resolveFollowedLeagueIdsFromUserExtra,
   resolveLikedLeagueIdsFromUserExtra,
@@ -96,12 +97,42 @@ export function LeaguePublicDetailClient({
   }, [cleanLeagueId, tenantId]);
 
   useEffect(() => {
-    setFollowedIds(resolveFollowedLeagueIdsFromUserExtra(user?.extra, tenantId));
-  }, [tenantId, user?.extra]);
+    let mounted = true;
+    if (!user?.uid) {
+      setFollowedIds([]);
+      setLikedIds([]);
+      return () => {
+        mounted = false;
+      };
+    }
 
-  useEffect(() => {
-    setLikedIds(resolveLikedLeagueIdsFromUserExtra(user?.extra, tenantId));
-  }, [tenantId, user?.extra]);
+    const fallbackFollowedIds = resolveFollowedLeagueIdsFromUserExtra(user.extra, tenantId);
+    const fallbackLikedIds = resolveLikedLeagueIdsFromUserExtra(user.extra, tenantId);
+    setFollowedIds(fallbackFollowedIds);
+    setLikedIds(fallbackLikedIds);
+
+    const syncInteractionState = async () => {
+      try {
+        const state = await fetchUserLeagueInteractionState({
+          userId: user.uid,
+          tenantId: tenantId || undefined,
+        });
+        if (!mounted) return;
+        setFollowedIds(state.followedIds);
+        setLikedIds(state.likedIds);
+      } catch (error: unknown) {
+        console.error(error);
+        if (!mounted) return;
+        setFollowedIds(fallbackFollowedIds);
+        setLikedIds(fallbackLikedIds);
+      }
+    };
+
+    void syncInteractionState();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId, user?.uid, user?.extra]);
 
   const sortedMembers = useMemo(
     () =>
@@ -120,9 +151,10 @@ export function LeaguePublicDetailClient({
   const handleLike = async () => {
     if (!user || !league) return;
     const wasLiked = likedIds.includes(league.id);
+    const optimisticDelta = wasLiked ? -1 : 1;
     setLikedIds((current) => (wasLiked ? current.filter((entry) => entry !== league.id) : [...current, league.id]));
     setLeague((current) =>
-      current ? { ...current, likes: Math.max(0, (current.likes || 0) + (wasLiked ? -1 : 1)) } : current
+      current ? { ...current, likes: Math.max(0, (current.likes || 0) + optimisticDelta) } : current
     );
 
     try {
@@ -132,7 +164,18 @@ export function LeaguePublicDetailClient({
         tenantId: tenantId || undefined,
       });
       setLikedIds(result.likedIds);
-      if (!wasLiked) {
+      if (result.isLiked !== !wasLiked) {
+        const actualDelta = result.isLiked ? 1 : -1;
+        const correction = actualDelta - optimisticDelta;
+        if (correction !== 0) {
+          setLeague((current) =>
+            current
+              ? { ...current, likes: Math.max(0, (current.likes || 0) + correction) }
+              : current
+          );
+        }
+      }
+      if (result.isLiked) {
         void logActivity(user.uid, user.nome || "Atleta", "LIKE", "Ligas", `Curtiu a liga ${league.sigla || league.nome}`);
       }
     } catch (error: unknown) {
@@ -146,26 +189,27 @@ export function LeaguePublicDetailClient({
 
   const handleFollow = async () => {
     if (!user || !league) return;
-    const nextFollowing = !isFollowing;
     const previousIds = followedIds;
-    const nextIds = nextFollowing
-      ? Array.from(new Set([...previousIds, league.id]))
-      : previousIds.filter((entry) => entry !== league.id);
+    const nextIds = isFollowing
+      ? previousIds.filter((entry) => entry !== league.id)
+      : Array.from(new Set([...previousIds, league.id]));
     setFollowedIds(nextIds);
 
     try {
-      await toggleUserLeagueFollow({
+      const nextIds = await toggleUserLeagueFollow({
         leagueId: league.id,
         userId: user.uid,
         currentlyFollowing: isFollowing,
         tenantId: tenantId || undefined,
       });
+      setFollowedIds(nextIds);
+      const isFollowingNow = nextIds.includes(league.id);
       void logActivity(
         user.uid,
         user.nome || "Atleta",
-        nextFollowing ? "FOLLOW" : "UNFOLLOW",
+        isFollowingNow ? "FOLLOW" : "UNFOLLOW",
         "Ligas",
-        `${nextFollowing ? "Seguiu" : "Parou de seguir"} a liga ${league.sigla || league.nome}`
+        `${isFollowingNow ? "Seguiu" : "Parou de seguir"} a liga ${league.sigla || league.nome}`
       );
     } catch (error: unknown) {
       console.error(error);
