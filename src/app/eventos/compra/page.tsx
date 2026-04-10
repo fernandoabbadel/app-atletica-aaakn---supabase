@@ -15,6 +15,7 @@ import {
   buildTenantFinanceFallback,
   resolveTenantBrandLabel,
 } from "../../../lib/tenantBranding";
+import { keepDigits } from "@/utils/contactFields";
 // Interfaces para tipagem forte (fim do any)
 interface Lote {
     id: string;
@@ -130,8 +131,15 @@ function CompraContent() {
           });
 
           // 2. Gerar Link do WhatsApp
-          const adminPhone = pixData.whatsapp || financeFallback.whatsapp;
-          const message = `Fala, equipe ${brandLabel}! Quero garantir meu lugar no *${evento.titulo}*.\n\n[INGRESSO] *${quantidade}x ${lote.nome}*\n[VALOR] Valor Total: R$ ${valorTotal.toFixed(2)}\n[PEDIDO] Pedido: ${ticketRequest.id.slice(0,5)}\n\nSegue o comprovante!`;
+          const adminPhone = keepDigits(pixData.whatsapp || financeFallback.whatsapp);
+          if (!adminPhone) {
+              throw new Error("WhatsApp do evento nao configurado.");
+          }
+
+          const buyerName = user.nome || "Aluno";
+          const buyerPhone = user.telefone || "Nao informado";
+          const buyerTurma = user.turma || "Sem turma";
+          const message = `Fala, equipe do evento ${brandLabel}! Quero garantir meu lugar no *${evento.titulo}*.\n\n[ALUNO] ${buyerName}\n[TURMA] ${buyerTurma}\n[CONTATO] ${buyerPhone}\n[INGRESSO] ${quantidade}x ${lote.nome}\n[VALOR] R$ ${valorTotal.toFixed(2)}\n[PEDIDO] ${ticketRequest.id.slice(0,8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
           const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
 
           // 3. Redirecionar
@@ -278,7 +286,7 @@ function CompraContent() {
                 <div>
                     <h2 className="text-2xl font-black text-white uppercase italic">Ingresso Reservado!</h2>
                     <p className="text-zinc-400 mt-2 text-sm max-w-xs mx-auto">
-                        Agora a equipe da atletica vai conferir o PIX e liberar seu QR Code oficial. Fique de olho no status!
+                        Agora a equipe do evento vai conferir o PIX e liberar seu QR Code oficial. Fique de olho no status! Envie o comprovante no WhatsApp.
                     </p>
                 </div>
 

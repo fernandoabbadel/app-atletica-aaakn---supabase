@@ -40,7 +40,7 @@ import {
   PIX_HOLDER_MAX_LENGTH,
   PIX_KEY_MAX_LENGTH,
   URL_MAX_LENGTH,
-  normalizePhoneInput,
+  normalizePhoneToBrE164,
 } from "@/utils/contactFields";
 import {
   createStoreCategory,
@@ -1338,12 +1338,12 @@ export default function AdminLojaProdutosPage() {
                       ...prev,
                       payment: {
                         ...prev.payment,
-                        whatsapp: normalizePhoneInput(e.target.value),
+                        whatsapp: normalizePhoneToBrE164(e.target.value),
                       },
                     }))
                   }
                   placeholder="WhatsApp para comprovante"
-                  inputMode="numeric"
+                  inputMode="tel"
                   disabled={!form.payment.enabled}
                   className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
                 />

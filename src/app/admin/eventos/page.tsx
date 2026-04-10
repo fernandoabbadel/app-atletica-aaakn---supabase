@@ -43,6 +43,11 @@ import {
 import { fetchPlanCatalog, type PlanRecord } from "../../../lib/plansPublicService";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
+import {
+  hasValidPhoneLength,
+  normalizePhoneToBrE164,
+  PHONE_MAX_LENGTH,
+} from "@/utils/contactFields";
 
 const EVENT_DASHBOARD_GRACE_MS = 24 * 60 * 60 * 1000;
 const EVENT_TITLE_MAX_LENGTH = 120;
@@ -507,6 +512,12 @@ export default function AdminEventosPage() {
   const handleSave = async () => {
     if (!novoEvento.titulo?.trim()) return addToast("Titulo obrigatorio!", "error");
     if (!novoEvento.data || !novoEvento.hora) return addToast("Data e hora obrigatorios!", "error");
+    if (
+      String(novoEvento.contatoComprovante || "").trim() &&
+      !hasValidPhoneLength(String(novoEvento.contatoComprovante || ""))
+    ) {
+      return addToast("Informe um WhatsApp valido para o comprovante.", "error");
+    }
 
     const eventoPayload: Record<string, unknown> = {
         ...novoEvento,
@@ -519,7 +530,9 @@ export default function AdminEventosPage() {
         pixChave: String(novoEvento.pixChave || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
         pixBanco: String(novoEvento.pixBanco || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
         pixTitular: String(novoEvento.pixTitular || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
-        contatoComprovante: String(novoEvento.contatoComprovante || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+        contatoComprovante: normalizePhoneToBrE164(
+          String(novoEvento.contatoComprovante || "").trim()
+        ).slice(0, PHONE_MAX_LENGTH),
         lotes: (novoEvento.lotes || []).map((lote) => ({
           ...lote,
           nome: String(lote.nome || "").trim().slice(0, EVENT_LOTE_NAME_MAX_LENGTH),
@@ -535,7 +548,7 @@ export default function AdminEventosPage() {
                 chave: String(novoEvento.pixChave || "").trim(),
                 banco: String(novoEvento.pixBanco || "").trim(),
                 titular: String(novoEvento.pixTitular || "").trim(),
-                whatsapp: String(novoEvento.contatoComprovante || "").trim(),
+                whatsapp: normalizePhoneToBrE164(String(novoEvento.contatoComprovante || "").trim()),
               }
             : null,
         updatedAt: new Date().toISOString(),
@@ -1165,7 +1178,7 @@ export default function AdminEventosPage() {
                         <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixBanco} onChange={e => setNovoEvento({...novoEvento, pixBanco: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                         <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixTitular} onChange={e => setNovoEvento({...novoEvento, pixTitular: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                     </div>
-                    <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.contatoComprovante} onChange={e => setNovoEvento({...novoEvento, contatoComprovante: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
+                    <input type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.contatoComprovante} onChange={e => setNovoEvento({...novoEvento, contatoComprovante: normalizePhoneToBrE164(e.target.value)})} />
                 </div>
                 
                 {/* Gestão de Lotes */}

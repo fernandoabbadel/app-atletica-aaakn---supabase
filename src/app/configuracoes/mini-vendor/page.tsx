@@ -62,9 +62,17 @@ export default function MiniVendorSettingsPage() {
         title: "Pedidos pendentes",
         description:
           "Mostra somente a fila que ainda precisa de aprovacao, sem misturar com o historico.",
-        href: tenantSlug
-          ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-pendentes")
-          : "/configuracoes/mini-vendor/pedidos-pendentes",
+        href:
+          profile?.storeName?.trim()
+            ? tenantSlug
+              ? withTenantSlug(
+                  tenantSlug,
+                  `/configuracoes/mini-vendor/pedidos-pendentes/${encodeURIComponent(profile.storeName.trim())}`
+                )
+              : `/configuracoes/mini-vendor/pedidos-pendentes/${encodeURIComponent(profile.storeName.trim())}`
+            : tenantSlug
+            ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-pendentes")
+            : "/configuracoes/mini-vendor/pedidos-pendentes",
         Icon: Clock3,
         accentClass:
           "border-yellow-500/30 bg-yellow-500/10 text-yellow-300 shadow-yellow-500/10",
@@ -81,7 +89,7 @@ export default function MiniVendorSettingsPage() {
           "border-cyan-500/30 bg-cyan-500/10 text-cyan-300 shadow-cyan-500/10",
       },
     ],
-    [tenantSlug]
+    [profile?.storeName, tenantSlug]
   );
 
   useEffect(() => {

@@ -108,7 +108,15 @@ const formatDateTime = (value?: string): string => {
 const compactUserId = (value: string): string =>
   value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
 
-export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
+export function MiniVendorOrdersStatusPage({
+  mode,
+  titleOverride,
+  subtitleOverride,
+}: {
+  mode: OrdersMode;
+  titleOverride?: string;
+  subtitleOverride?: string;
+}) {
   const { user } = useAuth();
   const { addToast } = useToast();
   const { tenantId, tenantLogoUrl } = useTenantTheme();
@@ -121,6 +129,8 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
   const [approverNames, setApproverNames] = useState<Record<string, string>>({});
 
   const pageCopy = PAGE_COPY[mode];
+  const pageTitle = titleOverride || pageCopy.title;
+  const pageSubtitle = subtitleOverride || pageCopy.subtitle;
 
   const loadPage = useCallback(async (forceRefresh = true) => {
     const cleanTenantId = tenantId.trim();
@@ -271,7 +281,7 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
   };
 
   return (
-    <MiniVendorShell title={pageCopy.title} subtitle={pageCopy.subtitle}>
+    <MiniVendorShell title={pageTitle} subtitle={pageSubtitle}>
       <div className="space-y-5">
         {!tenantId.trim() || !user?.uid ? (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
@@ -328,9 +338,9 @@ export function MiniVendorOrdersStatusPage({ mode }: { mode: OrdersMode }) {
             </section>
 
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-              <div className="flex items-center gap-2 text-xs font-black uppercase text-zinc-300">
+                <div className="flex items-center gap-2 text-xs font-black uppercase text-zinc-300">
                 {mode === "pending" ? <Clock3 size={14} /> : <ShoppingBag size={14} />}
-                {pageCopy.title}
+                {pageTitle}
               </div>
 
               <div className="mt-4 space-y-3">

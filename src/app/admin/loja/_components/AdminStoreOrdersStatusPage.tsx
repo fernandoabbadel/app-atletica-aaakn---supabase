@@ -21,6 +21,7 @@ import { logActivity } from "@/lib/logger";
 import {
   approveStoreOrder,
   fetchStoreOrdersPage,
+  fetchStoreProducts,
   setStoreOrderStatus,
 } from "@/lib/storeService";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -90,10 +91,17 @@ const formatDateTime = (value?: string): string => {
 const compactUserId = (value: string): string =>
   value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
 
-export function AdminStoreOrdersStatusPage({ mode }: { mode: OrdersMode }) {
+export function AdminStoreOrdersStatusPage({
+  mode,
+  categoryLabel,
+}: {
+  mode: OrdersMode;
+  categoryLabel?: string | null;
+}) {
   const { user } = useAuth();
   const { addToast } = useToast();
   const { tenantSlug } = useTenantTheme();
+  const normalizedCategory = String(categoryLabel || "").trim();
 
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,23 +112,50 @@ export function AdminStoreOrdersStatusPage({ mode }: { mode: OrdersMode }) {
   const [approverNames, setApproverNames] = useState<Record<string, string>>({});
 
   const pageCopy = PAGE_COPY[mode];
-  const backHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/loja") : "/admin/loja";
+  const backHref = tenantSlug
+    ? withTenantSlug(tenantSlug, normalizedCategory ? "/admin/loja/categorias" : "/admin/loja")
+    : normalizedCategory
+    ? "/admin/loja/categorias"
+    : "/admin/loja";
   const pendingHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/admin/loja/pedidos-pendentes")
     : "/admin/loja/pedidos-pendentes";
   const approvedHref = tenantSlug
-    ? withTenantSlug(tenantSlug, "/admin/loja/pedidos-aprovados")
-    : "/admin/loja/pedidos-aprovados";
+      ? withTenantSlug(tenantSlug, "/admin/loja/pedidos-aprovados")
+      : "/admin/loja/pedidos-aprovados";
+  const pageTitle = normalizedCategory
+    ? `${pageCopy.title} • ${normalizedCategory}`
+    : pageCopy.title;
+  const pageSubtitle = normalizedCategory
+    ? `Mostra somente os comprovantes da categoria ${normalizedCategory}.`
+    : pageCopy.subtitle;
 
   const load = useCallback(
     async (targetPage: number) => {
-      const result = await fetchStoreOrdersPage({
-        page: targetPage,
-        pageSize: PAGE_SIZE,
+      let result = await fetchStoreOrdersPage({
+        page: normalizedCategory ? 1 : targetPage,
+        pageSize: normalizedCategory ? 200 : PAGE_SIZE,
         status: pageCopy.status,
       });
 
-      if (targetPage > 1 && result.rows.length === 0) {
+      if (normalizedCategory) {
+        const categoryProducts = await fetchStoreProducts({
+          maxResults: 240,
+          forceRefresh: false,
+          category: normalizedCategory,
+        });
+        const productIds = new Set(
+          categoryProducts
+            .map((row) => String(row.id || "").trim())
+            .filter((value) => value.length > 0)
+        );
+        result = {
+          rows: result.rows.filter((row) => productIds.has(String(row.productId || "").trim())),
+          hasMore: false,
+        };
+      }
+
+      if (!normalizedCategory && targetPage > 1 && result.rows.length === 0) {
         setPage((prev) => Math.max(1, prev - 1));
         return;
       }
@@ -154,7 +189,7 @@ export function AdminStoreOrdersStatusPage({ mode }: { mode: OrdersMode }) {
       });
       setApproverNames(nextNames);
     },
-    [mode, pageCopy.status]
+    [mode, normalizedCategory, pageCopy.status]
   );
 
   useEffect(() => {
@@ -259,35 +294,37 @@ export function AdminStoreOrdersStatusPage({ mode }: { mode: OrdersMode }) {
               <ArrowLeft size={18} className="text-zinc-300" />
             </Link>
             <div>
-              <h1 className="text-xl font-black uppercase tracking-tight">{pageCopy.title}</h1>
-              <p className="text-[11px] font-bold text-zinc-500">{pageCopy.subtitle}</p>
+              <h1 className="text-xl font-black uppercase tracking-tight">{pageTitle}</h1>
+              <p className="text-[11px] font-bold text-zinc-500">{pageSubtitle}</p>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={pendingHref}
-              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
-                mode === "pending"
-                  ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
-                  : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
-              }`}
-            >
-              <Clock3 size={14} />
-              Pendentes
-            </Link>
-            <Link
-              href={approvedHref}
-              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
-                mode === "approved"
-                  ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                  : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
-              }`}
-            >
-              <ShoppingBag size={14} />
-              Aprovados
-            </Link>
-          </div>
+          {!normalizedCategory && (
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={pendingHref}
+                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
+                  mode === "pending"
+                    ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                    : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                <Clock3 size={14} />
+                Pendentes
+              </Link>
+              <Link
+                href={approvedHref}
+                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
+                  mode === "approved"
+                    ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                    : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                <ShoppingBag size={14} />
+                Aprovados
+              </Link>
+            </div>
+          )}
         </div>
       </header>
 
@@ -455,7 +492,7 @@ export function AdminStoreOrdersStatusPage({ mode }: { mode: OrdersMode }) {
           })
         )}
 
-        {(page > 1 || hasMore) && (
+        {!normalizedCategory && (page > 1 || hasMore) && (
           <div className="flex items-center justify-between pt-2 text-xs font-bold uppercase text-zinc-500">
             <span>Pagina {page}</span>
             <div className="flex items-center gap-2">

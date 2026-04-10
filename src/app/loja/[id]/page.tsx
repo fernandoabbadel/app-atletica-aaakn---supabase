@@ -17,9 +17,11 @@ import {
   Heart,
   Loader2,
   MessageCircle,
+  Minimize2,
   ShoppingBag,
   Wallet,
   X,
+  ZoomIn,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
@@ -81,6 +83,7 @@ interface Order {
   quantidade?: number;
   itens?: number;
   data?: Record<string, unknown>;
+  payment_config?: PixData | null;
   status: "pendente" | "approved" | "rejected" | "delivered" | "cancelado";
   createdAt: DateLike | null;
   updatedAt?: DateLike | null;
@@ -196,11 +199,20 @@ export default function DetalheProdutoPage() {
     whatsapp: "",
   });
   const [loadingPixData, setLoadingPixData] = useState(false);
+  const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
+  const [isImageViewerZoomed, setIsImageViewerZoomed] = useState(false);
 
   const checkoutTotal = useMemo(
     () => Number((Number(produto?.preco || 0) * checkoutQuantity).toFixed(2)),
     [produto?.preco, checkoutQuantity]
   );
+
+  const resolveOrderColor = useCallback((order?: Order | null): string => {
+    const rawData = order?.data;
+    if (!rawData || typeof rawData !== "object") return "";
+    const selectedColor = rawData["corSelecionada"];
+    return typeof selectedColor === "string" ? selectedColor.trim() : "";
+  }, []);
 
   const availableColors = useMemo(() => {
     if (!produto) return [] as string[];
@@ -269,6 +281,34 @@ export default function DetalheProdutoPage() {
   const brandLabel = useMemo(
     () => resolveTenantBrandLabel(tenantSigla, tenantName),
     [tenantName, tenantSigla]
+  );
+  const resolveOrderPaymentConfig = useCallback(
+    (order?: Order | null): PixData => {
+      const rawConfig =
+        order?.payment_config && typeof order.payment_config === "object"
+          ? order.payment_config
+          : null;
+
+      return {
+        chave:
+          typeof rawConfig?.chave === "string" && rawConfig.chave.trim()
+            ? rawConfig.chave.trim()
+            : pixData.chave,
+        banco:
+          typeof rawConfig?.banco === "string" && rawConfig.banco.trim()
+            ? rawConfig.banco.trim()
+            : pixData.banco,
+        titular:
+          typeof rawConfig?.titular === "string" && rawConfig.titular.trim()
+            ? rawConfig.titular.trim()
+            : pixData.titular,
+        whatsapp:
+          typeof rawConfig?.whatsapp === "string" && rawConfig.whatsapp.trim()
+            ? rawConfig.whatsapp.trim()
+            : pixData.whatsapp || financeFallback.whatsapp,
+      };
+    },
+    [financeFallback.whatsapp, pixData]
   );
   const sellerLogo = produto?.seller?.logoUrl || tenantLogoUrl || "/logo.png";
   const sellerName = produto?.seller?.name || brandLabel;
@@ -505,10 +545,46 @@ export default function DetalheProdutoPage() {
   const handleSendReceiptWhatsapp = () => {
     if (!produto || !checkoutOrderId) return;
     const adminPhone = (pixData.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
-    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[PRODUTO] ${produto.nome}\n[QTD] ${checkoutQuantity}\n${checkoutColor.trim() ? `[COR] ${checkoutColor.trim()}\n` : ""}[VALOR] R$ ${checkoutTotal.toFixed(2)}\n[PEDIDO] ${checkoutOrderId.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+    const buyerName = user?.nome?.trim() || "Cliente";
+    const buyerPhone = user?.telefone?.trim() || "Nao informado";
+    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[CLIENTE] ${buyerName}\n[CONTATO] ${buyerPhone}\n[PRODUTO] ${produto.nome}\n[QTD] ${checkoutQuantity}\n${checkoutColor.trim() ? `[COR] ${checkoutColor.trim()}\n` : ""}[VALOR] R$ ${checkoutTotal.toFixed(2)}\n[PEDIDO] ${checkoutOrderId.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
     const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, "_blank");
     setCheckoutStep(3);
+  };
+
+  const handleOpenImageViewer = () => {
+    setIsImageViewerZoomed(false);
+    setIsImageViewerOpen(true);
+  };
+
+  const handleCopyOrderPix = async (order: Order) => {
+    try {
+      await navigator.clipboard.writeText(resolveOrderPaymentConfig(order).chave);
+      addToast("Chave PIX copiada!", "success");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Nao foi possivel copiar a chave PIX.", "error");
+    }
+  };
+
+  const handleSendOrderReceiptWhatsapp = (order: Order) => {
+    if (!produto) return;
+    const payment = resolveOrderPaymentConfig(order);
+    const adminPhone = (payment.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
+    if (!adminPhone) {
+      addToast("WhatsApp financeiro nao configurado para este pedido.", "error");
+      return;
+    }
+
+    const quantity = Number(order.quantidade || order.itens || 1);
+    const total = Number((order.total ?? order.price) || 0).toFixed(2);
+    const selectedColor = resolveOrderColor(order);
+    const buyerName = user?.nome?.trim() || order.userName || "Cliente";
+    const buyerPhone = user?.telefone?.trim() || "Nao informado";
+    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[CLIENTE] ${buyerName}\n[CONTATO] ${buyerPhone}\n[PRODUTO] ${produto.nome}\n[QTD] ${quantity}\n${selectedColor ? `[COR] ${selectedColor}\n` : ""}[VALOR] R$ ${total}\n[PEDIDO] ${order.id.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+    const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, "_blank");
   };
 
   const handleCancelOrder = async (orderId: string) => {
@@ -561,7 +637,7 @@ export default function DetalheProdutoPage() {
           priority
           className="object-cover"
           sizes="100vw"
-          
+          onClick={handleOpenImageViewer}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-transparent z-10" />
         <button
@@ -569,6 +645,13 @@ export default function DetalheProdutoPage() {
           className="absolute top-6 left-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full text-white hover:bg-zinc-800 transition border border-white/10"
         >
           <ArrowLeft size={24} />
+        </button>
+        <button
+          onClick={handleOpenImageViewer}
+          className="absolute top-6 right-24 z-20 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-4 py-3 text-[11px] font-black uppercase text-white backdrop-blur-md transition hover:bg-zinc-800"
+        >
+          <ZoomIn size={16} />
+          Ver melhor
         </button>
         <button
           onClick={handleLike}
@@ -756,6 +839,65 @@ export default function DetalheProdutoPage() {
                           Cancelar pedido
                         </button>
                       </div>
+                      {(() => {
+                        const payment = resolveOrderPaymentConfig(order);
+                        const orderColor = resolveOrderColor(order);
+                        const orderWhatsapp = (payment.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
+                        return (
+                          <div className="mt-3 rounded-xl border border-zinc-800 bg-black/30 p-3">
+                            <div className="flex items-center gap-2">
+                              <Wallet size={14} className="text-emerald-400" />
+                              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                                Informacoes do PIX
+                              </p>
+                            </div>
+                            <div className="mt-3 space-y-2 text-xs">
+                              <div>
+                                <p className="text-zinc-500 font-bold uppercase text-[10px]">Chave PIX</p>
+                                <p className="mt-1 break-all rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 font-mono text-zinc-100">
+                                  {payment.chave || "Consulte o financeiro"}
+                                </p>
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Banco</p>
+                                  <p className="mt-1 font-bold text-zinc-200">{payment.banco || "--"}</p>
+                                </div>
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Titular</p>
+                                  <p className="mt-1 font-bold text-zinc-200">{payment.titular || "--"}</p>
+                                </div>
+                              </div>
+                              {orderColor ? (
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Cor enviada</p>
+                                  <p className="mt-1 font-bold text-zinc-200">{orderColor}</p>
+                                </div>
+                              ) : null}
+                              <div className="flex flex-wrap gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleCopyOrderPix(order)}
+                                  className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-[10px] font-black uppercase text-zinc-200 hover:bg-zinc-800"
+                                >
+                                  <Copy size={12} />
+                                  Copiar PIX
+                                </button>
+                                {orderWhatsapp ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSendOrderReceiptWhatsapp(order)}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 px-3 py-2 text-[10px] font-black uppercase text-[#8bf0b0] hover:bg-[#25D366]/20"
+                                  >
+                                    <MessageCircle size={12} />
+                                    Enviar comprovante
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </article>
                   ))}
                 </div>
@@ -974,7 +1116,7 @@ export default function DetalheProdutoPage() {
                   <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
                     <p className="text-sm font-black uppercase text-white">Pedido em analise</p>
                     <p className="text-xs text-zinc-400 mt-2">
-                      Pedido #{checkoutOrderId?.slice(0, 8).toUpperCase() || "--"} gerado. Agora aguarde a aprovacao manual no painel.
+                      Pedido #{checkoutOrderId?.slice(0, 8).toUpperCase() || "--"} gerado. Agora envie o comprovante no WhatsApp e acompanhe o status da compra.
                     </p>
                   </div>
                   <button
@@ -988,6 +1130,58 @@ export default function DetalheProdutoPage() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isImageViewerOpen && (
+        <div className="fixed inset-0 z-[95] bg-black/95 backdrop-blur-md">
+          <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Imagem do produto</p>
+              <h3 className="text-sm font-black uppercase text-white">{produto.nome}</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsImageViewerZoomed((previous) => !previous)}
+                className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[10px] font-black uppercase text-zinc-200 hover:bg-zinc-800"
+              >
+                {isImageViewerZoomed ? <Minimize2 size={14} /> : <ZoomIn size={14} />}
+                {isImageViewerZoomed ? "Ajustar" : "Zoom 2x"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsImageViewerOpen(false)}
+                className="rounded-xl border border-zinc-700 bg-zinc-900 p-2 text-zinc-200 hover:bg-zinc-800"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+
+          <div className="h-[calc(100vh-81px)] overflow-auto p-4">
+            <div className="relative mx-auto flex min-h-full w-full max-w-6xl items-center justify-center">
+              <div
+                className={`relative w-full overflow-auto rounded-3xl border border-white/10 bg-black/60 transition-all duration-300 ${
+                  isImageViewerZoomed ? "max-w-[1600px]" : "max-w-5xl"
+                }`}
+              >
+                <div className={`relative h-[70vh] w-full ${isImageViewerZoomed ? "sm:h-[90vh]" : ""}`}>
+                  <Image
+                    src={produto.img}
+                    alt={produto.nome}
+                    fill
+                    sizes="100vw"
+                    className={
+                      isImageViewerZoomed
+                        ? "object-contain scale-[1.8] transition-transform duration-300"
+                        : "object-contain transition-transform duration-300"
+                    }
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -30,6 +30,7 @@ import {
   fetchAdminStoreBundle,
   renameStoreProductsCategory,
   saveStoreCategoryDisplayOrder,
+  setStoreCategoryVisibility,
   upsertStoreCategory,
 } from "@/lib/storeService";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -48,6 +49,7 @@ type CategoryRow = {
   button_color?: string;
   logo_url?: string;
   display_order?: number | null;
+  visible?: boolean;
   seller_type?: string;
   seller_id?: string;
 };
@@ -248,6 +250,8 @@ export default function AdminLojaCategoriasPage() {
         categoryVisible:
           sellerType === "mini_vendor"
             ? miniVendorVisibilityMap.get(sellerId) ?? true
+            : typeof row.visible === "boolean"
+            ? row.visible
             : true,
       });
     });
@@ -280,7 +284,7 @@ export default function AdminLojaCategoriasPage() {
         nome,
         coverImg: productLogoUrl,
         logoUrl: productLogoUrl,
-        buttonColor:
+          buttonColor:
           sellerType === "mini_vendor" ? MINI_VENDOR_COLOR_DEFAULT : tenantCategoryColor,
         displayOrder: null,
         sellerType,
@@ -467,6 +471,7 @@ export default function AdminLojaCategoriasPage() {
           coverImg: form.coverImg.trim(),
           logoUrl: tenantLogo,
           buttonColor: form.buttonColor.trim() || tenantCategoryColor,
+          visible: editingCategory?.categoryVisible ?? true,
           sellerType: "tenant",
           sellerId: tenantId,
           tenantId: tenantId || undefined,
@@ -549,6 +554,31 @@ export default function AdminLojaCategoriasPage() {
     } catch (error: unknown) {
       console.error(error);
       addToast("Erro ao atualizar visibilidade da categoria.", "error");
+    } finally {
+      setVisibilityActionKey("");
+    }
+  };
+
+  const handleToggleTenantCategoryVisibility = async (row: DisplayCategory) => {
+    if (row.sellerType !== "tenant" || !row.categoryId) return;
+
+    try {
+      setVisibilityActionKey(row.key);
+      await setStoreCategoryVisibility({
+        categoryId: row.categoryId,
+        visible: !row.categoryVisible,
+        tenantId: activeTenantId,
+      });
+      await loadData(true);
+      addToast(
+        row.categoryVisible
+          ? "Categoria do tenant ocultada na loja."
+          : "Categoria do tenant exibida na loja.",
+        "success"
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao atualizar visibilidade da categoria do tenant.", "error");
     } finally {
       setVisibilityActionKey("");
     }
@@ -937,6 +967,12 @@ export default function AdminLojaCategoriasPage() {
                   const productCount = productCounts.get(row.key) ?? 0;
                   const previewImage = row.coverImg || row.logoUrl || tenantLogoUrl || "/logo.png";
                   const logoImage = row.logoUrl || tenantLogoUrl || "/logo.png";
+                  const pendingOrdersHref = tenantSlug
+                    ? withTenantSlug(
+                        tenantSlug,
+                        `/admin/loja/pedidos-pendentes/${encodeURIComponent(row.nome)}`
+                      )
+                    : `/admin/loja/pedidos-pendentes/${encodeURIComponent(row.nome)}`;
 
                   return (
                     <article
@@ -997,7 +1033,7 @@ export default function AdminLojaCategoriasPage() {
                             >
                               {row.sellerType === "mini_vendor" ? "Mini Vendor" : "Tenant"}
                             </span>
-                            {row.sellerType === "mini_vendor" ? (
+                            {(row.sellerType === "mini_vendor" || row.categoryId) ? (
                               <span
                                 className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${
                                   row.categoryVisible
@@ -1020,6 +1056,13 @@ export default function AdminLojaCategoriasPage() {
 
                         {row.sellerType === "mini_vendor" ? (
                           <div className="flex flex-wrap items-center justify-end gap-2">
+                            <Link
+                              href={pendingOrdersHref}
+                              className="inline-flex items-center gap-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] font-black uppercase text-yellow-200 hover:bg-yellow-500/20"
+                            >
+                              <ExternalLink size={14} />
+                              Pedidos da categoria
+                            </Link>
                             <button
                               type="button"
                               onClick={() => void handleToggleMiniVendorCategoryVisibility(row)}
@@ -1048,14 +1091,46 @@ export default function AdminLojaCategoriasPage() {
                             </Link>
                           </div>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleEditCategory(row)}
-                            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 hover:bg-zinc-800"
-                          >
-                            <Pencil size={14} />
-                            {row.derivedOnly ? "Completar" : "Editar"}
-                          </button>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            {row.categoryId ? (
+                              <Link
+                                href={pendingOrdersHref}
+                                className="inline-flex items-center gap-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] font-black uppercase text-yellow-200 hover:bg-yellow-500/20"
+                              >
+                                <ExternalLink size={14} />
+                                Pedidos da categoria
+                              </Link>
+                            ) : null}
+                            {row.categoryId ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleToggleTenantCategoryVisibility(row)}
+                                disabled={visibilityActionKey === row.key}
+                                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase transition disabled:opacity-60 ${
+                                  row.categoryVisible
+                                    ? "border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20"
+                                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                                }`}
+                              >
+                                {visibilityActionKey === row.key ? (
+                                  <Loader2 size={14} className="animate-spin" />
+                                ) : row.categoryVisible ? (
+                                  <EyeOff size={14} />
+                                ) : (
+                                  <Eye size={14} />
+                                )}
+                                {row.categoryVisible ? "Ocultar categoria" : "Exibir categoria"}
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => handleEditCategory(row)}
+                              className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 hover:bg-zinc-800"
+                            >
+                              <Pencil size={14} />
+                              {row.derivedOnly ? "Completar" : "Editar"}
+                            </button>
+                          </div>
                         )}
                       </div>
                     </article>

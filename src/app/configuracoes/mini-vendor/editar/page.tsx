@@ -715,6 +715,18 @@ export default function MiniVendorCompanyEditPage() {
               </div>
             </div>
           </section>
+
+          <div className="sticky bottom-4 z-10 mt-5 flex justify-end">
+            <button
+              type="button"
+              onClick={() => void handleSaveVendor()}
+              disabled={savingVendor || uploadingLogo || uploadingCover}
+              className="inline-flex items-center gap-2 rounded-2xl border border-blue-500/30 bg-blue-500/10 px-5 py-3 text-xs font-black uppercase text-blue-300 shadow-2xl backdrop-blur-sm hover:bg-blue-500/20 disabled:opacity-60"
+            >
+              {savingVendor ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {savingVendor ? "Salvando..." : profile ? "Salvar esta pagina" : "Enviar cadastro"}
+            </button>
+          </div>
         </div>
       )}
     </MiniVendorShell>

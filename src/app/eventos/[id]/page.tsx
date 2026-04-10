@@ -406,6 +406,7 @@ export default function DetalhesEventoPage() {
               userName: user.nome || "Anônimo",
               userAvatar: user.foto || "",
               userTurma: user.turma || "Geral",
+              tenantId: activeTenantId || undefined,
           });
           addToast("Lista atualizada!", "success");
           await refreshEventData();
@@ -610,12 +611,28 @@ export default function DetalhesEventoPage() {
       });
   }, [comentarios]);
 
-  const handleShare = () => {
-      if (evento && typeof navigator !== 'undefined' && navigator.share) {
-          navigator.share({ title: evento.titulo, url: window.location.href });
-      } else {
-          navigator.clipboard.writeText(window.location.href);
+  const handleShare = async () => {
+      const shareUrl = typeof window !== "undefined" ? window.location.href : "";
+      if (!shareUrl) return;
+
+      try {
+          if (evento && typeof navigator !== "undefined" && navigator.share) {
+              await navigator.share({ title: evento.titulo, url: shareUrl });
+              return;
+          }
+
+          await navigator.clipboard.writeText(shareUrl);
           addToast("Link copiado!", "success");
+      } catch (error: unknown) {
+          const shareError = error as { name?: string };
+          if (shareError?.name === "AbortError") return;
+
+          try {
+              await navigator.clipboard.writeText(shareUrl);
+              addToast("Link copiado!", "success");
+          } catch {
+              addToast("Nao foi possivel compartilhar agora.", "error");
+          }
       }
   };
 

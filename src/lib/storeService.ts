@@ -34,7 +34,7 @@ const MAX_CATEGORIES = 300;
 const STORE_PRODUCT_SELECT_COLUMNS =
   "id,tenant_id,nome,categoria,descricao,img,preco,precoAntigo,estoque,lote,tagLabel,tagColor,tagEffect,cores,variantes,caracteristicas,badge,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,cliques,likes,createdAt,updatedAt";
 const STORE_CATEGORY_SELECT_COLUMNS =
-  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order,createdAt,updatedAt";
+  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order,visible,createdAt,updatedAt";
 const STORE_ORDER_SELECT_COLUMNS =
   "id,tenant_id,userId,userName,productId,productName,price,total,quantidade,itens,data,status,approvedBy,seller_type,seller_id,seller_name,seller_logo_url,payment_config,createdAt,updatedAt";
 const STORE_REVIEW_SELECT_COLUMNS =
@@ -366,6 +366,7 @@ const normalizeAdminStoreRow = (table: string, row: Row): Row => {
       button_color: asString(row.button_color),
       logo_url: asString(row.logo_url),
       display_order: asInt(row.display_order),
+      visible: typeof row.visible === "boolean" ? row.visible : true,
       seller: normalizeSellerSnapshot({
         type: row.seller_type,
         id: row.seller_id,
@@ -1223,6 +1224,7 @@ export async function upsertStoreCategory(payload: {
     buttonColor?: string;
     logoUrl?: string;
     displayOrder?: number;
+    visible?: boolean;
     sellerType?: "tenant" | "mini_vendor";
     sellerId?: string;
     tenantId?: string | null;
@@ -1235,6 +1237,7 @@ export async function upsertStoreCategory(payload: {
   const buttonColor = asString(source.buttonColor).trim().slice(0, 40);
   const logoUrl = asString(source.logoUrl).trim().slice(0, 400);
   const displayOrder = asInt(source.displayOrder);
+  const visible = typeof source.visible === "boolean" ? source.visible : true;
   const sellerType = source.sellerType === "mini_vendor" ? "mini_vendor" : "tenant";
   const sellerId = asString(source.sellerId).trim().slice(0, 120);
   const scopedTenantId = resolveStoreTenantId(source.tenantId);
@@ -1249,6 +1252,7 @@ export async function upsertStoreCategory(payload: {
       seller_type: sellerType,
       seller_id: sellerId || null,
       ...(displayOrder !== null ? { display_order: displayOrder } : {}),
+      visible,
       updatedAt: nowIso(),
     };
     await mutateStoreTableWithSchemaFallback({
@@ -1274,6 +1278,7 @@ export async function upsertStoreCategory(payload: {
     seller_type: sellerType,
     seller_id: sellerId || null,
     ...(nextDisplayOrder !== null ? { display_order: nextDisplayOrder } : {}),
+    visible,
     ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -1289,6 +1294,7 @@ export async function upsertStoreCategory(payload: {
       ...(nextDisplayOrder !== null ? { display_order: nextDisplayOrder } : {}),
       seller_type: sellerType,
       seller_id: sellerId,
+      visible,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     },
     async () => {
@@ -1373,6 +1379,31 @@ export async function saveStoreCategoryDisplayOrder(payload: {
       ],
     });
   }
+
+  invalidateStoreCaches();
+}
+
+export async function setStoreCategoryVisibility(payload: {
+  categoryId: string;
+  visible: boolean;
+  tenantId?: string | null;
+}): Promise<void> {
+  const categoryId = payload.categoryId.trim();
+  if (!categoryId) return;
+
+  const scopedTenantId = resolveStoreTenantId(payload.tenantId);
+  await mutateStoreTableWithSchemaFallback({
+    tableName: "categorias",
+    operation: "update",
+    payload: {
+      visible: payload.visible,
+      updatedAt: nowIso(),
+    },
+    filters: [
+      { field: "id", value: categoryId },
+      ...(scopedTenantId ? [{ field: "tenant_id", value: scopedTenantId }] : []),
+    ],
+  });
 
   invalidateStoreCaches();
 }

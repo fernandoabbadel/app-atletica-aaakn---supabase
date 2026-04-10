@@ -1463,8 +1463,25 @@ export async function setEventRsvpDetailed(payload: {
     const { error: deleteError } = await deleteQuery;
     if (deleteError) throwSupabaseError(deleteError);
   } else {
-    const { error: upsertError } = await supabase.from("eventos_rsvps").upsert(
-      {
+    if (existing?.id) {
+      let updateQuery = supabase
+        .from("eventos_rsvps")
+        .update({
+          status: payload.status,
+          userName: payload.userName,
+          userAvatar: payload.userAvatar,
+          userTurma: payload.userTurma,
+          timestamp: nowIso(),
+        })
+        .eq("eventoId", eventId)
+        .eq("userId", userId);
+      if (scopedTenantId) {
+        updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { error: updateError } = await updateQuery;
+      if (updateError) throwSupabaseError(updateError);
+    } else {
+      const { error: insertError } = await supabase.from("eventos_rsvps").insert({
         eventoId: eventId,
         userId,
         status: payload.status,
@@ -1473,12 +1490,9 @@ export async function setEventRsvpDetailed(payload: {
         userTurma: payload.userTurma,
         ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         timestamp: nowIso(),
-      },
-      {
-        onConflict: "eventoId,userId",
-      }
-    );
-    if (upsertError) throwSupabaseError(upsertError);
+      });
+      if (insertError) throwSupabaseError(insertError);
+    }
   }
 
   await refreshEventStatsFromRelations(eventId, scopedTenantId);

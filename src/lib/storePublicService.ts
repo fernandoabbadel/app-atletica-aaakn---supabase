@@ -30,7 +30,7 @@ const USER_REVIEW_EXISTS_LIMIT = 1;
 const STORE_PRODUCT_SELECT_COLUMNS =
   "id,tenant_id,nome,preco,precoAntigo,img,descricao,likes,categoria,estoque,lote,tagLabel,tagColor,tagEffect,cores,variantes,caracteristicas,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,cliques,createdAt,updatedAt";
 const STORE_CATEGORY_SELECT_COLUMNS =
-  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order";
+  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order,visible";
 const STORE_REVIEW_SELECT_COLUMNS =
   "id,productId,userId,userName,userAvatar,rating,comment,createdAt,updatedAt";
 const STORE_ORDER_SELECT_COLUMNS =
@@ -248,6 +248,7 @@ const normalizeCategoryRow = (row: Row): Row => ({
   button_color: asString(row.button_color),
   logo_url: asString(row.logo_url),
   display_order: asInt(row.display_order),
+  visible: typeof row.visible === "boolean" ? row.visible : true,
   is_receiving_orders: asBoolean(row.is_receiving_orders),
   seller: normalizeSellerSnapshot({
     type: row.seller_type,
@@ -314,34 +315,74 @@ async function queryRows(table: string, options?: {
   client?: ReturnType<typeof getSupabaseClient>;
 }): Promise<Row[]> {
   const supabase = options?.client ?? getSupabaseClient();
-  const selectColumns = options?.selectColumns ?? "id";
+  let selectColumns = (options?.selectColumns ?? "id")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
   const scopedTenantId = resolveStoreTenantId(options?.tenantId);
-  let query = supabase.from(table).select(selectColumns);
+  let canFilterByTenant = scopedTenantId.length > 0;
+  let canOrderBy = Boolean(options?.orderBy?.column);
 
-  if (options?.eq) {
-    for (const [column, value] of Object.entries(options.eq)) {
-      query = query.eq(column, value);
+  while (selectColumns.length > 0) {
+    let query = supabase.from(table).select(selectColumns.join(","));
+
+    if (options?.eq) {
+      for (const [column, value] of Object.entries(options.eq)) {
+        query = query.eq(column, value);
+      }
     }
-  }
-  if (scopedTenantId) {
-    query = query.eq("tenant_id", scopedTenantId);
-  }
-  if (options?.orderBy) {
-    query = query.order(options.orderBy.column, { ascending: options.orderBy.ascending });
-  }
-  if (options?.limit) {
-    query = query.limit(options.limit);
-  }
+    if (canFilterByTenant) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    if (canOrderBy && options?.orderBy) {
+      query = query.order(options.orderBy.column, { ascending: options.orderBy.ascending });
+    }
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
 
-  const { data, error } = await query;
-  if (error) {
+    const { data, error } = await query;
+    if (!error) {
+      const rows = (data ?? []) as unknown as Row[];
+      return rows.map((row) => normalizeRowTimestamps(row));
+    }
+
+    const missingColumn = extractMissingSchemaColumn(error)?.trim().toLowerCase() || "";
+    if (missingColumn) {
+      if (canFilterByTenant && missingColumn === "tenant_id") {
+        canFilterByTenant = false;
+        continue;
+      }
+      if (
+        canOrderBy &&
+        options?.orderBy?.column &&
+        missingColumn === options.orderBy.column.trim().toLowerCase()
+      ) {
+        canOrderBy = false;
+        continue;
+      }
+
+      const nextColumns = selectColumns.filter((column) => {
+        const normalizedColumn = column.trim().toLowerCase();
+        return (
+          normalizedColumn.length > 0 &&
+          normalizedColumn !== missingColumn &&
+          !normalizedColumn.endsWith(`.${missingColumn}`)
+        );
+      });
+      if (nextColumns.length > 0 && nextColumns.length < selectColumns.length) {
+        selectColumns = nextColumns;
+        continue;
+      }
+    }
+
     if (scopedTenantId && isMissingTenantIdColumn(error)) {
       return [];
     }
     throwSupabaseError(error);
   }
-  const rows = (data ?? []) as unknown as Row[];
-  return rows.map((row) => normalizeRowTimestamps(row));
+
+  return [];
 }
 
 export interface StoreProductDetailBundle {
