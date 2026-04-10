@@ -244,6 +244,38 @@ export default function MiniVendorAdminDirectoryPage({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    {canManageVendorLinks ? (
+                      <>
+                        <Link
+                          href={
+                            tenantSlug
+                              ? withTenantSlug(
+                                  tenantSlug,
+                                  `/configuracoes/mini-vendor/editar?userId=${encodeURIComponent(row.userId)}`
+                                )
+                              : `/configuracoes/mini-vendor/editar?userId=${encodeURIComponent(row.userId)}`
+                          }
+                          className="inline-flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[10px] font-black uppercase text-blue-300 hover:bg-blue-500/20"
+                        >
+                          <Pencil size={12} />
+                          Editar loja
+                        </Link>
+                        <Link
+                          href={
+                            tenantSlug
+                              ? withTenantSlug(
+                                  tenantSlug,
+                                  `/configuracoes/mini-vendor/produtos?userId=${encodeURIComponent(row.userId)}`
+                                )
+                              : `/configuracoes/mini-vendor/produtos?userId=${encodeURIComponent(row.userId)}`
+                          }
+                          className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20"
+                        >
+                          <Package size={12} />
+                          Ver produtos
+                        </Link>
+                      </>
+                    ) : null}
                     <button
                       onClick={() => void handleUpdateStatus(row, "approved")}
                       disabled={actionId === row.id}

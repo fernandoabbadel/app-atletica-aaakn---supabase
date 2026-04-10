@@ -50,7 +50,7 @@ export default function MiniVendorSettingsPage() {
       {
         title: "Criar e editar produtos",
         description:
-          "Carrega so o catalogo da lojinha e busca os planos apenas quando o formulario abre.",
+          "Carrega so o catalogo da lojinha e continua liberado mesmo enquanto o cadastro estiver pendente.",
         href: tenantSlug
           ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/produtos")
           : "/configuracoes/mini-vendor/produtos",

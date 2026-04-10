@@ -1,5 +1,5 @@
 import { LigasAdminPageContent } from "../../../ligas/page";
 
-export default function TenantLigasEventosPage() {
+export default function TenantLigaScopedAdminPage() {
   return <LigasAdminPageContent />;
 }

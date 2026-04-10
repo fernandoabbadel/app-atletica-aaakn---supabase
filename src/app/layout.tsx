@@ -57,7 +57,7 @@ export default function RootLayout({
               <CartProvider>
                 <RouteGuard>
                   <MasterTopBar />
-                  <main className="relative z-10 min-h-screen pb-24">
+                  <main className="relative z-10 min-h-screen pb-24 pt-[var(--master-topbar-height)]">
                     {children}
                   </main>
                   <BottomNav />

@@ -19,10 +19,11 @@ import {
 } from "../../constants/leagueQuizProfiles";
 import {
   addLeagueQuizHistory,
-  changeLeagueLikeCount,
   fetchLeagueSummaries,
   LEAGUE_NAME_MAX_LENGTH,
   resolveFollowedLeagueIdsFromUserExtra,
+  resolveLikedLeagueIdsFromUserExtra,
+  toggleUserLeagueLike,
   toggleUserLeagueFollow,
   type LeagueRecord,
 } from "../../lib/leaguesService";
@@ -283,6 +284,10 @@ export default function LigasUscPage() {
   }, [tenantId, user?.extra]);
 
   useEffect(() => {
+    setLikedLeagues(resolveLikedLeagueIdsFromUserExtra(user?.extra, tenantId));
+  }, [tenantId, user?.extra]);
+
+  useEffect(() => {
     if (!selectedLeague) return;
     setIsJoined(followedLeagueIds.includes(selectedLeague.id));
   }, [followedLeagueIds, selectedLeague]);
@@ -309,14 +314,26 @@ export default function LigasUscPage() {
       );
 
       try {
-        await changeLeagueLikeCount({
-          id: leagueId,
-          delta: isLiked ? -1 : 1,
-          actorUserId: user.uid,
+        const result = await toggleUserLeagueLike({
+          leagueId,
+          userId: user.uid,
           tenantId: tenantId || undefined,
         });
+        setLikedLeagues(result.likedIds);
       } catch (error: unknown) {
         console.error(error);
+        setLikedLeagues((prev) =>
+          isLiked ? [...prev, leagueId] : prev.filter((id) => id !== leagueId)
+        );
+        setLeagues((prev) =>
+          prev
+            .map((league) =>
+              league.id === leagueId
+                ? { ...league, likes: Math.max(0, (league.likes || 0) + (isLiked ? 1 : -1)) }
+                : league
+            )
+            .sort((a, b) => (b.likes || 0) - (a.likes || 0))
+        );
       }
 
       // --- CORREÇÃO DO LOG ---

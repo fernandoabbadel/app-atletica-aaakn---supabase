@@ -9,9 +9,10 @@ import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { logActivity } from "@/lib/logger";
 import {
-  changeLeagueLikeCount,
   fetchLeagueById,
   resolveFollowedLeagueIdsFromUserExtra,
+  resolveLikedLeagueIdsFromUserExtra,
+  toggleUserLeagueLike,
   toggleUserLeagueFollow,
   type LeagueRecord,
 } from "@/lib/leaguesService";
@@ -98,6 +99,10 @@ export function LeaguePublicDetailClient({
     setFollowedIds(resolveFollowedLeagueIdsFromUserExtra(user?.extra, tenantId));
   }, [tenantId, user?.extra]);
 
+  useEffect(() => {
+    setLikedIds(resolveLikedLeagueIdsFromUserExtra(user?.extra, tenantId));
+  }, [tenantId, user?.extra]);
+
   const sortedMembers = useMemo(
     () =>
       sortLeagueMembersByRole(league?.membros || []).map((member) => ({
@@ -121,12 +126,12 @@ export function LeaguePublicDetailClient({
     );
 
     try {
-      await changeLeagueLikeCount({
-        id: league.id,
-        delta: wasLiked ? -1 : 1,
-        actorUserId: user.uid,
+      const result = await toggleUserLeagueLike({
+        leagueId: league.id,
+        userId: user.uid,
         tenantId: tenantId || undefined,
       });
+      setLikedIds(result.likedIds);
       if (!wasLiked) {
         void logActivity(user.uid, user.nome || "Atleta", "LIKE", "Ligas", `Curtiu a liga ${league.sigla || league.nome}`);
       }

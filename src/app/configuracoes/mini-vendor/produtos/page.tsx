@@ -220,8 +220,8 @@ export default function MiniVendorProductsPage() {
   }, [editingProductId, isPlanModalOpen, isProductOpen, loading, productDraftKey, productForm]);
 
   const openCreateProduct = async () => {
-    if (!isApproved || !profile?.id) {
-      addToast("Sua loja precisa estar aprovada para criar produtos.", "info");
+    if (!profile?.id) {
+      addToast("Cadastre a loja primeiro para liberar os produtos.", "info");
       return;
     }
     try {
@@ -237,8 +237,8 @@ export default function MiniVendorProductsPage() {
   };
 
   const openEditProduct = async (row: ProductRow) => {
-    if (!isApproved) {
-      addToast("Sua loja precisa estar aprovada para editar produtos.", "info");
+    if (!profile?.id) {
+      addToast("Cadastre a loja primeiro para editar produtos.", "info");
       return;
     }
     try {
@@ -299,8 +299,8 @@ export default function MiniVendorProductsPage() {
 
   const handleSaveProduct = async () => {
     const cleanTenantId = tenantId.trim();
-    if (!profile?.id || !isApproved || !cleanTenantId) {
-      addToast("Sua loja precisa estar aprovada para publicar produtos.", "error");
+    if (!profile?.id || !cleanTenantId) {
+      addToast("Cadastre a loja primeiro para salvar produtos.", "error");
       return;
     }
 
@@ -512,7 +512,7 @@ export default function MiniVendorProductsPage() {
               <button
                 type="button"
                 onClick={() => void openCreateProduct()}
-                disabled={!isApproved || plansLoading}
+                disabled={!profile?.id || plansLoading}
                 className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-black uppercase text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
               >
                 {plansLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
@@ -526,7 +526,7 @@ export default function MiniVendorProductsPage() {
               </div>
             ) : !isApproved ? (
               <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${getVendorStatusClass(profile.status)}`}>
-                Quando o admin aprovar sua loja, esta pagina libera a criacao e edicao dos produtos.
+                Sua loja segue em aprovacao, mas voce ja pode editar esta pagina e montar os produtos. Eles so entram na vitrine oficial depois da aprovacao.
               </div>
             ) : (
               <div className="mt-5 rounded-2xl border border-zinc-800 bg-black/20 px-4 py-4 text-sm text-zinc-400">
@@ -535,7 +535,7 @@ export default function MiniVendorProductsPage() {
             )}
           </section>
 
-          {isApproved ? (
+          {profile ? (
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 space-y-4">
               {isProductOpen ? (
                 <div className="space-y-4 rounded-2xl border border-zinc-800 bg-black/20 p-4">

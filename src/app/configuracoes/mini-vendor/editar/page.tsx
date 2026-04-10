@@ -242,7 +242,7 @@ export default function MiniVendorCompanyEditPage() {
       addToast(
         saved.status === "approved"
           ? "Loja mini vendor atualizada."
-          : "Cadastro salvo. Agora ele aguarda aprovacao do admin.",
+          : "Cadastro salvo. A loja segue em aprovacao, mas voce ja pode continuar editando e cadastrar produtos.",
         "success"
       );
     } catch (error: unknown) {
@@ -345,7 +345,7 @@ export default function MiniVendorCompanyEditPage() {
                   ? "Seu cadastro foi rejeitado. Ajuste os dados e envie novamente para nova analise."
                   : profile?.status === "disabled"
                   ? "Sua loja foi desativada pelo admin. Ajuste os dados ou fale com a atletica."
-                  : "Depois de salvar, o cadastro fica aguardando aprovacao do admin da atletica."}
+                  : "Depois de salvar, o cadastro segue em aprovacao do admin da atletica, mas a edicao da loja e dos produtos continua liberada."}
               </div>
             ) : null}
 

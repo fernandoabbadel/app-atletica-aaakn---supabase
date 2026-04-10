@@ -1148,7 +1148,7 @@ export default function CadastroPage() {
                 {/* BIO */}
                 {cadastroFields.bio.enabled ? (
                 <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Grito de Guerra (Bio do Album)</label>
+                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Bio</label>
                     <div className="relative group">
                         <FileText className="absolute left-4 top-4 text-zinc-500" size={18} />
                         <textarea placeholder="Conte algo sobre voce..." className="input-field pl-14 h-24 py-3 resize-none" value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} maxLength={100} />

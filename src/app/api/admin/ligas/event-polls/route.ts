@@ -19,10 +19,14 @@ export const runtime = "nodejs";
 type PollOptionInput = {
   text: string;
   votes: number;
-  creator?: string;
+  creatorId?: string;
   creatorName?: string;
   creatorAvatar?: string;
 };
+
+const POLL_QUESTION_MAX_CHARS = 280;
+const POLL_OPTION_MAX_CHARS = 60;
+const POLL_OPTION_MAX_COUNT = 20;
 
 const normalizeOptions = (value: unknown): PollOptionInput[] => {
   if (!Array.isArray(value)) return [];
@@ -32,23 +36,23 @@ const normalizeOptions = (value: unknown): PollOptionInput[] => {
       const raw = asObject(entry);
       if (!raw) return null;
 
-      const text = asString(raw.text).trim().slice(0, 120);
+      const text = asString(raw.text).trim().slice(0, POLL_OPTION_MAX_CHARS);
       if (!text) return null;
 
-      const creator = asString(raw.creator).trim();
+      const creatorId = asString(raw.creatorId || raw.creator).trim();
       const creatorName = asString(raw.creatorName).trim();
       const creatorAvatar = asString(raw.creatorAvatar).trim();
 
       return {
         text,
         votes: Math.max(0, Math.floor(asNumber(raw.votes, 0))),
-        ...(creator ? { creator } : {}),
+        ...(creatorId ? { creatorId } : {}),
         ...(creatorName ? { creatorName } : {}),
         ...(creatorAvatar ? { creatorAvatar } : {}),
       } satisfies PollOptionInput;
     })
     .filter((entry): entry is PollOptionInput => entry !== null)
-    .slice(0, 80);
+    .slice(0, POLL_OPTION_MAX_COUNT);
 };
 
 const insertPollWithSchemaFallback = async (
@@ -121,7 +125,8 @@ export async function POST(request: NextRequest) {
     const body = await readBody(request);
     const eventId = asString(body.eventId).trim();
     const requestedTenantId = asString(body.tenantId).trim();
-    const question = asString(body.question).trim().slice(0, 280);
+    const question = asString(body.question).trim().slice(0, POLL_QUESTION_MAX_CHARS);
+    const options = normalizeOptions(body.options);
 
     if (!question) {
       throw new LeagueAdminApiError("Pergunta da enquete obrigatoria.", 400);
@@ -137,7 +142,7 @@ export async function POST(request: NextRequest) {
       eventoId: eventId,
       question,
       allowUserOptions: asBoolean(body.allowUserOptions, true),
-      options: [],
+      options,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       creatorId: asString(body.creatorId).trim() || null,

@@ -16,6 +16,8 @@ import {
   createEventComment,
   cancelEventTicketRequest,
   deleteEventComment,
+  EVENT_POLL_OPTION_MAX_CHARS,
+  EVENT_POLL_OPTION_MAX_COUNT,
   fetchEventDetailsBundle,
   reportEventComment,
   setEventCommentHidden,
@@ -118,6 +120,7 @@ interface Enquete {
   id: string;
   question: string;
   options: EnqueteOption[];
+  allowUserOptions?: boolean;
   voters: string[];
   userVotes?: Record<string, number[]>;
   createdAt: DateLike | null;
@@ -140,8 +143,6 @@ const DEFAULT_PATENTES: PatenteConfig[] = [
 ];
 
 const COMMENT_MAX_CHARS = 280;
-const POLL_OPTION_MAX_CHARS = 40;
-const POLL_OPTION_MAX_COUNT = 10;
 const EVENT_DETAILS_RSVPS_LIMIT = 200;
 const EVENT_DETAILS_COMMENTS_LIMIT = 100;
 const EVENT_DETAILS_POLLS_LIMIT = 20;
@@ -490,12 +491,12 @@ export default function DetalhesEventoPage() {
   };
 
   const handleCreatePollOption = async (pollId: string) => {
-      const cleanOptionText = newPollOption.trim().slice(0, POLL_OPTION_MAX_CHARS);
+      const cleanOptionText = newPollOption.trim().slice(0, EVENT_POLL_OPTION_MAX_CHARS);
       if(!cleanOptionText || !user || !evento) return;
 
       const current = enquetes.find((poll) => poll.id === pollId);
-      if (current && Array.isArray(current.options) && current.options.length >= POLL_OPTION_MAX_COUNT) {
-          addToast(`Cada enquete aceita no maximo ${POLL_OPTION_MAX_COUNT} respostas.`, "error");
+      if (current && Array.isArray(current.options) && current.options.length >= EVENT_POLL_OPTION_MAX_COUNT) {
+          addToast(`Cada enquete aceita no maximo ${EVENT_POLL_OPTION_MAX_COUNT} respostas.`, "error");
           return;
       }
 
@@ -506,6 +507,13 @@ export default function DetalhesEventoPage() {
       );
       if (optionAlreadyExists) {
           addToast("Essa resposta ja existe na enquete.", "info");
+          return;
+      }
+      const userAlreadyCreatedOption = Boolean(
+          current?.options?.some((option) => option.creatorId === user.uid)
+      );
+      if (userAlreadyCreatedOption) {
+          addToast("Cada usuario pode sugerir no maximo uma nova resposta por enquete.", "info");
           return;
       }
 
@@ -875,19 +883,27 @@ export default function DetalhesEventoPage() {
                         })}
                     </div>
                     
-                    <div className="flex gap-2 mt-2 pt-2 border-t border-zinc-800/50">
-                        <input 
-                            value={newPollOption}
-                            onChange={e => setNewPollOption(e.target.value)}
-                            placeholder="Adicionar resposta..."
-                            className="bg-transparent text-xs text-white border-b border-zinc-700 outline-none flex-1 py-1"
-                            maxLength={POLL_OPTION_MAX_CHARS}
-                        />
-                        <button onClick={() => handleCreatePollOption(currentPoll.id)} className="text-[10px] bg-purple-500/10 text-purple-400 px-2 rounded uppercase font-bold hover:bg-purple-500 hover:text-white transition">Add</button>
-                    </div>
-                    <p className="text-[8px] text-zinc-600 mt-1 italic text-center">
-                        * Vote em quantas respostas quiser, uma vez por resposta, e a enquete aceita ate {POLL_OPTION_MAX_COUNT} respostas. ({newPollOption.length}/{POLL_OPTION_MAX_CHARS})
-                    </p>
+                    {currentPoll.allowUserOptions ? (
+                        <>
+                            <div className="flex gap-2 mt-2 pt-2 border-t border-zinc-800/50">
+                                <input 
+                                    value={newPollOption}
+                                    onChange={e => setNewPollOption(e.target.value)}
+                                    placeholder="Adicionar resposta..."
+                                    className="bg-transparent text-xs text-white border-b border-zinc-700 outline-none flex-1 py-1"
+                                    maxLength={EVENT_POLL_OPTION_MAX_CHARS}
+                                />
+                                <button onClick={() => handleCreatePollOption(currentPoll.id)} className="text-[10px] bg-purple-500/10 text-purple-400 px-2 rounded uppercase font-bold hover:bg-purple-500 hover:text-white transition">Add</button>
+                            </div>
+                            <p className="text-[8px] text-zinc-600 mt-1 italic text-center">
+                                * Cada usuario pode sugerir 1 resposta nova e a enquete aceita ate {EVENT_POLL_OPTION_MAX_COUNT} respostas. ({newPollOption.length}/{EVENT_POLL_OPTION_MAX_CHARS})
+                            </p>
+                        </>
+                    ) : (
+                        <p className="text-[10px] text-zinc-600 italic text-center pt-2 border-t border-zinc-800/50">
+                            Essa enquete esta fechada para novas respostas.
+                        </p>
+                    )}
                 </div>
             ) : (
                 <p className="text-[10px] text-zinc-600 italic">Nenhuma enquete ativa no momento.</p>

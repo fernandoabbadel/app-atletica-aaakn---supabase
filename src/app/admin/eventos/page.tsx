@@ -25,6 +25,9 @@ import {
   createAdminEventPoll,
   deleteAdminEventById,
   deleteAdminEventPoll,
+  EVENT_POLL_OPTION_MAX_CHARS,
+  EVENT_POLL_OPTION_MAX_COUNT,
+  EVENT_POLL_QUESTION_MAX_CHARS,
   fetchAdminEventParticipants,
   fetchAdminEventPolls,
   fetchEventsFeed,
@@ -209,6 +212,7 @@ export default function AdminEventosPage() {
   const [novoLote, setNovoLote] = useState<{ nome: string; preco: string; status: StatusLote }>({ nome: "", preco: "", status: "ativo" });
   
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
+  const [pollDraftOptions, setPollDraftOptions] = useState<string[]>(["", ""]);
 
   const mapEventRow = (raw: Record<string, unknown>): Evento => ({
       id: String(raw.id || ""),
@@ -405,6 +409,12 @@ export default function AdminEventosPage() {
       if (!showPollModal) return;
       void loadPolls();
   }, [showPollModal, loadPolls]);
+
+  useEffect(() => {
+      if (showPollModal) return;
+      setNovaEnquete({ question: "", allowUserOptions: true });
+      setPollDraftOptions(["", ""]);
+  }, [showPollModal]);
 
   const dashboardStats = useMemo(() => {
       const totalEventos = eventos.length;
@@ -802,14 +812,20 @@ export default function AdminEventosPage() {
   // --- GESTÃO DE ENQUETES ---
   const handleCreatePoll = async () => {
       if (!showPollModal || !novaEnquete.question) return;
+      const normalizedOptions = pollDraftOptions
+          .map((option) => option.trim().slice(0, EVENT_POLL_OPTION_MAX_CHARS))
+          .filter((option, index, array) => option.length > 0 && array.indexOf(option) === index)
+          .slice(0, EVENT_POLL_OPTION_MAX_COUNT);
       try {
           await createAdminEventPoll({
               eventId: showPollModal.id,
-              question: novaEnquete.question,
+              question: novaEnquete.question.trim().slice(0, EVENT_POLL_QUESTION_MAX_CHARS),
               allowUserOptions: novaEnquete.allowUserOptions,
+              options: normalizedOptions.map((text) => ({ text, votes: 0 })),
               tenantId: activeTenantId || undefined,
           });
           setNovaEnquete({ question: "", allowUserOptions: true });
+          setPollDraftOptions(["", ""]);
           addToast("Enquete criada!", "success");
           await loadPolls();
       } catch (error: unknown) {
@@ -1024,7 +1040,45 @@ export default function AdminEventosPage() {
                   <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
                       {/* Criar */}
                       <div className="bg-black/30 p-4 rounded-xl border border-zinc-800">
-                          <input type="text" placeholder="Pergunta..." className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm text-white mb-3" value={novaEnquete.question} onChange={e => setNovaEnquete({...novaEnquete, question: e.target.value})} />
+                          <input type="text" maxLength={EVENT_POLL_QUESTION_MAX_CHARS} placeholder="Pergunta..." className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm text-white mb-3" value={novaEnquete.question} onChange={e => setNovaEnquete({...novaEnquete, question: e.target.value.slice(0, EVENT_POLL_QUESTION_MAX_CHARS)})} />
+                          <div className="mb-3 flex items-center gap-2">
+                              <input type="checkbox" id="adminAllowPollOptions" checked={novaEnquete.allowUserOptions} onChange={e => setNovaEnquete({...novaEnquete, allowUserOptions: e.target.checked})} className="accent-purple-500"/>
+                              <label htmlFor="adminAllowPollOptions" className="text-xs text-zinc-400">Permitir que usuarios adicionem respostas</label>
+                          </div>
+                          <div className="space-y-2 mb-3">
+                              {pollDraftOptions.map((option, index) => (
+                                  <div key={`poll-draft-option-${index}`} className="flex gap-2">
+                                      <input
+                                          type="text"
+                                          maxLength={EVENT_POLL_OPTION_MAX_CHARS}
+                                          placeholder={`Resposta ${index + 1}`}
+                                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm text-white"
+                                          value={option}
+                                          onChange={(e) => setPollDraftOptions((prev) => prev.map((entry, entryIndex) => entryIndex === index ? e.target.value.slice(0, EVENT_POLL_OPTION_MAX_CHARS) : entry))}
+                                      />
+                                      {pollDraftOptions.length > 2 ? (
+                                          <button
+                                              type="button"
+                                              onClick={() => setPollDraftOptions((prev) => prev.filter((_, entryIndex) => entryIndex !== index))}
+                                              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-zinc-400 hover:bg-zinc-800"
+                                          >
+                                              <X size={14} />
+                                          </button>
+                                      ) : null}
+                                  </div>
+                              ))}
+                          </div>
+                          <div className="mb-3 flex items-center justify-between gap-3 text-[10px] font-bold uppercase text-zinc-500">
+                              <span>Opcoes iniciais opcionais</span>
+                              <button
+                                  type="button"
+                                  onClick={() => setPollDraftOptions((prev) => prev.length >= EVENT_POLL_OPTION_MAX_COUNT ? prev : [...prev, ""])}
+                                  disabled={pollDraftOptions.length >= EVENT_POLL_OPTION_MAX_COUNT}
+                                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                              >
+                                  Adicionar resposta
+                              </button>
+                          </div>
                           <button onClick={handleCreatePoll} className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 rounded-lg text-xs uppercase">Criar Enquete</button>
                       </div>
                       {/* Lista */}

@@ -1,3 +1,5 @@
+import { LigasAdminPageContent } from "../../../ligas/page";
+
 export default function TenantLigasBoardRoundPage() {
-  return null;
+  return <LigasAdminPageContent />;
 }

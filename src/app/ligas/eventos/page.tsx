@@ -1,3 +1,5 @@
+import { LigasAdminPageContent } from "../page";
+
 export default function LigasEventosPage() {
-  return null;
+  return <LigasAdminPageContent />;
 }

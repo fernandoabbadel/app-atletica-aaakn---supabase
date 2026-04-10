@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Check,
   Loader2,
+  Pencil,
   Plus,
   Save,
   SlidersHorizontal,
   Trophy,
+  X,
 } from "lucide-react";
 
 import { useToast } from "@/context/ToastContext";
@@ -23,6 +26,7 @@ import {
   dedupeCadastroSportOptions,
   normalizeCadastroSportOption,
   type CadastroFieldKey,
+  type CadastroSportOption,
 } from "@/lib/cadastroOptions";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
@@ -39,7 +43,7 @@ const FIELD_DEFINITIONS: Array<{
   {
     key: "bio",
     title: "Bio",
-    description: "Texto curto usado no album e no perfil.",
+    description: "Texto curto usado no álbum e no perfil.",
   },
   {
     key: "statusRelacionamento",
@@ -49,13 +53,106 @@ const FIELD_DEFINITIONS: Array<{
   {
     key: "pets",
     title: "Mascote",
-    description: "Selecao de pets/mascote do usuario.",
+    description: "Seleção de pets e mascote do usuário.",
   },
   {
     key: "esportes",
     title: "Modalidades",
-    description: "Botoes selecionaveis de modalidades esportivas.",
+    description: "Botões selecionáveis de modalidades esportivas.",
   },
+];
+
+const EMOJI_OPTIONS = [
+  "⚽",
+  "🏀",
+  "🏐",
+  "🎾",
+  "🏓",
+  "🏸",
+  "🥎",
+  "⚾",
+  "🏉",
+  "🏈",
+  "🥏",
+  "🎱",
+  "🏏",
+  "🏑",
+  "🏒",
+  "🥍",
+  "🏹",
+  "🥊",
+  "🥋",
+  "🤺",
+  "⛳",
+  "⛸️",
+  "🎣",
+  "🤿",
+  "🏊",
+  "🏄",
+  "🚣",
+  "🛶",
+  "🚴",
+  "🏋️",
+  "🤸",
+  "🤾",
+  "🤽",
+  "🏌️",
+  "🏇",
+  "🧘",
+  "🧗",
+  "🏂",
+  "⛷️",
+  "🏃",
+  "💪",
+  "🔥",
+  "⭐",
+  "🌟",
+  "🏅",
+  "🥇",
+  "🥈",
+  "🥉",
+  "🏆",
+  "🎖️",
+  "👟",
+  "🧢",
+  "🎯",
+  "🎉",
+  "🚀",
+  "🌊",
+  "🏖️",
+  "🌴",
+  "☀️",
+  "⚡",
+  "🐶",
+  "🐱",
+  "🐺",
+  "🐯",
+  "🦁",
+  "🦅",
+  "🦈",
+  "🐍",
+  "🐉",
+  "🐲",
+  "🦍",
+  "🦊",
+  "🐆",
+  "🦬",
+  "🦄",
+  "❤️",
+  "🖤",
+  "🤍",
+  "💙",
+  "💚",
+  "💛",
+  "🧡",
+  "💜",
+  "🤎",
+  "👏",
+  "🙌",
+  "👊",
+  "🤝",
+  "😎",
+  "🥳",
 ];
 
 export default function AdminUsuariosCadastroPage() {
@@ -66,6 +163,9 @@ export default function AdminUsuariosCadastroPage() {
   const [draft, setDraft] = useState<CadastroConfig>(getDefaultCadastroConfig);
   const [newSportLabel, setNewSportLabel] = useState("");
   const [newSportIcon, setNewSportIcon] = useState("");
+  const [editingSportId, setEditingSportId] = useState("");
+  const [editingSportLabel, setEditingSportLabel] = useState("");
+  const [editingSportIcon, setEditingSportIcon] = useState("");
 
   const backHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/usuarios") : "/admin/usuarios";
 
@@ -82,10 +182,10 @@ export default function AdminUsuariosCadastroPage() {
         if (!mounted) return;
         setDraft(nextConfig);
       } catch (error: unknown) {
-        console.error("Erro ao carregar configuracao do cadastro:", error);
+        console.error("Erro ao carregar configuração do cadastro:", error);
         if (!mounted) return;
         setDraft(getDefaultCadastroConfig());
-        addToast("Nao foi possivel carregar a configuracao do cadastro.", "error");
+        addToast("Não foi possível carregar a configuração do cadastro.", "error");
       } finally {
         if (mounted) {
           setLoading(false);
@@ -121,6 +221,18 @@ export default function AdminUsuariosCadastroPage() {
     }));
   };
 
+  const resetEditingSport = () => {
+    setEditingSportId("");
+    setEditingSportLabel("");
+    setEditingSportIcon("");
+  };
+
+  const startEditingSport = (sport: CadastroSportOption) => {
+    setEditingSportId(sport.id);
+    setEditingSportLabel(sport.label);
+    setEditingSportIcon(sport.icon);
+  };
+
   const handleAddSport = () => {
     const normalized = normalizeCadastroSportOption({
       label: newSportLabel,
@@ -135,14 +247,34 @@ export default function AdminUsuariosCadastroPage() {
 
     setDraft((prev) => ({
       ...prev,
-      sportOptions: dedupeCadastroSportOptions([
-        ...prev.sportOptions,
-        normalized,
-      ]),
+      sportOptions: dedupeCadastroSportOptions([...prev.sportOptions, normalized]),
     }));
     setNewSportLabel("");
     setNewSportIcon("");
     addToast("Modalidade adicionada ao rascunho.", "success");
+  };
+
+  const handleSaveSportEdit = (sport: CadastroSportOption) => {
+    const normalized = normalizeCadastroSportOption({
+      id: sport.id,
+      label: editingSportLabel,
+      icon: editingSportIcon,
+      enabled: sport.enabled,
+    });
+
+    if (!normalized) {
+      addToast("Informe um nome válido para a modalidade.", "info");
+      return;
+    }
+
+    setDraft((prev) => ({
+      ...prev,
+      sportOptions: dedupeCadastroSportOptions(
+        prev.sportOptions.map((option) => (option.id === sport.id ? normalized : option))
+      ),
+    }));
+    resetEditingSport();
+    addToast("Botão da modalidade atualizado no rascunho.", "success");
   };
 
   const handleSave = async () => {
@@ -150,10 +282,11 @@ export default function AdminUsuariosCadastroPage() {
     try {
       const nextConfig = await saveCadastroConfig(draft, { tenantId });
       setDraft(nextConfig);
-      addToast("Configuracao do cadastro salva.", "success");
+      resetEditingSport();
+      addToast("Configuração do cadastro salva.", "success");
     } catch (error: unknown) {
-      console.error("Erro ao salvar configuracao do cadastro:", error);
-      addToast("Erro ao salvar configuracao do cadastro.", "error");
+      console.error("Erro ao salvar configuração do cadastro:", error);
+      addToast("Erro ao salvar configuração do cadastro.", "error");
     } finally {
       setSaving(false);
     }
@@ -181,7 +314,7 @@ export default function AdminUsuariosCadastroPage() {
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight">Cadastro</h1>
               <p className="text-[11px] font-bold text-zinc-500">
-                Campos e modalidades da pagina de cadastro
+                Campos e modalidades da página de cadastro
               </p>
             </div>
           </div>
@@ -193,7 +326,7 @@ export default function AdminUsuariosCadastroPage() {
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-[11px] font-black uppercase text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-60"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            {saving ? "Salvando..." : "Salvar Configuracao"}
+            {saving ? "Salvando..." : "Salvar configuração"}
           </button>
         </div>
       </header>
@@ -209,7 +342,7 @@ export default function AdminUsuariosCadastroPage() {
                 <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
                   Campos opcionais
                 </p>
-                <h2 className="text-sm font-black uppercase">Exibicao e obrigatoriedade</h2>
+                <h2 className="text-sm font-black uppercase">Exibição e obrigatoriedade</h2>
               </div>
             </div>
 
@@ -237,7 +370,7 @@ export default function AdminUsuariosCadastroPage() {
                               : "border-zinc-700 bg-zinc-900 text-zinc-400"
                           }`}
                         >
-                          {currentField.enabled ? "Visivel" : "Oculto"}
+                          {currentField.enabled ? "Visível" : "Oculto"}
                         </button>
                         <button
                           type="button"
@@ -248,7 +381,7 @@ export default function AdminUsuariosCadastroPage() {
                               : "border-zinc-700 bg-zinc-900 text-zinc-400"
                           }`}
                         >
-                          {currentField.required ? "Obrigatorio" : "Opcional"}
+                          {currentField.required ? "Obrigatório" : "Opcional"}
                         </button>
                       </div>
                     </div>
@@ -268,23 +401,29 @@ export default function AdminUsuariosCadastroPage() {
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
                 Modalidades
               </p>
-              <h2 className="text-sm font-black uppercase">Botoes selecionaveis do cadastro</h2>
+              <h2 className="text-sm font-black uppercase">Botões selecionáveis do cadastro</h2>
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-[1fr_170px_140px]">
+          <div className="mt-5 grid gap-3 md:grid-cols-[1fr_220px_140px]">
             <input
               value={newSportLabel}
               onChange={(event) => setNewSportLabel(event.target.value)}
               placeholder="Nome da nova modalidade"
               className="rounded-2xl border border-zinc-700 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-emerald-500"
             />
-            <input
+            <select
               value={newSportIcon}
               onChange={(event) => setNewSportIcon(event.target.value)}
-              placeholder="Emoji"
               className="rounded-2xl border border-zinc-700 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-emerald-500"
-            />
+            >
+              <option value="">Escolha um emoji</option>
+              {EMOJI_OPTIONS.map((emoji) => (
+                <option key={emoji} value={emoji}>
+                  {emoji}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={handleAddSport}
@@ -295,39 +434,119 @@ export default function AdminUsuariosCadastroPage() {
             </button>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {draft.sportOptions.map((sport) => (
-              <div
-                key={sport.id}
-                className={`rounded-2xl border p-4 transition ${
-                  sport.enabled
-                    ? "border-emerald-500/30 bg-emerald-500/10"
-                    : "border-zinc-800 bg-black/30"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-2xl">{sport.icon}</p>
-                    <p className="mt-3 text-sm font-black uppercase text-white">{sport.label}</p>
-                    <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-zinc-500">
-                      {sport.id}
-                    </p>
-                  </div>
+          <p className="mt-3 text-xs text-zinc-500">
+            Use o dropdown para escolher o emoji da modalidade e o botão de editar para ajustar os
+            cards já existentes.
+          </p>
 
-                  <button
-                    type="button"
-                    onClick={() => toggleSportEnabled(sport.id)}
-                    className={`rounded-full border px-3 py-2 text-[10px] font-black uppercase transition ${
-                      sport.enabled
-                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                        : "border-zinc-700 bg-zinc-900 text-zinc-400"
-                    }`}
-                  >
-                    {sport.enabled ? "Ativo" : "Oculto"}
-                  </button>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {draft.sportOptions.map((sport) => {
+              const isEditing = editingSportId === sport.id;
+              return (
+                <div
+                  key={sport.id}
+                  className={`rounded-2xl border p-4 transition ${
+                    sport.enabled
+                      ? "border-emerald-500/30 bg-emerald-500/10"
+                      : "border-zinc-800 bg-black/30"
+                  }`}
+                >
+                  {isEditing ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-2xl">{editingSportIcon || sport.icon}</p>
+                        <button
+                          type="button"
+                          onClick={() => toggleSportEnabled(sport.id)}
+                          className={`rounded-full border px-3 py-2 text-[10px] font-black uppercase transition ${
+                            sport.enabled
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                              : "border-zinc-700 bg-zinc-900 text-zinc-400"
+                          }`}
+                        >
+                          {sport.enabled ? "Ativo" : "Oculto"}
+                        </button>
+                      </div>
+
+                      <input
+                        value={editingSportLabel}
+                        onChange={(event) => setEditingSportLabel(event.target.value)}
+                        placeholder="Nome da modalidade"
+                        className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-500"
+                      />
+
+                      <select
+                        value={editingSportIcon}
+                        onChange={(event) => setEditingSportIcon(event.target.value)}
+                        className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-500"
+                      >
+                        <option value="">Escolha um emoji</option>
+                        {EMOJI_OPTIONS.map((emoji) => (
+                          <option key={`${sport.id}-${emoji}`} value={emoji}>
+                            {emoji}
+                          </option>
+                        ))}
+                      </select>
+
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+                        {sport.id}
+                      </p>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={resetEditingSport}
+                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 transition hover:bg-zinc-800"
+                        >
+                          <X size={13} />
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveSportEdit(sport)}
+                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-300 transition hover:bg-emerald-500/20"
+                        >
+                          <Check size={13} />
+                          Salvar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-2xl">{sport.icon}</p>
+                        <p className="mt-3 text-sm font-black uppercase text-white">{sport.label}</p>
+                        <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+                          {sport.id}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleSportEnabled(sport.id)}
+                          className={`rounded-full border px-3 py-2 text-[10px] font-black uppercase transition ${
+                            sport.enabled
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                              : "border-zinc-700 bg-zinc-900 text-zinc-400"
+                          }`}
+                        >
+                          {sport.enabled ? "Ativo" : "Oculto"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEditingSport(sport)}
+                          className="inline-flex items-center justify-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[10px] font-black uppercase text-blue-300 transition hover:bg-blue-500/20"
+                        >
+                          <Pencil size={11} />
+                          Editar
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       </main>

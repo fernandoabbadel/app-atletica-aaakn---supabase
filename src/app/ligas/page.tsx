@@ -2,17 +2,22 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { usePathname, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { 
   Lock, ArrowRight, Upload, Plus, Trash2, Save, LogOut, 
   Image as ImageIcon, Layout, Edit3, Bell, 
-  Calendar, UserPlus, Search, X, 
+  Calendar, UserPlus, Search, X, Users,
   Loader2, MessageCircle, LayoutGrid
 } from 'lucide-react';
 import Image from "next/image";
 import { useToast } from "../../context/ToastContext";
 import { ClientCache } from "@/lib/clientCache";
-import { clearEventsNativeCaches } from "@/lib/eventsNativeService";
+import {
+  clearEventsNativeCaches,
+  EVENT_POLL_OPTION_MAX_CHARS,
+  EVENT_POLL_OPTION_MAX_COUNT,
+  EVENT_POLL_QUESTION_MAX_CHARS,
+} from "@/lib/eventsNativeService";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -262,15 +267,23 @@ const extractMemberIds = (members?: Member[]): string[] =>
         )
     );
 
-const buildLeagueSectionPath = (tab: LigaAdminTab): string => {
-    if (tab === "members") return "/ligas/membros";
-    if (tab === "events") return "/ligas/eventos";
-    if (tab === "shark") return "/ligas/board-round";
-    return "/ligas/informacoes";
+const buildLeagueSectionPath = (tab: LigaAdminTab, leagueId?: string | null): string => {
+    const cleanLeagueId = typeof leagueId === "string" ? leagueId.trim() : "";
+    const basePath = cleanLeagueId
+        ? `/ligas/${encodeURIComponent(cleanLeagueId)}`
+        : "/ligas";
+
+    if (tab === "members") return `${basePath}/membros`;
+    if (tab === "events") return `${basePath}/eventos`;
+    if (tab === "shark") return `${basePath}/board-round`;
+    return cleanLeagueId ? `${basePath}/informacoes` : "/ligas/informacoes";
 };
 
 const resolveLeagueTabFromPathname = (pathname: string): LigaAdminTab => {
     const normalized = pathname.toLowerCase().replace(/\/+$/, "");
+    if (/\/ligas\/[^/]+\/membros$/.test(normalized)) return "members";
+    if (/\/ligas\/[^/]+\/eventos$/.test(normalized)) return "events";
+    if (/\/ligas\/[^/]+\/board-round$/.test(normalized)) return "shark";
     if (normalized.endsWith("/ligas/membros")) return "members";
     if (normalized.endsWith("/ligas/eventos")) return "events";
     if (normalized.endsWith("/ligas/board-round")) return "shark";
@@ -300,9 +313,12 @@ const extractErrorMessage = (error: unknown): string => {
 export function LigasAdminPageContent() {
   const { user } = useAuth();
   const router = useRouter();
+  const params = useParams<{ leagueId?: string }>();
   const pathname = usePathname();
   const { tenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
+  const routeLeagueId =
+    typeof params?.leagueId === "string" ? params.leagueId.trim() : "";
   const tenantScopeId =
     tenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
   const lastSelectedStorageKey = buildLigaEditorLastSelectedKey(tenantScopeId);
@@ -344,32 +360,33 @@ export function LigasAdminPageContent() {
   const [pollModal, setPollModal] = useState<string | null>(null); 
   const [polls, setPolls] = useState<Poll[]>([]);
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
+  const [pollDraftOptions, setPollDraftOptions] = useState<string[]>(["", ""]);
 
   useEffect(() => {
       setActiveTab(routeTab);
   }, [routeTab]);
 
   useEffect(() => {
-      const lastSelected = readSessionStorageValue(lastSelectedStorageKey);
-      if (lastSelected) {
-          setSelectedLigaId(lastSelected);
+      const preferredLeagueId = routeLeagueId || readSessionStorageValue(lastSelectedStorageKey);
+      if (preferredLeagueId) {
+          setSelectedLigaId(preferredLeagueId);
       }
-  }, [lastSelectedStorageKey]);
+  }, [lastSelectedStorageKey, routeLeagueId]);
 
   useEffect(() => {
       if (isLoggingOutRef.current) return;
       if (isLoggedIn || ligaData) return;
 
-      const lastSelected = readSessionStorageValue(lastSelectedStorageKey);
-      if (!lastSelected) return;
-      const restoredDraft = readLigaEditorDraft(lastSelected, tenantScopeId);
+      const preferredLeagueId = routeLeagueId || readSessionStorageValue(lastSelectedStorageKey);
+      if (!preferredLeagueId) return;
+      const restoredDraft = readLigaEditorDraft(preferredLeagueId, tenantScopeId);
       if (!restoredDraft || !restoredDraft.ligaSenha) return;
 
       setLigaData({
           ...(restoredDraft.ligaDraft as Omit<LigaData, "senha">),
           senha: restoredDraft.ligaSenha,
       } as LigaData);
-      setSelectedLigaId(lastSelected);
+      setSelectedLigaId(preferredLeagueId);
       setSenhaInput(restoredDraft.ligaSenha);
       setActiveTab(routeTab);
       setSavedMemberIds(
@@ -384,7 +401,13 @@ export function LigasAdminPageContent() {
       setNovoLote(restoredDraft.novoLote);
       setIsLoggedIn(true);
       addToast("Sessao da liga restaurada.", "info");
-  }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, routeTab, tenantScopeId]);
+      if (preferredLeagueId && preferredLeagueId !== routeLeagueId) {
+          const nextPath = tenantSlug
+              ? withTenantSlug(tenantSlug, buildLeagueSectionPath(routeTab, preferredLeagueId))
+              : buildLeagueSectionPath(routeTab, preferredLeagueId);
+          router.replace(nextPath);
+      }
+  }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, routeLeagueId, routeTab, router, tenantScopeId, tenantSlug]);
 
   useEffect(() => {
       if (!selectedLigaId) return;
@@ -501,6 +524,12 @@ export function LigasAdminPageContent() {
       };
   }, [pollModal, addToast, tenantScopeId]);
 
+  useEffect(() => {
+      if (pollModal) return;
+      setNovaEnquete({ question: "", allowUserOptions: true });
+      setPollDraftOptions(["", ""]);
+  }, [pollModal]);
+
   // 4. FUNÇÃO DE LOGIN
   const handleLogin = async () => {
       if (!selectedLigaId || !senhaInput) return addToast("Preencha todos os campos!", "error");
@@ -565,6 +594,7 @@ export function LigasAdminPageContent() {
               }
               
               // LOG CORRIGIDO: ORDEM (ID, NOME, AÇÃO, RECURSO, DETALHES)
+              router.replace(tenantPath(buildLeagueSectionPath(routeTab, target.id)));
               logActivity(
                   target.id, 
                   target.nome,
@@ -999,7 +1029,17 @@ export function LigasAdminPageContent() {
       tenantSlug ? withTenantSlug(tenantSlug, path) : path;
   const navigateToSection = (tab: LigaAdminTab) => {
       setActiveTab(tab);
-      router.push(tenantPath(buildLeagueSectionPath(tab)));
+      const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
+      router.push(tenantPath(buildLeagueSectionPath(tab, scopedLeagueId)));
+  };
+  const openEventPresenceList = (eventId: string) => {
+      const cleanEventId = eventId.trim();
+      if (!cleanEventId) return;
+      const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
+      const path = scopedLeagueId
+          ? `/ligas/${encodeURIComponent(scopedLeagueId)}/eventos/lista/${encodeURIComponent(cleanEventId)}`
+          : `/ligas/eventos/lista/${encodeURIComponent(cleanEventId)}`;
+      router.push(tenantPath(path));
   };
   const savedMemberIdSet = new Set(savedMemberIds);
   const allLeagueMembers = ligaData?.membros || [];
@@ -1280,6 +1320,9 @@ export function LigasAdminPageContent() {
                                       <div className="flex gap-2 mt-2">
                                           <button onClick={() => handleOpenEventModal(idx)} className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1"><Edit3 size={10}/> Editar Evento</button>
                                           {ev.globalEventId && (
+                                              <button onClick={() => openEventPresenceList(ev.globalEventId || "")} className="text-[10px] text-cyan-400 hover:underline flex items-center gap-1"><Users size={10}/> Lista Presenca</button>
+                                          )}
+                                          {ev.globalEventId && (
                                               <button onClick={() => setPollModal(ev.globalEventId || null)} className="text-[10px] text-purple-400 hover:underline flex items-center gap-1"><MessageCircle size={10}/> Gerenciar Enquetes</button>
                                           )}
                                       </div>
@@ -1364,19 +1407,58 @@ export function LigasAdminPageContent() {
                       <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
                           <div className="bg-black/30 p-4 rounded-xl border border-zinc-800">
                               <label className="text-xs font-bold text-zinc-500 uppercase mb-2 block">Nova Enquete</label>
-                              <input type="text" placeholder="Pergunta..." className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm text-white mb-3" value={novaEnquete.question} onChange={e => setNovaEnquete({...novaEnquete, question: e.target.value})} />
+                              <input type="text" maxLength={EVENT_POLL_QUESTION_MAX_CHARS} placeholder="Pergunta..." className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm text-white mb-3" value={novaEnquete.question} onChange={e => setNovaEnquete({...novaEnquete, question: e.target.value.slice(0, EVENT_POLL_QUESTION_MAX_CHARS)})} />
                               <div className="flex items-center gap-2 mb-4">
                                   <input type="checkbox" id="allowOpts" checked={novaEnquete.allowUserOptions} onChange={e => setNovaEnquete({...novaEnquete, allowUserOptions: e.target.checked})} className="accent-purple-500"/>
                                   <label htmlFor="allowOpts" className="text-xs text-zinc-400">Permitir que usuários adicionem opções</label>
                               </div>
+                              <div className="space-y-2 mb-4">
+                                  {pollDraftOptions.map((option, index) => (
+                                      <div key={`league-poll-option-${index}`} className="flex gap-2">
+                                          <input
+                                              type="text"
+                                              maxLength={EVENT_POLL_OPTION_MAX_CHARS}
+                                              placeholder={`Resposta ${index + 1}`}
+                                              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm text-white"
+                                              value={option}
+                                              onChange={e => setPollDraftOptions((prev) => prev.map((entry, entryIndex) => entryIndex === index ? e.target.value.slice(0, EVENT_POLL_OPTION_MAX_CHARS) : entry))}
+                                          />
+                                          {pollDraftOptions.length > 2 ? (
+                                              <button
+                                                  type="button"
+                                                  onClick={() => setPollDraftOptions((prev) => prev.filter((_, entryIndex) => entryIndex !== index))}
+                                                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-zinc-400 hover:bg-zinc-800"
+                                              >
+                                                  <X size={14}/>
+                                              </button>
+                                          ) : null}
+                                      </div>
+                                  ))}
+                              </div>
+                              <div className="flex items-center justify-between gap-3 mb-4 text-[10px] font-bold uppercase text-zinc-500">
+                                  <span>Opcoes iniciais opcionais</span>
+                                  <button
+                                      type="button"
+                                      onClick={() => setPollDraftOptions((prev) => prev.length >= EVENT_POLL_OPTION_MAX_COUNT ? prev : [...prev, ""])}
+                                      disabled={pollDraftOptions.length >= EVENT_POLL_OPTION_MAX_COUNT}
+                                      className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                                  >
+                                      Adicionar resposta
+                                  </button>
+                              </div>
                               <button onClick={async () => {
                                   if (!novaEnquete.question) return;
                                   try {
-                                      const question = novaEnquete.question;
+                                      const question = novaEnquete.question.trim().slice(0, EVENT_POLL_QUESTION_MAX_CHARS);
+                                      const normalizedOptions = pollDraftOptions
+                                          .map((option) => option.trim().slice(0, EVENT_POLL_OPTION_MAX_CHARS))
+                                          .filter((option, index, array) => option.length > 0 && array.indexOf(option) === index)
+                                          .slice(0, EVENT_POLL_OPTION_MAX_COUNT);
                                       const ref = await createEventPoll({
                                           eventId: pollModal,
                                           question,
                                           allowUserOptions: novaEnquete.allowUserOptions,
+                                          options: normalizedOptions.map((text) => ({ text, votes: 0 })),
                                           creatorId: ligaData?.id,
                                           tenantId: tenantScopeId || undefined,
                                       });
@@ -1386,11 +1468,12 @@ export function LigasAdminPageContent() {
                                               id: ref.id,
                                               question,
                                               allowUserOptions: novaEnquete.allowUserOptions,
-                                              options: [],
+                                              options: normalizedOptions.map((text) => ({ text, votes: 0 })),
                                               voters: [],
                                           },
                                       ]);
                                       setNovaEnquete({ question: "", allowUserOptions: true });
+                                      setPollDraftOptions(["", ""]);
                                       addToast("Enquete criada!", "success");
                                       await logActivity(
                                           ligaData?.id || 'sys', 
@@ -1561,7 +1644,7 @@ export function LigasAdminPageContent() {
 }
 
 export default function LigasAdminPage() {
-    return null;
+    return <LigasAdminPageContent />;
 }
 
 

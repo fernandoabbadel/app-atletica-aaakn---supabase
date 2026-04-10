@@ -767,7 +767,7 @@ export interface LeagueUserRecord {
   turma?: string;
 }
 
-const normalizeFollowedLeagueIds = (value: unknown): string[] =>
+const normalizeLeagueInteractionIds = (value: unknown): string[] =>
   Array.from(
     new Set(
       (Array.isArray(value) ? value : [])
@@ -786,10 +786,25 @@ export const resolveFollowedLeagueIdsFromUserExtra = (
   const byTenant = asObject(extraData.followedLeagueIdsByTenant);
 
   if (scopedTenantId && byTenant) {
-    return normalizeFollowedLeagueIds(byTenant[scopedTenantId]);
+    return normalizeLeagueInteractionIds(byTenant[scopedTenantId]);
   }
 
-  return normalizeFollowedLeagueIds(extraData.followedLeagueIds);
+  return normalizeLeagueInteractionIds(extraData.followedLeagueIds);
+};
+
+export const resolveLikedLeagueIdsFromUserExtra = (
+  extra: unknown,
+  tenantId?: string | null
+): string[] => {
+  const extraData = asObject(extra) ?? {};
+  const scopedTenantId = resolveLeagueTenantId(tenantId);
+  const byTenant = asObject(extraData.likedLeagueIdsByTenant);
+
+  if (scopedTenantId && byTenant) {
+    return normalizeLeagueInteractionIds(byTenant[scopedTenantId]);
+  }
+
+  return normalizeLeagueInteractionIds(extraData.likedLeagueIds);
 };
 
 export interface LeaguePollOptionRecord {
@@ -1599,6 +1614,122 @@ export async function changeLeagueLikeCount(payload: {
   clearLeagueDependentCaches();
 }
 
+const updateUserLeagueInteractionIds = async (payload: {
+  leagueId: string;
+  userId: string;
+  tenantId?: string | null;
+  key: "followedLeagueIds" | "likedLeagueIds";
+  byTenantKey: "followedLeagueIdsByTenant" | "likedLeagueIdsByTenant";
+}): Promise<{
+  currentExtra: Record<string, unknown>;
+  nextExtra: Record<string, unknown>;
+  nextIds: string[];
+  wasActive: boolean;
+  changed: boolean;
+}> => {
+  const leagueId = payload.leagueId.trim();
+  const userId = payload.userId.trim();
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  if (!leagueId || !userId) {
+    return {
+      currentExtra: {},
+      nextExtra: {},
+      nextIds: [],
+      wasActive: false,
+      changed: false,
+    };
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("extra")
+    .eq("uid", userId)
+    .maybeSingle();
+  if (error) throwSupabaseError(error);
+
+  const currentExtra = asObject(asObject(data)?.extra) ?? {};
+  const currentByTenant = asObject(currentExtra[payload.byTenantKey]) ?? {};
+  const currentIds = scopedTenantId
+    ? normalizeLeagueInteractionIds(currentByTenant[scopedTenantId])
+    : normalizeLeagueInteractionIds(currentExtra[payload.key]);
+  const wasActive = currentIds.includes(leagueId);
+  const nextIds = wasActive
+    ? currentIds.filter((entry) => entry !== leagueId)
+    : Array.from(new Set([...currentIds, leagueId]));
+
+  const nextExtra: Record<string, unknown> = {
+    ...currentExtra,
+    ...(scopedTenantId
+      ? {
+          [payload.byTenantKey]: {
+            ...currentByTenant,
+            [scopedTenantId]: nextIds,
+          },
+        }
+      : {
+          [payload.key]: nextIds,
+        }),
+  };
+
+  const changed =
+    nextIds.length !== currentIds.length ||
+    nextIds.some((entry, index) => entry !== currentIds[index]);
+
+  if (changed) {
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({
+        extra: nextExtra,
+        updatedAt: nowIso(),
+      })
+      .eq("uid", userId);
+    if (updateError) throwSupabaseError(updateError);
+  }
+
+  return {
+    currentExtra,
+    nextExtra,
+    nextIds,
+    wasActive,
+    changed,
+  };
+};
+
+export async function toggleUserLeagueLike(payload: {
+  leagueId: string;
+  userId: string;
+  tenantId?: string | null;
+}): Promise<{ likedIds: string[]; isLiked: boolean }> {
+  const leagueId = payload.leagueId.trim();
+  const userId = payload.userId.trim();
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  if (!leagueId || !userId) {
+    return { likedIds: [], isLiked: false };
+  }
+
+  const { nextIds, wasActive, changed } = await updateUserLeagueInteractionIds({
+    leagueId,
+    userId,
+    tenantId: scopedTenantId,
+    key: "likedLeagueIds",
+    byTenantKey: "likedLeagueIdsByTenant",
+  });
+
+  const isLiked = !wasActive;
+  if (changed) {
+    await changeLeagueLikeCount({
+      id: leagueId,
+      delta: isLiked ? 1 : -1,
+      actorUserId: userId,
+      tenantId: scopedTenantId,
+    });
+  }
+
+  clearLeagueDependentCaches();
+  return { likedIds: nextIds, isLiked };
+}
+
 export async function toggleUserLeagueFollow(payload: {
   leagueId: string;
   userId: string;
@@ -1610,43 +1741,13 @@ export async function toggleUserLeagueFollow(payload: {
   const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
   if (!leagueId || !userId) return [];
 
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("users")
-    .select("extra")
-    .eq("uid", userId)
-    .maybeSingle();
-  if (error) throwSupabaseError(error);
-
-  const currentExtra = asObject(asObject(data)?.extra) ?? {};
-  const currentByTenant = asObject(currentExtra.followedLeagueIdsByTenant) ?? {};
-  const currentIds = resolveFollowedLeagueIdsFromUserExtra(currentExtra, scopedTenantId);
-  const nextIds = payload.currentlyFollowing
-    ? currentIds.filter((entry) => entry !== leagueId)
-    : Array.from(new Set([...currentIds, leagueId]));
-
-  const nextByTenant = scopedTenantId
-    ? {
-        ...currentByTenant,
-        [scopedTenantId]: nextIds,
-      }
-    : currentByTenant;
-
-  const nextExtra: Record<string, unknown> = {
-    ...currentExtra,
-    ...(scopedTenantId
-      ? { followedLeagueIdsByTenant: nextByTenant }
-      : { followedLeagueIds: nextIds }),
-  };
-
-  const { error: updateError } = await supabase
-    .from("users")
-    .update({
-      extra: nextExtra,
-      updatedAt: nowIso(),
-    })
-    .eq("uid", userId);
-  if (updateError) throwSupabaseError(updateError);
+  const { nextIds } = await updateUserLeagueInteractionIds({
+    leagueId,
+    userId,
+    tenantId: scopedTenantId,
+    key: "followedLeagueIds",
+    byTenantKey: "followedLeagueIdsByTenant",
+  });
 
   clearLeagueDependentCaches();
   return nextIds;
@@ -1708,6 +1809,7 @@ export async function createEventPoll(payload: {
   eventId: string;
   question: string;
   allowUserOptions: boolean;
+  options?: unknown[];
   creatorId?: string;
   tenantId?: string | null;
 }): Promise<{ id: string }> {
@@ -1720,6 +1822,7 @@ export async function createEventPoll(payload: {
     eventId,
     question: payload.question.trim().slice(0, 280),
     allowUserOptions: payload.allowUserOptions,
+    options: Array.isArray(payload.options) ? payload.options : [],
     creatorId: payload.creatorId?.trim() || "",
     tenantId: scopedTenantId || undefined,
   };
@@ -1739,7 +1842,7 @@ export async function createEventPoll(payload: {
         eventoId: eventId,
         question: requestPayload.question,
         allowUserOptions: requestPayload.allowUserOptions,
-        options: [],
+        options: requestPayload.options,
         creatorId: requestPayload.creatorId || null,
         ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
         isOfficial: true,

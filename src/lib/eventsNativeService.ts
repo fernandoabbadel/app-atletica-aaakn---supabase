@@ -37,6 +37,9 @@ const DEFAULT_EVENT_DETAILS_RSVPS_LIMIT = 200;
 const DEFAULT_EVENT_DETAILS_COMMENTS_LIMIT = 100;
 const DEFAULT_EVENT_DETAILS_POLLS_LIMIT = 20;
 const DEFAULT_EVENT_DETAILS_PEDIDOS_LIMIT = 20;
+export const EVENT_POLL_QUESTION_MAX_CHARS = 280;
+export const EVENT_POLL_OPTION_MAX_CHARS = 60;
+export const EVENT_POLL_OPTION_MAX_COUNT = 20;
 const EVENTOS_FEED_SELECT_COLUMNS =
   "id,titulo,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,status,sale_status,isLowStock,stats,lotes,tenant_id,createdAt,updatedAt";
 const EVENTOS_SELECT_COLUMNS =
@@ -44,7 +47,7 @@ const EVENTOS_SELECT_COLUMNS =
 const EVENTOS_RSVPS_SELECT_COLUMNS =
   "id,eventoId,userId,status,userName,userAvatar,userTurma,timestamp";
 const EVENTOS_COMENTARIOS_SELECT_COLUMNS =
-  "id,eventoId,userId,userName,userAvatar,userTurma,role,userPlanoCor,userPlanoIcon,userPatente,userPatenteIcon,text,texto,likes,reports,hidden,createdAt,updatedAt";
+  "id,eventoId,userId,userName,userAvatar,userTurma,role,userPlanoCor,userPlanoIcon,userPatente,text,texto,likes,reports,hidden,createdAt,updatedAt";
 const EVENTOS_ENQUETES_SELECT_COLUMNS =
   "id,eventoId,question,allowUserOptions,options,createdAt,updatedAt";
 const PATENTES_SELECT_COLUMNS = "id,titulo,minXp,cor,iconName,bg,border,text";
@@ -82,6 +85,66 @@ const resolveEventsTenantId = (tenantId?: string | null): string =>
 
 const asNum = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+type EventPollOptionRecord = {
+  text: string;
+  votes: number;
+  creatorId?: string;
+  creatorName?: string;
+  creatorAvatar?: string;
+  votesByTurma?: Record<string, number>;
+};
+
+const normalizeEventPollOptionRecord = (value: unknown): EventPollOptionRecord | null => {
+  const raw = asObject(value);
+  if (!raw) return null;
+
+  const text = asString(raw.text).trim().slice(0, EVENT_POLL_OPTION_MAX_CHARS);
+  if (!text) return null;
+
+  const creatorId = asString(raw.creatorId || raw.creator).trim();
+  const creatorName = asString(raw.creatorName).trim();
+  const creatorAvatar = asString(raw.creatorAvatar).trim();
+  const votesByTurmaSource = asObject(raw.votesByTurma) ?? {};
+  const votesByTurma = Object.entries(votesByTurmaSource).reduce<Record<string, number>>(
+    (accumulator, [key, entryValue]) => {
+      const turma = asString(key).trim();
+      const count = Math.max(0, Math.floor(asNum(entryValue, 0)));
+      if (turma && count > 0) {
+        accumulator[turma] = count;
+      }
+      return accumulator;
+    },
+    {}
+  );
+
+  return {
+    text,
+    votes: Math.max(0, Math.floor(asNum(raw.votes, 0))),
+    ...(creatorId ? { creatorId } : {}),
+    ...(creatorName ? { creatorName } : {}),
+    ...(creatorAvatar ? { creatorAvatar } : {}),
+    ...(Object.keys(votesByTurma).length > 0 ? { votesByTurma } : {}),
+  };
+};
+
+const normalizeEventPollOptions = (value: unknown): EventPollOptionRecord[] => {
+  if (!Array.isArray(value)) return [];
+
+  const seenTexts = new Set<string>();
+  const options: EventPollOptionRecord[] = [];
+  for (const entry of value) {
+    const normalized = normalizeEventPollOptionRecord(entry);
+    if (!normalized) continue;
+    const dedupeKey = normalized.text.trim().toLowerCase();
+    if (!dedupeKey || seenTexts.has(dedupeKey)) continue;
+    seenTexts.add(dedupeKey);
+    options.push(normalized);
+    if (options.length >= EVENT_POLL_OPTION_MAX_COUNT) break;
+  }
+
+  return options;
+};
 
 const splitSelectColumns = (selectColumns: string): string[] =>
   selectColumns
@@ -1183,6 +1246,7 @@ export async function createAdminEventPoll(payload: {
   eventId: string;
   question: string;
   allowUserOptions: boolean;
+  options?: unknown[];
   tenantId?: string | null;
 }): Promise<{ id: string }> {
   const eventId = payload.eventId.trim();
@@ -1194,14 +1258,15 @@ export async function createAdminEventPoll(payload: {
   }
 
   const supabase = getSupabaseClient();
+  const normalizedOptions = normalizeEventPollOptions(payload.options);
   const { data, error } = await supabase
     .from("eventos_enquetes")
     .insert({
       eventoId: eventId,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
-      question: payload.question.trim(),
+      question: payload.question.trim().slice(0, EVENT_POLL_QUESTION_MAX_CHARS),
       allowUserOptions: payload.allowUserOptions,
-      options: [],
+      options: normalizedOptions,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     })
@@ -1675,30 +1740,31 @@ export async function voteEventPollOption(payload: {
       .map((value) => Math.floor(value));
 
     if (currentVotes.includes(index)) {
-      let deleteQuery = supabase
-        .from("eventos_enquete_votos")
-        .delete()
-        .eq("enqueteId", payload.pollId)
-        .eq("userId", payload.userId)
-        .eq("optionIndex", index);
-      if (scopedTenantId) {
-        deleteQuery = deleteQuery.eq("tenant_id", scopedTenantId);
-      }
-      const { error: deleteError } = await deleteQuery;
-      if (deleteError) throw deleteError;
-    } else {
-      const { error: insertError } = await supabase.from("eventos_enquete_votos").insert({
-        enqueteId: payload.pollId,
-        eventoId: payload.eventId,
-        userId: payload.userId,
-        optionIndex: index,
-        userTurma: (payload.userTurma || "Geral").trim() || "Geral",
-        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
-        createdAt: nowIso(),
-      });
-      if (insertError) throw insertError;
-      shouldCountPollAnswer = currentVotes.length === 0;
+      invalidateEventCaches(payload.eventId);
+      return;
     }
+
+    const { error: insertError } = await supabase.from("eventos_enquete_votos").insert({
+      enqueteId: payload.pollId,
+      eventoId: payload.eventId,
+      userId: payload.userId,
+      optionIndex: index,
+      userTurma: (payload.userTurma || "Geral").trim() || "Geral",
+      ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+      createdAt: nowIso(),
+    });
+    if (insertError) {
+      const insertCode =
+        typeof insertError === "object" && insertError !== null && "code" in insertError
+          ? String((insertError as { code?: unknown }).code || "")
+          : "";
+      if (insertCode === "23505") {
+        invalidateEventCaches(payload.eventId);
+        return;
+      }
+      throw insertError;
+    }
+    shouldCountPollAnswer = currentVotes.length === 0;
   } catch (error: unknown) {
     if (!isMissingRelationError(error)) {
       if (error instanceof Error) throw error;
@@ -1729,18 +1795,15 @@ export async function voteEventPollOption(payload: {
     const turmaKey = (payload.userTurma || "Geral").trim() || "Geral";
 
     if (myVotes.includes(index)) {
-      optionObj.votes = Math.max(0, asNum(optionObj.votes, 0) - 1);
-      votesByTurma[turmaKey] = Math.max(0, asNum(votesByTurma[turmaKey], 0) - 1);
-      optionObj.votesByTurma = votesByTurma;
-      legacyOptions[index] = optionObj;
-      legacyUserVotesMap[payload.userId] = myVotes.filter((v) => v !== index);
-    } else {
-      optionObj.votes = asNum(optionObj.votes, 0) + 1;
-      votesByTurma[turmaKey] = asNum(votesByTurma[turmaKey], 0) + 1;
-      optionObj.votesByTurma = votesByTurma;
-      legacyOptions[index] = optionObj;
-      legacyUserVotesMap[payload.userId] = [...myVotes, index];
+      invalidateEventCaches(payload.eventId);
+      return;
     }
+
+    optionObj.votes = asNum(optionObj.votes, 0) + 1;
+    votesByTurma[turmaKey] = asNum(votesByTurma[turmaKey], 0) + 1;
+    optionObj.votesByTurma = votesByTurma;
+    legacyOptions[index] = optionObj;
+    legacyUserVotesMap[payload.userId] = [...myVotes, index];
 
     const voters = asStringArray(legacyPollRow.voters);
     shouldCountPollAnswer = !voters.includes(payload.userId) && !myVotes.includes(index);
@@ -1790,7 +1853,7 @@ export async function addEventPollOption(payload: {
   const scopedTenantId = resolveEventsTenantId(payload.tenantId);
   let selectQuery = supabase
     .from("eventos_enquetes")
-    .select("options")
+    .select("options, allowUserOptions")
     .eq("id", payload.pollId)
     .eq("eventoId", payload.eventId);
   if (scopedTenantId) {
@@ -1800,11 +1863,40 @@ export async function addEventPollOption(payload: {
   if (selectError) throwSupabaseError(selectError);
   if (!row) return;
 
-  const currentOptions = Array.isArray(row.options) ? row.options : [];
+  const currentOptions = normalizeEventPollOptions(row.options);
+  const nextOption = normalizeEventPollOptionRecord(payload.option);
+  if (!nextOption) {
+    throw new Error("Resposta invalida.");
+  }
+
+  const creatorId = asString(nextOption.creatorId).trim();
+  const isUserGeneratedOption =
+    Boolean(asString(payload.autoVoteUserId).trim()) && creatorId.length > 0;
+
+  if (isUserGeneratedOption && row.allowUserOptions === false) {
+    throw new Error("Essa enquete nao aceita novas respostas.");
+  }
+  if (currentOptions.length >= EVENT_POLL_OPTION_MAX_COUNT) {
+    throw new Error(`Cada enquete aceita no maximo ${EVENT_POLL_OPTION_MAX_COUNT} respostas.`);
+  }
+  if (
+    currentOptions.some(
+      (entry) => entry.text.trim().toLowerCase() === nextOption.text.trim().toLowerCase()
+    )
+  ) {
+    throw new Error("Essa resposta ja existe na enquete.");
+  }
+  if (
+    isUserGeneratedOption &&
+    currentOptions.some((entry) => asString(entry.creatorId).trim() === creatorId)
+  ) {
+    throw new Error("Cada usuario pode sugerir no maximo uma nova resposta por enquete.");
+  }
+
   let updateQuery = supabase
     .from("eventos_enquetes")
     .update({
-      options: [...currentOptions, payload.option],
+      options: [...currentOptions, nextOption],
       updatedAt: nowIso(),
     })
     .eq("id", payload.pollId)
