@@ -624,49 +624,66 @@ export async function upsertMiniVendorProfile(
       : existing?.status || "pending";
   const approvedBy = nextStatus === "approved" ? existing?.approvedBy || "" : "";
   const approvedAt = nextStatus === "approved" ? existing?.approvedAt || "" : "";
+  const slug = storeName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  const writePayload = {
+    status: nextStatus,
+    store_name: storeName,
+    slug,
+    description: asString(payload.description).trim().slice(0, 1200),
+    logo_url: asString(payload.logoUrl).trim().slice(0, 400),
+    cover_url: asString(payload.coverUrl).trim().slice(0, 400),
+    pix_key: asString(payload.pixKey).trim().slice(0, 180),
+    pix_bank: asString(payload.pixBank).trim().slice(0, 120),
+    pix_holder: asString(payload.pixHolder).trim().slice(0, 180),
+    pix_whatsapp: asString(payload.pixWhatsapp).trim().slice(0, 60),
+    instagram: asString(payload.instagram).trim().slice(0, 160),
+    instagram_enabled: payload.instagramEnabled,
+    whatsapp: asString(payload.whatsapp).trim().slice(0, 60),
+    whatsapp_enabled: payload.whatsappEnabled,
+    profile_visible: payload.profileVisible ?? existing?.profileVisible ?? true,
+    category_visible: payload.categoryVisible ?? existing?.categoryVisible ?? true,
+    products_visible: payload.productsVisible ?? existing?.productsVisible ?? true,
+    category_button_color:
+      asString(payload.categoryButtonColor).trim().slice(0, 32) || "#2563eb",
+    approved_by: approvedBy || null,
+    approved_at: approvedAt || null,
+    updated_at: nowIso(),
+  };
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("mini_vendors")
-    .upsert(
-      {
+  let data: unknown = null;
+  let error: { message: string; code?: string | null; name?: string | null } | null = null;
+
+  if (existing?.id) {
+    const result = await supabase
+      .from("mini_vendors")
+      .update(writePayload)
+      .eq("id", existing.id)
+      .eq("tenant_id", tenantId)
+      .select(MINI_VENDOR_SELECT_COLUMNS)
+      .single();
+    data = result.data;
+    error = result.error;
+  } else {
+    const result = await supabase
+      .from("mini_vendors")
+      .insert({
         tenant_id: tenantId,
         user_id: userId,
-        status: nextStatus,
-        store_name: storeName,
-        slug: storeName
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "")
-          .slice(0, 80),
-        description: asString(payload.description).trim().slice(0, 1200),
-        logo_url: asString(payload.logoUrl).trim().slice(0, 400),
-        cover_url: asString(payload.coverUrl).trim().slice(0, 400),
-        pix_key: asString(payload.pixKey).trim().slice(0, 180),
-        pix_bank: asString(payload.pixBank).trim().slice(0, 120),
-        pix_holder: asString(payload.pixHolder).trim().slice(0, 180),
-        pix_whatsapp: asString(payload.pixWhatsapp).trim().slice(0, 60),
-        instagram: asString(payload.instagram).trim().slice(0, 160),
-        instagram_enabled: payload.instagramEnabled,
-        whatsapp: asString(payload.whatsapp).trim().slice(0, 60),
-        whatsapp_enabled: payload.whatsappEnabled,
-        profile_visible: payload.profileVisible ?? existing?.profileVisible ?? true,
-        category_visible: payload.categoryVisible ?? existing?.categoryVisible ?? true,
-        products_visible: payload.productsVisible ?? existing?.productsVisible ?? true,
-        category_button_color:
-          asString(payload.categoryButtonColor).trim().slice(0, 32) || "#2563eb",
-        approved_by: approvedBy || null,
-        approved_at: approvedAt || null,
-        updated_at: nowIso(),
-      },
-      {
-        onConflict: "tenant_id,user_id",
-      }
-    )
-    .select(MINI_VENDOR_SELECT_COLUMNS)
-    .single();
+        ...writePayload,
+      })
+      .select(MINI_VENDOR_SELECT_COLUMNS)
+      .single();
+    data = result.data;
+    error = result.error;
+  }
+
   if (error) throwSupabaseError(error);
 
   const normalized = normalizeMiniVendorProfile(asObject(data));
