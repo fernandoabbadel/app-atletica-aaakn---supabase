@@ -108,10 +108,16 @@ const LEAGUE_GLOBAL_EVENT_SELECT_COLUMNS = [
   "local",
   "tipo",
   "destaque",
+  "mapsUrl",
   "imagem",
   "imagePositionY",
   "lotes",
   "descricao",
+  "sale_status",
+  "pixChave",
+  "pixBanco",
+  "pixTitular",
+  "contatoComprovante",
 ] as const;
 
 const asObject = (value: unknown): Record<string, unknown> | null => {
@@ -593,13 +599,18 @@ export async function syncLeagueEvents(payload: {
       local: nextEvent.local,
       tipo: "Liga",
       destaque: nextEvent.destaque,
+      mapsUrl: asString(nextEvent.mapsUrl).trim(),
       imagem: nextEvent.imagem || leagueLogoUrl || "",
       imagePositionY: nextEvent.imagePositionY,
       lotes: nextEvent.lotes,
       descricao: nextEvent.descricao,
+      pixChave: asString(nextEvent.pixChave).trim(),
+      pixBanco: asString(nextEvent.pixBanco).trim(),
+      pixTitular: asString(nextEvent.pixTitular).trim(),
+      contatoComprovante: asString(nextEvent.contatoComprovante).trim(),
       categoria: "Liga",
       status: "ativo",
-      sale_status: "ativo",
+      sale_status: asString(nextEvent.saleStatus, "ativo").trim() || "ativo",
       updatedAt: timestamp,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     };
@@ -734,7 +745,7 @@ export interface LeagueLoteRecord {
   id: number;
   nome: string;
   preco: string;
-  status: "ativo" | "encerrado" | "agendado";
+  status: "ativo" | "em_breve" | "esgotado";
 }
 
 export interface LeagueEventRecord {
@@ -745,6 +756,7 @@ export interface LeagueEventRecord {
   local: string;
   tipo: string;
   destaque: string;
+  mapsUrl?: string;
   imagem: string;
   imagePositionY: number;
   lotes: LeagueLoteRecord[];
@@ -752,6 +764,11 @@ export interface LeagueEventRecord {
   linkEvento?: string;
   globalEventId?: string;
   pollQuestion?: string;
+  saleStatus?: "ativo" | "em_breve" | "esgotado";
+  pixChave?: string;
+  pixBanco?: string;
+  pixTitular?: string;
+  contatoComprovante?: string;
 }
 
 export interface LeagueRecord {
@@ -808,7 +825,11 @@ const normalizeLeagueLotesFromGlobalEvent = (
       const parsedId = Number(lote.id);
       const statusRaw = asString(lote.status, "ativo").trim().toLowerCase();
       const status: LeagueLoteRecord["status"] =
-        statusRaw === "encerrado" || statusRaw === "agendado" ? statusRaw : "ativo";
+        statusRaw === "esgotado" || statusRaw === "encerrado"
+          ? "esgotado"
+          : statusRaw === "em_breve" || statusRaw === "agendado"
+          ? "em_breve"
+          : "ativo";
 
       return {
         id:
@@ -930,10 +951,22 @@ const hydrateLeagueEventsFromGlobalCatalog = async (
         local: asString(globalRow.local, event.local),
         tipo: asString(globalRow.tipo, event.tipo),
         destaque: asString(globalRow.destaque, event.destaque),
+        mapsUrl: asString(globalRow.mapsUrl, event.mapsUrl || ""),
         imagem: asString(globalRow.imagem, event.imagem),
         imagePositionY: asNumber(globalRow.imagePositionY, event.imagePositionY),
         lotes: normalizeLeagueLotesFromGlobalEvent(globalRow.lotes, event.lotes),
         descricao: asString(globalRow.descricao, event.descricao),
+        saleStatus: (
+          asString(globalRow.sale_status, event.saleStatus || "ativo").trim().toLowerCase() === "esgotado"
+            ? "esgotado"
+            : asString(globalRow.sale_status, event.saleStatus || "ativo").trim().toLowerCase() === "em_breve"
+            ? "em_breve"
+            : "ativo"
+        ),
+        pixChave: asString(globalRow.pixChave, event.pixChave || ""),
+        pixBanco: asString(globalRow.pixBanco, event.pixBanco || ""),
+        pixTitular: asString(globalRow.pixTitular, event.pixTitular || ""),
+        contatoComprovante: asString(globalRow.contatoComprovante, event.contatoComprovante || ""),
         linkEvento: event.linkEvento || `/eventos/${globalEventId}`,
       } satisfies LeagueEventRecord;
     }),
@@ -1091,9 +1124,11 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
                   const lote = asObject(entry);
                   if (!lote) return null;
                   const statusRaw = asString(lote.status, "ativo");
-                  const status: "ativo" | "encerrado" | "agendado" =
-                    statusRaw === "encerrado" || statusRaw === "agendado"
-                      ? statusRaw
+                  const status: LeagueLoteRecord["status"] =
+                    statusRaw === "esgotado" || statusRaw === "encerrado"
+                      ? "esgotado"
+                      : statusRaw === "em_breve" || statusRaw === "agendado"
+                      ? "em_breve"
                       : "ativo";
                   return {
                     id: asNumber(lote.id, Date.now()),
@@ -1108,6 +1143,18 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
           const linkEvento = asString(event.linkEvento) || undefined;
           const globalEventId = asString(event.globalEventId) || undefined;
           const pollQuestion = asString(event.pollQuestion) || undefined;
+          const mapsUrl = asString(event.mapsUrl) || undefined;
+          const saleStatusRaw = asString(event.saleStatus || event.sale_status, "ativo").trim().toLowerCase();
+          const saleStatus: LeagueEventRecord["saleStatus"] =
+            saleStatusRaw === "esgotado" || saleStatusRaw === "encerrado"
+              ? "esgotado"
+              : saleStatusRaw === "em_breve" || saleStatusRaw === "agendado"
+              ? "em_breve"
+              : "ativo";
+          const pixChave = asString(event.pixChave) || undefined;
+          const pixBanco = asString(event.pixBanco) || undefined;
+          const pixTitular = asString(event.pixTitular) || undefined;
+          const contatoComprovante = asString(event.contatoComprovante) || undefined;
 
           return {
             id: asString(event.id),
@@ -1117,6 +1164,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
             local: asString(event.local),
             tipo: asString(event.tipo),
             destaque: asString(event.destaque),
+            ...(mapsUrl ? { mapsUrl } : {}),
             imagem: asString(event.imagem),
             imagePositionY: asNumber(event.imagePositionY, 50),
             lotes,
@@ -1124,6 +1172,11 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
             ...(linkEvento ? { linkEvento } : {}),
             ...(globalEventId ? { globalEventId } : {}),
             ...(pollQuestion ? { pollQuestion } : {}),
+            ...(saleStatus ? { saleStatus } : {}),
+            ...(pixChave ? { pixChave } : {}),
+            ...(pixBanco ? { pixBanco } : {}),
+            ...(pixTitular ? { pixTitular } : {}),
+            ...(contatoComprovante ? { contatoComprovante } : {}),
           } as LeagueEventRecord;
         })
         .filter((row): row is LeagueEventRecord => row !== null)

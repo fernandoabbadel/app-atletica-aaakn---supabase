@@ -514,6 +514,26 @@ function nextOffsetCursor(offset: number, pageSize: number, hasMore: boolean): s
   return String(offset + pageSize);
 }
 
+function toMillis(value: unknown): number {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === "object" && value !== null) {
+    const candidate = (value as { toDate?: unknown }).toDate;
+    if (typeof candidate === "function") {
+      const parsed = candidate.call(value);
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) {
+        return parsed.getTime();
+      }
+    }
+  }
+  return 0;
+}
+
 export async function fetchEventsFeed(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
@@ -712,17 +732,14 @@ export interface AdminEventParticipantsPage {
   hasMore: boolean;
 }
 
-const isMissingPresenceRpcError = (error: { code?: string | null; message?: string | null }): boolean => {
-  const code = (error.code ?? "").toLowerCase();
-  const message = (error.message ?? "").toLowerCase();
-  return (
-    code === "pgrst202" ||
-    message.includes("could not find the function") ||
-    message.includes("admin_event_presence_page")
-  );
+const resolvePresencePaymentStatus = (value: unknown): "pago" | "pendente" | "analise" => {
+  const normalized = asString(value, "pendente").trim().toLowerCase();
+  if (normalized === "aprovado" || normalized === "pago") return "pago";
+  if (normalized === "analise") return "analise";
+  return "pendente";
 };
 
-const buildLegacyMergedPresenceRows = async (eventId: string): Promise<Row[]> => {
+const buildMergedPresenceRows = async (eventId: string): Promise<Row[]> => {
   const [rsvpsRaw, salesRaw] = await Promise.all([
     selectRows("eventos_rsvps", {
       eq: { eventoId: eventId },
@@ -736,22 +753,56 @@ const buildLegacyMergedPresenceRows = async (eventId: string): Promise<Row[]> =>
     }),
   ]);
 
-  const mergedByUser = new Map<string, Row>();
+  const latestRsvpByUser = new Map<string, Row>();
 
   normalizeRows(rsvpsRaw).forEach((row) => {
     const userId = asString(row.userId).trim();
     if (!userId) return;
+    if (!latestRsvpByUser.has(userId)) {
+      latestRsvpByUser.set(userId, row);
+    }
+  });
 
-    const statusRaw = asString(row.status, "maybe").toLowerCase();
-    const rsvpStatus = statusRaw === "going" ? "going" : "maybe";
+  const rows: Row[] = [];
+  const usersWithSales = new Set<string>();
 
-    mergedByUser.set(userId, {
+  normalizeRows(salesRaw).forEach((row) => {
+    const userId = asString(row.userId).trim();
+    const requestId = asString(row.id).trim();
+    if (!userId || !requestId) return;
+    usersWithSales.add(userId);
+
+    const latestRsvp = latestRsvpByUser.get(userId);
+    rows.push({
+      id: requestId,
+      userId,
+      userName: asString(row.userName, asString(latestRsvp?.userName, "Aluno")),
+      userAvatar: asString(latestRsvp?.userAvatar),
+      userTurma: asString(row.userTurma, asString(latestRsvp?.userTurma, "-")),
+      rsvpStatus:
+        latestRsvp && asString(latestRsvp.status, "maybe").toLowerCase() === "maybe"
+          ? "maybe"
+          : "going",
+      pagamento: resolvePresencePaymentStatus(row.status),
+      lote: asString(row.loteNome, "-"),
+      quantidade: Math.max(1, asNum(row.quantidade, 1)),
+      valorTotal: asString(row.valorTotal, "-"),
+      dataAprovacao: row.dataAprovacao ?? null,
+      aprovadoPor: asString(row.aprovadoPor),
+      ticketRequestId: requestId,
+      sortTimestamp: row.dataSolicitacao ?? latestRsvp?.timestamp ?? null,
+    });
+  });
+
+  latestRsvpByUser.forEach((row, userId) => {
+    if (usersWithSales.has(userId)) return;
+    rows.push({
       id: asString(row.id, userId),
       userId,
       userName: asString(row.userName, "Aluno"),
       userAvatar: asString(row.userAvatar),
       userTurma: asString(row.userTurma, "-"),
-      rsvpStatus,
+      rsvpStatus: asString(row.status, "maybe").toLowerCase() === "going" ? "going" : "maybe",
       pagamento: "pendente",
       lote: "-",
       quantidade: 1,
@@ -759,43 +810,17 @@ const buildLegacyMergedPresenceRows = async (eventId: string): Promise<Row[]> =>
       dataAprovacao: null,
       aprovadoPor: "",
       ticketRequestId: null,
+      sortTimestamp: row.timestamp ?? null,
     });
   });
 
-  normalizeRows(salesRaw).forEach((row) => {
-    const userId = asString(row.userId).trim();
-    const requestId = asString(row.id).trim();
-    if (!userId || !requestId) return;
-
-    const saleStatusRaw = asString(row.status, "pendente").toLowerCase();
-    const pagamento =
-      saleStatusRaw === "aprovado"
-        ? "pago"
-        : saleStatusRaw === "analise"
-        ? "analise"
-        : "pendente";
-
-    const previous = mergedByUser.get(userId);
-    mergedByUser.set(userId, {
-      id: asString(previous?.id, requestId),
-      userId,
-      userName: asString(row.userName, asString(previous?.userName, "Aluno")),
-      userAvatar: asString(previous?.userAvatar),
-      userTurma: asString(row.userTurma, asString(previous?.userTurma, "-")),
-      rsvpStatus: "going",
-      pagamento,
-      lote: asString(row.loteNome, "-"),
-      quantidade: Math.max(1, asNum(row.quantidade, 1)),
-      valorTotal: asString(row.valorTotal, "-"),
-      dataAprovacao: row.dataAprovacao ?? null,
-      aprovadoPor: asString(row.aprovadoPor),
-      ticketRequestId: requestId,
-    });
+  return rows.sort((left, right) => {
+    const timeDelta = toMillis(right.sortTimestamp) - toMillis(left.sortTimestamp);
+    if (timeDelta !== 0) return timeDelta;
+    const userNameDelta = asString(left.userName).localeCompare(asString(right.userName), "pt-BR");
+    if (userNameDelta !== 0) return userNameDelta;
+    return asString(left.id).localeCompare(asString(right.id), "pt-BR");
   });
-
-  return Array.from(mergedByUser.values()).sort((left, right) =>
-    asString(left.userName).localeCompare(asString(right.userName), "pt-BR")
-  );
 };
 
 export async function fetchAdminEventPresencePage(options: {
@@ -817,43 +842,8 @@ export async function fetchAdminEventPresencePage(options: {
     if (cached) return cached;
   }
 
-  let rows: Row[] = [];
-  try {
-    const supabase = getSupabaseClient();
-    const { data, error } = await supabase.rpc("admin_event_presence_page", {
-      p_event_id: eventId,
-      p_limit: pageSize + 1,
-      p_offset: offset,
-    });
-    if (error) {
-      if (!isMissingPresenceRpcError(error)) {
-        throwSupabaseError(error);
-      }
-      const legacyRows = await buildLegacyMergedPresenceRows(eventId);
-      rows = legacyRows.slice(offset, offset + pageSize + 1);
-    } else {
-      rows = normalizeRows((Array.isArray(data) ? data : []) as Row[]);
-    }
-  } catch (error: unknown) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      typeof (error as { code?: unknown }).code === "string" &&
-      isMissingPresenceRpcError({
-        code: (error as { code: string }).code,
-        message:
-          "message" in error && typeof (error as { message?: unknown }).message === "string"
-            ? (error as { message: string }).message
-            : "",
-      })
-    ) {
-      const legacyRows = await buildLegacyMergedPresenceRows(eventId);
-      rows = legacyRows.slice(offset, offset + pageSize + 1);
-    } else {
-      throw error;
-    }
-  }
+  const mergedRows = await buildMergedPresenceRows(eventId);
+  const rows = mergedRows.slice(offset, offset + pageSize + 1);
 
   const hasMore = rows.length > pageSize;
   const result: AdminEventParticipantsPage = {

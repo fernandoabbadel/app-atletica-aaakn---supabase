@@ -110,16 +110,20 @@ const normalizeMergedParticipant = (raw: Record<string, unknown>): MergedPartici
   };
 };
 
-const mergeUniqueByUserId = (
+const buildPresenceRowKey = (row: MergedParticipant): string =>
+  row.ticketRequestId?.trim() || row.id.trim() || `${row.userId}:${row.userName}:${row.lote}:${row.valorTotal}`;
+
+const mergeUniquePresenceRows = (
   current: MergedParticipant[],
   next: MergedParticipant[]
 ): MergedParticipant[] => {
   if (!next.length) return current;
-  const known = new Set(current.map((row) => row.userId));
+  const known = new Set(current.map((row) => buildPresenceRowKey(row)));
   const merged = [...current];
   next.forEach((row) => {
-    if (known.has(row.userId)) return;
-    known.add(row.userId);
+    const key = buildPresenceRowKey(row);
+    if (known.has(key)) return;
+    known.add(key);
     merged.push(row);
   });
   return merged;
@@ -193,7 +197,7 @@ export default function AdminEventoListaPage() {
         .map((row) => normalizeMergedParticipant(row))
         .filter((row): row is MergedParticipant => row !== null);
 
-      setRows((prev) => mergeUniqueByUserId(prev, normalized));
+      setRows((prev) => mergeUniquePresenceRows(prev, normalized));
       setCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } catch (error: unknown) {
@@ -353,7 +357,7 @@ export default function AdminEventoListaPage() {
                   </tr>
                 ) : (
                   rows.map((row) => (
-                    <tr key={`${row.userId}:${row.id}`} className="hover:bg-zinc-800/40">
+                    <tr key={buildPresenceRowKey(row)} className="hover:bg-zinc-800/40">
                       <td className="p-4">
                         <div className="flex items-center gap-2">
                           <div className="relative w-7 h-7 rounded-full overflow-hidden border border-zinc-700 bg-zinc-800">

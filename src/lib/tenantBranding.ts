@@ -88,14 +88,14 @@ export const buildEventReceiptWhatsappMessage = (options: {
   const orderCode = cleanString(options.orderCode) || "Nao informado";
 
   return [
-    `Fala, equipe [${organizerLabel}]! Quero garantir meu lugar no ${eventTitle}.`,
+    `Fala, equipe ${organizerLabel}! Quero garantir meu lugar no evento ${eventTitle}.`,
     "",
-    `[NOME] ${buyerName}`,
-    `[TURMA] ${buyerTurma}`,
-    `[CONTATO] ${buyerPhone}`,
-    `[INGRESSO] ${ticketLabel}`,
-    `[VALOR] Valor Total: R$ ${totalValue}`,
-    `[PEDIDO] Pedido: ${orderCode}`,
+    `Nome: ${buyerName}`,
+    `Turma: ${buyerTurma}`,
+    `Contato: ${buyerPhone}`,
+    `Ingresso: ${ticketLabel}`,
+    `Valor total: R$ ${totalValue}`,
+    `Pedido: ${orderCode}`,
     "",
     "Segue o comprovante!",
   ].join("\n");

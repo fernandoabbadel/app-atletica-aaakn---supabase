@@ -45,7 +45,7 @@ interface Lote {
     id: number; 
     nome: string; 
     preco: string; 
-    status: "ativo" | "encerrado" | "agendado"; 
+    status: "ativo" | "em_breve" | "esgotado"; 
 }
 
 interface LeagueEvent { 

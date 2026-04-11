@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, CalendarDays, Heart, Lightbulb, Loader2, Users } from "lucide-react";
+import { ArrowLeft, Heart, Lightbulb, Loader2, Users } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -355,7 +355,7 @@ export function LeaguePublicDetailClient({
 
         {activeTab === "overview" ? (
           <section className="space-y-6">
-            {overviewHighlights.length > 0 ? (
+            {false ? (
               <article className="rounded-[2rem] border border-emerald-500/20 bg-[linear-gradient(180deg,rgba(10,24,20,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
                 <div className="flex items-center gap-3">
                   <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-emerald-200">
@@ -376,17 +376,15 @@ export function LeaguePublicDetailClient({
               </article>
             ) : null}
             <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,24,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
-              <div className="flex items-center gap-3"><div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-200"><CalendarDays size={18} /></div><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Agenda da liga</p><h2 className="mt-2 text-2xl font-black text-white">{"O que vem por a\u00ed"}</h2></div></div>
+              <div className="flex items-center gap-3"><div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-200"><Lightbulb size={18} /></div><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Visao geral da liga</p><h2 className="mt-2 text-2xl font-black text-white">O que a liga faz</h2></div></div>
               <div className="mt-5 space-y-3">
-                {sortedEvents.slice(0, 3).map((event) => (
-                  <div key={event.id || event.titulo} className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
-                    <p className="text-sm font-black text-white">{event.titulo}</p>
-                    <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">{event.data ? <span>{event.data}</span> : null}{event.hora ? <span>{event.hora}</span> : null}{event.local ? <span>{event.local}</span> : null}</div>
+                {overviewHighlights.length > 0 ? overviewHighlights.map((entry, index) => (
+                  <div key={`${entry}-${index}`} className="rounded-[1.5rem] border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm font-semibold leading-6 text-cyan-50">
+                    {entry}
                   </div>
-                ))}
-                {sortedEvents.length === 0 ? <p className="rounded-[1.5rem] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-zinc-500">Nenhum evento publicado no momento.</p> : null}
+                )) : <p className="rounded-[1.5rem] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-zinc-500">A liga ainda nao publicou a visao geral.</p>}
               </div>
-              <Link href={eventsFeedHref} className="mt-5 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20">Abrir agenda completa</Link>
+              <Link href={eventsFeedHref} className="mt-5 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20">Ver eventos publicados</Link>
             </article>
           </section>
         ) : activeTab === "membros" ? (

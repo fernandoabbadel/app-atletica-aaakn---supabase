@@ -21,7 +21,7 @@ type NormalizedLote = {
   id: number;
   nome: string;
   preco: string;
-  status: "ativo" | "encerrado" | "agendado";
+  status: "ativo" | "em_breve" | "esgotado";
 };
 
 type NormalizedLeagueEvent = {
@@ -33,16 +33,23 @@ type NormalizedLeagueEvent = {
   hora: string;
   local: string;
   destaque: string;
+  mapsUrl: string;
   imagem: string;
   imagePositionY: number;
   lotes: NormalizedLote[];
   descricao: string;
   pollQuestion: string;
+  saleStatus: "ativo" | "em_breve" | "esgotado";
+  pixChave: string;
+  pixBanco: string;
+  pixTitular: string;
+  contatoComprovante: string;
 };
 
-const normalizeStatus = (value: unknown): "ativo" | "encerrado" | "agendado" => {
+const normalizeStatus = (value: unknown): "ativo" | "em_breve" | "esgotado" => {
   const raw = asString(value).trim().toLowerCase();
-  if (raw === "encerrado" || raw === "agendado") return raw;
+  if (raw === "em_breve" || raw === "agendado") return "em_breve";
+  if (raw === "esgotado" || raw === "encerrado") return "esgotado";
   return "ativo";
 };
 
@@ -92,11 +99,17 @@ const normalizeEvents = (value: unknown, leagueLogoUrl: string): NormalizedLeagu
       hora: asString(raw.hora).trim().slice(0, 20),
       local: asString(raw.local).trim().slice(0, 140),
       destaque: asString(raw.destaque).trim().slice(0, 80),
+      mapsUrl: asString(raw.mapsUrl).trim().slice(0, 400),
       imagem: asString(raw.imagem).trim() || leagueLogoUrl,
       imagePositionY: Math.max(0, Math.min(100, Math.floor(asNumber(raw.imagePositionY, 50)))),
       lotes: normalizeLotes(raw.lotes),
       descricao: asString(raw.descricao).trim().slice(0, 1200),
       pollQuestion: asString(raw.pollQuestion).trim().slice(0, 280),
+      saleStatus: normalizeStatus(raw.saleStatus),
+      pixChave: asString(raw.pixChave).trim().slice(0, 140),
+      pixBanco: asString(raw.pixBanco).trim().slice(0, 140),
+      pixTitular: asString(raw.pixTitular).trim().slice(0, 140),
+      contatoComprovante: asString(raw.contatoComprovante).trim().slice(0, 32),
     });
   }
 
@@ -249,12 +262,17 @@ export async function POST(request: NextRequest) {
         tipo: "Liga",
         categoria: "Liga",
         destaque: event.destaque,
+        mapsUrl: event.mapsUrl,
         imagem: event.imagem || leagueLogoUrl || "",
         imagePositionY: event.imagePositionY,
         lotes: event.lotes,
         descricao: event.descricao,
+        pixChave: event.pixChave,
+        pixBanco: event.pixBanco,
+        pixTitular: event.pixTitular,
+        contatoComprovante: event.contatoComprovante,
         status: "ativo",
-        sale_status: "ativo",
+        sale_status: event.saleStatus,
         tenant_id: effectiveTenantId,
         updatedAt: timestamp,
       };
@@ -285,10 +303,16 @@ export async function POST(request: NextRequest) {
         local: event.local,
         tipo: "Liga",
         destaque: event.destaque,
+        mapsUrl: event.mapsUrl,
         imagem: event.imagem || leagueLogoUrl || "",
         imagePositionY: event.imagePositionY,
         lotes: event.lotes,
         descricao: event.descricao,
+        saleStatus: event.saleStatus,
+        pixChave: event.pixChave,
+        pixBanco: event.pixBanco,
+        pixTitular: event.pixTitular,
+        contatoComprovante: event.contatoComprovante,
       };
 
       if (event.pollQuestion) {

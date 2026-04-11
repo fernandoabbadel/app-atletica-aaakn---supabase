@@ -7,9 +7,10 @@ import {
   Lock, ArrowRight, Upload, Plus, Trash2, Save, LogOut, 
   Image as ImageIcon, Layout, Edit3, Bell, 
   Calendar, UserPlus, Search, X, Users,
-  Loader2, MessageCircle, LayoutGrid
+  Loader2, MessageCircle, LayoutGrid, MoveVertical, Wallet
 } from 'lucide-react';
 import Image from "next/image";
+import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useToast } from "../../context/ToastContext";
 import { ClientCache } from "@/lib/clientCache";
 import {
@@ -47,6 +48,11 @@ import {
   sortLeagueMembersByRole,
 } from "../../lib/leagueRoles";
 import { withTenantSlug } from "@/lib/tenantRouting";
+import {
+  hasValidPhoneLength,
+  normalizePhoneToBrE164,
+  PHONE_MAX_LENGTH,
+} from "@/utils/contactFields";
 
 // --- TIPAGEM ESTRITA (Sem 'any') ---
 
@@ -73,17 +79,19 @@ interface Member {
     linkPerfil?: string; 
 }
 
+type EventSaleStatus = "ativo" | "em_breve" | "esgotado";
+
 interface Lote { 
     id: number; 
     nome: string; 
     preco: string; 
-    status: "ativo" | "encerrado" | "agendado"; 
+    status: EventSaleStatus; 
 }
 
 interface NovoLoteDraft {
     nome: string;
     preco: string;
-    status: "ativo" | "encerrado" | "agendado";
+    status: EventSaleStatus;
 }
 
 interface PollOption {
@@ -104,6 +112,7 @@ interface LeagueEvent {
     local: string; 
     tipo: string; 
     destaque: string; 
+    mapsUrl?: string;
     imagem: string; 
     imagePositionY: number;
     lotes: Lote[]; 
@@ -111,6 +120,11 @@ interface LeagueEvent {
     linkEvento?: string; 
     globalEventId?: string;
     pollQuestion?: string; 
+    saleStatus?: EventSaleStatus;
+    pixChave?: string;
+    pixBanco?: string;
+    pixTitular?: string;
+    contatoComprovante?: string;
 }
 
 type LigaAdminTab = 'visual' | 'members' | 'events' | 'shark';
@@ -151,6 +165,12 @@ interface LigaEditorDraftSnapshot {
 
 const LIGA_EDITOR_DRAFT_VERSION = 1;
 const LIGA_EDITOR_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const EVENT_TITLE_MAX_LENGTH = 120;
+const EVENT_LOCATION_MAX_LENGTH = 140;
+const EVENT_TYPE_MAX_LENGTH = 40;
+const EVENT_DESCRIPTION_MAX_LENGTH = 1200;
+const EVENT_PIX_FIELD_MAX_LENGTH = 140;
+const EVENT_LOTE_NAME_MAX_LENGTH = 80;
 const buildLigaEditorLastSelectedKey = (tenantScopeId?: string | null): string =>
     `usc:ligas:${tenantScopeId?.trim() || "default"}:last-selected`;
 
@@ -160,6 +180,76 @@ const getLigaEditorDraftKey = (ligaId: string, tenantScopeId?: string | null): s
 const isLigaAdminTab = (value: unknown): value is LigaAdminTab => (
     value === "visual" || value === "members" || value === "events" || value === "shark"
 );
+
+const normalizeEventSaleStatus = (value: unknown): EventSaleStatus => {
+    const raw = String(value || "").trim().toLowerCase();
+    if (raw === "em_breve" || raw === "agendado") return "em_breve";
+    if (raw === "esgotado" || raw === "encerrado") return "esgotado";
+    return "ativo";
+};
+
+const normalizeEditorLote = (value: unknown, index: number): Lote | null => {
+    if (!value || typeof value !== "object") return null;
+    const raw = value as Partial<Lote>;
+    const nome = String(raw.nome || "").trim().slice(0, EVENT_LOTE_NAME_MAX_LENGTH);
+    if (!nome) return null;
+    return {
+        id: Number.isFinite(Number(raw.id)) && Number(raw.id) > 0 ? Math.floor(Number(raw.id)) : index + 1,
+        nome,
+        preco: String(raw.preco || "").trim().slice(0, 32),
+        status: normalizeEventSaleStatus(raw.status),
+    };
+};
+
+const normalizeEditableLeagueEvent = (value: unknown): Partial<LeagueEvent> => {
+    if (!value || typeof value !== "object") return {};
+    const raw = value as Partial<LeagueEvent>;
+    return {
+        ...raw,
+        titulo: String(raw.titulo || "").slice(0, EVENT_TITLE_MAX_LENGTH),
+        data: String(raw.data || ""),
+        hora: String(raw.hora || ""),
+        local: String(raw.local || "").slice(0, EVENT_LOCATION_MAX_LENGTH),
+        tipo: String(raw.tipo || "Festa").slice(0, EVENT_TYPE_MAX_LENGTH),
+        destaque: String(raw.destaque || "").slice(0, 180),
+        mapsUrl: String(raw.mapsUrl || "").slice(0, 400),
+        imagem: String(raw.imagem || ""),
+        imagePositionY: Number.isFinite(Number(raw.imagePositionY)) ? Number(raw.imagePositionY) : 50,
+        lotes: Array.isArray(raw.lotes)
+            ? raw.lotes.map((entry, index) => normalizeEditorLote(entry, index)).filter((entry): entry is Lote => entry !== null)
+            : [],
+        descricao: String(raw.descricao || "").slice(0, EVENT_DESCRIPTION_MAX_LENGTH),
+        pollQuestion: String(raw.pollQuestion || "").slice(0, EVENT_POLL_QUESTION_MAX_CHARS),
+        saleStatus: normalizeEventSaleStatus(raw.saleStatus),
+        pixChave: String(raw.pixChave || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+        pixBanco: String(raw.pixBanco || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+        pixTitular: String(raw.pixTitular || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+        contatoComprovante: String(raw.contatoComprovante || "").slice(0, PHONE_MAX_LENGTH),
+    };
+};
+
+const createEmptyLoteDraft = (): NovoLoteDraft => ({ nome: "", preco: "", status: "ativo" });
+
+const createEmptyEventDraft = (): Partial<LeagueEvent> => ({
+    id: Date.now().toString(),
+    titulo: "",
+    data: "",
+    hora: "",
+    local: "",
+    tipo: "Festa",
+    destaque: "",
+    mapsUrl: "",
+    imagem: "",
+    imagePositionY: 50,
+    lotes: [],
+    descricao: "",
+    pollQuestion: "",
+    saleStatus: "ativo",
+    pixChave: "",
+    pixBanco: "",
+    pixTitular: "",
+    contatoComprovante: "",
+});
 
 const readSessionStorageValue = (key: string): string | null => {
     if (typeof window === "undefined") return null;
@@ -215,17 +305,14 @@ const readLigaEditorDraft = (ligaId: string, tenantScopeId?: string | null): Lig
             ligaDraft: snapshot.ligaDraft as Omit<LigaData, "senha">,
             eventModal: Boolean(snapshot.eventModal),
             editingEventIdx: typeof snapshot.editingEventIdx === "number" ? snapshot.editingEventIdx : null,
-            currentEvent: snapshot.currentEvent && typeof snapshot.currentEvent === "object" ? snapshot.currentEvent : {},
+            currentEvent: normalizeEditableLeagueEvent(snapshot.currentEvent),
             novoLote: snapshot.novoLote && typeof snapshot.novoLote === "object"
                 ? {
                     nome: typeof snapshot.novoLote.nome === "string" ? snapshot.novoLote.nome : "",
                     preco: typeof snapshot.novoLote.preco === "string" ? snapshot.novoLote.preco : "",
-                    status:
-                        snapshot.novoLote.status === "encerrado" || snapshot.novoLote.status === "agendado"
-                            ? snapshot.novoLote.status
-                            : "ativo",
+                    status: normalizeEventSaleStatus(snapshot.novoLote.status),
                 }
-                : { nome: "", preco: "", status: "ativo" },
+                : createEmptyLoteDraft(),
         };
     } catch {
         return null;
@@ -366,7 +453,7 @@ export function LigasAdminPageContent() {
   const isLoggingOutRef = useRef(false);
   const [uploadingLeagueAsset, setUploadingLeagueAsset] = useState(false);
   const [uploadingEventImg, setUploadingEventImg] = useState(false);
-  const [novoLote, setNovoLote] = useState<NovoLoteDraft>({ nome: "", preco: "", status: "ativo" });
+  const [novoLote, setNovoLote] = useState<NovoLoteDraft>(createEmptyLoteDraft());
 
   // --- 🦈 MODAL DE GESTÃO DE ENQUETES (NOVO) ---
   const [pollModal, setPollModal] = useState<string | null>(null); 
@@ -450,7 +537,7 @@ export function LigasAdminPageContent() {
               setEventModal(false);
               setEditingEventIdx(null);
               setCurrentEvent({});
-              setNovoLote({ nome: "", preco: "", status: "ativo" });
+              setNovoLote(createEmptyLoteDraft());
               setIsLoggedIn(true);
               addToast("Sessao da liga restaurada.", "info");
               if (preferredLeagueId && preferredLeagueId !== routeLeagueId) {
@@ -685,7 +772,7 @@ export function LigasAdminPageContent() {
                   setEventModal(false);
                   setEditingEventIdx(null);
                   setCurrentEvent({});
-                  setNovoLote({ nome: "", preco: "", status: "ativo" });
+                  setNovoLote(createEmptyLoteDraft());
                   if (!shouldApplyDraft) {
                       addToast("Rascunho local mais antigo que a base salva. Exibindo a versao publicada.", "info");
                   }
@@ -696,7 +783,7 @@ export function LigasAdminPageContent() {
                   setEventModal(false);
                   setEditingEventIdx(null);
                   setCurrentEvent({});
-                  setNovoLote({ nome: "", preco: "", status: "ativo" });
+                  setNovoLote(createEmptyLoteDraft());
               }
               setIsLoggedIn(true);
               addToast("Acesso autorizado!", "success");
@@ -734,7 +821,7 @@ export function LigasAdminPageContent() {
       setEventModal(false);
       setEditingEventIdx(null);
       setCurrentEvent({});
-      setNovoLote({ nome: "", preco: "", status: "ativo" });
+      setNovoLote(createEmptyLoteDraft());
       setSendNotification(false);
       setSenhaInput("");
       setSelectedLigaId("");
@@ -833,7 +920,7 @@ export function LigasAdminPageContent() {
               leagueId: ligaData.id,
               entityId: currentEvent.id || undefined,
           });
-          setCurrentEvent(prev => ({ ...prev, imagem: imageUrl }));
+          setCurrentEvent(prev => ({ ...normalizeEditableLeagueEvent(prev), imagem: imageUrl }));
           addToast("Capa do evento enviada com sucesso.", "success");
           await logActivity(
               ligaData.id,
@@ -886,23 +973,80 @@ export function LigasAdminPageContent() {
   // --- GESTÃO DE EVENTOS ---
   const handleOpenEventModal = (idx: number | null) => {
       if (idx !== null && ligaData?.eventos) {
-          setCurrentEvent(ligaData.eventos[idx]);
+          setCurrentEvent(normalizeEditableLeagueEvent(ligaData.eventos[idx]));
           setEditingEventIdx(idx);
       } else {
-          setCurrentEvent({ 
-              id: Date.now().toString(), titulo: "", data: "", hora: "", local: "", 
-              tipo: "Festa", destaque: "", imagem: "", imagePositionY: 50, 
-              lotes: [], descricao: "", pollQuestion: "" 
-          });
+          setCurrentEvent(createEmptyEventDraft());
           setEditingEventIdx(null);
       }
+      setNovoLote(createEmptyLoteDraft());
       setEventModal(true);
+  };
+
+  const handleAddLoteToCurrentEvent = () => {
+      const loteNome = novoLote.nome.trim().slice(0, EVENT_LOTE_NAME_MAX_LENGTH);
+      const lotePreco = novoLote.preco.trim().slice(0, 32);
+      if (!loteNome || !lotePreco) return;
+
+      const nextLote: Lote = {
+          id: Date.now(),
+          nome: loteNome,
+          preco: lotePreco,
+          status: normalizeEventSaleStatus(novoLote.status),
+      };
+
+      setCurrentEvent((prev) => ({
+          ...normalizeEditableLeagueEvent(prev),
+          lotes: [...(Array.isArray(prev?.lotes) ? prev.lotes : []), nextLote],
+      }));
+      setNovoLote(createEmptyLoteDraft());
+  };
+
+  const toggleCurrentEventLoteStatus = (loteId: number, status: EventSaleStatus) => {
+      setCurrentEvent((prev) => ({
+          ...normalizeEditableLeagueEvent(prev),
+          lotes: (Array.isArray(prev?.lotes) ? prev.lotes : []).map((lote) =>
+              lote.id === loteId ? { ...lote, status } : lote
+          ),
+      }));
+  };
+
+  const removeCurrentEventLote = (loteId: number) => {
+      setCurrentEvent((prev) => ({
+          ...normalizeEditableLeagueEvent(prev),
+          lotes: (Array.isArray(prev?.lotes) ? prev.lotes : []).filter((lote) => lote.id !== loteId),
+      }));
   };
 
   const saveEventLocal = async () => {
       if (!ligaData || !currentEvent.titulo) return addToast("Título obrigatório!", "error");
       const novosEventos = [...(ligaData.eventos || [])];
-      const eventoSalvo = currentEvent as LeagueEvent;
+      if (!currentEvent.data || !currentEvent.hora) return addToast("Data e hora obrigatorias!", "error");
+      if (
+          String(currentEvent.contatoComprovante || "").trim() &&
+          !hasValidPhoneLength(String(currentEvent.contatoComprovante || ""))
+      ) {
+          return addToast("Informe um WhatsApp valido para comprovante.", "error");
+      }
+      const eventoSalvo = {
+          ...normalizeEditableLeagueEvent(currentEvent),
+          id: String(currentEvent.id || Date.now()),
+          titulo: String(currentEvent.titulo || "").trim().slice(0, EVENT_TITLE_MAX_LENGTH),
+          local: String(currentEvent.local || "").trim().slice(0, EVENT_LOCATION_MAX_LENGTH),
+          tipo: String(currentEvent.tipo || "Festa").trim().slice(0, EVENT_TYPE_MAX_LENGTH),
+          destaque: String(currentEvent.destaque || "").trim().slice(0, 180),
+          mapsUrl: String(currentEvent.mapsUrl || "").trim().slice(0, 400),
+          descricao: String(currentEvent.descricao || "").trim().slice(0, EVENT_DESCRIPTION_MAX_LENGTH),
+          saleStatus: normalizeEventSaleStatus(currentEvent.saleStatus),
+          pixChave: String(currentEvent.pixChave || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+          pixBanco: String(currentEvent.pixBanco || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+          pixTitular: String(currentEvent.pixTitular || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+          contatoComprovante: normalizePhoneToBrE164(String(currentEvent.contatoComprovante || "").trim()).slice(0, PHONE_MAX_LENGTH),
+          pollQuestion: String(currentEvent.pollQuestion || "").trim().slice(0, EVENT_POLL_QUESTION_MAX_CHARS),
+          lotes: (Array.isArray(currentEvent.lotes) ? currentEvent.lotes : [])
+              .map((lote, index) => normalizeEditorLote(lote, index))
+              .filter((lote): lote is Lote => lote !== null),
+      } as LeagueEvent;
       
       if (editingEventIdx !== null) {
           novosEventos[editingEventIdx] = eventoSalvo;
@@ -919,7 +1063,7 @@ export function LigasAdminPageContent() {
       setEventModal(false);
       setEditingEventIdx(null);
       setCurrentEvent({});
-      setNovoLote({ nome: "", preco: "", status: "ativo" });
+      setNovoLote(createEmptyLoteDraft());
   };
 
   const handleDeleteEvent = async (idx: number) => {
@@ -935,7 +1079,7 @@ export function LigasAdminPageContent() {
           setEventModal(false);
           setEditingEventIdx(null);
           setCurrentEvent({});
-          setNovoLote({ nome: "", preco: "", status: "ativo" });
+          setNovoLote(createEmptyLoteDraft());
       }
   };
 
@@ -1733,79 +1877,136 @@ export function LigasAdminPageContent() {
 
           {/* 🦈 MODAL EDITAR EVENTO (COM TURBO FEATURES 🦈) */}
           {eventModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 overflow-y-auto">
-                  <div className="bg-zinc-950 w-full max-w-lg rounded-2xl border border-zinc-800 p-6 space-y-4 my-auto animate-in zoom-in-95">
-                      <div className="flex justify-between items-center"><h2 className="font-bold text-white text-lg">Evento da Liga</h2><button onClick={() => setEventModal(false)}><X size={20} className="text-zinc-500"/></button></div>
+              <div className="fixed inset-0 z-[60] overflow-y-auto bg-black/80 p-4 backdrop-blur-sm">
+                  <div className="flex min-h-full items-start justify-center py-4">
+                      <div className="bg-zinc-950 w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-zinc-800 p-6 space-y-4 my-auto animate-in zoom-in-95 custom-scrollbar">
+                          <div className="flex items-center justify-between gap-3"><h2 className="font-bold text-white text-lg flex items-center gap-2"><Calendar size={20} className="text-emerald-500"/> {editingEventIdx !== null ? "Editar" : "Criar"} Evento</h2><button onClick={() => setEventModal(false)} className="rounded-lg border border-zinc-700 bg-zinc-900 p-2 hover:bg-zinc-800"><X size={16} className="text-zinc-400"/></button></div>
+                          
+                          <div onClick={() => eventFileRef.current?.click()} className="h-40 border-2 border-dashed border-zinc-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-emerald-500 transition bg-black/20 relative group overflow-hidden">
+                              <input type="file" ref={eventFileRef} className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingEventImg} onChange={handleEventImageUpload}/>
+                              {uploadingEventImg ? (
+                                  <span className="text-xs text-emerald-500 animate-pulse">Enviando...</span>
+                              ) : currentEvent.imagem ? (
+                                  <Image
+                                    src={currentEvent.imagem}
+                                    alt="Capa do evento"
+                                    fill
+                                    sizes="(max-width: 768px) 100vw, 560px"
+                                    className="object-cover"
+                                    style={{ objectPosition: `50% ${currentEvent.imagePositionY || 50}%` }}
+                                  />
+                              ) : (
+                                  <div className="text-center text-zinc-500"><ImageIcon className="mx-auto mb-1"/><span className="text-xs font-bold uppercase">Capa</span></div>
+                              )}
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition"><span className="text-xs font-bold text-white uppercase bg-black px-3 py-1 rounded-full">Trocar Imagem</span></div>
+                          </div>
+                          <ImageResizeHelpLink label="Diminuir a imagem do evento no favicon.io/favicon-converter" />
+                          {currentEvent.imagem && <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800"><div className="flex justify-between text-[10px] text-zinc-400 uppercase font-bold mb-1"><span className="flex items-center gap-1"><MoveVertical size={12}/> Ajuste Fino</span><span>{currentEvent.imagePositionY || 50}%</span></div><input type="range" min="0" max="100" value={currentEvent.imagePositionY || 50} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), imagePositionY: Number(e.target.value) })} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"/></div>}
                       
-                      <div onClick={() => eventFileRef.current?.click()} className="h-32 border-2 border-dashed border-zinc-700 rounded-xl flex items-center justify-center cursor-pointer bg-black/20 relative group overflow-hidden">
-                          <input type="file" ref={eventFileRef} className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingEventImg} onChange={handleEventImageUpload}/>
-                          {uploadingEventImg ? (
-                              <span className="text-xs text-emerald-500 animate-pulse">Enviando...</span>
-                          ) : currentEvent.imagem ? (
-                              <Image
-                                src={currentEvent.imagem}
-                                alt="Evento"
-                                fill
-                                sizes="(max-width: 768px) 90vw, 512px"
-                                className="object-cover"
-                                style={{ objectPosition: `50% ${currentEvent.imagePositionY || 50}%` }}
-                                
-                              />
-                          ) : (
-                              <div className="text-center text-zinc-500"><ImageIcon/><span className="text-xs">Capa</span></div>
-                          )}
-                      </div>
-                      {currentEvent.imagem && <div className="bg-zinc-900 p-2 rounded-xl"><div className="flex justify-between text-[10px] text-zinc-400 uppercase mb-1"><span>Ajuste Vertical</span><span>{currentEvent.imagePositionY || 50}%</span></div><input type="range" min="0" max="100" value={currentEvent.imagePositionY || 50} onChange={(e) => setCurrentEvent({ ...currentEvent, imagePositionY: Number(e.target.value) })} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"/></div>}
-                      
-                      <input type="text" placeholder="Título do Evento" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white focus:border-emerald-500 outline-none" value={currentEvent.titulo || ""} onChange={(e) => setCurrentEvent({ ...currentEvent, titulo: e.target.value })} />
+                      <input type="text" maxLength={EVENT_TITLE_MAX_LENGTH} placeholder="Nome do Evento" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white focus:border-emerald-500 outline-none" value={currentEvent.titulo || ""} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), titulo: e.target.value.slice(0, EVENT_TITLE_MAX_LENGTH) })} />
                       <div className="grid grid-cols-2 gap-3">
-                          <input type="date" className="bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={currentEvent.data || ""} onChange={(e) => setCurrentEvent({ ...currentEvent, data: e.target.value })} />
-                          <input type="time" className="bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={currentEvent.hora || ""} onChange={(e) => setCurrentEvent({ ...currentEvent, hora: e.target.value })} />
+                          <div>
+                              <label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Data</label>
+                              <input type="date" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white uppercase" value={currentEvent.data || ""} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), data: e.target.value })} />
+                          </div>
+                          <div>
+                              <label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Hora</label>
+                              <input type="time" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={currentEvent.hora || ""} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), hora: e.target.value })} />
+                          </div>
                       </div>
-                      <input type="text" placeholder="Local" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={currentEvent.local || ""} onChange={(e) => setCurrentEvent({ ...currentEvent, local: e.target.value })} />
+                      <div className="flex gap-2">
+                          <select className="flex-1 bg-black border border-zinc-700 rounded-xl p-3 text-sm text-zinc-400" value={currentEvent.tipo || "Festa"} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), tipo: e.target.value.slice(0, EVENT_TYPE_MAX_LENGTH) })}>
+                              <option value="Festa">Festa</option>
+                              <option value="Esporte">Esporte</option>
+                              <option value="Outro">Outro...</option>
+                          </select>
+                          <input type="text" maxLength={EVENT_LOCATION_MAX_LENGTH} placeholder="Local" className="flex-1 bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={currentEvent.local || ""} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), local: e.target.value.slice(0, EVENT_LOCATION_MAX_LENGTH) })} />
+                      </div>
+                      
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+                          <div className="flex items-center gap-2 mb-1">
+                              <Wallet size={16} className="text-emerald-500"/>
+                              <span className="text-xs font-bold text-zinc-300 uppercase">Financeiro & Recebimento</span>
+                          </div>
+                          <p className="text-[10px] text-zinc-500 -mt-2 mb-2">Preencha para substituir a conta global neste evento.</p>
+                          <div className="grid grid-cols-1 gap-2">
+                              <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Chave PIX (ex: CNPJ, Email)" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.pixChave || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pixChave: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH) })} />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                              <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.pixBanco || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pixBanco: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH) })} />
+                              <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.pixTitular || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pixTitular: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH) })} />
+                          </div>
+                          <input type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.contatoComprovante || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), contatoComprovante: normalizePhoneToBrE164(e.target.value) })} />
+                      </div>
+
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+                          <div>
+                              <span className="text-xs font-bold text-zinc-300 uppercase">Status de Venda</span>
+                              <p className="text-[10px] text-zinc-500">Controla se o evento esta ativo, em breve ou esgotado.</p>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                              {(["ativo", "em_breve", "esgotado"] as EventSaleStatus[]).map((status) => (
+                                  <button key={status} type="button" onClick={() => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), saleStatus: status })} className={`rounded-lg border px-3 py-2 text-[11px] font-black uppercase ${
+                                      (currentEvent.saleStatus || "ativo") === status
+                                          ? status === "ativo"
+                                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                              : status === "em_breve"
+                                              ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                                              : "border-red-500/30 bg-red-500/10 text-red-300"
+                                          : "border-zinc-700 bg-black text-zinc-400"
+                                  }`}>
+                                      {status === "ativo" ? "Ativar" : status === "em_breve" ? "Em-breve" : "Esgotado"}
+                                  </button>
+                              ))}
+                          </div>
+                      </div>
                       
                       <div>
-                          <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Descrição do Evento</label>
-                          <textarea className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" placeholder="Detalhes, regras, atrações..." value={currentEvent.descricao || ""} onChange={(e) => setCurrentEvent({ ...currentEvent, descricao: e.target.value })} />
+                          <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Descricao Completa</label>
+                          <textarea maxLength={EVENT_DESCRIPTION_MAX_LENGTH} className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" placeholder="Detalhes, regras e informacoes principais..." value={currentEvent.descricao || ""} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), descricao: e.target.value.slice(0, EVENT_DESCRIPTION_MAX_LENGTH) })} />
                       </div>
 
                       <div className="bg-purple-900/10 border border-purple-500/20 p-4 rounded-xl">
                           <label className="text-[10px] text-purple-400 font-bold uppercase mb-2 flex items-center gap-2"><MessageCircle size={12}/> Pergunta da Enquete (Opcional)</label>
-                          <input 
-                              type="text" 
-                              className="w-full bg-black border border-purple-900/50 rounded-lg p-3 text-sm outline-none focus:border-purple-500" 
-                              value={currentEvent.pollQuestion || ""} 
-                              onChange={e => setCurrentEvent({...currentEvent, pollQuestion: e.target.value})} 
-                              placeholder="Ex: Qual tema vocês preferem?"
+                          <input
+                              type="text"
+                              maxLength={EVENT_POLL_QUESTION_MAX_CHARS}
+                              className="w-full bg-black border border-purple-900/50 rounded-lg p-3 text-sm outline-none focus:border-purple-500"
+                              value={currentEvent.pollQuestion || ""}
+                              onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pollQuestion: e.target.value.slice(0, EVENT_POLL_QUESTION_MAX_CHARS) })}
+                              placeholder="Ex: Qual tema voces preferem?"
                           />
                       </div>
 
                       <div className="bg-black/40 border border-zinc-800 rounded-xl p-4">
-                          <label className="text-xs text-zinc-500 font-bold uppercase mb-2 block">Lotes de Ingressos</label>
-                          <div className="grid grid-cols-3 gap-2 mb-2">
-                              <input type="text" placeholder="Nome" className="col-span-2 bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.nome} onChange={e => setNovoLote({...novoLote, nome: e.target.value})} />
-                              <input type="text" placeholder="R$" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.preco} onChange={e => setNovoLote({...novoLote, preco: e.target.value})} />
+                          <label className="text-xs text-zinc-500 font-bold uppercase mb-3 block border-b border-zinc-800 pb-2">Configurar Lotes</label>
+                          <div className="grid grid-cols-2 gap-2 mb-2">
+                              <input type="text" maxLength={EVENT_LOTE_NAME_MAX_LENGTH} placeholder="Nome (ex: Lote 1)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.nome} onChange={e => setNovoLote({ ...novoLote, nome: e.target.value.slice(0, EVENT_LOTE_NAME_MAX_LENGTH) })} />
+                              <input type="text" placeholder="Preco (R$)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.preco} onChange={e => setNovoLote({ ...novoLote, preco: e.target.value })} />
                           </div>
-                          <button onClick={() => {if(novoLote.nome && novoLote.preco) { setCurrentEvent({...currentEvent, lotes: [...(currentEvent.lotes||[]), {id: Date.now(), ...novoLote}]}); setNovoLote({nome:"",preco:"",status:"ativo"}); }}} className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold text-xs uppercase hover:bg-emerald-500">Adicionar</button>
+                          <button onClick={handleAddLoteToCurrentEvent} className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold text-xs uppercase hover:bg-emerald-500">Adicionar Lote</button>
                           <div className="space-y-1 mt-2 max-h-24 overflow-y-auto custom-scrollbar">
                               {currentEvent.lotes?.map(l => (
                                   <div key={l.id} className="flex justify-between items-center text-xs bg-zinc-900 px-3 py-2 rounded border border-zinc-800">
                                       <span className="text-white font-bold">{l.nome} - {l.preco}</span>
-                                      <div className="flex items-center gap-2">
-                                          <span className="text-[9px] text-zinc-500 uppercase">{l.status}</span>
-                                          <button onClick={() => setCurrentEvent({...currentEvent, lotes: currentEvent.lotes?.filter(lo => lo.id !== l.id)})} className="text-red-500"><X size={12}/></button>
+                                      <div className="flex gap-1">
+                                          <button onClick={() => toggleCurrentEventLoteStatus(l.id, "ativo")} className={`px-2 rounded ${l.status === 'ativo' ? 'bg-emerald-500 ring-2 ring-emerald-500/50' : 'bg-zinc-700'}`} title="Ativar"></button>
+                                          <button onClick={() => toggleCurrentEventLoteStatus(l.id, "em_breve")} className={`px-2 rounded ${l.status === 'em_breve' ? 'bg-yellow-600 ring-2 ring-yellow-500/50' : 'bg-zinc-700'}`} title="Em breve"></button>
+                                          <button onClick={() => toggleCurrentEventLoteStatus(l.id, "esgotado")} className={`px-2 rounded ${l.status === 'esgotado' ? 'bg-red-500 ring-2 ring-red-500/50' : 'bg-zinc-700'}`} title="Esgotado"></button>
+                                          <button onClick={() => removeCurrentEventLote(l.id)} className="text-zinc-500 hover:text-red-500 ml-1"><X size={12}/></button>
                                       </div>
                                   </div>
                               ))}
                           </div>
                       </div>
 
-                      <div className="flex gap-3 pt-2">
+                      <div className="flex gap-3 pt-2 border-t border-zinc-800">
                           <button onClick={() => setEventModal(false)} className="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-400 font-bold text-xs uppercase hover:bg-zinc-800">Cancelar</button>
-                          <button onClick={() => void saveEventLocal()} disabled={loading} className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold text-xs uppercase hover:bg-emerald-500 disabled:opacity-50">{loading ? "Salvando..." : "Salvar Evento"}</button>
+                          <button onClick={() => void saveEventLocal()} disabled={loading} className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold text-xs uppercase hover:bg-emerald-500 disabled:opacity-50">{loading ? "Salvando..." : editingEventIdx !== null ? "Atualizar Evento" : "Criar Evento"}</button>
                       </div>
                   </div>
               </div>
+          </div>
           )}
       </div>
   );
