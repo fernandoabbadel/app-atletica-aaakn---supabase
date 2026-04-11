@@ -33,6 +33,7 @@ import { useToast } from "../../../context/ToastContext";
 import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../../constants/planVisuals";
 import { resolvePlanScopedPriceInfo } from "../../../lib/commerceCatalog";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "../../../lib/roles";
+import { buildEventReceiptWhatsappMessage } from "../../../lib/tenantBranding";
 import { withTenantSlug } from "../../../lib/tenantRouting";
 import { collectUserPlanScope } from "../../../lib/userPlanScope";
 
@@ -337,7 +338,7 @@ const UserBadges = ({ data, patentesConfig }: { data: Comentario, patentesConfig
 export default function DetalhesEventoPage() {
   const params = useParams();
   const { user, isAdmin } = useAuth(); 
-  const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
+  const { tenantId: activeTenantId, tenantSigla, tenantName, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const tenantPath = (path: string): string =>
     tenantSlug.trim() ? withTenantSlug(tenantSlug, path) : path;
@@ -514,11 +515,30 @@ export default function DetalhesEventoPage() {
           const buyerPhone = user?.telefone || "Nao informado";
           const buyerTurma = user?.turma || "Sem turma";
           const total = formatCurrencyValue(pedido.valorTotal);
-          const message = `Fala, equipe do evento ${evento.titulo}! Quero finalizar meu ingresso.\n\n[ALUNO] ${buyerName}\n[TURMA] ${buyerTurma}\n[CONTATO] ${buyerPhone}\n[INGRESSO] ${pedido.quantidade}x ${pedido.loteNome}\n[VALOR] R$ ${total}\n[PEDIDO] ${pedido.id.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+          const message = buildEventReceiptWhatsappMessage({
+              tenantSigla,
+              tenantName,
+              eventTitle: evento.titulo,
+              buyerName,
+              buyerTurma,
+              buyerPhone,
+              ticketLabel: `${pedido.quantidade}x ${pedido.loteNome}`,
+              totalValue: total,
+              orderCode: pedido.id.slice(0, 8).toUpperCase(),
+          });
           const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
           window.open(whatsappUrl, "_blank");
       },
-      [addToast, evento, resolvePedidoPaymentConfig, user?.nome, user?.telefone, user?.turma]
+      [
+          addToast,
+          evento,
+          resolvePedidoPaymentConfig,
+          tenantName,
+          tenantSigla,
+          user?.nome,
+          user?.telefone,
+          user?.turma,
+      ]
   );
 
   // --- ACTIONS ---

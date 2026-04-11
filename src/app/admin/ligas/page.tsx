@@ -13,9 +13,12 @@ import { useAuth } from "../../../context/AuthContext";
 import { useTenantTheme } from "../../../context/TenantThemeContext";
 import {
   deleteLeagueConfig,
+  LEAGUE_DESCRIPTION_MAX_LENGTH,
   fetchLeagueUsers,
   fetchLeagues,
   LEAGUE_NAME_MAX_LENGTH,
+  LEAGUE_OVERVIEW_MAX_LENGTH,
+  LEAGUE_SIGLA_MAX_LENGTH,
   saveLeagueConfig,
   setLeagueVisibility,
   uploadLeagueImageToStorage,
@@ -62,6 +65,10 @@ interface LeagueEvent {
     pollQuestion?: string; 
 }
 
+type LigaFormState = Partial<Liga> & {
+  visaoGeral?: string;
+};
+
 type Liga = LeagueRecord;
 type UserData = LeagueUserRecord;
 
@@ -92,8 +99,8 @@ export default function AdminLigasPage() {
   const [allUsers, setAllUsers] = useState<UserData[]>([]);
 
   // Form State Principal
-  const [formData, setFormData] = useState<Partial<Liga>>({
-    nome: "", sigla: "", presidente: "", descricao: "", senha: "", foto: "", visivel: false, ativa: false,
+  const [formData, setFormData] = useState<LigaFormState>({
+    nome: "", sigla: "", presidente: "", descricao: "", visaoGeral: "", senha: "", foto: "", visivel: false, ativa: false,
     membros: [], eventos: [], perguntas: [], bizu: "", likes: 0
   });
 
@@ -151,7 +158,7 @@ export default function AdminLigasPage() {
 
   const handleOpenCreate = () => {
     setFormData({ 
-        nome: "", sigla: "", presidente: "", descricao: "", senha: "", foto: "", visivel: false, ativa: false,
+        nome: "", sigla: "", presidente: "", descricao: "", visaoGeral: "", senha: "", foto: "", visivel: false, ativa: false,
         membros: [], eventos: [], perguntas: [], bizu: "", likes: 0 
     });
     setIsEditing(false);
@@ -160,7 +167,7 @@ export default function AdminLigasPage() {
   };
 
   const handleOpenEdit = (liga: Liga) => {
-    setFormData(liga);
+    setFormData({ ...liga, visaoGeral: liga.visaoGeral || "" });
     setEditingId(liga.id);
     setIsEditing(true);
     setShowModal(true);
@@ -452,10 +459,13 @@ export default function AdminLigasPage() {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <input type="text" placeholder="Nome da Liga" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none" value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})} maxLength={LEAGUE_NAME_MAX_LENGTH}/>
-                            <input type="text" placeholder="Sigla" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none uppercase" value={formData.sigla} onChange={e => setFormData({...formData, sigla: e.target.value})}/>
+                            <input type="text" placeholder="Sigla" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none uppercase" value={formData.sigla} onChange={e => setFormData({...formData, sigla: e.target.value.toUpperCase()})} maxLength={LEAGUE_SIGLA_MAX_LENGTH}/>
                         </div>
                         <p className="text-[10px] text-zinc-500">
                             Maximo de {LEAGUE_NAME_MAX_LENGTH} caracteres para o nome caber melhor nos cards.
+                        </p>
+                        <p className="text-[10px] text-zinc-500">
+                            Sigla: {String(formData.sigla || "").length}/{LEAGUE_SIGLA_MAX_LENGTH} caracteres.
                         </p>
                         
                         {/* CHECKBOX VISIBILIDADE NO DASHBOARD */}
@@ -476,7 +486,14 @@ export default function AdminLigasPage() {
                             <input type="text" placeholder="Presidente" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none" value={formData.presidente} onChange={e => setFormData({...formData, presidente: e.target.value})}/>
                             <input type="text" placeholder="Senha de Acesso" className="w-full bg-zinc-900 border border-emerald-500/30 p-3 rounded-xl text-sm text-white outline-none" value={formData.senha} onChange={e => setFormData({...formData, senha: e.target.value})}/>
                         </div>
-                        <textarea rows={3} placeholder="Descrição..." className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none resize-none" value={formData.descricao} onChange={e => setFormData({...formData, descricao: e.target.value})}/>
+                        <textarea rows={3} placeholder="Descrição..." className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none resize-none" value={formData.descricao} onChange={e => setFormData({...formData, descricao: e.target.value.slice(0, LEAGUE_DESCRIPTION_MAX_LENGTH)})} maxLength={LEAGUE_DESCRIPTION_MAX_LENGTH}/>
+                        <p className="text-[10px] text-zinc-500">
+                            Descrição: {String(formData.descricao || "").length}/{LEAGUE_DESCRIPTION_MAX_LENGTH} caracteres.
+                        </p>
+                        <textarea rows={5} placeholder={"Visão geral da liga...\nEx: Aulas\nAções\nEventos\nEstágio\nCurso\nViagens"} className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none resize-none" value={formData.visaoGeral || ""} onChange={e => setFormData({...formData, visaoGeral: e.target.value.slice(0, LEAGUE_OVERVIEW_MAX_LENGTH)})} maxLength={LEAGUE_OVERVIEW_MAX_LENGTH}/>
+                        <p className="text-[10px] text-zinc-500">
+                            Visão geral: {String(formData.visaoGeral || "").length}/{LEAGUE_OVERVIEW_MAX_LENGTH} caracteres.
+                        </p>
                         <input type="text" placeholder="Destaque da Semana" className="w-full bg-zinc-900 border border-yellow-500/30 p-3 rounded-xl text-sm text-white outline-none" value={formData.bizu} onChange={e => setFormData({...formData, bizu: e.target.value})}/>
                     </div>
                 )}

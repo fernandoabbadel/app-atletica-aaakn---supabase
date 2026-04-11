@@ -145,6 +145,14 @@ export function LeaguePublicDetailClient({
     [league]
   );
   const sortedEvents = useMemo(() => sortEvents(league?.eventos || []), [league]);
+  const overviewHighlights = useMemo(
+    () =>
+      String(league?.visaoGeral || "")
+        .split(/\r?\n/)
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    [league?.visaoGeral]
+  );
   const presidentName =
     sortedMembers.find((member) => member.cargo.trim().toLowerCase() === "presidente")?.nome || league?.presidente;
   const isLiked = Boolean(league && likedIds.includes(league.id));
@@ -333,13 +341,13 @@ export function LeaguePublicDetailClient({
       </section>
 
       <main className="mx-auto max-w-6xl space-y-6 px-6 py-2">
-        <nav className="flex flex-wrap gap-3">
+        <nav className="grid gap-3 sm:grid-cols-3">
           {[
             { href: overviewHref, label: "Vis\u00e3o geral", tab: "overview" as const },
             { href: membersHref, label: "Membros", tab: "membros" as const },
             { href: agendaHref, label: "Agenda", tab: "agenda" as const },
           ].map((item) => (
-            <Link key={item.href} href={item.href} className={`rounded-full border px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] transition ${activeTab === item.tab ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:bg-zinc-900 hover:text-white"}`}>
+            <Link key={item.href} href={item.href} className={`flex min-h-[76px] items-center justify-center rounded-[1.5rem] border px-5 py-4 text-center text-[12px] font-black uppercase tracking-[0.24em] transition ${activeTab === item.tab ? "border-emerald-500/30 bg-[linear-gradient(135deg,rgba(16,185,129,0.18),rgba(6,182,212,0.14))] text-emerald-200 shadow-[0_20px_40px_rgba(16,185,129,0.12)]" : "border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-white"}`}>
               {item.label}
             </Link>
           ))}
@@ -347,6 +355,26 @@ export function LeaguePublicDetailClient({
 
         {activeTab === "overview" ? (
           <section className="space-y-6">
+            {overviewHighlights.length > 0 ? (
+              <article className="rounded-[2rem] border border-emerald-500/20 bg-[linear-gradient(180deg,rgba(10,24,20,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-emerald-200">
+                    <Lightbulb size={18} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">Visão geral</p>
+                    <h2 className="mt-2 text-2xl font-black text-white">O que a liga faz</h2>
+                  </div>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {overviewHighlights.map((entry, index) => (
+                    <div key={`${entry}-${index}`} className="rounded-[1.25rem] border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-semibold leading-6 text-emerald-50">
+                      {entry}
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ) : null}
             <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,24,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
               <div className="flex items-center gap-3"><div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-200"><CalendarDays size={18} /></div><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Agenda da liga</p><h2 className="mt-2 text-2xl font-black text-white">{"O que vem por a\u00ed"}</h2></div></div>
               <div className="mt-5 space-y-3">

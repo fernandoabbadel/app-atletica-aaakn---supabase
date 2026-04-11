@@ -29,7 +29,10 @@ import {
   fetchLeagueById,
   fetchLeagueSummaries,
   fetchLeagueUsers,
+  LEAGUE_DESCRIPTION_MAX_LENGTH,
   LEAGUE_NAME_MAX_LENGTH,
+  LEAGUE_OVERVIEW_MAX_LENGTH,
+  LEAGUE_SIGLA_MAX_LENGTH,
   syncLeagueEvents,
   syncLeagueMembers,
   uploadLeagueImageToStorage,
@@ -117,6 +120,7 @@ interface LigaData {
     nome: string; 
     sigla: string; 
     descricao?: string; 
+    visaoGeral?: string;
     bizu?: string; 
     likes?: number; 
     senha: string; 
@@ -390,31 +394,80 @@ export function LigasAdminPageContent() {
       const restoredDraft = readLigaEditorDraft(preferredLeagueId, tenantScopeId);
       if (!restoredDraft || !restoredDraft.ligaSenha) return;
 
-      setLigaData({
-          ...(restoredDraft.ligaDraft as Omit<LigaData, "senha">),
-          senha: restoredDraft.ligaSenha,
-      } as LigaData);
-      setSelectedLigaId(preferredLeagueId);
-      setSenhaInput(restoredDraft.ligaSenha);
-      setActiveTab(routeTab);
-      setSavedMemberIds(
-          Array.isArray(restoredDraft.savedMemberIds)
-              ? restoredDraft.savedMemberIds
-              : extractMemberIds((restoredDraft.ligaDraft as Partial<LigaData>).membros as Member[] | undefined)
-      );
-      setSendNotification(restoredDraft.sendNotification);
-      setEventModal(restoredDraft.eventModal);
-      setEditingEventIdx(restoredDraft.editingEventIdx);
-      setCurrentEvent(restoredDraft.currentEvent);
-      setNovoLote(restoredDraft.novoLote);
-      setIsLoggedIn(true);
-      addToast("Sessao da liga restaurada.", "info");
-      if (preferredLeagueId && preferredLeagueId !== routeLeagueId) {
-          const nextPath = tenantSlug
-              ? withTenantSlug(tenantSlug, buildLeagueSectionPath(routeTab, preferredLeagueId))
-              : buildLeagueSectionPath(routeTab, preferredLeagueId);
-          router.replace(nextPath);
-      }
+      let mounted = true;
+      const restoreSession = async () => {
+          try {
+              const target = await fetchLeagueById(preferredLeagueId, {
+                  forceRefresh: true,
+                  tenantId: tenantScopeId || undefined,
+              });
+              if (!mounted || !target || target.senha !== restoredDraft.ligaSenha) return;
+
+              const baseLigaData: LigaData = {
+                  id: target.id,
+                  nome: target.nome,
+                  sigla: target.sigla || "",
+                  descricao: target.descricao || "",
+                  visaoGeral: target.visaoGeral || "",
+                  bizu: target.bizu || "",
+                  likes: target.likes || 0,
+                  senha: target.senha,
+                  foto: target.foto || resolveLeagueLogoSrc(target) || "",
+                  logoUrl: resolveLeagueLogoSrc(target) || undefined,
+                  ativa: target.ativa,
+                  perguntas: sanitizeQuestionDrafts((target.perguntas || []) as PerguntaLiga[]),
+                  membros: (target.membros || []) as Member[],
+                  eventos: (target.eventos || []) as LeagueEvent[],
+                  membersCount: target.membersCount,
+                  updatedAt: target.updatedAt,
+              };
+              const persistedMemberIds = extractMemberIds(baseLigaData.membros);
+              const persistedUpdatedAtMs = parseDateMs(baseLigaData.updatedAt);
+              const shouldApplyDraft =
+                  persistedUpdatedAtMs <= 0 ||
+                  (restoredDraft.savedAt || 0) >= persistedUpdatedAtMs;
+              const mergedLigaData: LigaData = shouldApplyDraft
+                  ? {
+                      ...baseLigaData,
+                      ...restoredDraft.ligaDraft,
+                      eventos: baseLigaData.eventos,
+                      id: baseLigaData.id,
+                      senha: baseLigaData.senha,
+                      updatedAt: baseLigaData.updatedAt,
+                  }
+                  : baseLigaData;
+
+              setLigaData(mergedLigaData);
+              setSelectedLigaId(preferredLeagueId);
+              setSenhaInput(restoredDraft.ligaSenha);
+              setActiveTab(routeTab);
+              setSavedMemberIds(
+                  Array.isArray(restoredDraft.savedMemberIds)
+                      ? restoredDraft.savedMemberIds
+                      : persistedMemberIds
+              );
+              setSendNotification(restoredDraft.sendNotification);
+              setEventModal(false);
+              setEditingEventIdx(null);
+              setCurrentEvent({});
+              setNovoLote({ nome: "", preco: "", status: "ativo" });
+              setIsLoggedIn(true);
+              addToast("Sessao da liga restaurada.", "info");
+              if (preferredLeagueId && preferredLeagueId !== routeLeagueId) {
+                  const nextPath = tenantSlug
+                      ? withTenantSlug(tenantSlug, buildLeagueSectionPath(routeTab, preferredLeagueId))
+                      : buildLeagueSectionPath(routeTab, preferredLeagueId);
+                  router.replace(nextPath);
+              }
+          } catch (error: unknown) {
+              console.error(error);
+          }
+      };
+
+      void restoreSession();
+      return () => {
+          mounted = false;
+      };
   }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, routeLeagueId, routeTab, router, tenantScopeId, tenantSlug]);
 
   useEffect(() => {
@@ -462,6 +515,40 @@ export function LigasAdminPageContent() {
       sendNotification,
       tenantScopeId,
   ]);
+
+  useEffect(() => {
+      if (!isLoggedIn || !ligaData?.id || activeTab !== "events" || eventModal) return;
+
+      let mounted = true;
+      const refreshLatestLeagueEvents = async () => {
+          try {
+              const latestLeague = await fetchLeagueById(ligaData.id, {
+                  forceRefresh: true,
+                  tenantId: tenantScopeId || undefined,
+              });
+              if (!mounted || !latestLeague) return;
+
+              setLigaData((prev) =>
+                  prev && prev.id === latestLeague.id
+                      ? {
+                          ...prev,
+                          eventos: (latestLeague.eventos || []) as LeagueEvent[],
+                          updatedAt: latestLeague.updatedAt,
+                        }
+                      : prev
+              );
+          } catch (error: unknown) {
+              console.error(error);
+          }
+      };
+
+      void refreshLatestLeagueEvents();
+      window.addEventListener("focus", refreshLatestLeagueEvents);
+      return () => {
+          window.removeEventListener("focus", refreshLatestLeagueEvents);
+          mounted = false;
+      };
+  }, [activeTab, eventModal, isLoggedIn, ligaData?.id, tenantScopeId]);
 
   // 1. CARREGAMENTO INICIAL
   useEffect(() => {
@@ -551,6 +638,7 @@ export function LigasAdminPageContent() {
                   nome: target.nome,
                   sigla: target.sigla || "",
                   descricao: target.descricao || "",
+                  visaoGeral: target.visaoGeral || "",
                   bizu: target.bizu || "",
                   likes: target.likes || 0,
                   senha: target.senha,
@@ -577,6 +665,7 @@ export function LigasAdminPageContent() {
                   ? {
                       ...baseLigaData,
                       ...restoredDraft.ligaDraft,
+                      eventos: baseLigaData.eventos,
                       id: baseLigaData.id,
                       senha: baseLigaData.senha,
                       updatedAt: baseLigaData.updatedAt,
@@ -593,10 +682,10 @@ export function LigasAdminPageContent() {
                           : persistedMemberIds
                   );
                   setSendNotification(restoredDraft.sendNotification);
-                  setEventModal(restoredDraft.eventModal);
-                  setEditingEventIdx(restoredDraft.editingEventIdx);
-                  setCurrentEvent(restoredDraft.currentEvent);
-                  setNovoLote(restoredDraft.novoLote);
+                  setEventModal(false);
+                  setEditingEventIdx(null);
+                  setCurrentEvent({});
+                  setNovoLote({ nome: "", preco: "", status: "ativo" });
                   if (!shouldApplyDraft) {
                       addToast("Rascunho local mais antigo que a base salva. Exibindo a versao publicada.", "info");
                   }
@@ -951,6 +1040,7 @@ export function LigasAdminPageContent() {
               nome: ligaData.nome,
               sigla: ligaData.sigla,
               descricao: ligaData.descricao || "",
+              visaoGeral: ligaData.visaoGeral || "",
               bizu: ligaData.bizu || "",
               likes: Number.isFinite(Number(ligaData.likes)) ? Number(ligaData.likes) : 0,
               senha: ligaData.senha,
@@ -1199,7 +1289,7 @@ export function LigasAdminPageContent() {
           {activeTab === 'visual' && ligaData && (
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl space-y-6">
                   <div className="grid grid-cols-2 gap-4">
-                      <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Sigla</label><input type="text" className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500 font-bold uppercase" value={ligaData.sigla} onChange={e => setLigaData({...ligaData, sigla: e.target.value})} maxLength={6}/></div>
+                      <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Sigla</label><input type="text" className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500 font-bold uppercase" value={ligaData.sigla} onChange={e => setLigaData({...ligaData, sigla: e.target.value.toUpperCase()})} maxLength={LEAGUE_SIGLA_MAX_LENGTH}/><p className="mt-1 text-[10px] text-zinc-500">{ligaData.sigla.length}/{LEAGUE_SIGLA_MAX_LENGTH} caracteres.</p></div>
                       <div>
                         <label className="text-[10px] font-bold text-zinc-500 uppercase">Nome Completo</label>
                         <input
@@ -1235,7 +1325,12 @@ export function LigasAdminPageContent() {
                           <span className="text-xs text-zinc-500 max-w-[150px]">Clique para alterar a logo.<br/>Recomendado: Quadrado.</span>
                       </div>
                   </div>
-                  <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Descrição</label><textarea className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm h-24 focus:border-emerald-500 outline-none resize-none" value={ligaData.descricao} onChange={e => setLigaData({...ligaData, descricao: e.target.value})}/></div>
+                  <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Descrição</label><textarea className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm h-24 focus:border-emerald-500 outline-none resize-none" value={ligaData.descricao} onChange={e => setLigaData({...ligaData, descricao: e.target.value.slice(0, LEAGUE_DESCRIPTION_MAX_LENGTH)})} maxLength={LEAGUE_DESCRIPTION_MAX_LENGTH}/><p className="mt-1 text-[10px] text-zinc-500">{String(ligaData.descricao || "").length}/{LEAGUE_DESCRIPTION_MAX_LENGTH} caracteres.</p></div>
+                  <div>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Visão geral da liga</label>
+                      <textarea className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm h-32 focus:border-emerald-500 outline-none resize-none" value={ligaData.visaoGeral || ""} onChange={e => setLigaData({...ligaData, visaoGeral: e.target.value.slice(0, LEAGUE_OVERVIEW_MAX_LENGTH)})} maxLength={LEAGUE_OVERVIEW_MAX_LENGTH} placeholder={"Explique o que a liga faz.\nEx: Aulas\nAções\nEventos\nEstágio\nCurso\nViagens"}/>
+                      <p className="mt-1 text-[10px] text-zinc-500">{String(ligaData.visaoGeral || "").length}/{LEAGUE_OVERVIEW_MAX_LENGTH} caracteres.</p>
+                  </div>
                   <div className="bg-yellow-900/10 border border-yellow-500/20 p-4 rounded-xl">
                       <div className="flex justify-between items-center mb-2">
                           <label className="text-[10px] font-bold text-yellow-500 uppercase">Destaque da Semana</label>

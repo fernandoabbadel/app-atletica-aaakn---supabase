@@ -49,6 +49,7 @@ const LEAGUES_SELECT_COLUMNS = [
   "sigla",
   "presidente",
   "descricao",
+  "visaoGeral",
   "senha",
   "foto",
   "logoUrl",
@@ -71,6 +72,7 @@ const LEAGUE_SUMMARY_SELECT_COLUMNS = [
   "nome",
   "sigla",
   "descricao",
+  "visaoGeral",
   "foto",
   "logoUrl",
   "logo",
@@ -758,6 +760,7 @@ export interface LeagueRecord {
   sigla: string;
   presidente: string;
   descricao: string;
+  visaoGeral?: string;
   senha: string;
   foto: string;
   logoUrl?: string;
@@ -938,6 +941,9 @@ const hydrateLeagueEventsFromGlobalCatalog = async (
 };
 
 export const LEAGUE_NAME_MAX_LENGTH = 42;
+export const LEAGUE_SIGLA_MAX_LENGTH = 10;
+export const LEAGUE_DESCRIPTION_MAX_LENGTH = 180;
+export const LEAGUE_OVERVIEW_MAX_LENGTH = 500;
 
 export interface LeagueUserRecord {
   id: string;
@@ -1132,6 +1138,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     sigla: asString(data.sigla),
     presidente: asString(data.presidente),
     descricao: asString(data.descricao),
+    visaoGeral: asString(data.visaoGeral) || undefined,
     senha: asString(data.senha),
     foto,
     ...(logoUrl ? { logoUrl } : {}),
@@ -1238,9 +1245,10 @@ const normalizeLeaguePayload = (
 
   return {
     nome: asString(payload.nome, "Liga").trim().slice(0, LEAGUE_NAME_MAX_LENGTH),
-    sigla: asString(payload.sigla).trim().slice(0, 20),
+    sigla: asString(payload.sigla).trim().toUpperCase().slice(0, LEAGUE_SIGLA_MAX_LENGTH),
     presidente: asString(payload.presidente).trim().slice(0, 120),
-    descricao: asString(payload.descricao).slice(0, 4_000),
+    descricao: asString(payload.descricao).slice(0, LEAGUE_DESCRIPTION_MAX_LENGTH),
+    visaoGeral: asString(payload.visaoGeral).slice(0, LEAGUE_OVERVIEW_MAX_LENGTH),
     senha: asString(payload.senha).slice(0, 120),
     foto,
     ...(logoUrl ? { logoUrl, logo: logoUrl } : { logoUrl: undefined, logo: undefined }),

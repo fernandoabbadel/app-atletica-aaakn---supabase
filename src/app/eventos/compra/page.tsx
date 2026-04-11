@@ -13,7 +13,7 @@ import { withTenantSlug } from "@/lib/tenantRouting";
 import { collectUserPlanScope } from "@/lib/userPlanScope";
 import {
   buildTenantFinanceFallback,
-  resolveTenantBrandLabel,
+  buildEventReceiptWhatsappMessage,
 } from "../../../lib/tenantBranding";
 import { keepDigits } from "@/utils/contactFields";
 // Interfaces para tipagem forte (fim do any)
@@ -60,7 +60,6 @@ function CompraContent() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const financeFallback = buildTenantFinanceFallback({ tenantSigla, tenantName });
-  const brandLabel = resolveTenantBrandLabel(tenantSigla, tenantName);
   const eventosHref = tenantSlug ? withTenantSlug(tenantSlug, "/eventos") : "/eventos";
 
     useEffect(() => {
@@ -139,7 +138,17 @@ function CompraContent() {
           const buyerName = user.nome || "Aluno";
           const buyerPhone = user.telefone || "Nao informado";
           const buyerTurma = user.turma || "Sem turma";
-          const message = `Fala, equipe do evento ${brandLabel}! Quero garantir meu lugar no *${evento.titulo}*.\n\n[ALUNO] ${buyerName}\n[TURMA] ${buyerTurma}\n[CONTATO] ${buyerPhone}\n[INGRESSO] ${quantidade}x ${lote.nome}\n[VALOR] R$ ${valorTotal.toFixed(2)}\n[PEDIDO] ${ticketRequest.id.slice(0,8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+          const message = buildEventReceiptWhatsappMessage({
+              tenantSigla,
+              tenantName,
+              eventTitle: evento.titulo,
+              buyerName,
+              buyerTurma,
+              buyerPhone,
+              ticketLabel: `${quantidade}x ${lote.nome}`,
+              totalValue: valorTotal.toFixed(2),
+              orderCode: ticketRequest.id.slice(0, 8).toUpperCase(),
+          });
           const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
 
           // 3. Redirecionar
