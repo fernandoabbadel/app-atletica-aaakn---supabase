@@ -101,7 +101,7 @@ const currentMiniVendorCache = new Map<string, CacheEntry<MiniVendorProfile | nu
 const miniVendorByIdCache = new Map<string, CacheEntry<MiniVendorProfile | null>>();
 const approvedMiniVendorIdsCache = new Map<string, CacheEntry<string[]>>();
 const tenantMiniVendorsCache = new Map<string, CacheEntry<MiniVendorProfile[]>>();
-const miniVendorOrdersCache = new Map<string, CacheEntry<Row[]>>();
+const miniVendorOrdersCache = new Map<string, CacheEntry<MiniVendorOrdersPage>>();
 const miniVendorProductsCache = new Map<string, CacheEntry<Row[]>>();
 
 const asObject = (value: unknown): Row | null =>
@@ -851,9 +851,30 @@ export async function fetchMiniVendorOrders(options: {
   forceRefresh?: boolean;
   limit?: number;
 }): Promise<Row[]> {
+  const page = await fetchMiniVendorOrdersPage({
+    ...options,
+    page: 1,
+    pageSize: options.limit,
+  });
+  return page.rows;
+}
+
+export interface MiniVendorOrdersPage {
+  rows: Row[];
+  hasMore: boolean;
+}
+
+export async function fetchMiniVendorOrdersPage(options: {
+  tenantId: string;
+  sellerId: string;
+  statuses?: string[];
+  forceRefresh?: boolean;
+  page?: number;
+  pageSize?: number;
+}): Promise<MiniVendorOrdersPage> {
   const tenantId = options.tenantId.trim();
   const sellerId = options.sellerId.trim();
-  if (!tenantId || !sellerId) return [];
+  if (!tenantId || !sellerId) return { rows: [], hasMore: false };
 
   const statuses = Array.from(
     new Set(
@@ -862,8 +883,16 @@ export async function fetchMiniVendorOrders(options: {
         .filter((entry) => entry.length > 0)
     )
   );
-  const limit = Math.max(1, Math.min(200, Math.floor(options.limit ?? 80)));
-  const cacheKey = buildScopedCacheKey(tenantId, sellerId, statuses.join("|"), String(limit));
+  const page = Math.max(1, Math.floor(options.page ?? 1));
+  const pageSize = Math.max(1, Math.min(50, Math.floor(options.pageSize ?? 20)));
+  const offset = (page - 1) * pageSize;
+  const cacheKey = buildScopedCacheKey(
+    tenantId,
+    sellerId,
+    statuses.join("|"),
+    String(page),
+    String(pageSize)
+  );
   if (!options.forceRefresh) {
     const cached = getCache(miniVendorOrdersCache, cacheKey);
     if (cached) return cached;
@@ -876,7 +905,7 @@ export async function fetchMiniVendorOrders(options: {
     .eq("tenant_id", tenantId)
     .eq("seller_type", "mini_vendor")
     .eq("seller_id", sellerId)
-    .limit(limit);
+    .range(offset, offset + pageSize);
 
   if (statuses.length > 0) {
     query = query.in("status", statuses);
@@ -901,8 +930,12 @@ export async function fetchMiniVendorOrders(options: {
     .filter((entry): entry is Row => entry !== null)
     .map((entry) => ({ ...entry }));
 
-  setCache(miniVendorOrdersCache, cacheKey, rows);
-  return rows;
+  const result = {
+    rows: rows.slice(0, pageSize),
+    hasMore: rows.length > pageSize,
+  };
+  setCache(miniVendorOrdersCache, cacheKey, result);
+  return result;
 }
 
 export async function fetchMiniVendorProducts(options: {

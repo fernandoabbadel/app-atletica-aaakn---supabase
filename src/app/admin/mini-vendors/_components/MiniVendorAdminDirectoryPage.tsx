@@ -86,6 +86,22 @@ export default function MiniVendorAdminDirectoryPage({
     ? withTenantSlug(tenantSlug, "/admin/mini-vendors")
     : "/admin/mini-vendors";
   const dashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
+  const buildVendorOrdersHref = useCallback(
+    (targetMode: "pending" | "approved", row: MiniVendorProfile) => {
+      const cleanStoreName = row.storeName.trim();
+      const basePath =
+        targetMode === "pending"
+          ? cleanStoreName
+            ? `/configuracoes/mini-vendor/pedidos-pendentes/${encodeURIComponent(cleanStoreName)}`
+            : "/configuracoes/mini-vendor/pedidos-pendentes"
+          : cleanStoreName
+          ? `/configuracoes/mini-vendor/pedidos-aprovados/${encodeURIComponent(cleanStoreName)}`
+          : "/configuracoes/mini-vendor/pedidos-aprovados";
+      const scopedPath = tenantSlug ? withTenantSlug(tenantSlug, basePath) : basePath;
+      return `${scopedPath}?userId=${encodeURIComponent(row.userId)}`;
+    },
+    [tenantSlug]
+  );
 
   const load = useCallback(async (forceRefresh = true) => {
     if (!tenantId.trim()) {
@@ -274,6 +290,20 @@ export default function MiniVendorAdminDirectoryPage({
                           <Package size={12} />
                           Ver produtos
                         </Link>
+                        <Link
+                          href={buildVendorOrdersHref("pending", row)}
+                          className="inline-flex items-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-500/20"
+                        >
+                          <ExternalLink size={12} />
+                          Pedidos pendentes
+                        </Link>
+                        <Link
+                          href={buildVendorOrdersHref("approved", row)}
+                          className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+                        >
+                          <ExternalLink size={12} />
+                          Pedidos aprovados
+                        </Link>
                       </>
                     ) : null}
                     <button
@@ -345,6 +375,20 @@ export default function MiniVendorAdminDirectoryPage({
                       >
                         <Package size={12} />
                         Editar produtos
+                      </Link>
+                      <Link
+                        href={buildVendorOrdersHref("pending", row)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-500/20"
+                      >
+                        <ExternalLink size={12} />
+                        Pedidos pendentes
+                      </Link>
+                      <Link
+                        href={buildVendorOrdersHref("approved", row)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+                      >
+                        <ExternalLink size={12} />
+                        Pedidos aprovados
                       </Link>
                       <button
                         type="button"

@@ -18,8 +18,10 @@ import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import { logActivity } from "@/lib/logger";
+import { fetchTenantMiniVendors } from "@/lib/miniVendorService";
 import {
   approveStoreOrder,
+  fetchStoreCategories,
   fetchStoreOrdersPage,
   fetchStoreProducts,
   setStoreOrderStatus,
@@ -44,6 +46,11 @@ type OrderRow = {
   createdAt?: string;
   updatedAt?: string;
   productCategory?: string;
+};
+
+type ProductLookupRow = {
+  id: string;
+  categoria: string;
 };
 
 const PAGE_SIZE = 20;
@@ -105,7 +112,10 @@ export function AdminStoreOrdersStatusPage({
   const normalizedCategory = String(categoryLabel || "").trim();
 
   const [rows, setRows] = useState<OrderRow[]>([]);
+  const [productRows, setProductRows] = useState<ProductLookupRow[]>([]);
+  const [categoryNames, setCategoryNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [catalogReady, setCatalogReady] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [actionId, setActionId] = useState("");
@@ -113,64 +123,138 @@ export function AdminStoreOrdersStatusPage({
   const [approverNames, setApproverNames] = useState<Record<string, string>>({});
 
   const pageCopy = PAGE_COPY[mode];
-  const backHref = tenantSlug
-    ? withTenantSlug(tenantSlug, normalizedCategory ? "/admin/loja/categorias" : "/admin/loja")
-    : normalizedCategory
-    ? "/admin/loja/categorias"
+  const buildOrdersHref = useCallback(
+    (targetMode: OrdersMode, targetCategory?: string | null) => {
+      const basePath =
+        targetMode === "pending"
+          ? "/admin/loja/pedidos-pendentes"
+          : "/admin/loja/pedidos-aprovados";
+      const nextPath =
+        targetCategory && targetCategory.trim()
+          ? `${basePath}/${encodeURIComponent(targetCategory.trim())}`
+          : basePath;
+      return tenantSlug ? withTenantSlug(tenantSlug, nextPath) : nextPath;
+    },
+    [tenantSlug]
+  );
+  const backHref = normalizedCategory
+    ? buildOrdersHref(mode)
+    : tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/loja")
     : "/admin/loja";
-  const pendingHref = tenantSlug
-    ? withTenantSlug(tenantSlug, "/admin/loja/pedidos-pendentes")
-    : "/admin/loja/pedidos-pendentes";
-  const approvedHref = tenantSlug
-      ? withTenantSlug(tenantSlug, "/admin/loja/pedidos-aprovados")
-      : "/admin/loja/pedidos-aprovados";
+  const pendingHref = buildOrdersHref("pending", normalizedCategory || null);
+  const approvedHref = buildOrdersHref("approved", normalizedCategory || null);
+  const allCategoriesHref = buildOrdersHref(mode);
   const pageTitle = normalizedCategory
     ? `${pageCopy.title} • ${normalizedCategory}`
     : pageCopy.title;
   const pageSubtitle = normalizedCategory
     ? `Mostra somente os comprovantes da categoria ${normalizedCategory}.`
     : pageCopy.subtitle;
+  const categoryByProductId = useMemo(
+    () =>
+      productRows.reduce<Record<string, string>>((accumulator, row) => {
+        if (row.id) {
+          accumulator[row.id] = row.categoria || "Sem categoria";
+        }
+        return accumulator;
+      }, {}),
+    [productRows]
+  );
+  const productIdsByCategory = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    productRows.forEach((row) => {
+      const category = String(row.categoria || "").trim();
+      const productId = String(row.id || "").trim();
+      if (!category || !productId) return;
+      const categoryRows = groups.get(category) || [];
+      categoryRows.push(productId);
+      groups.set(category, categoryRows);
+    });
+    return groups;
+  }, [productRows]);
+  const categoryLinks = useMemo(
+    () =>
+      categoryNames.map((label) => ({
+        label,
+        href: buildOrdersHref(mode, label),
+      })),
+    [buildOrdersHref, categoryNames, mode]
+  );
 
-  const load = useCallback(
-    async (targetPage: number) => {
-      let result = await fetchStoreOrdersPage({
-        page: normalizedCategory ? 1 : targetPage,
-        pageSize: normalizedCategory ? 200 : PAGE_SIZE,
-        status: pageCopy.status,
-      });
-
-      const productRows = await fetchStoreProducts({
+  const loadCatalog = useCallback(async () => {
+    const [storeCategories, storeProducts, miniVendorRows] = await Promise.all([
+      fetchStoreCategories({
+        maxResults: 200,
+        forceRefresh: false,
+        tenantId: tenantId || undefined,
+      }),
+      fetchStoreProducts({
         maxResults: 240,
         forceRefresh: false,
         tenantId: tenantId || undefined,
-      });
-      const categoryByProductId = new Map(
-        productRows.map((row) => [
-          String(row.id || "").trim(),
-          String(row.categoria || "").trim() || "Sem categoria",
-        ])
-      );
+      }),
+      tenantId.trim()
+        ? fetchTenantMiniVendors({
+            tenantId,
+            forceRefresh: false,
+          })
+        : Promise.resolve([]),
+    ]);
 
-      if (normalizedCategory) {
-        result = {
-          rows: result.rows.filter(
-            (row) =>
-              (categoryByProductId.get(String(row.productId || "").trim()) || "Sem categoria") ===
-              normalizedCategory
-          ),
-          hasMore: false,
-        };
-      }
+    const nextProductRows = storeProducts
+      .map((row) => ({
+        id: String(row.id || "").trim(),
+        categoria: String(row.categoria || "").trim(),
+      }))
+      .filter((row) => row.id.length > 0);
 
-      if (!normalizedCategory && targetPage > 1 && result.rows.length === 0) {
+    const labels = new Set<string>();
+    storeCategories.forEach((row) => {
+      const label = String(row.nome || "").trim();
+      if (label) labels.add(label);
+    });
+    nextProductRows.forEach((row) => {
+      if (row.categoria) labels.add(row.categoria);
+    });
+    miniVendorRows.forEach((row) => {
+      const label = String(row.storeName || "").trim();
+      if (label) labels.add(label);
+    });
+
+    setProductRows(nextProductRows);
+    setCategoryNames(
+      Array.from(labels).sort((left, right) =>
+        left.localeCompare(right, "pt-BR", { sensitivity: "base" })
+      )
+    );
+    setCatalogReady(true);
+  }, [tenantId]);
+
+  const load = useCallback(
+    async (targetPage: number) => {
+      const categoryProductIds = normalizedCategory
+        ? productIdsByCategory.get(normalizedCategory) || []
+        : undefined;
+      const result =
+        normalizedCategory && categoryProductIds && categoryProductIds.length === 0
+          ? { rows: [], hasMore: false }
+          : await fetchStoreOrdersPage({
+              page: targetPage,
+              pageSize: PAGE_SIZE,
+              status: pageCopy.status,
+              tenantId: tenantId || undefined,
+              ...(categoryProductIds ? { productIds: categoryProductIds } : {}),
+            });
+
+      if (targetPage > 1 && result.rows.length === 0) {
         setPage((prev) => Math.max(1, prev - 1));
         return;
       }
 
       const nextRows = (result.rows as OrderRow[]).map((row) => ({
         ...row,
-        productCategory:
-          categoryByProductId.get(String(row.productId || "").trim()) || "Sem categoria",
+        productCategory: categoryByProductId[String(row.productId || "").trim()] || "Sem categoria",
       }));
       setRows(nextRows);
       setHasMore(result.hasMore);
@@ -200,13 +284,38 @@ export function AdminStoreOrdersStatusPage({
       });
       setApproverNames(nextNames);
     },
-    [mode, normalizedCategory, pageCopy.status, tenantId]
+    [categoryByProductId, mode, normalizedCategory, pageCopy.status, productIdsByCategory, tenantId]
   );
 
   useEffect(() => {
     let mounted = true;
 
     const run = async () => {
+      try {
+        await loadCatalog();
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) {
+          addToast("Erro ao carregar categorias da loja.", "error");
+          setLoading(false);
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [addToast, loadCatalog]);
+
+  useEffect(() => {
+    if (!catalogReady) return;
+    let mounted = true;
+
+    const run = async () => {
+      if (mounted) {
+        setLoading(true);
+      }
       try {
         await load(page);
       } catch (error: unknown) {
@@ -225,7 +334,7 @@ export function AdminStoreOrdersStatusPage({
     return () => {
       mounted = false;
     };
-  }, [addToast, load, page]);
+  }, [addToast, catalogReady, load, page]);
 
   const reloadCurrentPage = async () => {
     await load(page);
@@ -335,36 +444,86 @@ export function AdminStoreOrdersStatusPage({
             </div>
           </div>
 
-          {!normalizedCategory && (
-            <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href={pendingHref}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
+                mode === "pending"
+                  ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              <Clock3 size={14} />
+              Pendentes
+            </Link>
+            <Link
+              href={approvedHref}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
+                mode === "approved"
+                  ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              <ShoppingBag size={14} />
+              Aprovados
+            </Link>
+            {normalizedCategory && (
               <Link
-                href={pendingHref}
-                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
-                  mode === "pending"
-                    ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
-                }`}
+                href={allCategoriesHref}
+                className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-zinc-300 hover:bg-zinc-800"
               >
-                <Clock3 size={14} />
-                Pendentes
+                Todas categorias
               </Link>
-              <Link
-                href={approvedHref}
-                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
-                  mode === "approved"
-                    ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
-                }`}
-              >
-                <ShoppingBag size={14} />
-                Aprovados
-              </Link>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-5xl space-y-3 px-6 py-6">
+        {categoryLinks.length > 0 && (
+          <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                  Categorias
+                </p>
+                <p className="mt-1 text-sm font-bold text-white">
+                  Cada botao abre a pagina paginada da categoria.
+                </p>
+              </div>
+              {normalizedCategory && (
+                <Link
+                  href={allCategoriesHref}
+                  className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-black/20 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 hover:bg-black/40"
+                >
+                  Voltar para todas
+                </Link>
+              )}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {categoryLinks.map((category) => {
+                const isCurrent = normalizedCategory === category.label;
+                return (
+                  <Link
+                    key={category.label}
+                    href={category.href}
+                    className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
+                      isCurrent
+                        ? mode === "pending"
+                          ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                          : "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                        : "border-zinc-700 bg-black/20 text-zinc-300 hover:bg-zinc-800"
+                    }`}
+                  >
+                    {category.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {loading ? (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 text-xs font-bold uppercase text-zinc-500">
             Carregando...
@@ -378,13 +537,34 @@ export function AdminStoreOrdersStatusPage({
             <section key={group.category} className="space-y-3">
               {!normalizedCategory && (
                 <div className="rounded-2xl border border-zinc-800 bg-black/20 px-4 py-3">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                    Categoria
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-white">{group.category}</p>
-                  <p className="mt-1 text-[11px] text-zinc-500">
-                    {group.rows.length} pedido{group.rows.length === 1 ? "" : "s"} nesta pagina.
-                  </p>
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                        Categoria
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-white">{group.category}</p>
+                      <p className="mt-1 text-[11px] text-zinc-500">
+                        {group.rows.length} pedido{group.rows.length === 1 ? "" : "s"} nesta pagina.
+                      </p>
+                    </div>
+
+                    {group.category !== "Sem categoria" && (
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={buildOrdersHref("pending", group.category)}
+                          className="inline-flex items-center gap-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] font-black uppercase text-yellow-300 hover:bg-yellow-500/20"
+                        >
+                          Pendentes
+                        </Link>
+                        <Link
+                          href={buildOrdersHref("approved", group.category)}
+                          className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+                        >
+                          Aprovados
+                        </Link>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -544,7 +724,7 @@ export function AdminStoreOrdersStatusPage({
           ))
         )}
 
-        {!normalizedCategory && (page > 1 || hasMore) && (
+        {(page > 1 || hasMore) && (
           <div className="flex items-center justify-between pt-2 text-xs font-bold uppercase text-zinc-500">
             <span>Pagina {page}</span>
             <div className="flex items-center gap-2">

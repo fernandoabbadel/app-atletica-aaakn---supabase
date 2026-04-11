@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import {
@@ -18,10 +20,12 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
   fetchCurrentMiniVendorProfile,
-  fetchMiniVendorOrders,
+  fetchMiniVendorOrdersPage,
   type MiniVendorProfile,
 } from "@/lib/miniVendorService";
+import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import { approveStoreOrder, setStoreOrderStatus } from "@/lib/storeService";
+import { withTenantSlug } from "@/lib/tenantRouting";
 import { fetchCanonicalUserVisuals } from "@/lib/userVisualsService";
 
 import { getVendorStatusClass, getVendorStatusLabel, type OrderRow } from "../_shared";
@@ -29,6 +33,7 @@ import { MiniVendorShell } from "./MiniVendorShell";
 
 type OrdersMode = "pending" | "approved";
 type OrderStatus = "pendente" | "approved" | "rejected" | "delivered";
+const PAGE_SIZE = 20;
 
 const PAGE_COPY: Record<
   OrdersMode,
@@ -112,32 +117,74 @@ export function MiniVendorOrdersStatusPage({
   mode,
   titleOverride,
   subtitleOverride,
+  categoryLabel,
 }: {
   mode: OrdersMode;
   titleOverride?: string;
   subtitleOverride?: string;
+  categoryLabel?: string | null;
 }) {
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const { addToast } = useToast();
-  const { tenantId, tenantLogoUrl } = useTenantTheme();
+  const { tenantId, tenantLogoUrl, tenantSlug } = useTenantTheme();
 
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<MiniVendorProfile | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [actionId, setActionId] = useState("");
   const [editingId, setEditingId] = useState("");
   const [approverNames, setApproverNames] = useState<Record<string, string>>({});
 
+  const currentUserId = user?.uid?.trim() || "";
+  const requestedUserId = String(searchParams.get("userId") || "").trim();
+  const canManageOtherMiniVendor = isAdminLikeRole(resolveEffectiveAccessRole(user));
+  const managedUserId =
+    canManageOtherMiniVendor && requestedUserId ? requestedUserId : currentUserId;
+  const isAdminManagingVendor =
+    canManageOtherMiniVendor &&
+    managedUserId.length > 0 &&
+    managedUserId !== currentUserId;
+  const normalizedCategory = String(categoryLabel || "").trim();
   const pageCopy = PAGE_COPY[mode];
-  const pageTitle = titleOverride || pageCopy.title;
-  const pageSubtitle = subtitleOverride || pageCopy.subtitle;
+  const buildOrdersHref = useCallback(
+    (targetMode: OrdersMode, targetCategory?: string | null) => {
+      const basePath =
+        targetMode === "pending"
+          ? "/configuracoes/mini-vendor/pedidos-pendentes"
+          : "/configuracoes/mini-vendor/pedidos-aprovados";
+      const nextPath =
+        targetCategory && targetCategory.trim()
+          ? `${basePath}/${encodeURIComponent(targetCategory.trim())}`
+          : basePath;
+      const scopedPath = tenantSlug ? withTenantSlug(tenantSlug, nextPath) : nextPath;
+      return isAdminManagingVendor
+        ? `${scopedPath}?userId=${encodeURIComponent(managedUserId)}`
+        : scopedPath;
+    },
+    [isAdminManagingVendor, managedUserId, tenantSlug]
+  );
+  const backPath = isAdminManagingVendor
+    ? "/admin/mini-vendors/cadastros"
+    : "/configuracoes/mini-vendor";
+  const pageTitle =
+    titleOverride ||
+    (normalizedCategory ? `${pageCopy.title} - ${normalizedCategory}` : pageCopy.title);
+  const pageSubtitle =
+    subtitleOverride ||
+    (normalizedCategory
+      ? `Mostra somente os pedidos da categoria ${normalizedCategory}.`
+      : pageCopy.subtitle);
 
-  const loadPage = useCallback(async (forceRefresh = true) => {
+  const loadPage = useCallback(async (targetPage: number, forceRefresh = true) => {
     const cleanTenantId = tenantId.trim();
-    const cleanUserId = user?.uid?.trim() || "";
+    const cleanUserId = managedUserId.trim();
     if (!cleanTenantId || !cleanUserId) {
       setProfile(null);
       setOrders([]);
+      setHasMore(false);
       return;
     }
 
@@ -150,18 +197,26 @@ export function MiniVendorOrdersStatusPage({
 
     if (!vendorProfile?.id || vendorProfile.status !== "approved") {
       setOrders([]);
+      setHasMore(false);
       return;
     }
 
-    const rows = await fetchMiniVendorOrders({
+    const result = await fetchMiniVendorOrdersPage({
       tenantId: cleanTenantId,
       sellerId: vendorProfile.id,
       statuses: pageCopy.statuses,
       forceRefresh,
-      limit: 80,
+      page: targetPage,
+      pageSize: PAGE_SIZE,
     });
-    const nextRows = rows as OrderRow[];
+    if (targetPage > 1 && result.rows.length === 0) {
+      setPage((prev) => Math.max(1, prev - 1));
+      return;
+    }
+
+    const nextRows = result.rows as OrderRow[];
     setOrders(nextRows);
+    setHasMore(result.hasMore);
 
     if (mode !== "approved") {
       setApproverNames({});
@@ -187,13 +242,14 @@ export function MiniVendorOrdersStatusPage({
       nextNames[id] = visual?.nome || compactUserId(id);
     });
     setApproverNames(nextNames);
-  }, [mode, pageCopy.statuses, tenantId, user?.uid]);
+  }, [managedUserId, mode, pageCopy.statuses, tenantId]);
 
   useEffect(() => {
     let mounted = true;
     const run = async () => {
+      if (mounted) setLoading(true);
       try {
-        await loadPage(false);
+        await loadPage(page, false);
       } catch (error: unknown) {
         console.error(error);
         if (mounted) addToast("Erro ao carregar pedidos do mini vendor.", "error");
@@ -206,7 +262,7 @@ export function MiniVendorOrdersStatusPage({
     return () => {
       mounted = false;
     };
-  }, [addToast, loadPage]);
+  }, [addToast, loadPage, page]);
 
   const handleApprove = async (row: OrderRow) => {
     if (!user?.uid) return;
@@ -222,7 +278,7 @@ export function MiniVendorOrdersStatusPage({
         quantidade: Number(row.quantidade || 0) || undefined,
         approvedBy: user.uid,
       });
-      await loadPage(true);
+      await loadPage(page, true);
       addToast("Pedido aprovado.", "success");
     } catch (error: unknown) {
       console.error(error);
@@ -240,7 +296,7 @@ export function MiniVendorOrdersStatusPage({
         status: "rejected",
         approvedBy: user?.uid || undefined,
       });
-      await loadPage(true);
+      await loadPage(page, true);
       addToast("Pedido rejeitado.", "info");
     } catch (error: unknown) {
       console.error(error);
@@ -261,7 +317,7 @@ export function MiniVendorOrdersStatusPage({
         orderId: row.id,
         status,
       });
-      await loadPage(true);
+      await loadPage(page, true);
       setEditingId("");
       addToast(successMessage, status === "rejected" ? "info" : "success");
     } catch (error: unknown) {
@@ -281,7 +337,45 @@ export function MiniVendorOrdersStatusPage({
   };
 
   return (
-    <MiniVendorShell title={pageTitle} subtitle={pageSubtitle}>
+    <MiniVendorShell
+      title={pageTitle}
+      subtitle={pageSubtitle}
+      backPath={backPath}
+      actions={
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={buildOrdersHref("pending", normalizedCategory || null)}
+            className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
+              mode === "pending"
+                ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+            }`}
+          >
+            <Clock3 size={14} />
+            Pendentes
+          </Link>
+          <Link
+            href={buildOrdersHref("approved", normalizedCategory || null)}
+            className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
+              mode === "approved"
+                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+            }`}
+          >
+            <ShoppingBag size={14} />
+            Aprovados
+          </Link>
+          {normalizedCategory && (
+            <Link
+              href={buildOrdersHref(mode)}
+              className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-zinc-300 hover:bg-zinc-800"
+            >
+              Todas categorias
+            </Link>
+          )}
+        </div>
+      }
+    >
       <div className="space-y-5">
         {!tenantId.trim() || !user?.uid ? (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
@@ -499,6 +593,30 @@ export function MiniVendorOrdersStatusPage({
                   ))
                 )}
               </div>
+
+              {(page > 1 || hasMore) && profile?.status === "approved" && (
+                <div className="mt-4 flex items-center justify-between text-xs font-bold uppercase text-zinc-500">
+                  <span>Pagina {page}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                      disabled={page <= 1}
+                      className="rounded border border-zinc-700 px-3 py-1 disabled:opacity-40"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPage((prev) => prev + 1)}
+                      disabled={!hasMore}
+                      className="rounded border border-zinc-700 px-3 py-1 disabled:opacity-40"
+                    >
+                      Proxima
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
           </>
         )}

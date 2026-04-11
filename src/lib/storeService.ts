@@ -59,6 +59,7 @@ const CALLABLE_CREATE_CATEGORY = "storeAdminCreateCategory";
 
 const adminBundleCache = new Map<string, CacheEntry<StoreAdminBundle>>();
 const productsFeedCache = new Map<string, CacheEntry<Row[]>>();
+const categoriesFeedCache = new Map<string, CacheEntry<Row[]>>();
 const productDetailCache = new Map<string, CacheEntry<StoreProductDetailBundle>>();
 
 const asNum = (value: unknown, fallback = 0): number =>
@@ -482,44 +483,148 @@ export async function fetchStoreOrdersPage(options?: {
   page?: number;
   pageSize?: number;
   status?: "pendente" | "approved" | "rejected" | "delivered";
+  productIds?: string[];
+  tenantId?: string | null;
 }): Promise<StoreOrdersPage> {
   const page = Math.max(1, Math.floor(options?.page ?? 1));
   const pageSize = Math.min(50, Math.max(1, Math.floor(options?.pageSize ?? 20)));
   const offset = (page - 1) * pageSize;
   const status = asString(options?.status, "pendente");
+  const scopedTenantId = resolveStoreTenantId(options?.tenantId);
+  const rawProductIds = Array.isArray(options?.productIds) ? options?.productIds : null;
+  const productIds = Array.from(
+    new Set(
+      (rawProductIds ?? [])
+        .map((entry) => asString(entry).trim())
+        .filter((entry) => entry.length > 0)
+    )
+  ).slice(0, MAX_PRODUCTS);
 
-  const rows = await queryRows("orders", [
-    {
-      filters: [{ field: "status", value: status }],
-      orderByField: "createdAt",
-      orderAscending: false,
-      limit: pageSize + 1,
-      offset,
-      selectColumns: STORE_ORDER_SELECT_COLUMNS.split(","),
-    },
-    {
-      filters: [{ field: "status", value: status }],
-      limit: pageSize + 1,
-      offset,
-      selectColumns: STORE_ORDER_SELECT_COLUMNS.split(","),
-    },
-  ]);
+  if (rawProductIds && productIds.length === 0) {
+    return { rows: [], hasMore: false };
+  }
+
+  const supabase = getSupabaseClient();
+  let selectColumns = STORE_ORDER_SELECT_COLUMNS.split(",");
+  let canOrder = true;
+  let canFilterByTenant = scopedTenantId.length > 0;
+
+  while (selectColumns.length > 0) {
+    let request = supabase
+      .from("orders")
+      .select(selectColumns.join(","))
+      .range(offset, offset + pageSize)
+      .eq("status", status);
+
+    if (productIds.length > 0) {
+      request = request.in("productId", productIds);
+    }
+    if (canFilterByTenant) {
+      request = request.eq("tenant_id", scopedTenantId);
+    }
+    if (canOrder) {
+      request = request.order("createdAt", { ascending: false });
+    }
+
+    const { data, error } = await request;
+    if (!error) {
+      const rows = ((data ?? []) as unknown as Row[]).map((row) =>
+        normalizeAdminStoreRow("orders", row)
+      );
+      return {
+        rows: rows.slice(0, pageSize),
+        hasMore: rows.length > pageSize,
+      };
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (missingColumn) {
+      if (canFilterByTenant && missingColumn.toLowerCase() === "tenant_id") {
+        canFilterByTenant = false;
+        continue;
+      }
+      if (canOrder && missingColumn.toLowerCase() === "createdat") {
+        canOrder = false;
+        continue;
+      }
+
+      const nextColumns = selectColumns.filter(
+        (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+      );
+      if (nextColumns.length > 0 && nextColumns.length < selectColumns.length) {
+        selectColumns = nextColumns;
+        continue;
+      }
+    }
+
+    if (canOrder) {
+      canOrder = false;
+      continue;
+    }
+
+    throwSupabaseError(error);
+  }
 
   return {
-    rows: rows.slice(0, pageSize).map((row) => normalizeAdminStoreRow("orders", row)),
-    hasMore: rows.length > pageSize,
+    rows: [],
+    hasMore: false,
   };
 }
 
 export async function fetchPendingStoreOrdersPage(options?: {
   page?: number;
   pageSize?: number;
+  productIds?: string[];
+  tenantId?: string | null;
 }): Promise<StorePendingOrdersPage> {
   return fetchStoreOrdersPage({
     page: options?.page,
     pageSize: options?.pageSize,
+    productIds: options?.productIds,
+    tenantId: options?.tenantId,
     status: "pendente",
   });
+}
+
+export async function fetchStoreCategories(options?: {
+  maxResults?: number;
+  forceRefresh?: boolean;
+  tenantId?: string | null;
+}): Promise<Row[]> {
+  const maxResults = boundedLimit(options?.maxResults ?? 120, MAX_CATEGORIES);
+  const forceRefresh = options?.forceRefresh ?? false;
+  const scopedTenantId = resolveStoreTenantId(options?.tenantId);
+  const cacheKey = `${scopedTenantId || "all"}:${maxResults}`;
+
+  if (!forceRefresh) {
+    const cached = getCache(categoriesFeedCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const rows = await queryRows("categorias", [
+    {
+      orderByField: "display_order",
+      orderAscending: true,
+      limit: maxResults,
+      selectColumns: STORE_CATEGORY_SELECT_COLUMNS.split(","),
+    },
+    {
+      orderByField: "nome",
+      orderAscending: true,
+      limit: maxResults,
+      selectColumns: STORE_CATEGORY_SELECT_COLUMNS.split(","),
+    },
+    {
+      limit: maxResults,
+      selectColumns: STORE_CATEGORY_SELECT_COLUMNS.split(","),
+    },
+  ]);
+
+  const normalizedRows = sortStoreCategoryRows(
+    rows.map((row) => normalizeAdminStoreRow("categorias", row))
+  );
+  setCache(categoriesFeedCache, cacheKey, normalizedRows);
+  return normalizedRows;
 }
 
 export async function fetchStoreProducts(options?: {

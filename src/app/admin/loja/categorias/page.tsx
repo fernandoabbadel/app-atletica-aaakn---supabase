@@ -973,6 +973,12 @@ export default function AdminLojaCategoriasPage() {
                         `/admin/loja/pedidos-pendentes/${encodeURIComponent(row.nome)}`
                       )
                     : `/admin/loja/pedidos-pendentes/${encodeURIComponent(row.nome)}`;
+                  const approvedOrdersHref = tenantSlug
+                    ? withTenantSlug(
+                        tenantSlug,
+                        `/admin/loja/pedidos-aprovados/${encodeURIComponent(row.nome)}`
+                      )
+                    : `/admin/loja/pedidos-aprovados/${encodeURIComponent(row.nome)}`;
 
                   return (
                     <article
@@ -1061,7 +1067,14 @@ export default function AdminLojaCategoriasPage() {
                               className="inline-flex items-center gap-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] font-black uppercase text-yellow-200 hover:bg-yellow-500/20"
                             >
                               <ExternalLink size={14} />
-                              Pedidos da categoria
+                              Pendentes
+                            </Link>
+                            <Link
+                              href={approvedOrdersHref}
+                              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+                            >
+                              <ExternalLink size={14} />
+                              Aprovados
                             </Link>
                             <button
                               type="button"
@@ -1098,7 +1111,16 @@ export default function AdminLojaCategoriasPage() {
                                 className="inline-flex items-center gap-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] font-black uppercase text-yellow-200 hover:bg-yellow-500/20"
                               >
                                 <ExternalLink size={14} />
-                                Pedidos da categoria
+                                Pendentes
+                              </Link>
+                            ) : null}
+                            {row.categoryId ? (
+                              <Link
+                                href={approvedOrdersHref}
+                                className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+                              >
+                                <ExternalLink size={14} />
+                                Aprovados
                               </Link>
                             ) : null}
                             {row.categoryId ? (

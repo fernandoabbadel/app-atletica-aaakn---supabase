@@ -8,8 +8,8 @@ type PageProps = {
   };
 };
 
-export default function MiniVendorPendingOrdersByCategoryPage({ params }: PageProps) {
+export default function MiniVendorApprovedOrdersByCategoryPage({ params }: PageProps) {
   const categoryLabel = decodeURIComponent(params.categoria);
 
-  return <MiniVendorOrdersStatusPage mode="pending" categoryLabel={categoryLabel} />;
+  return <MiniVendorOrdersStatusPage mode="approved" categoryLabel={categoryLabel} />;
 }

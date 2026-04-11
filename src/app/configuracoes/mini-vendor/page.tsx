@@ -81,9 +81,17 @@ export default function MiniVendorSettingsPage() {
         title: "Pedidos aprovados",
         description:
           "Historico separado para conferir somente os pagamentos que ja foram confirmados.",
-        href: tenantSlug
-          ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-aprovados")
-          : "/configuracoes/mini-vendor/pedidos-aprovados",
+        href:
+          profile?.storeName?.trim()
+            ? tenantSlug
+              ? withTenantSlug(
+                  tenantSlug,
+                  `/configuracoes/mini-vendor/pedidos-aprovados/${encodeURIComponent(profile.storeName.trim())}`
+                )
+              : `/configuracoes/mini-vendor/pedidos-aprovados/${encodeURIComponent(profile.storeName.trim())}`
+            : tenantSlug
+            ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-aprovados")
+            : "/configuracoes/mini-vendor/pedidos-aprovados",
         Icon: CheckCircle2,
         accentClass:
           "border-cyan-500/30 bg-cyan-500/10 text-cyan-300 shadow-cyan-500/10",
