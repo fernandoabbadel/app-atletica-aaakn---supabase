@@ -17,6 +17,7 @@ import {
   toggleUserLeagueFollow,
   type LeagueRecord,
 } from "@/lib/leaguesService";
+import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import { resolveLeagueRoleLabel, sortLeagueMembersByRole } from "@/lib/leagueRoles";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -28,19 +29,20 @@ const getLeagueImage = (league?: LeagueRecord | null) =>
 
 const sortEvents = (events: LeagueRecord["eventos"]) =>
   [...events].sort((left, right) => {
-    const leftDate = Date.parse(`${left.data || ""}T${left.hora || "00:00"}`);
-    const rightDate = Date.parse(`${right.data || ""}T${right.hora || "00:00"}`);
-    if (Number.isFinite(leftDate) && Number.isFinite(rightDate) && leftDate !== rightDate) {
+    const leftDate = parseEventDateTimeMs(left.data, left.hora);
+    const rightDate = parseEventDateTimeMs(right.data, right.hora);
+    if (leftDate !== null && rightDate !== null && leftDate !== rightDate) {
       return leftDate - rightDate;
     }
     return (left.titulo || "").localeCompare(right.titulo || "", "pt-BR");
   });
 
 const getEventBadge = (value: string) => {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
+  const parsedMs = parseEventDateTimeMs(value, "00:00");
+  if (parsedMs === null) {
     return { day: value.trim().slice(0, 2) || "--", month: value.trim().slice(3, 8) || "DATA" };
   }
+  const parsed = new Date(parsedMs);
   return {
     day: new Intl.DateTimeFormat("pt-BR", { day: "2-digit" }).format(parsed),
     month: new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(parsed).replace(".", "").toUpperCase(),
@@ -247,6 +249,7 @@ export function LeaguePublicDetailClient({
   const overviewHref = tenantPath(`/ligas_usc/${league.id}`);
   const membersHref = tenantPath(`/ligas_usc/${league.id}/membros`);
   const agendaHref = tenantPath(`/ligas_usc/${league.id}/agenda`);
+  const eventsFeedHref = tenantPath("/eventos");
   const imageSrc = getLeagueImage(league);
 
   return (
@@ -355,7 +358,7 @@ export function LeaguePublicDetailClient({
                 ))}
                 {sortedEvents.length === 0 ? <p className="rounded-[1.5rem] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-zinc-500">Nenhum evento publicado no momento.</p> : null}
               </div>
-              <Link href={agendaHref} className="mt-5 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20">Abrir agenda completa</Link>
+              <Link href={eventsFeedHref} className="mt-5 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20">Abrir agenda completa</Link>
             </article>
           </section>
         ) : activeTab === "membros" ? (

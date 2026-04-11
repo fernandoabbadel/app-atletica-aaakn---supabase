@@ -76,6 +76,7 @@ interface Order {
   id: string;
   userId: string;
   userName: string;
+  userTurma?: string;
   productId: string;
   productName: string;
   price: number;
@@ -546,8 +547,9 @@ export default function DetalheProdutoPage() {
     if (!produto || !checkoutOrderId) return;
     const adminPhone = (pixData.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
     const buyerName = user?.nome?.trim() || "Cliente";
+    const buyerTurma = user?.turma?.trim() || "Sem turma";
     const buyerPhone = user?.telefone?.trim() || "Nao informado";
-    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[CLIENTE] ${buyerName}\n[CONTATO] ${buyerPhone}\n[PRODUTO] ${produto.nome}\n[QTD] ${checkoutQuantity}\n${checkoutColor.trim() ? `[COR] ${checkoutColor.trim()}\n` : ""}[VALOR] R$ ${checkoutTotal.toFixed(2)}\n[PEDIDO] ${checkoutOrderId.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[CLIENTE] ${buyerName}\n[TURMA] ${buyerTurma}\n[CONTATO] ${buyerPhone}\n[PRODUTO] ${produto.nome}\n[QTD] ${checkoutQuantity}\n${checkoutColor.trim() ? `[COR] ${checkoutColor.trim()}\n` : ""}[VALOR] R$ ${checkoutTotal.toFixed(2)}\n[PEDIDO] ${checkoutOrderId.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
     const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, "_blank");
     setCheckoutStep(3);
@@ -581,8 +583,9 @@ export default function DetalheProdutoPage() {
     const total = Number((order.total ?? order.price) || 0).toFixed(2);
     const selectedColor = resolveOrderColor(order);
     const buyerName = user?.nome?.trim() || order.userName || "Cliente";
+    const buyerTurma = user?.turma?.trim() || order.userTurma || "Sem turma";
     const buyerPhone = user?.telefone?.trim() || "Nao informado";
-    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[CLIENTE] ${buyerName}\n[CONTATO] ${buyerPhone}\n[PRODUTO] ${produto.nome}\n[QTD] ${quantity}\n${selectedColor ? `[COR] ${selectedColor}\n` : ""}[VALOR] R$ ${total}\n[PEDIDO] ${order.id.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[CLIENTE] ${buyerName}\n[TURMA] ${buyerTurma}\n[CONTATO] ${buyerPhone}\n[PRODUTO] ${produto.nome}\n[QTD] ${quantity}\n${selectedColor ? `[COR] ${selectedColor}\n` : ""}[VALOR] R$ ${total}\n[PEDIDO] ${order.id.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
     const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, "_blank");
   };

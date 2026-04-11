@@ -543,7 +543,7 @@ export function LigasAdminPageContent() {
       if (!selectedLigaId || !senhaInput) return addToast("Preencha todos os campos!", "error");
       setLoading(true);
       try {
-          const target = await fetchLeagueById(selectedLigaId, { forceRefresh: false, tenantId: tenantScopeId || undefined });
+          const target = await fetchLeagueById(selectedLigaId, { forceRefresh: true, tenantId: tenantScopeId || undefined });
           
           if (target && target.senha === senhaInput) {
               const baseLigaData: LigaData = {
@@ -810,7 +810,7 @@ export function LigasAdminPageContent() {
       setEventModal(true);
   };
 
-  const saveEventLocal = () => {
+  const saveEventLocal = async () => {
       if (!ligaData || !currentEvent.titulo) return addToast("Título obrigatório!", "error");
       const novosEventos = [...(ligaData.eventos || [])];
       const eventoSalvo = currentEvent as LeagueEvent;
@@ -820,9 +820,34 @@ export function LigasAdminPageContent() {
       } else {
           novosEventos.push(eventoSalvo);
       }
-      setLigaData({ ...ligaData, eventos: novosEventos });
+
+      const syncedEvents = await syncAndPersistLeagueEvents(novosEventos, {
+          loadingLabel: editingEventIdx !== null ? "SALVANDO EVENTO..." : "CRIANDO EVENTO...",
+          successMessage: "Evento salvo e publicado.",
+      });
+      if (!syncedEvents) return;
+
       setEventModal(false);
-      return addToast("Evento salvo no rascunho local. Use PUBLICAR EVENTOS para atualizar o app.", "info");
+      setEditingEventIdx(null);
+      setCurrentEvent({});
+      setNovoLote({ nome: "", preco: "", status: "ativo" });
+  };
+
+  const handleDeleteEvent = async (idx: number) => {
+      if (!ligaData?.eventos) return;
+      const novosEventos = ligaData.eventos.filter((_, eventIdx) => eventIdx !== idx);
+      const syncedEvents = await syncAndPersistLeagueEvents(novosEventos, {
+          loadingLabel: "REMOVENDO EVENTO...",
+          successMessage: "Evento removido da agenda.",
+      });
+      if (!syncedEvents) return;
+
+      if (editingEventIdx === idx) {
+          setEventModal(false);
+          setEditingEventIdx(null);
+          setCurrentEvent({});
+          setNovoLote({ nome: "", preco: "", status: "ativo" });
+      }
   };
 
   // --- GESTÃO DE ENQUETES (SHARK FEATURE 🦈) ---
@@ -840,6 +865,58 @@ export function LigasAdminPageContent() {
           .eq("id", ligaData.id);
       if (error) {
           throw new Error(extractErrorMessage(error));
+      }
+  };
+
+  const syncAndPersistLeagueEvents = async (
+      nextEvents: LeagueEvent[],
+      options?: {
+          loadingLabel?: string;
+          successMessage?: string;
+      }
+  ): Promise<LeagueEvent[] | null> => {
+      const currentLiga = ligaData;
+      if (!currentLiga || loading) return null;
+
+      setLoading(true);
+      setSaveActionLabel(options?.loadingLabel || "SINCRONIZANDO EVENTOS...");
+      try {
+          const actorTenantId =
+              tenantScopeId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
+          const leagueLogoUrl = resolveLeagueLogoSrc(currentLiga) || "";
+          const syncedEvents = await syncLeagueEvents({
+              leagueId: currentLiga.id,
+              events: nextEvents,
+              leagueLogoUrl,
+              leagueSigla: currentLiga.sigla,
+              tenantId: actorTenantId || undefined,
+          });
+
+          await persistLeagueConfigPatch({
+              eventos: syncedEvents,
+          });
+
+          clearEventsNativeCaches();
+          ClientCache.invalidatePattern("events:feed:*");
+          setLigaData((prev) => (prev ? { ...prev, eventos: syncedEvents as LeagueEvent[] } : prev));
+          addToast(options?.successMessage || "Eventos sincronizados.", "success");
+
+          await logActivity(
+              currentLiga.id,
+              currentLiga.nome,
+              "UPDATE",
+              "eventos",
+              { totalEventos: syncedEvents.length }
+          );
+
+          return syncedEvents as LeagueEvent[];
+      } catch (error: unknown) {
+          console.error("Falha ao sincronizar eventos da liga:", error);
+          addToast(`Erro ao salvar: ${extractErrorMessage(error)}`, "error");
+          return null;
+      } finally {
+          setLoading(false);
+          setSaveActionLabel("");
       }
   };
 
@@ -954,35 +1031,9 @@ export function LigasAdminPageContent() {
 
   const handleSaveEventsSection = async () => {
       if (!ligaData) return;
-
-      await runSectionSave("PUBLICANDO EVENTOS...", async () => {
-          const actorTenantId =
-              tenantScopeId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
-          const leagueLogoUrl = resolveLeagueLogoSrc(ligaData) || "";
-          const syncedEvents = await syncLeagueEvents({
-              leagueId: ligaData.id,
-              events: ligaData.eventos || [],
-              leagueLogoUrl,
-              leagueSigla: ligaData.sigla,
-              tenantId: actorTenantId || undefined,
-          });
-
-          await persistLeagueConfigPatch({
-              eventos: syncedEvents,
-          });
-
-          clearEventsNativeCaches();
-          ClientCache.invalidatePattern("events:feed:*");
-          setLigaData((prev) => (prev ? { ...prev, eventos: syncedEvents } : prev));
-          addToast("Eventos publicados.", "success");
-
-          await logActivity(
-              ligaData.id,
-              ligaData.nome,
-              "UPDATE",
-              "eventos",
-              { totalEventos: syncedEvents.length }
-          );
+      await syncAndPersistLeagueEvents(ligaData.eventos || [], {
+          loadingLabel: "SINCRONIZANDO EVENTOS...",
+          successMessage: "Eventos sincronizados.",
       });
   };
 
@@ -1311,7 +1362,7 @@ export function LigasAdminPageContent() {
           {activeTab === 'events' && ligaData && (
               <div className="space-y-6">
                   <div className="flex justify-between items-center bg-zinc-900 p-4 rounded-xl border border-zinc-800">
-                      <div><h3 className="text-sm font-bold uppercase text-white">Eventos da Liga</h3><p className="text-[10px] text-zinc-500">Salve no modal e depois publique para sincronizar com a pagina de eventos do app.</p></div>
+                      <div><h3 className="text-sm font-bold uppercase text-white">Eventos da Liga</h3><p className="text-[10px] text-zinc-500">Ao salvar no modal, o evento ja sincroniza com a agenda publica e com a pagina de eventos.</p></div>
                       <button onClick={() => handleOpenEventModal(null)} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition"><Calendar size={14}/> Criar Evento</button>
                   </div>
                   <div className="space-y-3">
@@ -1319,7 +1370,7 @@ export function LigasAdminPageContent() {
                           const eventImage = ev.imagem || resolveLeagueLogoSrc(ligaData);
                           return (
                               <div key={idx} className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 relative flex flex-col md:flex-row gap-4 items-start md:items-center">
-                                  <button onClick={() => {const n=[...ligaData.eventos!]; n.splice(idx,1); setLigaData({...ligaData, eventos:n})}} className="absolute top-2 right-2 text-zinc-600 hover:text-red-500"><Trash2 size={14}/></button>
+                                  <button onClick={() => void handleDeleteEvent(idx)} disabled={loading} className="absolute top-2 right-2 text-zinc-600 hover:text-red-500 disabled:opacity-50"><Trash2 size={14}/></button>
                                   {eventImage ? (
                                       <Image
                                         src={eventImage}
@@ -1377,7 +1428,7 @@ export function LigasAdminPageContent() {
           )}
 
           {/* --- BOTÃO SALVAR DA SEÇÃO ATIVA --- */}
-          {ligaData && (
+          {ligaData && activeTab !== 'events' && (
               <div className="fixed bottom-6 left-0 right-0 px-4 flex justify-center z-50 pointer-events-none">
                   <button onClick={handleSaveCurrentSection} disabled={loading} className="bg-emerald-500 hover:bg-emerald-400 text-black font-black py-4 px-10 rounded-full shadow-2xl flex items-center gap-2 transition transform hover:scale-105 active:scale-95 pointer-events-auto border-4 border-black">
                       {loading ? <><Loader2 className="animate-spin"/> {saveActionLabel || "SALVANDO..."}</> : <><Save size={20}/> {currentSaveButtonLabel}</>}
@@ -1656,7 +1707,7 @@ export function LigasAdminPageContent() {
 
                       <div className="flex gap-3 pt-2">
                           <button onClick={() => setEventModal(false)} className="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-400 font-bold text-xs uppercase hover:bg-zinc-800">Cancelar</button>
-                          <button onClick={saveEventLocal} className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold text-xs uppercase hover:bg-emerald-500">Salvar Evento</button>
+                          <button onClick={() => void saveEventLocal()} disabled={loading} className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold text-xs uppercase hover:bg-emerald-500 disabled:opacity-50">{loading ? "Salvando..." : "Salvar Evento"}</button>
                       </div>
                   </div>
               </div>

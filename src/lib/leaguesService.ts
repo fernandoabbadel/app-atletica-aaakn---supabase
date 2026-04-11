@@ -98,6 +98,20 @@ const EVENT_POLLS_SELECT_COLUMNS = [
   "updatedAt",
 ] as const;
 
+const LEAGUE_GLOBAL_EVENT_SELECT_COLUMNS = [
+  "id",
+  "titulo",
+  "data",
+  "hora",
+  "local",
+  "tipo",
+  "destaque",
+  "imagem",
+  "imagePositionY",
+  "lotes",
+  "descricao",
+] as const;
+
 const asObject = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== "object" || value === null) return null;
   return value as Record<string, unknown>;
@@ -759,6 +773,170 @@ export interface LeagueRecord {
   updatedAt?: string;
 }
 
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const stripLeagueEventTitlePrefix = (
+  title: string,
+  leagueSigla: string,
+  fallbackTitle: string
+): string => {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return fallbackTitle;
+
+  const prefixPattern = leagueSigla.trim()
+    ? new RegExp(`^\\[${escapeRegExp(leagueSigla.trim())}\\]\\s*`, "i")
+    : /^\[[^\]]+\]\s*/;
+  const strippedTitle = cleanTitle.replace(prefixPattern, "").trim();
+  return strippedTitle || cleanTitle || fallbackTitle;
+};
+
+const normalizeLeagueLotesFromGlobalEvent = (
+  value: unknown,
+  fallback: LeagueLoteRecord[]
+): LeagueLoteRecord[] => {
+  if (!Array.isArray(value)) return fallback;
+
+  return value
+    .map((entry, index) => {
+      const lote = asObject(entry);
+      if (!lote) return null;
+
+      const parsedId = Number(lote.id);
+      const statusRaw = asString(lote.status, "ativo").trim().toLowerCase();
+      const status: LeagueLoteRecord["status"] =
+        statusRaw === "encerrado" || statusRaw === "agendado" ? statusRaw : "ativo";
+
+      return {
+        id:
+          Number.isFinite(parsedId) && parsedId > 0
+            ? Math.floor(parsedId)
+            : index + 1,
+        nome: asString(lote.nome),
+        preco: asString(lote.preco),
+        status,
+      } satisfies LeagueLoteRecord;
+    })
+    .filter((entry): entry is LeagueLoteRecord => entry !== null);
+};
+
+const fetchLeagueGlobalEventsById = async (
+  eventIds: string[],
+  tenantId?: string | null
+): Promise<Map<string, Record<string, unknown>>> => {
+  const uniqueEventIds = Array.from(
+    new Set(
+      eventIds
+        .map((eventId) => eventId.trim())
+        .filter((eventId) => eventId.length > 0)
+    )
+  );
+  if (uniqueEventIds.length === 0) return new Map();
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveLeagueTenantId(tenantId);
+
+  const selectGlobalEvents = async (
+    ids: string[],
+    scopeTenantId?: string
+  ): Promise<Record<string, unknown>[]> => {
+    if (ids.length === 0) return [];
+
+    let selectColumns: string[] = [...LEAGUE_GLOBAL_EVENT_SELECT_COLUMNS];
+
+    while (selectColumns.length > 0) {
+      let query = supabase
+        .from("eventos")
+        .select(selectColumns.join(","))
+        .in("id", ids);
+      if (scopeTenantId) {
+        query = query.eq("tenant_id", scopeTenantId);
+      }
+
+      const { data, error } = await query;
+      if (!error) {
+        return (Array.isArray(data) ? data : [])
+          .map((row) => asObject(row))
+          .filter((row): row is Record<string, unknown> => row !== null);
+      }
+
+      const missingColumn = asString(extractMissingSchemaColumn(error));
+      if (!missingColumn) throwSupabaseError(error);
+
+      const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
+      if (!nextColumns.length) throwSupabaseError(error);
+      selectColumns = nextColumns;
+    }
+
+    return [];
+  };
+
+  const rowsById = new Map<string, Record<string, unknown>>();
+
+  const primaryRows = await selectGlobalEvents(
+    uniqueEventIds,
+    scopedTenantId || undefined
+  );
+  primaryRows.forEach((row) => {
+    const rowId = asString(row.id).trim();
+    if (rowId) rowsById.set(rowId, row);
+  });
+
+  if (scopedTenantId && rowsById.size < uniqueEventIds.length) {
+    const missingIds = uniqueEventIds.filter((eventId) => !rowsById.has(eventId));
+    const fallbackRows = await selectGlobalEvents(missingIds);
+    fallbackRows.forEach((row) => {
+      const rowId = asString(row.id).trim();
+      if (rowId && !rowsById.has(rowId)) rowsById.set(rowId, row);
+    });
+  }
+
+  return rowsById;
+};
+
+const hydrateLeagueEventsFromGlobalCatalog = async (
+  league: LeagueRecord,
+  tenantId?: string | null
+): Promise<LeagueRecord> => {
+  const globalEventIds = (league.eventos || [])
+    .map((event) => asString(event.globalEventId).trim())
+    .filter((eventId) => eventId.length > 0);
+  if (globalEventIds.length === 0) return league;
+
+  const rowsById = await fetchLeagueGlobalEventsById(globalEventIds, tenantId);
+  if (rowsById.size === 0) return league;
+
+  return {
+    ...league,
+    eventos: (league.eventos || []).map((event) => {
+      const globalEventId = asString(event.globalEventId).trim();
+      if (!globalEventId) return event;
+
+      const globalRow = rowsById.get(globalEventId);
+      if (!globalRow) return event;
+
+      return {
+        ...event,
+        titulo: stripLeagueEventTitlePrefix(
+          asString(globalRow.titulo, event.titulo),
+          league.sigla,
+          event.titulo
+        ),
+        data: asString(globalRow.data, event.data),
+        hora: asString(globalRow.hora, event.hora),
+        local: asString(globalRow.local, event.local),
+        tipo: asString(globalRow.tipo, event.tipo),
+        destaque: asString(globalRow.destaque, event.destaque),
+        imagem: asString(globalRow.imagem, event.imagem),
+        imagePositionY: asNumber(globalRow.imagePositionY, event.imagePositionY),
+        lotes: normalizeLeagueLotesFromGlobalEvent(globalRow.lotes, event.lotes),
+        descricao: asString(globalRow.descricao, event.descricao),
+        linkEvento: event.linkEvento || `/eventos/${globalEventId}`,
+      } satisfies LeagueEventRecord;
+    }),
+  };
+};
+
 export const LEAGUE_NAME_MAX_LENGTH = 42;
 
 export interface LeagueUserRecord {
@@ -1303,6 +1481,17 @@ export async function fetchLeagueById(
     const nextColumns = removeMissingColumnFromSelection(selectColumns, missingColumn) ?? [];
     if (!nextColumns.length) throwSupabaseError(error);
     selectColumns = nextColumns;
+  }
+
+  if (league) {
+    try {
+      league = await hydrateLeagueEventsFromGlobalCatalog(
+        league,
+        scopedTenantId || undefined
+      );
+    } catch (error: unknown) {
+      console.warn("Leagues: falha ao hidratar eventos globais da liga.", error);
+    }
   }
 
   setCacheValue(leagueByIdCache, cacheKey, league);
