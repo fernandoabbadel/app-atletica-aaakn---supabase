@@ -3,11 +3,11 @@
 import Image from "next/image";
 import React, { useCallback, useEffect, useState, useMemo } from "react";
 import {
-  ArrowLeft, Calendar, MapPin, Share2, Ticket, Clock,
+  ArrowLeft, Calendar, MapPin, Share2, Ticket,
   Users, CheckCircle, HelpCircle, XCircle,
-  Loader2, MessageCircle,
+  Loader2, MessageCircle, Copy, Wallet,
   Heart, Send, Trash2, ShieldAlert, Star,
-  Ghost, Fish, ChevronLeft, ChevronRight, Flag, Phone, X
+  Ghost, Fish, ChevronLeft, ChevronRight, Flag, X
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -77,6 +77,14 @@ interface PedidoIngresso {
     quantidade: number;
     valorTotal: string;
     status: string;
+    payment_config?: {
+      chave?: string;
+      banco?: string;
+      titular?: string;
+      whatsapp?: string;
+    } | null;
+    dataSolicitacao?: DateLike | null;
+    dataAprovacao?: DateLike | null;
 }
 
 interface Rsvp {
@@ -158,6 +166,63 @@ const getSaleStatusClass = (status?: Evento["saleStatus"]): string => {
   if (status === "em_breve") return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
   if (status === "esgotado") return "border-red-500/30 bg-red-500/10 text-red-300";
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+};
+
+const keepDigits = (value: string): string => value.replace(/\D/g, "");
+
+const parseCurrencyValue = (value: string): number => {
+  const sanitized = String(value || "").trim().replace(/[^\d,.-]/g, "");
+  if (!sanitized) return 0;
+  const normalized = sanitized.includes(",")
+    ? sanitized.replace(/\./g, "").replace(",", ".")
+    : sanitized;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatCurrencyValue = (value: string): string =>
+  parseCurrencyValue(value).toFixed(2);
+
+const formatPedidoDateTime = (value?: DateLike | null): string => {
+  const date = value?.toDate?.();
+  if (!date || Number.isNaN(date.getTime())) return "Nao informado";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
+};
+
+const normalizePedidoStatus = (
+  value: string
+): "pendente" | "aprovado" | "rejeitado" => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "approved" || normalized === "aprovado") return "aprovado";
+  if (
+    normalized === "rejected" ||
+    normalized === "rejeitado" ||
+    normalized === "cancelado"
+  ) {
+    return "rejeitado";
+  }
+  return "pendente";
+};
+
+const getPedidoStatusLabel = (value: string): string => {
+  const status = normalizePedidoStatus(value);
+  if (status === "aprovado") return "Confirmado";
+  if (status === "rejeitado") return "Cancelado";
+  return "Pendente";
+};
+
+const getPedidoStatusClass = (value: string): string => {
+  const status = normalizePedidoStatus(value);
+  if (status === "aprovado") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  }
+  if (status === "rejeitado") {
+    return "border-red-500/30 bg-red-500/10 text-red-300";
+  }
+  return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
 };
 
 const parseEventDate = (dateStr: string, timeStr: string = "00:00") => {
@@ -383,12 +448,87 @@ export default function DetalhesEventoPage() {
       void refreshEventData(true);
   }, [refreshEventData]);
 
+  const pendingPedidos = useMemo(
+      () => meusPedidos.filter((pedido) => normalizePedidoStatus(pedido.status) === "pendente"),
+      [meusPedidos]
+  );
+  const historyPedidos = useMemo(
+      () => meusPedidos.filter((pedido) => normalizePedidoStatus(pedido.status) !== "pendente"),
+      [meusPedidos]
+  );
+
+  const resolvePedidoPaymentConfig = useCallback(
+      (pedido: PedidoIngresso) => {
+          const paymentConfig =
+              pedido.payment_config && typeof pedido.payment_config === "object"
+                  ? pedido.payment_config
+                  : null;
+          return {
+              chave:
+                  String(paymentConfig?.chave || evento?.pixChave || globalFinanceiro?.chave || "").trim(),
+              banco:
+                  String(paymentConfig?.banco || evento?.pixBanco || globalFinanceiro?.banco || "").trim(),
+              titular:
+                  String(paymentConfig?.titular || evento?.pixTitular || globalFinanceiro?.titular || "").trim(),
+              whatsapp:
+                  String(
+                      paymentConfig?.whatsapp ||
+                      evento?.contatoComprovante ||
+                      contatoFinanceiro ||
+                      ""
+                  ).trim(),
+          };
+      },
+      [contatoFinanceiro, evento, globalFinanceiro]
+  );
+
+  const handleCopyPedidoPix = useCallback(
+      async (pedido: PedidoIngresso) => {
+          try {
+              const payment = resolvePedidoPaymentConfig(pedido);
+              if (!payment.chave) {
+                  addToast("Chave PIX nao configurada para este evento.", "error");
+                  return;
+              }
+              await navigator.clipboard.writeText(payment.chave || "");
+              addToast("Chave PIX copiada!", "success");
+          } catch (error: unknown) {
+              console.error(error);
+              addToast("Nao foi possivel copiar a chave PIX.", "error");
+          }
+      },
+      [addToast, resolvePedidoPaymentConfig]
+  );
+
+  const handleSendPedidoReceiptWhatsapp = useCallback(
+      (pedido: PedidoIngresso) => {
+          if (!evento) return;
+          const payment = resolvePedidoPaymentConfig(pedido);
+          const adminPhone = keepDigits(payment.whatsapp || "");
+          if (!adminPhone) {
+              addToast("WhatsApp financeiro nao configurado para este evento.", "error");
+              return;
+          }
+
+          const buyerName = user?.nome || "Aluno";
+          const buyerPhone = user?.telefone || "Nao informado";
+          const buyerTurma = user?.turma || "Sem turma";
+          const total = formatCurrencyValue(pedido.valorTotal);
+          const message = `Fala, equipe do evento ${evento.titulo}! Quero finalizar meu ingresso.\n\n[ALUNO] ${buyerName}\n[TURMA] ${buyerTurma}\n[CONTATO] ${buyerPhone}\n[INGRESSO] ${pedido.quantidade}x ${pedido.loteNome}\n[VALOR] R$ ${total}\n[PEDIDO] ${pedido.id.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+          const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
+          window.open(whatsappUrl, "_blank");
+      },
+      [addToast, evento, resolvePedidoPaymentConfig, user?.nome, user?.telefone, user?.turma]
+  );
+
   // --- ACTIONS ---
 
   const handleCancelOrder = async (pedidoId: string) => {
       if (!confirm("Tem certeza que deseja cancelar este pedido?")) return;
       try {
-          await cancelEventTicketRequest(pedidoId);
+          await cancelEventTicketRequest(pedidoId, {
+              tenantId: activeTenantId || undefined,
+          });
           addToast("Pedido cancelado.", "info");
           await refreshEventData();
       } catch {
@@ -1021,40 +1161,169 @@ export default function DetalhesEventoPage() {
             </div>
         </div>
 
-        {meusPedidos.length > 0 && (
-            <div className="space-y-3 pt-4 border-t border-zinc-800">
-                <h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2"><Ticket size={14} className="text-purple-500"/> Seus Pedidos</h3>
-                {meusPedidos.map(pedido => (
-                    <div key={pedido.id} className={`p-4 rounded-xl border flex flex-col gap-3 ${pedido.status === 'aprovado' ? 'bg-emerald-900/10 border-emerald-500/30' : 'bg-yellow-900/10 border-yellow-500/30'}`}>
-                        <div className="flex justify-between items-start">
-                            <div>
-                                <p className="text-sm font-bold text-white">{pedido.quantidade}x {pedido.loteNome}</p>
-                                <p className="text-xs text-zinc-400 font-mono">R$ {pedido.valorTotal}</p>
-                            </div>
-                            <span className={`text-[10px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 ${pedido.status === 'aprovado' ? 'bg-emerald-500 text-black' : 'bg-yellow-500 text-black'}`}>
-                                {pedido.status === 'aprovado' ? <CheckCircle size={12}/> : <Clock size={12}/>}
-                                {pedido.status === 'aprovado' ? 'Confirmado' : 'Aguardando Aprovação'}
-                            </span>
-                        </div>
+        <section className="space-y-4 pt-4 border-t border-zinc-800">
+            <h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                <Ticket size={14} className="text-purple-500"/>
+                Seus Pedidos
+            </h3>
 
-                        {pedido.status !== 'aprovado' && (
-                            <div className="bg-black/40 p-3 rounded-lg border border-white/5 text-xs">
-                                <p className="text-zinc-400 mb-1 flex items-center gap-1"><Phone size={12}/> Envie o comprovante para:</p>
-                                <p className="text-white font-mono">
-                                    {evento.contatoComprovante || contatoFinanceiro || "(Consulte a diretoria)"}
-                                </p>
-                            </div>
-                        )}
+            {pendingPedidos.length > 0 && (
+                <div className="space-y-3">
+                    <p className="text-[11px] font-black uppercase text-yellow-400">Pendentes</p>
+                    {pendingPedidos.map((pedido) => {
+                        const payment = resolvePedidoPaymentConfig(pedido);
+                        const pedidoWhatsapp = keepDigits(payment.whatsapp || "");
+                        const pedidoTotal = formatCurrencyValue(pedido.valorTotal);
 
-                        {pedido.status !== 'aprovado' && (
-                            <button onClick={() => handleCancelOrder(pedido.id)} className="text-xs text-red-500 hover:text-red-400 font-bold uppercase flex items-center gap-1 self-end">
-                                <X size={12}/> Cancelar Pedido
-                            </button>
-                        )}
-                    </div>
-                ))}
-            </div>
-        )}
+                        return (
+                            <article
+                                key={pedido.id}
+                                className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4"
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-bold text-white">
+                                            Pedido #{pedido.id.slice(0, 8).toUpperCase()}
+                                        </p>
+                                        <p className="text-xs text-zinc-400">
+                                            {formatPedidoDateTime(pedido.dataSolicitacao)}
+                                        </p>
+                                    </div>
+                                    <span
+                                        className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${getPedidoStatusClass(pedido.status)}`}
+                                    >
+                                        {getPedidoStatusLabel(pedido.status)}
+                                    </span>
+                                </div>
+
+                                <div className="mt-3 flex items-center justify-between gap-3">
+                                    <p className="text-xs text-zinc-300">
+                                        {pedido.quantidade}x {pedido.loteNome} • R$ {pedidoTotal}
+                                    </p>
+                                    <button
+                                        onClick={() => void handleCancelOrder(pedido.id)}
+                                        className="inline-flex items-center gap-1 text-xs font-black uppercase text-red-400 hover:text-red-300"
+                                    >
+                                        <X size={12}/>
+                                        Cancelar pedido
+                                    </button>
+                                </div>
+
+                                <div className="mt-3 rounded-xl border border-zinc-800 bg-black/30 p-3">
+                                    <div className="flex items-center gap-2">
+                                        <Wallet size={14} className="text-emerald-400" />
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                                            Informacoes do PIX
+                                        </p>
+                                    </div>
+
+                                    <div className="mt-3 space-y-2 text-xs">
+                                        <div>
+                                            <p className="text-[10px] font-black uppercase text-zinc-500">
+                                                Chave PIX
+                                            </p>
+                                            <p className="mt-1 break-all rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 font-mono text-zinc-100">
+                                                {payment.chave || "Consulte o financeiro"}
+                                            </p>
+                                        </div>
+
+                                        <div className="grid gap-2 sm:grid-cols-2">
+                                            <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                                                    Banco
+                                                </p>
+                                                <p className="mt-1 font-bold text-zinc-200">
+                                                    {payment.banco || "--"}
+                                                </p>
+                                            </div>
+                                            <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                                                    Titular
+                                                </p>
+                                                <p className="mt-1 font-bold text-zinc-200">
+                                                    {payment.titular || "--"}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                                                Envie o comprovante para
+                                            </p>
+                                            <p className="mt-1 font-bold text-zinc-200">
+                                                {payment.whatsapp || "(Consulte a diretoria)"}
+                                            </p>
+                                        </div>
+
+                                        <div className="flex flex-wrap gap-2 pt-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleCopyPedidoPix(pedido)}
+                                                disabled={!payment.chave}
+                                                className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-[10px] font-black uppercase text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                                            >
+                                                <Copy size={12} />
+                                                Copiar PIX
+                                            </button>
+                                            {pedidoWhatsapp ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSendPedidoReceiptWhatsapp(pedido)}
+                                                    className="inline-flex items-center gap-2 rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 px-3 py-2 text-[10px] font-black uppercase text-[#8bf0b0] hover:bg-[#25D366]/20"
+                                                >
+                                                    <MessageCircle size={12} />
+                                                    Enviar comprovante
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+                        );
+                    })}
+                </div>
+            )}
+
+            {historyPedidos.length > 0 && (
+                <div className="space-y-3">
+                    <p className="text-[11px] font-black uppercase text-zinc-400">Finalizados</p>
+                    {historyPedidos.map((pedido) => (
+                        <article
+                            key={pedido.id}
+                            className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4"
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <p className="text-sm font-bold text-white">
+                                        Pedido #{pedido.id.slice(0, 8).toUpperCase()}
+                                    </p>
+                                    <p className="text-xs text-zinc-500">
+                                        {formatPedidoDateTime(
+                                            pedido.dataAprovacao || pedido.dataSolicitacao
+                                        )}
+                                    </p>
+                                </div>
+                                <span
+                                    className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${getPedidoStatusClass(pedido.status)}`}
+                                >
+                                    {getPedidoStatusLabel(pedido.status)}
+                                </span>
+                            </div>
+
+                            <div className="mt-3 text-xs text-zinc-300">
+                                {pedido.quantidade}x {pedido.loteNome} • R$ {formatCurrencyValue(pedido.valorTotal)}
+                            </div>
+                        </article>
+                    ))}
+                </div>
+            )}
+
+            {pendingPedidos.length === 0 && historyPedidos.length === 0 && (
+                <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-500">
+                    Voce ainda nao fez pedidos deste evento.
+                </div>
+            )}
+        </section>
 
       </div>
 

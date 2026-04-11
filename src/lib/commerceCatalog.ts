@@ -48,17 +48,20 @@ const normalizePlanName = (value: string): string =>
 const normalizePlanMatchToken = (value: string): string =>
   normalizePlanName(value).replace(/[^a-z0-9]+/g, "");
 
-const normalizePrice = (value: unknown): number => {
+const normalizeOptionalPrice = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return Math.max(0, value);
   }
   if (typeof value === "string") {
-    const parsed = Number.parseFloat(value.replace(",", "."));
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number.parseFloat(trimmed.replace(",", "."));
     if (Number.isFinite(parsed)) {
       return Math.max(0, parsed);
     }
+    return null;
   }
-  return 0;
+  return null;
 };
 
 export const normalizeAvailabilityStatus = (
@@ -84,11 +87,13 @@ export const normalizePlanPriceEntries = (
       const planId = normalizeString(row.planId || row.id);
       const planName = normalizeString(row.planName || row.nome);
       if (!planId && !planName) return null;
+      const price = normalizeOptionalPrice(row.price ?? row.preco);
+      if (price === null) return null;
 
       return {
         planId,
         planName,
-        price: normalizePrice(row.price ?? row.preco),
+        price,
       };
     })
     .filter((entry): entry is CommercePlanPriceEntry => entry !== null);

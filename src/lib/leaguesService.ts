@@ -756,6 +756,7 @@ export interface LeagueRecord {
   likes: number;
   membrosIds?: string[];
   membersCount?: number;
+  updatedAt?: string;
 }
 
 export const LEAGUE_NAME_MAX_LENGTH = 42;
@@ -964,6 +965,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     bizu: asString(data.bizu),
     likes: Math.max(0, asNumber(data.likes, 0)),
     membersCount: Math.max(0, asNumber(data.membersCount, membros.length)),
+    updatedAt: asString(data.updatedAt) || undefined,
   };
 };
 

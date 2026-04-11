@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle, Clock, Copy, MessageCircle, Package, Wallet, X, XCircle } from "lucide-react";
+import { Copy, MessageCircle, Package, Wallet, X } from "lucide-react";
 
 import { useAuth } from "../../../../context/AuthContext";
 import { fetchUserOrdersByTab } from "../../../../lib/settingsService";
@@ -218,6 +218,14 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
       rejected: pedidos.filter((row) => row.status === "rejeitado").length,
     };
   }, [pedidos]);
+  const pendingOrders = useMemo(
+    () => pedidos.filter((row) => row.status === "pendente"),
+    [pedidos]
+  );
+  const historyOrders = useMemo(
+    () => pedidos.filter((row) => row.status !== "pendente"),
+    [pedidos]
+  );
 
   const whatsappDigits = String(financeiro?.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
   const whatsappMessage = selectedPedido
@@ -226,6 +234,52 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
       )
     : "";
   const whatsappUrl = whatsappDigits ? `https://wa.me/${whatsappDigits}?text=${whatsappMessage}` : "";
+  const renderPedidoCard = (pedido: PedidoUnificado) => (
+    <article
+      key={pedido.id}
+      className={`cursor-pointer rounded-xl border p-4 transition hover:border-zinc-600 ${
+        pedido.status === "pendente"
+          ? "border-yellow-500/20 bg-yellow-500/5"
+          : pedido.status === "aprovado"
+          ? "border-emerald-500/20 bg-emerald-500/5"
+          : "border-red-500/20 bg-red-500/5"
+      }`}
+      onClick={() => {
+        setSelectedPedido(pedido);
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-white">{pedido.titulo}</h3>
+          <p className="text-xs text-zinc-400">{pedido.subtitulo}</p>
+        </div>
+        <span
+          className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${
+            pedido.status === "aprovado"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+              : pedido.status === "rejeitado"
+              ? "border-red-500/30 bg-red-500/10 text-red-400"
+              : "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+          }`}
+        >
+          {pedido.status}
+        </span>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between border-t border-zinc-800 pt-3">
+        <p className="text-xs text-zinc-500">
+          {pedido.data.toLocaleDateString("pt-BR")}{" "}
+          {pedido.data.toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+        <p className="text-sm font-black text-emerald-400">
+          R$ {pedido.valor.toFixed(2)}
+        </p>
+      </div>
+    </article>
+  );
 
   return (
     <main className="p-4 space-y-4">
@@ -252,39 +306,21 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
           <p className="text-sm">Nenhum pedido encontrado.</p>
         </div>
       ) : (
-        pedidos.map((pedido) => (
-          <article
-            key={pedido.id}
-            className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 cursor-pointer hover:border-zinc-600 transition"
-            onClick={() => {
-              setSelectedPedido(pedido);
-            }}
-          >
-            <div className="flex justify-between items-start gap-3">
-              <div>
-                <h3 className="text-sm font-bold text-white">{pedido.titulo}</h3>
-                <p className="text-xs text-zinc-400">{pedido.subtitulo}</p>
-              </div>
-              <p className="text-sm font-black text-emerald-400">R$ {pedido.valor.toFixed(2)}</p>
-            </div>
+        <>
+          {pendingOrders.length > 0 && (
+            <section className="space-y-3">
+              <p className="text-[11px] font-black uppercase text-yellow-400">Pendentes</p>
+              {pendingOrders.map(renderPedidoCard)}
+            </section>
+          )}
 
-            <div className="mt-3 pt-2 border-t border-zinc-800 flex justify-between items-center">
-              <span className="text-[10px] text-zinc-500">{pedido.data.toLocaleDateString("pt-BR")}</span>
-              <span
-                className={`text-[10px] font-black uppercase px-2 py-0.5 rounded flex items-center gap-1 ${
-                  pedido.status === "aprovado"
-                    ? "bg-emerald-500/10 text-emerald-500"
-                    : pedido.status === "rejeitado"
-                    ? "bg-red-500/10 text-red-500"
-                    : "bg-yellow-500/10 text-yellow-500"
-                }`}
-              >
-                {pedido.status === "aprovado" ? <CheckCircle size={10} /> : pedido.status === "rejeitado" ? <XCircle size={10} /> : <Clock size={10} />}
-                {pedido.status}
-              </span>
-            </div>
-          </article>
-        ))
+          {historyOrders.length > 0 && (
+            <section className="space-y-3">
+              <p className="text-[11px] font-black uppercase text-zinc-400">Finalizados</p>
+              {historyOrders.map(renderPedidoCard)}
+            </section>
+          )}
+        </>
       )}
 
       {selectedPedido && (

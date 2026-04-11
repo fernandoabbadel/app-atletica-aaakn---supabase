@@ -991,16 +991,6 @@ export async function createStoreOrder(payload: {
       : undefined,
   };
 
-  const baseInsertPayload: Record<string, unknown> = {
-    ...requestPayload,
-    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
-    status: "pendente",
-    createdAt: new Date().toISOString(),
-  };
-  if (baseInsertPayload.data === undefined) {
-    delete baseInsertPayload.data;
-  }
-
   let productLookup = supabase
     .from("produtos")
     .select("id,preco,plan_prices,payment_config,seller_type,seller_id,seller_name,seller_logo_url")
@@ -1023,6 +1013,17 @@ export async function createStoreOrder(payload: {
   const totalPrice = Number((resolvedUnitPrice * quantity).toFixed(2));
   requestPayload.price = totalPrice;
   requestPayload.total = totalPrice;
+
+  const baseInsertPayload: Record<string, unknown> = {
+    ...requestPayload,
+    ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+    status: "pendente",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  if (baseInsertPayload.data === undefined) {
+    delete baseInsertPayload.data;
+  }
 
   const seller = normalizeSellerSnapshot({
     type: asObject(productRow)?.seller_type,

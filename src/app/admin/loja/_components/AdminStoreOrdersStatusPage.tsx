@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -43,6 +43,7 @@ type OrderRow = {
   approvedBy?: string;
   createdAt?: string;
   updatedAt?: string;
+  productCategory?: string;
 };
 
 const PAGE_SIZE = 20;
@@ -100,7 +101,7 @@ export function AdminStoreOrdersStatusPage({
 }) {
   const { user } = useAuth();
   const { addToast } = useToast();
-  const { tenantSlug } = useTenantTheme();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const normalizedCategory = String(categoryLabel || "").trim();
 
   const [rows, setRows] = useState<OrderRow[]>([]);
@@ -138,19 +139,25 @@ export function AdminStoreOrdersStatusPage({
         status: pageCopy.status,
       });
 
+      const productRows = await fetchStoreProducts({
+        maxResults: 240,
+        forceRefresh: false,
+        tenantId: tenantId || undefined,
+      });
+      const categoryByProductId = new Map(
+        productRows.map((row) => [
+          String(row.id || "").trim(),
+          String(row.categoria || "").trim() || "Sem categoria",
+        ])
+      );
+
       if (normalizedCategory) {
-        const categoryProducts = await fetchStoreProducts({
-          maxResults: 240,
-          forceRefresh: false,
-          category: normalizedCategory,
-        });
-        const productIds = new Set(
-          categoryProducts
-            .map((row) => String(row.id || "").trim())
-            .filter((value) => value.length > 0)
-        );
         result = {
-          rows: result.rows.filter((row) => productIds.has(String(row.productId || "").trim())),
+          rows: result.rows.filter(
+            (row) =>
+              (categoryByProductId.get(String(row.productId || "").trim()) || "Sem categoria") ===
+              normalizedCategory
+          ),
           hasMore: false,
         };
       }
@@ -160,7 +167,11 @@ export function AdminStoreOrdersStatusPage({
         return;
       }
 
-      const nextRows = result.rows as OrderRow[];
+      const nextRows = (result.rows as OrderRow[]).map((row) => ({
+        ...row,
+        productCategory:
+          categoryByProductId.get(String(row.productId || "").trim()) || "Sem categoria",
+      }));
       setRows(nextRows);
       setHasMore(result.hasMore);
 
@@ -189,7 +200,7 @@ export function AdminStoreOrdersStatusPage({
       });
       setApproverNames(nextNames);
     },
-    [mode, normalizedCategory, pageCopy.status]
+    [mode, normalizedCategory, pageCopy.status, tenantId]
   );
 
   useEffect(() => {
@@ -281,6 +292,31 @@ export function AdminStoreOrdersStatusPage({
     if (approvedBy === "admin") return "Admin";
     return approverNames[approvedBy] || compactUserId(approvedBy);
   };
+  const groupedRows = useMemo(() => {
+    if (normalizedCategory) {
+      return [
+        {
+          category: normalizedCategory,
+          rows,
+        },
+      ];
+    }
+
+    const groups = new Map<string, OrderRow[]>();
+    rows.forEach((row) => {
+      const category = String(row.productCategory || "Sem categoria").trim() || "Sem categoria";
+      const categoryRows = groups.get(category) || [];
+      categoryRows.push(row);
+      groups.set(category, categoryRows);
+    });
+
+    return Array.from(groups.entries())
+      .sort(([left], [right]) => left.localeCompare(right, "pt-BR"))
+      .map(([category, categoryRows]) => ({
+        category,
+        rows: categoryRows,
+      }));
+  }, [normalizedCategory, rows]);
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 font-sans text-white">
@@ -338,7 +374,21 @@ export function AdminStoreOrdersStatusPage({
             {pageCopy.emptyText}
           </div>
         ) : (
-          rows.map((row) => {
+          groupedRows.map((group) => (
+            <section key={group.category} className="space-y-3">
+              {!normalizedCategory && (
+                <div className="rounded-2xl border border-zinc-800 bg-black/20 px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                    Categoria
+                  </p>
+                  <p className="mt-1 text-sm font-bold text-white">{group.category}</p>
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    {group.rows.length} pedido{group.rows.length === 1 ? "" : "s"} nesta pagina.
+                  </p>
+                </div>
+              )}
+
+              {group.rows.map((row) => {
             const isEditing = editingId === row.id;
             const isBusy = actionId === row.id;
             const totalValue = Number(row.total || row.price || 0);
@@ -489,7 +539,9 @@ export function AdminStoreOrdersStatusPage({
                 </div>
               </article>
             );
-          })
+              })}
+            </section>
+          ))
         )}
 
         {!normalizedCategory && (page > 1 || hasMore) && (

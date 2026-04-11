@@ -128,6 +128,7 @@ interface LigaData {
     eventos?: LeagueEvent[];
     membrosIds?: string[];
     membersCount?: number;
+    updatedAt?: string;
 }
 
 interface LigaEditorDraftSnapshot {
@@ -233,6 +234,13 @@ const writeLigaEditorDraft = (ligaId: string, snapshot: LigaEditorDraftSnapshot,
 
 const clearLigaEditorDraft = (ligaId: string, tenantScopeId?: string | null): void => {
     removeSessionStorageValue(getLigaEditorDraftKey(ligaId, tenantScopeId));
+};
+
+const parseDateMs = (value: unknown): number => {
+    if (typeof value !== "string" || !value.trim()) return 0;
+    const parsed = new Date(value);
+    const time = parsed.getTime();
+    return Number.isFinite(time) ? time : 0;
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -553,16 +561,27 @@ export function LigasAdminPageContent() {
                   membros: (target.membros || []) as Member[],
                   eventos: (target.eventos || []) as LeagueEvent[],
                   membersCount: target.membersCount,
+                  updatedAt: target.updatedAt,
               };
               const persistedMemberIds = extractMemberIds(baseLigaData.membros);
               const restoredDraft = readLigaEditorDraft(target.id, tenantScopeId);
+              const persistedUpdatedAtMs = parseDateMs(baseLigaData.updatedAt);
+              const shouldApplyDraft =
+                  Boolean(restoredDraft) &&
+                  (
+                      persistedUpdatedAtMs <= 0 ||
+                      (restoredDraft?.savedAt || 0) >= persistedUpdatedAtMs
+                  );
               const mergedLigaData: LigaData = restoredDraft
+                  ? shouldApplyDraft
                   ? {
                       ...baseLigaData,
                       ...restoredDraft.ligaDraft,
                       id: baseLigaData.id,
                       senha: baseLigaData.senha,
+                      updatedAt: baseLigaData.updatedAt,
                   }
+                  : baseLigaData
                   : baseLigaData;
 
               setLigaData(mergedLigaData);
@@ -578,6 +597,9 @@ export function LigasAdminPageContent() {
                   setEditingEventIdx(restoredDraft.editingEventIdx);
                   setCurrentEvent(restoredDraft.currentEvent);
                   setNovoLote(restoredDraft.novoLote);
+                  if (!shouldApplyDraft) {
+                      addToast("Rascunho local mais antigo que a base salva. Exibindo a versao publicada.", "info");
+                  }
               } else {
                   setActiveTab(routeTab);
                   setSavedMemberIds(persistedMemberIds);
@@ -589,7 +611,7 @@ export function LigasAdminPageContent() {
               }
               setIsLoggedIn(true);
               addToast("Acesso autorizado!", "success");
-              if (restoredDraft) {
+              if (restoredDraft && shouldApplyDraft) {
                   addToast("Rascunho recuperado.", "info");
               }
               
@@ -800,7 +822,7 @@ export function LigasAdminPageContent() {
       }
       setLigaData({ ...ligaData, eventos: novosEventos });
       setEventModal(false);
-      addToast("Evento salvo no rascunho da seção.", "info");
+      return addToast("Evento salvo no rascunho local. Use PUBLICAR EVENTOS para atualizar o app.", "info");
   };
 
   // --- GESTÃO DE ENQUETES (SHARK FEATURE 🦈) ---
@@ -1053,7 +1075,7 @@ export function LigasAdminPageContent() {
       activeTab === "members"
           ? "SALVAR MEMBROS"
           : activeTab === "events"
-          ? "SALVAR EVENTOS"
+          ? "PUBLICAR EVENTOS"
           : activeTab === "shark"
           ? "SALVAR BOARD ROUND"
           : "SALVAR INFORMACOES";
@@ -1289,7 +1311,7 @@ export function LigasAdminPageContent() {
           {activeTab === 'events' && ligaData && (
               <div className="space-y-6">
                   <div className="flex justify-between items-center bg-zinc-900 p-4 rounded-xl border border-zinc-800">
-                      <div><h3 className="text-sm font-bold uppercase text-white">Eventos da Liga</h3><p className="text-[10px] text-zinc-500">Criar eventos para aparecer no App.</p></div>
+                      <div><h3 className="text-sm font-bold uppercase text-white">Eventos da Liga</h3><p className="text-[10px] text-zinc-500">Salve no modal e depois publique para sincronizar com a pagina de eventos do app.</p></div>
                       <button onClick={() => handleOpenEventModal(null)} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition"><Calendar size={14}/> Criar Evento</button>
                   </div>
                   <div className="space-y-3">

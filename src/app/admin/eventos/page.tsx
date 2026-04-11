@@ -170,19 +170,37 @@ const buildLotePlanPrices = (
   plans: PlanRecord[],
   current?: LotePlanPrice[]
 ): LotePlanPrice[] => {
-  const currentMap = new Map(
-    (current ?? []).map((entry) => [
-      (entry.planId || entry.planName).trim().toLowerCase(),
-      entry.price,
-    ])
-  );
+  const currentMap = new Map<string, string>();
+
+  (current ?? []).forEach((entry) => {
+    const normalizedPrice = String(entry.price ?? "").trim();
+    const planIdKey = String(entry.planId || "").trim().toLowerCase();
+    const planNameKey = String(entry.planName || "").trim().toLowerCase();
+
+    if (planIdKey) currentMap.set(planIdKey, normalizedPrice);
+    if (planNameKey) currentMap.set(planNameKey, normalizedPrice);
+  });
 
   return plans.map((plan) => ({
     planId: plan.id,
     planName: plan.nome,
-    price: currentMap.get((plan.id || plan.nome).trim().toLowerCase()) || "",
+    price:
+      currentMap.get((plan.id || "").trim().toLowerCase()) ||
+      currentMap.get((plan.nome || "").trim().toLowerCase()) ||
+      "",
   }));
 };
+
+const serializeLotePlanPrices = (
+  plans: PlanRecord[],
+  current?: LotePlanPrice[]
+): LotePlanPrice[] =>
+  buildLotePlanPrices(plans, current)
+    .map((entry) => ({
+      ...entry,
+      price: String(entry.price ?? "").trim(),
+    }))
+    .filter((entry) => entry.price.length > 0);
 
 export default function AdminEventosPage() {
   const router = useRouter();
@@ -538,7 +556,7 @@ export default function AdminEventosPage() {
           nome: String(lote.nome || "").trim().slice(0, EVENT_LOTE_NAME_MAX_LENGTH),
           preco: String(lote.preco || "").trim().slice(0, 40),
           status: lote.status || "ativo",
-          planPrices: buildLotePlanPrices(planCatalog, lote.planPrices),
+          planPrices: serializeLotePlanPrices(planCatalog, lote.planPrices),
         })),
         status: novoEvento.status || "ativo",
         sale_status: novoEvento.saleStatus || "ativo",

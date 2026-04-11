@@ -379,6 +379,28 @@ async function selectEventById(eventId: string, tenantId?: string): Promise<Row 
   return normalizeEventRow(rows[0] as Row);
 }
 
+async function resolveEventInteractionScope(options: {
+  eventId: string;
+  tenantId?: string | null;
+}): Promise<{ eventRow: Row | null; tenantId: string }> {
+  const preferredTenantId = resolveEventsTenantId(options.tenantId);
+  const eventFromPreferredTenant = await selectEventById(
+    options.eventId,
+    preferredTenantId || undefined
+  );
+  const fallbackEvent =
+    eventFromPreferredTenant || !preferredTenantId
+      ? null
+      : await selectEventById(options.eventId);
+  const eventRow = eventFromPreferredTenant ?? fallbackEvent;
+  const eventTenantId = asString(eventRow?.tenant_id).trim();
+
+  return {
+    eventRow,
+    tenantId: eventTenantId || preferredTenantId,
+  };
+}
+
 async function updateEventRow(eventId: string, patch: Row, tenantId?: string): Promise<void> {
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveEventsTenantId(tenantId);
@@ -1342,7 +1364,14 @@ export async function toggleEventLike(payload: {
 
   try {
     const supabase = getSupabaseClient();
-    const scopedTenantId = resolveEventsTenantId(payload.tenantId);
+    const interactionScope = await resolveEventInteractionScope({
+      eventId,
+      tenantId: payload.tenantId,
+    });
+    const scopedTenantId = interactionScope.tenantId;
+    if (!interactionScope.eventRow) {
+      throw new Error("Evento nao encontrado.");
+    }
     let existingQuery = supabase
       .from("eventos_likes")
       .select("id")
@@ -1427,8 +1456,12 @@ export async function setEventRsvpDetailed(payload: {
   if (!eventId || !userId) return;
 
   const supabase = getSupabaseClient();
-  const scopedTenantId = resolveEventsTenantId(payload.tenantId);
-  const eventRow = await selectEventById(eventId, scopedTenantId);
+  const interactionScope = await resolveEventInteractionScope({
+    eventId,
+    tenantId: payload.tenantId,
+  });
+  const scopedTenantId = interactionScope.tenantId;
+  const eventRow = interactionScope.eventRow;
   if (!eventRow) {
     throw new Error("Evento fora do tenant ativo.");
   }
