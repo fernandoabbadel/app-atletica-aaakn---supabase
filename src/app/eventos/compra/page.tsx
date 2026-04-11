@@ -27,6 +27,8 @@ interface Lote {
 interface EventoData {
     id: string;
     titulo: string;
+    tipo?: string;
+    categoria?: string;
     imagem?: string;
     lotes?: Lote[];
     [key: string]: unknown; // Flexibilidade para outros campos do evento
@@ -142,6 +144,8 @@ function CompraContent() {
               tenantSigla,
               tenantName,
               eventTitle: evento.titulo,
+              eventType: evento.tipo,
+              eventCategory: evento.categoria,
               buyerName,
               buyerTurma,
               buyerPhone,

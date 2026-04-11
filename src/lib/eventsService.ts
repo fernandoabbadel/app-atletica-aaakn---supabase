@@ -14,7 +14,7 @@ type Row = Record<string, unknown>;
 const FINANCEIRO_CACHE_TTL_MS = 90_000;
 const FINANCEIRO_DOC_ID = "financeiro";
 const EVENT_CHECKOUT_SELECT_COLUMNS =
-  "id,titulo,imagem,lotes,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,data,hora,local";
+  "id,titulo,imagem,lotes,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,data,hora,local,tipo,categoria";
 const TICKET_REQUEST_INSERT_SELECT_COLUMNS = "id";
 
 const financeiroCache = new Map<string, CacheEntry<Row | null>>();

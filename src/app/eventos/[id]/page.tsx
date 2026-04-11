@@ -56,6 +56,7 @@ interface Evento {
   imagem?: string;
   imagePositionY?: number;
   tipo: string;
+  categoria?: string;
   saleStatus?: 'ativo' | 'esgotado' | 'em_breve';
   sale_status?: 'ativo' | 'esgotado' | 'em_breve';
   isLowStock?: boolean;
@@ -519,6 +520,8 @@ export default function DetalhesEventoPage() {
               tenantSigla,
               tenantName,
               eventTitle: evento.titulo,
+              eventType: evento.tipo,
+              eventCategory: evento.categoria,
               buyerName,
               buyerTurma,
               buyerPhone,

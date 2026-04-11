@@ -1,6 +1,27 @@
 const cleanString = (value?: string | null): string =>
   typeof value === "string" ? value.trim() : "";
 
+const normalizeTextToken = (value?: string | null): string =>
+  cleanString(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const extractBracketPrefixedTitle = (
+  value?: string | null
+): { prefix: string; title: string } => {
+  const raw = cleanString(value);
+  if (!raw) return { prefix: "", title: "" };
+
+  const match = raw.match(/^\[([^\]]+)\]\s*(.+)$/);
+  if (!match) return { prefix: "", title: raw };
+
+  return {
+    prefix: cleanString(match[1]).toUpperCase(),
+    title: cleanString(match[2]) || raw,
+  };
+};
+
 export const resolveTenantBrandLabel = (
   tenantSigla?: string | null,
   tenantName?: string | null
@@ -35,6 +56,8 @@ export const buildEventReceiptWhatsappMessage = (options: {
   tenantSigla?: string | null;
   tenantName?: string | null;
   eventTitle?: string | null;
+  eventType?: string | null;
+  eventCategory?: string | null;
   buyerName?: string | null;
   buyerTurma?: string | null;
   buyerPhone?: string | null;
@@ -43,8 +66,17 @@ export const buildEventReceiptWhatsappMessage = (options: {
   orderCode?: string | null;
 }): string => {
   const tenantLabel = resolveTenantBrandLabel(options.tenantSigla, options.tenantName);
+  const titleParts = extractBracketPrefixedTitle(options.eventTitle);
+  const isLeagueEvent =
+    normalizeTextToken(options.eventType) === "liga" ||
+    normalizeTextToken(options.eventCategory) === "liga";
+  const organizerLabel =
+    isLeagueEvent && titleParts.prefix ? titleParts.prefix : tenantLabel;
   const eventTitle =
-    cleanString(options.eventTitle).replace(/[.!?]+$/g, "") || "evento";
+    (isLeagueEvent ? titleParts.title : cleanString(options.eventTitle || titleParts.title)).replace(
+      /[.!?]+$/g,
+      ""
+    ) || "evento";
   const buyerName = cleanString(options.buyerName) || "Aluno";
   const buyerTurma = cleanString(options.buyerTurma) || "Sem turma";
   const buyerPhone = cleanString(options.buyerPhone) || "Nao informado";
@@ -56,7 +88,7 @@ export const buildEventReceiptWhatsappMessage = (options: {
   const orderCode = cleanString(options.orderCode) || "Nao informado";
 
   return [
-    `Fala, equipe [${tenantLabel}]! Quero garantir meu lugar no ${eventTitle}.`,
+    `Fala, equipe [${organizerLabel}]! Quero garantir meu lugar no ${eventTitle}.`,
     "",
     `[NOME] ${buyerName}`,
     `[TURMA] ${buyerTurma}`,
