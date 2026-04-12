@@ -36,6 +36,7 @@ import {
   LEAGUE_SIGLA_MAX_LENGTH,
   syncLeagueEvents,
   syncLeagueMembers,
+  updateLeagueConfigPatch,
   uploadLeagueImageToStorage,
   updateEventPollOptions,
   type LeaguePollRecord,
@@ -384,6 +385,25 @@ const buildLeaguePanelHomePath = (leagueId?: string | null): string => {
     return cleanLeagueId ? `/ligas/${encodeURIComponent(cleanLeagueId)}` : "/ligas";
 };
 
+const resolveLeagueLandingPath = (payload: {
+    pageVariant: LigaAdminPageVariant;
+    routeLeagueId?: string | null;
+    routeTab: LigaAdminTab;
+    lockedTab?: LigaAdminTab;
+    leagueId: string;
+}): string => {
+    if (payload.pageVariant === "hub") {
+        return buildLeaguePanelHomePath(payload.leagueId);
+    }
+    if (payload.lockedTab) {
+        return buildLeagueSectionPath(payload.lockedTab, payload.leagueId);
+    }
+    if (!payload.routeLeagueId) {
+        return buildLeaguePanelHomePath(payload.leagueId);
+    }
+    return buildLeagueSectionPath(payload.routeTab, payload.leagueId);
+};
+
 const resolveLeagueTabFromPathname = (pathname: string): LigaAdminTab => {
     const normalized = pathname.toLowerCase().replace(/\/+$/, "");
     if (/\/ligas\/[^/]+\/membros$/.test(normalized)) return "members";
@@ -417,8 +437,10 @@ const extractErrorMessage = (error: unknown): string => {
 
 export function LigasAdminPageContent({
     pageVariant = "editor",
+    lockedTab,
 }: {
     pageVariant?: LigaAdminPageVariant;
+    lockedTab?: LigaAdminTab;
 } = {}) {
   const { user } = useAuth();
   const router = useRouter();
@@ -436,7 +458,7 @@ export function LigasAdminPageContent({
   // --- ESTADOS DE CONTROLE ---
   const [loading, setLoading] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [activeTab, setActiveTab] = useState<LigaAdminTab>(routeTab);
+  const [activeTab, setActiveTab] = useState<LigaAdminTab>(lockedTab || routeTab);
   const [saveActionLabel, setSaveActionLabel] = useState("");
   
   // Login
@@ -478,8 +500,8 @@ export function LigasAdminPageContent({
   const [pollDraftOptions, setPollDraftOptions] = useState<string[]>(["", ""]);
 
   useEffect(() => {
-      setActiveTab(routeTab);
-  }, [routeTab]);
+      setActiveTab(lockedTab || routeTab);
+  }, [lockedTab, routeTab]);
 
   useEffect(() => {
       const preferredLeagueId = routeLeagueId || readSessionStorageValue(lastSelectedStorageKey);
@@ -543,7 +565,7 @@ export function LigasAdminPageContent({
               setLigaData(mergedLigaData);
               setSelectedLigaId(preferredLeagueId);
               setSenhaInput(restoredDraft.ligaSenha);
-              setActiveTab(routeTab);
+              setActiveTab(lockedTab || routeTab);
               setSavedMemberIds(
                   Array.isArray(restoredDraft.savedMemberIds)
                       ? restoredDraft.savedMemberIds
@@ -557,10 +579,13 @@ export function LigasAdminPageContent({
               setIsLoggedIn(true);
               addToast("Sessao da liga restaurada.", "info");
               if (preferredLeagueId && preferredLeagueId !== routeLeagueId) {
-                  const targetPath =
-                      pageVariant === "hub"
-                          ? buildLeaguePanelHomePath(preferredLeagueId)
-                          : buildLeagueSectionPath(routeTab, preferredLeagueId);
+                  const targetPath = resolveLeagueLandingPath({
+                      pageVariant,
+                      routeLeagueId,
+                      routeTab,
+                      lockedTab,
+                      leagueId: preferredLeagueId,
+                  });
                   const nextPath = tenantSlug
                       ? withTenantSlug(tenantSlug, targetPath)
                       : targetPath;
@@ -575,7 +600,7 @@ export function LigasAdminPageContent({
       return () => {
           mounted = false;
       };
-  }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, pageVariant, routeLeagueId, routeTab, router, tenantScopeId, tenantSlug]);
+  }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, lockedTab, pageVariant, routeLeagueId, routeTab, router, tenantScopeId, tenantSlug]);
 
   useEffect(() => {
       if (!selectedLigaId) return;
@@ -782,7 +807,7 @@ export function LigasAdminPageContent({
 
               setLigaData(mergedLigaData);
               if (restoredDraft) {
-                  setActiveTab(routeTab);
+                  setActiveTab(lockedTab || routeTab);
                   setSavedMemberIds(
                       Array.isArray(restoredDraft.savedMemberIds)
                           ? restoredDraft.savedMemberIds
@@ -797,7 +822,7 @@ export function LigasAdminPageContent({
                       addToast("Rascunho local mais antigo que a base salva. Exibindo a versao publicada.", "info");
                   }
               } else {
-                  setActiveTab(routeTab);
+                  setActiveTab(lockedTab || routeTab);
                   setSavedMemberIds(persistedMemberIds);
                   setSendNotification(false);
                   setEventModal(false);
@@ -812,10 +837,13 @@ export function LigasAdminPageContent({
               }
               
               // LOG CORRIGIDO: ORDEM (ID, NOME, AÇÃO, RECURSO, DETALHES)
-              const landingPath =
-                  pageVariant === "hub"
-                      ? buildLeaguePanelHomePath(target.id)
-                      : buildLeagueSectionPath(routeTab, target.id);
+              const landingPath = resolveLeagueLandingPath({
+                  pageVariant,
+                  routeLeagueId,
+                  routeTab,
+                  lockedTab,
+                  leagueId: target.id,
+              });
               router.replace(tenantPath(landingPath));
               logActivity(
                   target.id, 
@@ -1121,15 +1149,16 @@ export function LigasAdminPageContent({
   // --- SALVAMENTO POR SEÇÃO ---
   const persistLeagueConfigPatch = async (patch: Record<string, unknown>) => {
       if (!ligaData) return;
-      const supabase = getSupabaseClient();
-      const { error } = await supabase
-          .from("ligas_config")
-          .update({
-              ...patch,
-              updatedAt: nowIso(),
-          })
-          .eq("id", ligaData.id);
-      if (error) {
+      try {
+          await updateLeagueConfigPatch({
+              id: ligaData.id,
+              patch: {
+                  ...patch,
+                  updatedAt: nowIso(),
+              },
+              tenantId: tenantScopeId || undefined,
+          });
+      } catch (error: unknown) {
           throw new Error(extractErrorMessage(error));
       }
   };
@@ -1417,9 +1446,10 @@ export function LigasAdminPageContent({
   const tenantPath = (path: string) =>
       tenantSlug ? withTenantSlug(tenantSlug, path) : path;
   const navigateToSection = (tab: LigaAdminTab) => {
-      setActiveTab(tab);
+      const nextTab = lockedTab || tab;
+      setActiveTab(nextTab);
       const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
-      router.push(tenantPath(buildLeagueSectionPath(tab, scopedLeagueId)));
+      router.push(tenantPath(buildLeagueSectionPath(nextTab, scopedLeagueId)));
   };
   const openEventPresenceList = (eventId: string) => {
       const cleanEventId = eventId.trim();
@@ -1446,6 +1476,9 @@ export function LigasAdminPageContent({
           : activeTab === "shark"
           ? "SALVAR BOARD ROUND"
           : "SALVAR INFORMACOES";
+  const visibleTabs: LigaAdminTab[] = lockedTab
+      ? [lockedTab]
+      : ['visual', 'members', 'events', 'shark'];
 
   if (!isLoggedIn) return (
       <div className="min-h-screen bg-black flex items-center justify-center p-4 font-sans text-white">
@@ -1458,14 +1491,14 @@ export function LigasAdminPageContent({
                   <p className="text-sm text-zinc-500">Acesso Restrito à Diretoria</p>
               </div>
               <div className="space-y-1">
-                  <label className="text-xs font-bold text-zinc-500 uppercase ml-1">Selecione sua Liga</label>
-                  <select className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-white focus:border-emerald-500 outline-none transition-colors" value={selectedLigaId} onChange={(e) => setSelectedLigaId(e.target.value)} disabled={isLoadingList}>
+                  <label htmlFor="liga-select" className="text-xs font-bold text-zinc-500 uppercase ml-1">Selecione sua Liga</label>
+                  <select id="liga-select" name="ligaSelect" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-white focus:border-emerald-500 outline-none transition-colors" value={selectedLigaId} onChange={(e) => setSelectedLigaId(e.target.value)} disabled={isLoadingList}>
                       <option value="">{isLoadingList ? "Carregando Ligas..." : "Selecione..."}</option>
                       {ligasDisponiveis.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
                   </select>
               </div>
               <div className="space-y-1">
-                  <label className="text-xs font-bold text-zinc-500 uppercase ml-1">Senha de Acesso</label>
+                  <label htmlFor="liga-password" className="text-xs font-bold text-zinc-500 uppercase ml-1">Senha de Acesso</label>
                   <input type="password" value={senhaInput} onChange={e => setSenhaInput(e.target.value)} className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-white focus:border-emerald-500 outline-none transition-colors" placeholder="••••••"/>
               </div>
               <button onClick={handleLogin} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-emerald-900/20 flex items-center justify-center gap-2">
@@ -1541,21 +1574,21 @@ export function LigasAdminPageContent({
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-2 md:grid-cols-4">
-                <button onClick={() => navigateToSection('visual')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'visual' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+            <div className={`grid grid-cols-1 gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-2 ${visibleTabs.length > 1 ? 'md:grid-cols-4' : ''}`}>
+                <button onClick={() => navigateToSection('visual')} className={`${!visibleTabs.includes('visual') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'visual' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
                     <span className="block text-[10px] text-zinc-500">1.</span>
                     Informações
                 </button>
-                <button onClick={() => navigateToSection('members')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'members' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
-                    <span className="block text-[10px] text-zinc-500">2.</span>
+                <button onClick={() => navigateToSection('members')} className={`${!visibleTabs.includes('members') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'members' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                    <span className="block text-[10px] text-zinc-500">{lockedTab ? '1.' : '2.'}</span>
                     Membros
                 </button>
-                <button onClick={() => navigateToSection('events')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'events' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
-                    <span className="block text-[10px] text-zinc-500">3.</span>
+                <button onClick={() => navigateToSection('events')} className={`${!visibleTabs.includes('events') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'events' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                    <span className="block text-[10px] text-zinc-500">{lockedTab ? '1.' : '3.'}</span>
                     Eventos
                 </button>
-                <button onClick={() => navigateToSection('shark')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
-                    <span className="block text-[10px] text-zinc-500">4.</span>
+                <button onClick={() => navigateToSection('shark')} className={`${!visibleTabs.includes('shark') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                    <span className="block text-[10px] text-zinc-500">{lockedTab ? '1.' : '4.'}</span>
                     Board Round
                 </button>
             </div>
@@ -1565,10 +1598,12 @@ export function LigasAdminPageContent({
           {activeTab === 'visual' && ligaData && (
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl space-y-6">
                   <div className="grid grid-cols-2 gap-4">
-                      <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Sigla</label><input type="text" className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500 font-bold uppercase" value={ligaData.sigla} onChange={e => setLigaData({...ligaData, sigla: e.target.value.toUpperCase()})} maxLength={LEAGUE_SIGLA_MAX_LENGTH}/><p className="mt-1 text-[10px] text-zinc-500">{ligaData.sigla.length}/{LEAGUE_SIGLA_MAX_LENGTH} caracteres.</p></div>
+                      <div><label htmlFor="league-sigla" className="text-[10px] font-bold text-zinc-500 uppercase">Sigla</label><input id="league-sigla" name="leagueSigla" type="text" className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500 font-bold uppercase" value={ligaData.sigla} onChange={e => setLigaData({...ligaData, sigla: e.target.value.toUpperCase()})} maxLength={LEAGUE_SIGLA_MAX_LENGTH}/><p className="mt-1 text-[10px] text-zinc-500">{ligaData.sigla.length}/{LEAGUE_SIGLA_MAX_LENGTH} caracteres.</p></div>
                       <div>
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Nome Completo</label>
+                        <label htmlFor="league-name" className="text-[10px] font-bold text-zinc-500 uppercase">Nome Completo</label>
                         <input
+                          id="league-name"
+                          name="leagueName"
                           type="text"
                           className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500"
                           value={ligaData.nome}
@@ -1596,7 +1631,7 @@ export function LigasAdminPageContent({
                               ) : (
                                 <Upload size={20} className="text-zinc-500"/>
                               )}
-                              <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingLeagueAsset} onChange={(e) => handleImageUpload(e, 'logo')}/>
+                              <input name="leagueLogo" type="file" className="hidden" accept="image/png,image/jpeg,image/webp" disabled={uploadingLeagueAsset} onChange={(e) => handleImageUpload(e, 'logo')}/>
                           </label>
                           <span className="text-xs text-zinc-500 max-w-[150px]">Clique para alterar a logo.<br/>Recomendado: Quadrado.</span>
                       </div>

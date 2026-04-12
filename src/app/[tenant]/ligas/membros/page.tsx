@@ -1,5 +1,5 @@
 import { LigasAdminPageContent } from "../../../ligas/page";
 
 export default function TenantLigasMembrosPage() {
-  return <LigasAdminPageContent />;
+  return <LigasAdminPageContent lockedTab="members" />;
 }

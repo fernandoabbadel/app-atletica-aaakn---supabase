@@ -57,6 +57,7 @@ const LEAGUES_SELECT_COLUMNS = [
   "visivel",
   "ativa",
   "membros",
+  "membrosIds",
   "eventos",
   "perguntas",
   "bizu",
@@ -65,6 +66,7 @@ const LEAGUES_SELECT_COLUMNS = [
   "status",
   "createdAt",
   "updatedAt",
+  "data",
 ] as const;
 
 const LEAGUE_SUMMARY_SELECT_COLUMNS = [
@@ -84,6 +86,8 @@ const LEAGUE_SUMMARY_SELECT_COLUMNS = [
   "status",
   "createdAt",
   "updatedAt",
+  "membrosIds",
+  "data",
 ] as const;
 
 const LEAGUE_USERS_SELECT_COLUMNS = ["uid", "nome", "foto", "turma"] as const;
@@ -243,6 +247,193 @@ const removeMissingColumnFromPayload = (
   );
   if (nextEntries.length === Object.keys(payload).length) return null;
   return Object.fromEntries(nextEntries);
+};
+
+const stripUndefinedEntries = (payload: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+
+const getLeagueDataField = (raw: unknown): Record<string, unknown> => {
+  const row = asObject(raw);
+  return asObject(row?.data) ?? {};
+};
+
+const readLeagueField = (raw: Record<string, unknown>, key: string): unknown => {
+  const dataField = getLeagueDataField(raw);
+  if (Object.prototype.hasOwnProperty.call(raw, key) && raw[key] !== null && raw[key] !== undefined) {
+    return raw[key];
+  }
+  return dataField[key];
+};
+
+const mergeLeagueCompatData = (
+  currentData: Record<string, unknown>,
+  patch: Record<string, unknown>
+): Record<string, unknown> => ({
+  ...currentData,
+  ...stripUndefinedEntries(patch),
+});
+
+const normalizeLeaguePartialPatch = (
+  patch: Partial<LeagueRecord> & Record<string, unknown>
+): Record<string, unknown> => {
+  const normalized: Record<string, unknown> = {};
+  const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(patch, key);
+
+  if (hasOwn("nome")) {
+    normalized.nome = asString(patch.nome, "Liga").trim().slice(0, LEAGUE_NAME_MAX_LENGTH);
+  }
+  if (hasOwn("sigla")) {
+    normalized.sigla = asString(patch.sigla).trim().toUpperCase().slice(0, LEAGUE_SIGLA_MAX_LENGTH);
+  }
+  if (hasOwn("presidente")) {
+    normalized.presidente = asString(patch.presidente).trim().slice(0, 120);
+  }
+  if (hasOwn("descricao")) {
+    normalized.descricao = asString(patch.descricao).slice(0, LEAGUE_DESCRIPTION_MAX_LENGTH);
+  }
+  if (hasOwn("visaoGeral")) {
+    normalized.visaoGeral = asString(patch.visaoGeral).slice(0, LEAGUE_OVERVIEW_MAX_LENGTH);
+  }
+  if (hasOwn("senha")) {
+    normalized.senha = asString(patch.senha).slice(0, 120);
+  }
+  if (hasOwn("foto")) {
+    const foto = asString(patch.foto).trim();
+    normalized.foto = foto || null;
+  }
+  if (hasOwn("logoUrl")) {
+    const logoUrl = asString(patch.logoUrl).trim();
+    normalized.logoUrl = logoUrl || null;
+    if (!hasOwn("logo")) {
+      normalized.logo = logoUrl || null;
+    }
+  }
+  if (hasOwn("logo")) {
+    const logo = asString(patch.logo).trim();
+    normalized.logo = logo || null;
+    if (!hasOwn("logoUrl")) {
+      normalized.logoUrl = logo || null;
+    }
+  }
+  if (hasOwn("visivel")) {
+    normalized.visivel = Boolean(patch.visivel);
+  }
+  if (hasOwn("ativa")) {
+    normalized.ativa = Boolean(patch.ativa);
+  }
+  if (hasOwn("membros")) {
+    normalized.membros = Array.isArray(patch.membros) ? patch.membros : [];
+  }
+  if (hasOwn("membrosIds")) {
+    normalized.membrosIds = Array.isArray(patch.membrosIds)
+      ? patch.membrosIds
+          .filter((entry): entry is string => typeof entry === "string")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0)
+      : [];
+  } else if (Array.isArray(normalized.membros)) {
+    normalized.membrosIds = extractLeagueMemberIds(normalized.membros);
+  }
+  if (hasOwn("eventos")) {
+    normalized.eventos = Array.isArray(patch.eventos) ? patch.eventos : [];
+  }
+  if (hasOwn("perguntas")) {
+    normalized.perguntas = Array.isArray(patch.perguntas) ? patch.perguntas : [];
+  }
+  if (hasOwn("bizu")) {
+    normalized.bizu = asString(patch.bizu).slice(0, 500);
+  }
+  if (hasOwn("likes")) {
+    normalized.likes = Math.max(0, asNumber(patch.likes, 0));
+  }
+  if (hasOwn("membersCount")) {
+    normalized.membersCount = Math.max(0, asNumber(patch.membersCount, 0));
+  } else if (Array.isArray(normalized.membrosIds)) {
+    normalized.membersCount = normalized.membrosIds.length;
+  } else if (Array.isArray(normalized.membros)) {
+    normalized.membersCount = normalized.membros.length;
+  }
+  if (hasOwn("status")) {
+    normalized.status = asString(patch.status).trim();
+  }
+  if (hasOwn("createdAt")) {
+    normalized.createdAt = asString(patch.createdAt).trim();
+  }
+  if (hasOwn("updatedAt")) {
+    normalized.updatedAt = asString(patch.updatedAt).trim();
+  }
+
+  return stripUndefinedEntries(normalized);
+};
+
+const fetchLeagueConfigDataField = async (
+  leagueId: string,
+  tenantId?: string | null
+): Promise<Record<string, unknown>> => {
+  const cleanId = leagueId.trim();
+  if (!cleanId) return {};
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveLeagueTenantId(tenantId);
+  const selectCandidates = ["data", "membrosIds,data", "membros,data"];
+
+  for (const selectColumns of selectCandidates) {
+    let query = supabase
+      .from("ligas_config")
+      .select(selectColumns)
+      .eq("id", cleanId);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (!error) {
+      return getLeagueDataField(data);
+    }
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+  }
+
+  return {};
+};
+
+const updateLeagueConfigRecordCompat = async (payload: {
+  leagueId: string;
+  patch: Partial<LeagueRecord> & Record<string, unknown>;
+  tenantId?: string | null;
+}): Promise<void> => {
+  const cleanId = payload.leagueId.trim();
+  if (!cleanId) return;
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  const normalizedPatch = normalizeLeaguePartialPatch(payload.patch);
+  const currentData = await fetchLeagueConfigDataField(cleanId, scopedTenantId);
+  let updatePayload = stripUndefinedEntries({
+    ...normalizedPatch,
+    data: mergeLeagueCompatData(currentData, normalizedPatch),
+    updatedAt: nowIso(),
+  });
+
+  while (Object.keys(updatePayload).length > 0) {
+    let query = supabase
+      .from("ligas_config")
+      .update(updatePayload)
+      .eq("id", cleanId);
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+
+    const { error } = await query;
+    if (!error) return;
+
+    const missingColumn = asString(extractMissingSchemaColumn(error));
+    if (!missingColumn) throwSupabaseError(error);
+    const nextPayload = removeMissingColumnFromPayload(updatePayload, missingColumn);
+    if (!nextPayload) throwSupabaseError(error);
+    updatePayload = stripUndefinedEntries(nextPayload as Record<string, unknown>);
+  }
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -532,18 +723,14 @@ export async function syncLeagueMembers(payload: {
     if (deleteError) throw deleteError;
   }
 
-  let updateQuery = supabase
-    .from("ligas_config")
-    .update({
+  await updateLeagueConfigRecordCompat({
+    leagueId,
+    tenantId: scopedTenantId,
+    patch: {
+      membrosIds: nextMemberIds,
       membersCount: nextMemberIds.length,
-      updatedAt: nowIso(),
-    })
-    .eq("id", leagueId);
-  if (scopedTenantId) {
-    updateQuery = updateQuery.eq("tenant_id", scopedTenantId);
-  }
-  const { error: updateError } = await updateQuery;
-  if (updateError) throw updateError;
+    },
+  });
 }
 
 export async function syncLeagueEvents(payload: {
@@ -1071,10 +1258,24 @@ export type LeagueStorageImageKind = "logo" | "member" | "event" | "question";
 const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
   const data = asObject(raw);
   if (!data) return null;
+  const dataField = getLeagueDataField(data);
 
-  const membros = Array.isArray(data.membros)
+  const membrosSource = Array.isArray(readLeagueField(data, "membros"))
+    ? (readLeagueField(data, "membros") as unknown[])
+    : [];
+  const membrosIdsSource = Array.isArray(readLeagueField(data, "membrosIds"))
+    ? (readLeagueField(data, "membrosIds") as unknown[])
+    : [];
+  const perguntasSource = Array.isArray(readLeagueField(data, "perguntas"))
+    ? (readLeagueField(data, "perguntas") as unknown[])
+    : [];
+  const eventosSource = Array.isArray(readLeagueField(data, "eventos"))
+    ? (readLeagueField(data, "eventos") as unknown[])
+    : [];
+
+  const membros = Array.isArray(membrosSource)
     ? sortLeagueMembersByRole(
-        data.membros
+        membrosSource
         .map((row) => {
           const member = asObject(row);
           if (!member) return null;
@@ -1091,8 +1292,8 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
       )
     : [];
 
-  const perguntas = Array.isArray(data.perguntas)
-    ? data.perguntas
+  const perguntas = Array.isArray(perguntasSource)
+    ? perguntasSource
         .map((row) => {
           const question = asObject(row);
           if (!question) return null;
@@ -1113,8 +1314,8 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
         .filter((row): row is LeagueQuestionRecord => row !== null)
     : [];
 
-  const eventos = Array.isArray(data.eventos)
-    ? data.eventos
+  const eventos = Array.isArray(eventosSource)
+    ? eventosSource
         .map((row) => {
           const event = asObject(row);
           if (!event) return null;
@@ -1182,28 +1383,39 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
         .filter((row): row is LeagueEventRecord => row !== null)
     : [];
 
-  const logoUrl = resolveLeagueLogoSrc(data) || undefined;
-  const foto = asString(data.foto) || logoUrl || "";
+  const logoUrl = resolveLeagueLogoSrc({ ...dataField, ...data }) || undefined;
+  const foto = asString(readLeagueField(data, "foto")) || logoUrl || "";
+  const resolvedMemberIds = membrosIdsSource
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 
   return {
     id,
-    nome: asString(data.nome, "Liga"),
-    sigla: asString(data.sigla),
-    presidente: asString(data.presidente),
-    descricao: asString(data.descricao),
-    visaoGeral: asString(data.visaoGeral) || undefined,
-    senha: asString(data.senha),
+    nome: asString(readLeagueField(data, "nome"), "Liga"),
+    sigla: asString(readLeagueField(data, "sigla")),
+    presidente: asString(readLeagueField(data, "presidente")),
+    descricao: asString(readLeagueField(data, "descricao")),
+    visaoGeral: asString(readLeagueField(data, "visaoGeral")) || undefined,
+    senha: asString(readLeagueField(data, "senha")),
     foto,
     ...(logoUrl ? { logoUrl } : {}),
-    visivel: asBoolean(data.visivel, false),
-    ativa: asBoolean(data.ativa, false),
+    visivel: asBoolean(readLeagueField(data, "visivel"), false),
+    ativa: asBoolean(readLeagueField(data, "ativa"), false),
     membros,
     eventos,
     perguntas,
-    bizu: asString(data.bizu),
-    likes: Math.max(0, asNumber(data.likes, 0)),
-    membersCount: Math.max(0, asNumber(data.membersCount, membros.length)),
-    updatedAt: asString(data.updatedAt) || undefined,
+    bizu: asString(readLeagueField(data, "bizu")),
+    likes: Math.max(0, asNumber(readLeagueField(data, "likes"), 0)),
+    membrosIds: resolvedMemberIds,
+    membersCount: Math.max(
+      0,
+      asNumber(
+        readLeagueField(data, "membersCount"),
+        resolvedMemberIds.length || membros.length
+      )
+    ),
+    updatedAt: asString(readLeagueField(data, "updatedAt")) || undefined,
   };
 };
 
@@ -1295,8 +1507,25 @@ const normalizeLeaguePayload = (
         };
       })
     : [];
-
-  return {
+  const membrosIds = Array.from(
+    new Set([
+      ...extractLeagueMemberIds(membros),
+      ...(Array.isArray(payload.membrosIds)
+        ? payload.membrosIds
+            .filter((entry): entry is string => typeof entry === "string")
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0)
+        : []),
+    ])
+  );
+  const membersCount = Math.max(
+    0,
+    asNumber(
+      payload.membersCount,
+      membrosIds.length || membros.length
+    )
+  );
+  const normalizedPayload = {
     nome: asString(payload.nome, "Liga").trim().slice(0, LEAGUE_NAME_MAX_LENGTH),
     sigla: asString(payload.sigla).trim().toUpperCase().slice(0, LEAGUE_SIGLA_MAX_LENGTH),
     presidente: asString(payload.presidente).trim().slice(0, 120),
@@ -1308,17 +1537,18 @@ const normalizeLeaguePayload = (
     visivel: Boolean(payload.visivel),
     ativa: Boolean(payload.ativa),
     membros,
+    membrosIds,
     eventos: Array.isArray(payload.eventos) ? payload.eventos : [],
     perguntas,
     bizu: asString(payload.bizu).slice(0, 500),
     likes: Math.max(0, asNumber(payload.likes, 0)),
-    membersCount: Math.max(
-      0,
-      asNumber(
-        payload.membersCount,
-        membros.length
-      )
-    ),
+    membersCount,
+  };
+  const compatData = mergeLeagueCompatData({}, normalizedPayload);
+
+  return {
+    ...normalizedPayload,
+    data: compatData,
   };
 };
 
@@ -1613,6 +1843,19 @@ export async function fetchLeagueUsers(options?: {
   return users;
 }
 
+export async function updateLeagueConfigPatch(payload: {
+  id: string;
+  patch: Partial<LeagueRecord> & Record<string, unknown>;
+  tenantId?: string | null;
+}): Promise<void> {
+  await updateLeagueConfigRecordCompat({
+    leagueId: payload.id,
+    patch: payload.patch,
+    tenantId: payload.tenantId,
+  });
+  clearLeagueDependentCaches();
+}
+
 export async function saveLeagueConfig(payload: {
   id?: string;
   data: Partial<LeagueRecord>;
@@ -1636,23 +1879,41 @@ export async function saveLeagueConfig(payload: {
   );
 
   let previousMemberIds = new Set<string>();
+  let previousDataField: Record<string, unknown> = {};
   if (id) {
     const supabase = getSupabaseClient();
-    let previousQuery = supabase
-      .from("ligas_config")
-      .select("membros,membrosIds")
-      .eq("id", id);
-    if (scopedTenantId) {
-      previousQuery = previousQuery.eq("tenant_id", scopedTenantId);
+    let previous: Record<string, unknown> = {};
+    const selectCandidates = ["membros,membrosIds,data", "membros,data", "membros,membrosIds", "membros"];
+
+    for (const selectColumns of selectCandidates) {
+      let previousQuery = supabase
+        .from("ligas_config")
+        .select(selectColumns)
+        .eq("id", id);
+      if (scopedTenantId) {
+        previousQuery = previousQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { data: previousRow, error: previousError } = await previousQuery.maybeSingle();
+      if (!previousError) {
+        previous = asObject(previousRow) ?? {};
+        break;
+      }
+
+      const missingColumn = asString(extractMissingSchemaColumn(previousError));
+      if (!missingColumn) throwSupabaseError(previousError);
     }
-    const { data: previousRow, error: previousError } = await previousQuery.maybeSingle();
-    if (previousError) throwSupabaseError(previousError);
-    const previous = asObject(previousRow) ?? {};
+
+    previousDataField = getLeagueDataField(previous);
     previousMemberIds = new Set([
       ...extractLeagueMemberIds(previous.membros),
       ...(
         Array.isArray(previous.membrosIds)
           ? previous.membrosIds
+              .filter((entry): entry is string => typeof entry === "string")
+              .map((entry) => entry.trim())
+              .filter((entry) => entry.length > 0)
+          : Array.isArray(previousDataField.membrosIds)
+          ? previousDataField.membrosIds
               .filter((entry): entry is string => typeof entry === "string")
               .map((entry) => entry.trim())
               .filter((entry) => entry.length > 0)
@@ -1672,34 +1933,61 @@ export async function saveLeagueConfig(payload: {
     async () => {
       const supabase = getSupabaseClient();
       if (id) {
-        let query = supabase
-          .from("ligas_config")
-          .update({
-            ...normalizedData,
-            updatedAt: nowIso(),
-          })
-          .eq("id", id);
-        if (scopedTenantId) {
-          query = query.eq("tenant_id", scopedTenantId);
+        let updatePayload: Record<string, unknown> = stripUndefinedEntries({
+          ...normalizedData,
+          updatedAt: nowIso(),
+        });
+        updatePayload.data = mergeLeagueCompatData(previousDataField, updatePayload);
+
+        while (Object.keys(updatePayload).length > 0) {
+          let query = supabase
+            .from("ligas_config")
+            .update(updatePayload)
+            .eq("id", id);
+          if (scopedTenantId) {
+            query = query.eq("tenant_id", scopedTenantId);
+          }
+          const { error } = await query;
+          if (!error) {
+            return { id };
+          }
+
+          const missingColumn = asString(extractMissingSchemaColumn(error));
+          if (!missingColumn) throwSupabaseError(error);
+          const nextPayload = removeMissingColumnFromPayload(updatePayload, missingColumn);
+          if (!nextPayload) throwSupabaseError(error);
+          updatePayload = stripUndefinedEntries(nextPayload as Record<string, unknown>);
         }
-        const { error } = await query;
-        if (error) throwSupabaseError(error);
 
         return { id };
       }
 
-      const { data, error } = await supabase
-        .from("ligas_config")
-        .insert({
-          ...normalizedData,
-          ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        })
-        .select("id")
-        .single();
-      if (error) throwSupabaseError(error);
-      return { id: asString((data as Record<string, unknown> | null)?.id) };
+      let insertPayload: Record<string, unknown> = stripUndefinedEntries({
+        ...normalizedData,
+        ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      });
+      insertPayload.data = mergeLeagueCompatData({}, insertPayload);
+
+      while (Object.keys(insertPayload).length > 0) {
+        const { data, error } = await supabase
+          .from("ligas_config")
+          .insert(insertPayload)
+          .select("id")
+          .single();
+        if (!error) {
+          return { id: asString((data as Record<string, unknown> | null)?.id) };
+        }
+
+        const missingColumn = asString(extractMissingSchemaColumn(error));
+        if (!missingColumn) throwSupabaseError(error);
+        const nextPayload = removeMissingColumnFromPayload(insertPayload, missingColumn);
+        if (!nextPayload) throwSupabaseError(error);
+        insertPayload = stripUndefinedEntries(nextPayload as Record<string, unknown>);
+      }
+
+      throw new Error("Nao foi possivel salvar a liga.");
     }
   );
 

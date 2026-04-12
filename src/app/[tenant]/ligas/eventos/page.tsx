@@ -1,5 +1,5 @@
 import { LigasAdminPageContent } from "../../../ligas/page";
 
 export default function TenantLigasEventosPage() {
-  return <LigasAdminPageContent />;
+  return <LigasAdminPageContent lockedTab="events" />;
 }

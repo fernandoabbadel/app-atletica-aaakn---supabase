@@ -19,6 +19,51 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
 
+const getLeagueDataField = (value: unknown): Record<string, unknown> =>
+  asObject(asObject(value)?.data) ?? {};
+
+const mergeLeagueCompatData = (
+  currentData: Record<string, unknown>,
+  patch: Record<string, unknown>
+): Record<string, unknown> => ({
+  ...currentData,
+  ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+});
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [asString(raw.message), asString(raw.details)]
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const removeMissingColumnFromPayload = (
+  payload: Record<string, unknown>,
+  missingColumn: string
+): Record<string, unknown> | null => {
+  const normalizedMissing = missingColumn.trim().toLowerCase();
+  if (!normalizedMissing) return null;
+
+  const nextEntries = Object.entries(payload).filter(
+    ([key]) => key.toLowerCase() !== normalizedMissing
+  );
+  if (nextEntries.length === Object.keys(payload).length) return null;
+  return Object.fromEntries(nextEntries);
+};
+
 type AuthScope = {
   userId: string;
   userRole: string;
@@ -121,7 +166,7 @@ export async function POST(request: NextRequest) {
 
     const { data: leagueRow, error: leagueError } = await supabaseAdmin
       .from("ligas_config")
-      .select("id,tenant_id")
+      .select("id,tenant_id,data")
       .eq("id", leagueId)
       .maybeSingle();
 
@@ -135,6 +180,7 @@ export async function POST(request: NextRequest) {
     }
 
     const leagueTenantId = asString(rawLeague.tenant_id).trim();
+    const currentLeagueData = getLeagueDataField(rawLeague);
     const effectiveTenantId = requestedTenantId || leagueTenantId || scope.userTenantId;
 
     if (!effectiveTenantId) {
@@ -278,30 +324,49 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const leaguePatch: Record<string, unknown> = {
+    const timestamp = new Date().toISOString();
+    let leaguePatch: Record<string, unknown> = {
       membersCount: nextMembers.length,
-      updatedAt: new Date().toISOString(),
+      membrosIds: nextMemberIds,
+      updatedAt: timestamp,
+      data: mergeLeagueCompatData(currentLeagueData, {
+        membersCount: nextMembers.length,
+        membrosIds: nextMemberIds,
+        updatedAt: timestamp,
+      }),
     };
     if (!leagueTenantId) {
       leaguePatch.tenant_id = effectiveTenantId;
     }
 
-    const { error: leagueUpdateError } = await supabaseAdmin
-      .from("ligas_config")
-      .update(leaguePatch)
-      .eq("id", leagueId);
+    while (Object.keys(leaguePatch).length > 0) {
+      const { error: leagueUpdateError } = await supabaseAdmin
+        .from("ligas_config")
+        .update(leaguePatch)
+        .eq("id", leagueId);
 
-    if (leagueUpdateError) {
-      return NextResponse.json({ error: leagueUpdateError.message }, { status: 400 });
+      if (!leagueUpdateError) {
+        return NextResponse.json({
+          ok: true,
+          inserted: membersToInsert.length,
+          updated: membersToUpdate.length,
+          deleted: removedMemberIds.length,
+          membersCount: nextMembers.length,
+        });
+      }
+
+      const missingColumn = extractMissingSchemaColumn(leagueUpdateError);
+      if (!missingColumn) {
+        return NextResponse.json({ error: leagueUpdateError.message }, { status: 400 });
+      }
+
+      const nextPayload = removeMissingColumnFromPayload(leaguePatch, missingColumn);
+      if (!nextPayload) {
+        return NextResponse.json({ error: leagueUpdateError.message }, { status: 400 });
+      }
+      leaguePatch = nextPayload;
     }
-
-    return NextResponse.json({
-      ok: true,
-      inserted: membersToInsert.length,
-      updated: membersToUpdate.length,
-      deleted: removedMemberIds.length,
-      membersCount: nextMembers.length,
-    });
+    return NextResponse.json({ error: "Falha ao atualizar resumo da liga." }, { status: 400 });
   } catch (error: unknown) {
     const message =
       error instanceof Error && error.message

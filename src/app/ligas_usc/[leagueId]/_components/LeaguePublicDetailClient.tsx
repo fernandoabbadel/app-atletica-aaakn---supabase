@@ -20,6 +20,10 @@ import {
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import { resolveLeagueRoleLabel, sortLeagueMembersByRole } from "@/lib/leagueRoles";
+import {
+  DEFAULT_LIGAS_USC_UI_CONFIG,
+  fetchLigasUscUiConfig,
+} from "@/lib/ligasUscUiService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 type LeaguePublicTab = "overview" | "membros" | "agenda";
@@ -65,6 +69,7 @@ export function LeaguePublicDetailClient({
   const [league, setLeague] = useState<LeagueRecord | null>(null);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [followedIds, setFollowedIds] = useState<string[]>([]);
+  const [uiConfig, setUiConfig] = useState(DEFAULT_LIGAS_USC_UI_CONFIG);
 
   const tenantPath = (path: string) => (cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path);
 
@@ -97,6 +102,29 @@ export function LeaguePublicDetailClient({
       mounted = false;
     };
   }, [cleanLeagueId, tenantId]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadUiConfig = async () => {
+      try {
+        const nextConfig = await fetchLigasUscUiConfig({
+          tenantId: tenantId || undefined,
+        });
+        if (!mounted) return;
+        setUiConfig(nextConfig);
+      } catch (error: unknown) {
+        console.error(error);
+        if (!mounted) return;
+        setUiConfig(DEFAULT_LIGAS_USC_UI_CONFIG);
+      }
+    };
+
+    void loadUiConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -277,7 +305,7 @@ export function LeaguePublicDetailClient({
                 Voltar
               </Link>
               <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">Liga USC</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{uiConfig.rotuloCard || DEFAULT_LIGAS_USC_UI_CONFIG.rotuloCard}</span>
                 <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-cyan-200">{league.sigla || league.nome}</span>
               </div>
             </div>
