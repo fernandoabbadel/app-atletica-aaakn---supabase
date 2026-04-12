@@ -14,6 +14,7 @@ import { useTenantTheme } from "../../../context/TenantThemeContext";
 import {
   deleteLeagueConfig,
   LEAGUE_DESCRIPTION_MAX_LENGTH,
+  fetchLeagueById,
   fetchLeagueUsers,
   fetchLeagues,
   LEAGUE_NAME_MAX_LENGTH,
@@ -166,8 +167,20 @@ export default function AdminLigasPage() {
     setActiveTab('info');
   };
 
-  const handleOpenEdit = (liga: Liga) => {
-    setFormData({ ...liga, visaoGeral: liga.visaoGeral || "" });
+  const handleOpenEdit = async (liga: Liga) => {
+    try {
+      const latestLeague = await fetchLeagueById(liga.id, {
+        forceRefresh: true,
+        tenantId: tenantId || undefined,
+      });
+      const baseLeague = latestLeague || liga;
+      setFormData({ ...baseLeague, visaoGeral: baseLeague.visaoGeral || "" });
+    } catch (error: unknown) {
+      console.error(error);
+      setFormData({ ...liga, visaoGeral: liga.visaoGeral || "" });
+      addToast("Nao consegui buscar a versao mais recente da liga. Abrindo o ultimo dado carregado.", "info");
+    }
+
     setEditingId(liga.id);
     setIsEditing(true);
     setShowModal(true);
