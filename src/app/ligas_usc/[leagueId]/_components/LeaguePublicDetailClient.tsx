@@ -7,19 +7,26 @@ import { ArrowLeft, Heart, Lightbulb, Loader2, Users } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { useToast } from "@/context/ToastContext";
 import { logActivity } from "@/lib/logger";
 import {
   fetchUserLeagueInteractionState,
   fetchLeagueById,
   resolveFollowedLeagueIdsFromUserExtra,
   resolveLikedLeagueIdsFromUserExtra,
+  submitLeagueMemberRequest,
   toggleUserLeagueLike,
   toggleUserLeagueFollow,
   type LeagueRecord,
 } from "@/lib/leaguesService";
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
-import { resolveLeagueRoleLabel, sortLeagueMembersByRole } from "@/lib/leagueRoles";
+import {
+  DEFAULT_LEAGUE_ROLE,
+  LEAGUE_ROLE_OPTIONS,
+  resolveLeagueRoleLabel,
+  sortLeagueMembersByRole,
+} from "@/lib/leagueRoles";
 import {
   DEFAULT_LIGAS_USC_UI_CONFIG,
   fetchLigasUscUiConfig,
@@ -62,6 +69,7 @@ export function LeaguePublicDetailClient({
 }) {
   const { user } = useAuth();
   const { tenantId, tenantSlug } = useTenantTheme();
+  const { addToast } = useToast();
   const cleanLeagueId = typeof leagueId === "string" ? leagueId.trim() : "";
   const cleanTenantSlug = typeof tenantSlug === "string" ? tenantSlug.trim() : "";
 
@@ -70,6 +78,8 @@ export function LeaguePublicDetailClient({
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [followedIds, setFollowedIds] = useState<string[]>([]);
   const [uiConfig, setUiConfig] = useState(DEFAULT_LIGAS_USC_UI_CONFIG);
+  const [requestRole, setRequestRole] = useState<string>(DEFAULT_LEAGUE_ROLE);
+  const [submittingMemberRequest, setSubmittingMemberRequest] = useState(false);
 
   const tenantPath = (path: string) => (cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path);
 
@@ -185,6 +195,16 @@ export function LeaguePublicDetailClient({
     sortedMembers.find((member) => member.cargo.trim().toLowerCase() === "presidente")?.nome || league?.presidente;
   const isLiked = Boolean(league && likedIds.includes(league.id));
   const isFollowing = Boolean(league && followedIds.includes(league.id));
+  const currentMemberRequest =
+    league?.memberRequests?.find((entry) => entry.userId.trim() === (user?.uid || "").trim()) || null;
+  const isOfficialMember = Boolean(
+    user?.uid && sortedMembers.some((member) => member.id.trim() === user.uid.trim())
+  );
+
+  useEffect(() => {
+    if (!currentMemberRequest) return;
+    setRequestRole(resolveLeagueRoleLabel(currentMemberRequest.requestedRole));
+  }, [currentMemberRequest]);
 
   const handleLike = async () => {
     if (!user || !league) return;
@@ -252,6 +272,58 @@ export function LeaguePublicDetailClient({
     } catch (error: unknown) {
       console.error(error);
       setFollowedIds(previousIds);
+    }
+  };
+
+  const handleSubmitMemberRequest = async () => {
+    if (!user?.uid || !league || submittingMemberRequest) return;
+    if (isOfficialMember) {
+      addToast("Voce ja faz parte desta liga.", "info");
+      return;
+    }
+    if (currentMemberRequest) {
+      addToast("Sua solicitacao ja esta pendente de analise.", "info");
+      return;
+    }
+
+    setSubmittingMemberRequest(true);
+    try {
+      const createdRequest = await submitLeagueMemberRequest({
+        leagueId: league.id,
+        requestedRole: requestRole,
+      });
+
+      setLeague((current) =>
+        current
+          ? {
+              ...current,
+              memberRequests: [
+                ...(current.memberRequests || []).filter(
+                  (entry) => entry.userId.trim() !== createdRequest.userId.trim()
+                ),
+                createdRequest,
+              ],
+            }
+          : current
+      );
+      setRequestRole(resolveLeagueRoleLabel(createdRequest.requestedRole));
+      addToast("Solicitacao enviada para a gestao da liga.", "success");
+      void logActivity(
+        user.uid,
+        user.nome || "Atleta",
+        "CREATE",
+        "ligas_config",
+        `Solicitou entrada na liga ${league.sigla || league.nome} como ${createdRequest.requestedRole}`
+      );
+    } catch (error: unknown) {
+      console.error(error);
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Erro ao enviar solicitacao para a liga.";
+      addToast(message, "error");
+    } finally {
+      setSubmittingMemberRequest(false);
     }
   };
 
@@ -348,6 +420,53 @@ export function LeaguePublicDetailClient({
                     <span className="text-[10px] font-black uppercase tracking-[0.24em]">{isFollowing ? "Seguindo" : "Seguir"}</span>
                   </div>
                 </button>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-[1.75rem] border border-emerald-500/20 bg-emerald-500/10 p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-200">
+                    Participacao na liga
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-emerald-50/90">
+                    {isOfficialMember
+                      ? "Seu perfil ja esta na equipe oficial desta liga."
+                      : currentMemberRequest
+                        ? `Solicitacao enviada como ${resolveLeagueRoleLabel(currentMemberRequest.requestedRole)}. A diretoria pode aprovar e ajustar o cargo na gestao da liga.`
+                        : "Escolha o cargo desejado e envie sua solicitacao para a diretoria analisar."}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <select
+                    value={requestRole}
+                    onChange={(event) => setRequestRole(resolveLeagueRoleLabel(event.target.value))}
+                    disabled={!user || isOfficialMember || Boolean(currentMemberRequest) || submittingMemberRequest}
+                    className="rounded-full border border-emerald-500/20 bg-[#050505]/80 px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-emerald-100 outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {LEAGUE_ROLE_OPTIONS.map((role) => (
+                      <option key={role} value={role} className="bg-zinc-950 text-white">
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleSubmitMemberRequest()}
+                    disabled={!user || isOfficialMember || Boolean(currentMemberRequest) || submittingMemberRequest}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/15 px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-emerald-50 transition hover:bg-emerald-400/25 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {submittingMemberRequest ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
+                    {isOfficialMember
+                      ? "Voce ja esta na liga"
+                      : currentMemberRequest
+                        ? "Solicitacao pendente"
+                        : user
+                          ? "Solicitar entrada"
+                          : "Entre para solicitar"}
+                  </button>
+                </div>
               </div>
             </div>
 

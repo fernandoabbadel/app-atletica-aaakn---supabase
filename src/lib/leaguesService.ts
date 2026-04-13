@@ -49,7 +49,6 @@ const LEAGUES_SELECT_COLUMNS = [
   "sigla",
   "presidente",
   "descricao",
-  "visaoGeral",
   "senha",
   "foto",
   "logoUrl",
@@ -62,7 +61,6 @@ const LEAGUES_SELECT_COLUMNS = [
   "perguntas",
   "bizu",
   "likes",
-  "membersCount",
   "status",
   "createdAt",
   "updatedAt",
@@ -74,7 +72,6 @@ const LEAGUE_SUMMARY_SELECT_COLUMNS = [
   "nome",
   "sigla",
   "descricao",
-  "visaoGeral",
   "foto",
   "logoUrl",
   "logo",
@@ -82,7 +79,6 @@ const LEAGUE_SUMMARY_SELECT_COLUMNS = [
   "ativa",
   "bizu",
   "likes",
-  "membersCount",
   "status",
   "createdAt",
   "updatedAt",
@@ -197,6 +193,40 @@ const extractLeagueMemberIds = (value: unknown): string[] => {
       return asString(member?.id).trim();
     })
     .filter((entry) => entry.length > 0);
+};
+
+const normalizeLeagueMemberRequests = (
+  value: unknown
+): LeagueMemberJoinRequestRecord[] => {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  return value
+    .map((entry) => {
+      const raw = asObject(entry);
+      if (!raw) return null;
+
+      const id = asString(raw.id).trim() || crypto.randomUUID();
+      const userId = asString(raw.userId, asString(raw.requesterUserId)).trim();
+      if (!userId || seen.has(userId)) return null;
+      seen.add(userId);
+
+      const foto = asString(raw.foto).trim() || undefined;
+      const turma = asString(raw.turma).trim() || undefined;
+
+      return {
+        id,
+        userId,
+        nome: asString(raw.nome, "Atleta").trim().slice(0, 160) || "Atleta",
+        ...(foto ? { foto } : {}),
+        ...(turma ? { turma } : {}),
+        requestedRole:
+          resolveLeagueRoleLabel(asString(raw.requestedRole, DEFAULT_LEAGUE_ROLE)).slice(0, 80) ||
+          DEFAULT_LEAGUE_ROLE,
+        createdAt: asString(raw.createdAt).trim() || nowIso(),
+      } satisfies LeagueMemberJoinRequestRecord;
+    })
+    .filter((entry): entry is LeagueMemberJoinRequestRecord => entry !== null);
 };
 
 const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
@@ -323,6 +353,9 @@ const normalizeLeaguePartialPatch = (
   }
   if (hasOwn("membros")) {
     normalized.membros = Array.isArray(patch.membros) ? patch.membros : [];
+  }
+  if (hasOwn("memberRequests")) {
+    normalized.memberRequests = normalizeLeagueMemberRequests(patch.memberRequests);
   }
   if (hasOwn("membrosIds")) {
     normalized.membrosIds = Array.isArray(patch.membrosIds)
@@ -602,6 +635,44 @@ const updateEventPollOptionsViaAdminRoute = async (payload: {
   });
 
   return Boolean(response);
+};
+
+const submitLeagueMemberRequestViaRoute = async (payload: {
+  leagueId: string;
+  requestedRole?: string;
+}): Promise<LeagueMemberJoinRequestRecord | null> => {
+  if (typeof window === "undefined") return null;
+
+  const accessToken = await getCurrentSessionAccessToken();
+  if (!accessToken) {
+    throw new Error("Faça login para solicitar entrada na liga.");
+  }
+
+  const response = await fetch("/api/ligas/member-requests", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+
+  let body: { request?: unknown; error?: unknown } = {};
+  try {
+    body = (await response.json()) as { request?: unknown; error?: unknown };
+  } catch {
+    body = {};
+  }
+
+  if (!response.ok) {
+    const message = asString(body.error).trim();
+    throw new Error(message || `Falha ao enviar solicitacao para a liga (${response.status}).`);
+  }
+
+  if (!body.request) return null;
+  const [request] = normalizeLeagueMemberRequests([body.request]);
+  return request ?? null;
 };
 
 export async function syncLeagueMembers(payload: {
@@ -928,6 +999,16 @@ export interface LeagueMemberRecord {
   linkPerfil?: string;
 }
 
+export interface LeagueMemberJoinRequestRecord {
+  id: string;
+  userId: string;
+  nome: string;
+  foto?: string;
+  turma?: string;
+  requestedRole: string;
+  createdAt: string;
+}
+
 export interface LeagueLoteRecord {
   id: number;
   nome: string;
@@ -977,6 +1058,7 @@ export interface LeagueRecord {
   likes: number;
   membrosIds?: string[];
   membersCount?: number;
+  memberRequests?: LeagueMemberJoinRequestRecord[];
   updatedAt?: string;
 }
 
@@ -1266,6 +1348,9 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
   const membrosIdsSource = Array.isArray(readLeagueField(data, "membrosIds"))
     ? (readLeagueField(data, "membrosIds") as unknown[])
     : [];
+  const memberRequestsSource = Array.isArray(readLeagueField(data, "memberRequests"))
+    ? (readLeagueField(data, "memberRequests") as unknown[])
+    : [];
   const perguntasSource = Array.isArray(readLeagueField(data, "perguntas"))
     ? (readLeagueField(data, "perguntas") as unknown[])
     : [];
@@ -1389,6 +1474,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     .filter((entry): entry is string => typeof entry === "string")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+  const memberRequests = normalizeLeagueMemberRequests(memberRequestsSource);
 
   return {
     id,
@@ -1415,6 +1501,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
         resolvedMemberIds.length || membros.length
       )
     ),
+    memberRequests,
     updatedAt: asString(readLeagueField(data, "updatedAt")) || undefined,
   };
 };
@@ -1518,6 +1605,7 @@ const normalizeLeaguePayload = (
         : []),
     ])
   );
+  const memberRequests = normalizeLeagueMemberRequests(payload.memberRequests);
   const membersCount = Math.max(
     0,
     asNumber(
@@ -1537,6 +1625,7 @@ const normalizeLeaguePayload = (
     visivel: Boolean(payload.visivel),
     ativa: Boolean(payload.ativa),
     membros,
+    memberRequests,
     membrosIds,
     eventos: Array.isArray(payload.eventos) ? payload.eventos : [],
     perguntas,
@@ -2316,6 +2405,28 @@ export async function toggleUserLeagueFollow(payload: {
 
   clearLeagueDependentCaches();
   return nextIds;
+}
+
+export async function submitLeagueMemberRequest(payload: {
+  leagueId: string;
+  requestedRole?: string;
+}): Promise<LeagueMemberJoinRequestRecord> {
+  const leagueId = payload.leagueId.trim();
+  if (!leagueId) {
+    throw new Error("Liga invalida.");
+  }
+
+  const request = await submitLeagueMemberRequestViaRoute({
+    leagueId,
+    requestedRole: payload.requestedRole || DEFAULT_LEAGUE_ROLE,
+  });
+
+  if (!request) {
+    throw new Error("Nao foi possivel enviar a solicitacao para a liga.");
+  }
+
+  clearLeagueDependentCaches();
+  return request;
 }
 
 export async function fetchEventPolls(

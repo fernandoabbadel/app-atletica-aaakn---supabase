@@ -479,13 +479,27 @@ const normalizeLiga = (raw: unknown): ProfileLigaRecord | null => {
   if (!id) return null;
   const logoUrl = asString(data.logoUrl) || undefined;
   const logo = asString(data.logo) || logoUrl;
+  const extraData = asObject(data.data);
+  const membrosCount = Math.max(
+    0,
+    asNumber(
+      data.membrosCount,
+      asNumber(
+        data.membersCount,
+        asNumber(
+          extraData?.membersCount,
+          Math.max(asStringArray(data.membrosIds).length, asArray(data.membros).length)
+        )
+      )
+    )
+  );
   return {
     id,
     nome: asString(data.nome) || undefined,
     sigla: asString(data.sigla) || undefined,
     foto: asString(data.foto) || undefined,
     logo,
-    membrosCount: asNumber(data.membrosCount, asNumber(data.membersCount, 0)),
+    membrosCount,
   };
 };
 
@@ -696,7 +710,7 @@ async function fetchProfileLigas(
 
   let query = supabase
     .from("ligas_config")
-    .select("id,nome,sigla,foto,logo,logoUrl,membersCount")
+    .select("id,nome,sigla,foto,logo,logoUrl,membros,membrosIds,data")
     .in("id", leagueIds);
   if (tenantId?.trim()) {
     query = query.eq("tenant_id", tenantId.trim());

@@ -30,6 +30,7 @@ const SITE_CONFIG_TABLE = "site_config";
 const LANDING_CONFIG_ROW_ID = "landing_page";
 const LANDING_ROW_SELECT_CANDIDATES = ["id,data", "id,config", "id,payload", "*"] as const;
 const LANDING_CONFIG_STORAGE_KEY_PREFIX = "usc:landing-config:";
+const LANDING_EDITOR_DRAFT_STORAGE_KEY_PREFIX = "usc:landing-editor-draft:";
 export const LANDING_CONFIG_SNAPSHOT_UPDATED_EVENT = "usc:landing-config-snapshot-updated";
 
 const landingConfigCache = new Map<string, CacheEntry<LandingConfig>>();
@@ -352,6 +353,14 @@ const buildLandingRowId = (tenantId?: string | null): string => {
 const getLandingStorageKey = (tenantId?: string | null): string =>
   `${LANDING_CONFIG_STORAGE_KEY_PREFIX}${getLandingCacheKey(tenantId)}`;
 
+const getLandingEditorDraftStorageKey = (tenantId?: string | null): string =>
+  `${LANDING_EDITOR_DRAFT_STORAGE_KEY_PREFIX}${getLandingCacheKey(tenantId)}`;
+
+type LandingEditorDraftSnapshot = {
+  savedAt: number;
+  config: LandingConfig;
+};
+
 export function storeLandingConfigSnapshot(
   config: LandingConfig,
   tenantId?: string | null
@@ -392,6 +401,85 @@ export function getStoredLandingConfigSnapshot(options?: {
     return null;
   }
 }
+
+export function storeLandingEditorDraft(
+  config: LandingConfig,
+  tenantId?: string | null
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: LandingEditorDraftSnapshot = {
+      savedAt: Date.now(),
+      config: sanitizeLandingConfig(config, config),
+    };
+    window.localStorage.setItem(
+      getLandingEditorDraftStorageKey(tenantId),
+      JSON.stringify(payload)
+    );
+  } catch {
+    // ignora falha de storage
+  }
+}
+
+export function getStoredLandingEditorDraft(options?: {
+  tenantId?: string | null;
+  fallbackConfig?: LandingConfig;
+}): LandingEditorDraftSnapshot | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(getLandingEditorDraftStorageKey(options?.tenantId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt?: unknown; config?: unknown };
+    return {
+      savedAt:
+        typeof parsed.savedAt === "number" && Number.isFinite(parsed.savedAt)
+          ? parsed.savedAt
+          : 0,
+      config: sanitizeLandingConfig(
+        parsed.config,
+        options?.fallbackConfig ?? DEFAULT_LANDING_CONFIG
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearLandingEditorDraft(tenantId?: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(getLandingEditorDraftStorageKey(tenantId));
+  } catch {
+    // ignora falha de storage
+  }
+}
+
+const isRetryableLandingFetchError = (error: unknown): boolean => {
+  const raw = asObject(error);
+  const candidates = [
+    error instanceof Error ? error.message : "",
+    error instanceof Error ? error.name : "",
+    asString(raw?.message),
+    asString(raw?.name),
+    asString(raw?.details),
+  ]
+    .filter((entry) => entry.length > 0)
+    .join(" | ")
+    .toLowerCase();
+
+  return (
+    candidates.includes("failed to fetch") ||
+    candidates.includes("networkerror") ||
+    candidates.includes("load failed") ||
+    candidates.includes("fetch failed")
+  );
+};
+
+const wait = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 async function fetchLandingConfigRow(tenantId?: string | null): Promise<unknown> {
   const supabase = getSupabaseClient();
@@ -572,7 +660,22 @@ export async function fetchLandingConfig(options?: {
     return cached.value;
   }
 
-  const rawConfig = await fetchLandingConfigRow(options?.tenantId);
+  let rawConfig: unknown;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      rawConfig = await fetchLandingConfigRow(options?.tenantId);
+      lastError = null;
+      break;
+    } catch (error: unknown) {
+      lastError = error;
+      if (!isRetryableLandingFetchError(error) || attempt === 1) {
+        throw error;
+      }
+      await wait(450);
+    }
+  }
+  if (lastError) throw lastError;
   const normalized = sanitizeLandingConfig(extractPayloadData(rawConfig), fallbackConfig);
 
   landingConfigCache.set(cacheKey, {
@@ -591,7 +694,21 @@ export async function saveLandingConfig(
   const normalized = sanitizeLandingConfig(config, config);
   const cacheKey = getLandingCacheKey(options?.tenantId);
 
-  await saveLandingConfigRow(normalized, options?.tenantId);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await saveLandingConfigRow(normalized, options?.tenantId);
+      lastError = null;
+      break;
+    } catch (error: unknown) {
+      lastError = error;
+      if (!isRetryableLandingFetchError(error) || attempt === 1) {
+        throw error;
+      }
+      await wait(600);
+    }
+  }
+  if (lastError) throw lastError;
 
   landingConfigCache.set(cacheKey, {
     cachedAt: Date.now(),

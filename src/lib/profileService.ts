@@ -30,7 +30,7 @@ const PROFILE_USER_SELECT_COLUMNS =
 const PROFILE_POST_SELECT_COLUMNS = "id,texto,imagem,createdAt,likes,comentarios,userId";
 const PROFILE_EVENT_SELECT_COLUMNS = "id,titulo,data,local,imagem,imagePositionY";
 const PROFILE_TREINO_SELECT_COLUMNS = "id,modalidade,dia,horario,imagem,local,confirmedCount";
-const PROFILE_LIGA_SELECT_COLUMNS = "id,nome,sigla,foto,logo,logoUrl,membersCount";
+const PROFILE_LIGA_SELECT_COLUMNS = "id,nome,sigla,foto,logo,logoUrl,membros,membrosIds,data";
 const PROFILE_FOLLOW_SELECT_COLUMNS = "id,uid,nome,foto,turma,followedAt";
 
 const profileCache = new Map<string, CacheEntry<ProfileUserRecord | null>>();
@@ -484,6 +484,17 @@ const normalizeLiga = (id: string, raw: unknown): ProfileLigaRecord | null => {
   if (!data) return null;
   const logoUrl = resolveLeagueLogoSrc(data) || undefined;
   const foto = asString(data.foto) || logoUrl || undefined;
+  const extraData = asObject(data.data);
+  const membersCount = Math.max(
+    0,
+    asNumber(
+      data.membersCount,
+      asNumber(
+        extraData?.membersCount,
+        Math.max(asStringArray(data.membrosIds).length, Array.isArray(data.membros) ? data.membros.length : 0)
+      )
+    )
+  );
 
   return {
     id,
@@ -491,7 +502,7 @@ const normalizeLiga = (id: string, raw: unknown): ProfileLigaRecord | null => {
     sigla: asString(data.sigla) || undefined,
     ...(foto ? { foto } : {}),
     ...(logoUrl ? { logoUrl, logo: logoUrl } : {}),
-    membersCount: asNumber(data.membersCount, 0),
+    membersCount,
   };
 };
 

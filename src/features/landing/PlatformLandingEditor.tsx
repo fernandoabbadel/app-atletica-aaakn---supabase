@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import LandingEditorShell from "./LandingEditorShell";
@@ -14,8 +14,11 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import { PLATFORM_LOGO_URL } from "@/constants/platformBrand";
 import {
+  clearLandingEditorDraft,
   fetchLandingConfig,
+  getStoredLandingEditorDraft,
   saveLandingConfig,
+  storeLandingEditorDraft,
   type LandingConfig,
 } from "@/lib/adminLandingService";
 import { isPermissionError } from "@/lib/backendErrors";
@@ -27,6 +30,16 @@ const requirePlatformMaster = (
   user: ReturnType<typeof useAuth>["user"]
 ): boolean => isPlatformMaster(user);
 
+const isTransientLandingNetworkError = (error: unknown): boolean => {
+  const text = extractLandingEditorErrorMessage(error).toLowerCase();
+  return (
+    text.includes("failed to fetch") ||
+    text.includes("networkerror") ||
+    text.includes("load failed") ||
+    text.includes("fetch failed")
+  );
+};
+
 export default function PlatformLandingEditor() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -36,6 +49,8 @@ export default function PlatformLandingEditor() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<LandingConfig>(PLATFORM_INITIAL_LANDING_CONFIG);
+  const skipNextDraftPersistRef = useRef(true);
+  const draftReadyRef = useRef(false);
 
   useEffect(() => {
     if (authLoading || tenantThemeLoading) return;
@@ -50,13 +65,37 @@ export default function PlatformLandingEditor() {
     const loadPlatformLanding = async () => {
       setLoading(true);
       try {
+        const draftSnapshot = getStoredLandingEditorDraft({
+          fallbackConfig: PLATFORM_INITIAL_LANDING_CONFIG,
+        });
         const data = await fetchLandingConfig({
           fallbackConfig: PLATFORM_INITIAL_LANDING_CONFIG,
         });
         if (!mounted) return;
-        setConfig(mergeLandingConfig(PLATFORM_INITIAL_LANDING_CONFIG, data));
+        const mergedServerConfig = mergeLandingConfig(PLATFORM_INITIAL_LANDING_CONFIG, data);
+        const nextConfig = draftSnapshot
+          ? mergeLandingConfig(mergedServerConfig, draftSnapshot.config)
+          : mergedServerConfig;
+        skipNextDraftPersistRef.current = true;
+        draftReadyRef.current = true;
+        setConfig(nextConfig);
+        if (draftSnapshot) {
+          addToast("Rascunho local da landing restaurado.", "info");
+        }
       } catch (error: unknown) {
         if (!mounted) return;
+
+        const fallbackDraft = getStoredLandingEditorDraft({
+          fallbackConfig: PLATFORM_INITIAL_LANDING_CONFIG,
+        });
+        if (fallbackDraft) {
+          skipNextDraftPersistRef.current = true;
+          draftReadyRef.current = true;
+          setConfig(fallbackDraft.config);
+          addToast("Conexao falhou ao carregar. Rascunho local restaurado.", "info");
+          setLoading(false);
+          return;
+        }
 
         if (isPermissionError(error)) {
           addToast("Sem permissao para carregar a configuracao da landing.", "error");
@@ -75,6 +114,22 @@ export default function PlatformLandingEditor() {
       mounted = false;
     };
   }, [addToast, authLoading, router, tenantThemeLoading, user]);
+
+  useEffect(() => {
+    if (!draftReadyRef.current) return;
+    if (skipNextDraftPersistRef.current) {
+      skipNextDraftPersistRef.current = false;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      storeLandingEditorDraft(config);
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [config]);
 
   const handleSave = async () => {
     if (config.email.trim() && !isValidEmail(config.email)) {
@@ -112,15 +167,21 @@ export default function PlatformLandingEditor() {
         );
       }
 
+      clearLandingEditorDraft();
       addToast("Landing USC atualizada com sucesso.", "success");
-      router.refresh();
     } catch (error: unknown) {
+      storeLandingEditorDraft(config);
       if (isPermissionError(error)) {
         addToast("Sem permissao para salvar a landing.", "error");
       } else {
         const message = extractLandingEditorErrorMessage(error);
         console.error(`Erro ao salvar landing da plataforma: ${message}`);
-        addToast(`Falha ao salvar landing: ${message}`, "error");
+        addToast(
+          isTransientLandingNetworkError(error)
+            ? `Falha de rede ao salvar. Seu rascunho local foi preservado. Detalhe: ${message}`
+            : `Falha ao salvar landing: ${message}`,
+          "error"
+        );
       }
     } finally {
       setSaving(false);

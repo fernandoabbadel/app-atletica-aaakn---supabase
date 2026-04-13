@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import LandingEditorShell from "./LandingEditorShell";
@@ -13,8 +13,11 @@ import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import {
+  clearLandingEditorDraft,
   fetchLandingConfig,
+  getStoredLandingEditorDraft,
   saveLandingConfig,
+  storeLandingEditorDraft,
   type LandingConfig,
 } from "@/lib/adminLandingService";
 import { isPermissionError } from "@/lib/backendErrors";
@@ -27,6 +30,16 @@ import { hasValidPhoneLength, isValidEmail } from "@/utils/contactFields";
 
 type TenantLandingEditorProps = {
   tenantSlug: string;
+};
+
+const isTransientLandingNetworkError = (error: unknown): boolean => {
+  const text = extractLandingEditorErrorMessage(error).toLowerCase();
+  return (
+    text.includes("failed to fetch") ||
+    text.includes("networkerror") ||
+    text.includes("load failed") ||
+    text.includes("fetch failed")
+  );
 };
 
 const requireTenantAdmin = (
@@ -67,6 +80,8 @@ export default function TenantLandingEditor({
   const [routeTenantId, setRouteTenantId] = useState("");
   const [config, setConfig] = useState<LandingConfig>(TENANT_INITIAL_LANDING_CONFIG);
   const [partnerRows, setPartnerRows] = useState<PartnerRecord[]>([]);
+  const skipNextDraftPersistRef = useRef(true);
+  const draftReadyRef = useRef(false);
 
   const contextLabel = useMemo(() => {
     const label =
@@ -85,12 +100,14 @@ export default function TenantLandingEditor({
 
     const loadTenantLanding = async () => {
       setLoading(true);
+      let resolvedTenantIdForDraft = "";
 
       try {
         const resolvedTenantId =
           normalizedActiveTenantSlug === normalizedRouteTenantSlug && activeTenantId.trim()
             ? activeTenantId.trim()
             : await fetchPublicTenantIdBySlugCached(normalizedRouteTenantSlug);
+        resolvedTenantIdForDraft = resolvedTenantId?.trim() || resolvedTenantIdForDraft;
 
         if (!mounted) return;
 
@@ -107,6 +124,10 @@ export default function TenantLandingEditor({
         }
 
         setRouteTenantId(resolvedTenantId);
+        const draftSnapshot = getStoredLandingEditorDraft({
+          tenantId: resolvedTenantId,
+          fallbackConfig: TENANT_INITIAL_LANDING_CONFIG,
+        });
 
         const fetchAllTenantPartners = async (): Promise<PartnerRecord[]> => {
           const collected: PartnerRecord[] = [];
@@ -146,10 +167,32 @@ export default function TenantLandingEditor({
         ]);
         if (!mounted) return;
 
-        setConfig(mergeLandingConfig(TENANT_INITIAL_LANDING_CONFIG, data));
+        const mergedServerConfig = mergeLandingConfig(TENANT_INITIAL_LANDING_CONFIG, data);
+        const nextConfig = draftSnapshot
+          ? mergeLandingConfig(mergedServerConfig, draftSnapshot.config)
+          : mergedServerConfig;
+        skipNextDraftPersistRef.current = true;
+        draftReadyRef.current = true;
+        setConfig(nextConfig);
         setPartnerRows(partners);
+        if (draftSnapshot) {
+          addToast("Rascunho local da landing restaurado.", "info");
+        }
       } catch (error: unknown) {
         if (!mounted) return;
+
+        const fallbackDraft = getStoredLandingEditorDraft({
+          tenantId: resolvedTenantIdForDraft,
+          fallbackConfig: TENANT_INITIAL_LANDING_CONFIG,
+        });
+        if (fallbackDraft) {
+          skipNextDraftPersistRef.current = true;
+          draftReadyRef.current = true;
+          setConfig(fallbackDraft.config);
+          addToast("Conexao falhou ao carregar. Rascunho local restaurado.", "info");
+          setLoading(false);
+          return;
+        }
 
         if (isPermissionError(error)) {
           addToast("Sem permissao para carregar a configuracao da landing.", "error");
@@ -177,6 +220,22 @@ export default function TenantLandingEditor({
     tenantThemeLoading,
     user,
   ]);
+
+  useEffect(() => {
+    if (!draftReadyRef.current) return;
+    if (skipNextDraftPersistRef.current) {
+      skipNextDraftPersistRef.current = false;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      storeLandingEditorDraft(config, routeTenantId);
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [config, routeTenantId]);
 
   const handleSave = async () => {
     if (!routeTenantId.trim()) {
@@ -218,15 +277,21 @@ export default function TenantLandingEditor({
         );
       }
 
+      clearLandingEditorDraft(routeTenantId);
       addToast("Landing do tenant atualizada com sucesso.", "success");
-      router.refresh();
     } catch (error: unknown) {
+      storeLandingEditorDraft(config, routeTenantId);
       if (isPermissionError(error)) {
         addToast("Sem permissao para salvar a landing.", "error");
       } else {
         const message = extractLandingEditorErrorMessage(error);
         console.error(`Erro ao salvar landing do tenant: ${message}`);
-        addToast(`Falha ao salvar landing: ${message}`, "error");
+        addToast(
+          isTransientLandingNetworkError(error)
+            ? `Falha de rede ao salvar. Seu rascunho local foi preservado. Detalhe: ${message}`
+            : `Falha ao salvar landing: ${message}`,
+          "error"
+        );
       }
     } finally {
       setSaving(false);
