@@ -88,14 +88,9 @@ export default function MiniVendorAdminDirectoryPage({
   const dashboardHref = tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard";
   const buildVendorOrdersHref = useCallback(
     (targetMode: "pending" | "approved", row: MiniVendorProfile) => {
-      const cleanStoreName = row.storeName.trim();
       const basePath =
         targetMode === "pending"
-          ? cleanStoreName
-            ? `/configuracoes/mini-vendor/pedidos-pendentes/${encodeURIComponent(cleanStoreName)}`
-            : "/configuracoes/mini-vendor/pedidos-pendentes"
-          : cleanStoreName
-          ? `/configuracoes/mini-vendor/pedidos-aprovados/${encodeURIComponent(cleanStoreName)}`
+          ? "/configuracoes/mini-vendor/pedidos-pendentes"
           : "/configuracoes/mini-vendor/pedidos-aprovados";
       const scopedPath = tenantSlug ? withTenantSlug(tenantSlug, basePath) : basePath;
       return `${scopedPath}?userId=${encodeURIComponent(row.userId)}`;

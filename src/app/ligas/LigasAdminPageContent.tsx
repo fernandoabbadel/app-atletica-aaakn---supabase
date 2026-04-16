@@ -6,7 +6,7 @@ import { useParams, usePathname, useRouter } from "next/navigation";
 import { 
   Lock, ArrowRight, ArrowLeft, Upload, Plus, Trash2, Save, LogOut, 
   Image as ImageIcon, Layout, Edit3, Bell, 
-  Calendar, UserPlus, Search, X, Users,
+  Calendar, UserPlus, Search, X, Users, ShoppingBag,
   Loader2, MessageCircle, LayoutGrid, MoveVertical, Wallet
 } from 'lucide-react';
 import Image from "next/image";
@@ -418,6 +418,11 @@ const buildLeagueSectionPath = (tab: LigaAdminTab, leagueId?: string | null): st
 const buildLeaguePanelHomePath = (leagueId?: string | null): string => {
     const cleanLeagueId = typeof leagueId === "string" ? leagueId.trim() : "";
     return cleanLeagueId ? `/ligas/${encodeURIComponent(cleanLeagueId)}` : "/ligas";
+};
+
+const buildLeagueStorePath = (leagueId?: string | null): string => {
+    const cleanLeagueId = typeof leagueId === "string" ? leagueId.trim() : "";
+    return cleanLeagueId ? `/ligas/${encodeURIComponent(cleanLeagueId)}/loja` : "/ligas/loja";
 };
 
 const resolveLeagueLandingPath = (payload: {
@@ -1633,13 +1638,17 @@ export default function LigasAdminPageContent({
       tenantSlug ? withTenantSlug(tenantSlug, path) : path;
   const navigateToLeagueHome = () => {
       const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
-      router.push(tenantPath(buildLeaguePanelHomePath(scopedLeagueId)));
+      router.replace(tenantPath(buildLeaguePanelHomePath(scopedLeagueId)));
   };
   const navigateToSection = (tab: LigaAdminTab) => {
-      const nextTab = lockedTab || tab;
+      const nextTab = tab;
       setActiveTab(nextTab);
       const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
       router.push(tenantPath(buildLeagueSectionPath(nextTab, scopedLeagueId)));
+  };
+  const navigateToLeagueStore = () => {
+      const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
+      router.push(tenantPath(buildLeagueStorePath(scopedLeagueId)));
   };
   const openEventPresenceList = (eventId: string) => {
       const cleanEventId = eventId.trim();
@@ -1720,7 +1729,7 @@ export default function LigasAdminPageContent({
                       <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
                           Cada botao abre somente a pagina da secao escolhida, sem misturar as outras areas do painel.
                       </p>
-                      <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                           <button onClick={() => navigateToSection("visual")} className="rounded-2xl border border-zinc-800 bg-black/40 p-5 text-left transition hover:border-emerald-500/30 hover:bg-zinc-900">
                               <Layout className="text-emerald-400" size={20} />
                               <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Informacoes</p>
@@ -1740,6 +1749,11 @@ export default function LigasAdminPageContent({
                               <LayoutGrid className="text-violet-400" size={20} />
                               <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Board Round</p>
                               <p className="mt-2 text-lg font-black text-white">Configurar perguntas</p>
+                          </button>
+                          <button onClick={navigateToLeagueStore} className="rounded-2xl border border-zinc-800 bg-black/40 p-5 text-left transition hover:border-emerald-500/30 hover:bg-zinc-900">
+                              <ShoppingBag className="text-emerald-400" size={20} />
+                              <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Loja</p>
+                              <p className="mt-2 text-lg font-black text-white">Produtos e pedidos</p>
                           </button>
                       </div>
                   </div>
@@ -1777,19 +1791,15 @@ export default function LigasAdminPageContent({
 
             <div className={`grid grid-cols-1 gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-2 ${visibleTabs.length > 1 ? 'md:grid-cols-4' : ''}`}>
                 <button onClick={() => navigateToSection('visual')} className={`${!visibleTabs.includes('visual') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'visual' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
-                    <span className="block text-[10px] text-zinc-500">1.</span>
                     Informações
                 </button>
                 <button onClick={() => navigateToSection('members')} className={`${!visibleTabs.includes('members') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'members' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
-                    <span className="block text-[10px] text-zinc-500">{lockedTab ? '1.' : '2.'}</span>
                     Membros
                 </button>
                 <button onClick={() => navigateToSection('events')} className={`${!visibleTabs.includes('events') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'events' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
-                    <span className="block text-[10px] text-zinc-500">{lockedTab ? '1.' : '3.'}</span>
                     Eventos
                 </button>
                 <button onClick={() => navigateToSection('shark')} className={`${!visibleTabs.includes('shark') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
-                    <span className="block text-[10px] text-zinc-500">{lockedTab ? '1.' : '4.'}</span>
                     Board Round
                 </button>
             </div>
@@ -1798,6 +1808,23 @@ export default function LigasAdminPageContent({
           {/* 1. VISUAL */}
           {activeTab === 'visual' && ligaData && (
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl space-y-6">
+                  <div className="grid gap-3 md:grid-cols-3">
+                      <button type="button" onClick={() => navigateToSection("members")} className="rounded-xl border border-zinc-800 bg-black/30 p-4 text-left transition hover:border-cyan-500/30 hover:bg-cyan-500/10">
+                          <Users className="text-cyan-300" size={18} />
+                          <p className="mt-3 text-xs font-black uppercase text-white">Membros</p>
+                          <p className="mt-1 text-[11px] text-zinc-500">Abrir diretoria da liga</p>
+                      </button>
+                      <button type="button" onClick={() => navigateToSection("events")} className="rounded-xl border border-zinc-800 bg-black/30 p-4 text-left transition hover:border-amber-500/30 hover:bg-amber-500/10">
+                          <Calendar className="text-amber-300" size={18} />
+                          <p className="mt-3 text-xs font-black uppercase text-white">Agenda</p>
+                          <p className="mt-1 text-[11px] text-zinc-500">Abrir eventos da liga</p>
+                      </button>
+                      <button type="button" onClick={() => navigateToSection("shark")} className="rounded-xl border border-zinc-800 bg-black/30 p-4 text-left transition hover:border-violet-500/30 hover:bg-violet-500/10">
+                          <LayoutGrid className="text-violet-300" size={18} />
+                          <p className="mt-3 text-xs font-black uppercase text-white">Board Round</p>
+                          <p className="mt-1 text-[11px] text-zinc-500">Abrir perguntas</p>
+                      </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                       <div><label htmlFor="league-sigla" className="text-[10px] font-bold text-zinc-500 uppercase">Sigla</label><input id="league-sigla" name="leagueSigla" type="text" className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm outline-none focus:border-emerald-500 font-bold uppercase" value={ligaData.sigla} onChange={e => setLigaData({...ligaData, sigla: e.target.value.toUpperCase()})} maxLength={LEAGUE_SIGLA_MAX_LENGTH}/><p className="mt-1 text-[10px] text-zinc-500">{ligaData.sigla.length}/{LEAGUE_SIGLA_MAX_LENGTH} caracteres.</p></div>
                       <div>
@@ -2433,7 +2460,7 @@ export default function LigasAdminPageContent({
                           <PaymentRecipientSelect
                               id="league-event-payment-recipient"
                               name="league_event_payment_recipient"
-                              label="Usuario da tenant para receber"
+                              label="Usuarios que podem receber."
                               options={paymentRecipients}
                               selectedUserId={String(currentEvent.recipientUserId || "")}
                               loading={loadingPaymentRecipients}

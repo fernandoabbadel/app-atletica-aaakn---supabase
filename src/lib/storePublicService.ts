@@ -67,6 +67,18 @@ const asInt = (value: unknown): number | null => {
 };
 const resolveStoreTenantId = (tenantId?: string | null): string =>
   resolveStoredTenantScopeId(asString(tenantId).trim());
+const normalizeStoreSellerType = (value: unknown): "tenant" | "mini_vendor" | "league" => {
+  const raw = asString(value).trim().toLowerCase();
+  if (raw === "mini_vendor") return "mini_vendor";
+  if (raw === "league") return "league";
+  return "tenant";
+};
+const getStoreSellerSortOrder = (value: unknown): number => {
+  const sellerType = normalizeStoreSellerType(value);
+  if (sellerType === "tenant") return 0;
+  if (sellerType === "mini_vendor") return 1;
+  return 2;
+};
 
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
@@ -271,7 +283,7 @@ const normalizeOrderRow = (row: Row): Row => ({
 
 const resolveMiniVendorProductPaymentConfig = async (options: {
   tenantId: string;
-  seller: { type: "tenant" | "mini_vendor"; id: string } | null;
+  seller: { type: "tenant" | "mini_vendor" | "league"; id: string } | null;
 }): Promise<Row | null> => {
   if (!options.tenantId || options.seller?.type !== "mini_vendor" || !options.seller.id) {
     return null;
@@ -287,10 +299,10 @@ const resolveMiniVendorProductPaymentConfig = async (options: {
 
 const sortStoreCategoryRows = <T extends Row>(rows: T[]): T[] =>
   [...rows].sort((left, right) => {
-    const leftMiniVendor = asString(left.seller_type).trim().toLowerCase() === "mini_vendor";
-    const rightMiniVendor = asString(right.seller_type).trim().toLowerCase() === "mini_vendor";
-    if (leftMiniVendor !== rightMiniVendor) {
-      return leftMiniVendor ? 1 : -1;
+    const leftSellerOrder = getStoreSellerSortOrder(left.seller_type);
+    const rightSellerOrder = getStoreSellerSortOrder(right.seller_type);
+    if (leftSellerOrder !== rightSellerOrder) {
+      return leftSellerOrder - rightSellerOrder;
     }
 
     const leftOrder = asInt(left.display_order);
@@ -592,7 +604,7 @@ export async function fetchStoreProducts(options?: {
 }
 
 export async function fetchStoreProductsBySeller(options: {
-  seller: { type: "tenant" | "mini_vendor"; id: string };
+  seller: { type: "tenant" | "mini_vendor" | "league"; id: string };
   tenantId?: string | null;
   maxResults?: number;
   forceRefresh?: boolean;
@@ -601,7 +613,7 @@ export async function fetchStoreProductsBySeller(options: {
 }): Promise<Row[]> {
   const scopedTenantId = resolveStoreTenantId(options.tenantId);
   const sellerId = asString(options.seller?.id).trim();
-  const sellerType = options.seller?.type === "mini_vendor" ? "mini_vendor" : "tenant";
+  const sellerType = normalizeStoreSellerType(options.seller?.type);
   if (!sellerId) return [];
 
   const maxResults = boundedLimit(options.maxResults ?? 24, MAX_PRODUCTS);

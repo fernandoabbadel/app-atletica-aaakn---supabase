@@ -148,10 +148,10 @@ const sortStoreCategoryRows = <T extends Row>(rows: T[]): T[] =>
       if (leftOrder !== rightOrder) return leftOrder - rightOrder;
     }
 
-    const leftMiniVendor = asString(left.seller_type).trim().toLowerCase() === "mini_vendor";
-    const rightMiniVendor = asString(right.seller_type).trim().toLowerCase() === "mini_vendor";
-    if (leftMiniVendor !== rightMiniVendor) {
-      return leftMiniVendor ? 1 : -1;
+    const leftSellerOrder = getStoreSellerSortOrder(left.seller_type);
+    const rightSellerOrder = getStoreSellerSortOrder(right.seller_type);
+    if (leftSellerOrder !== rightSellerOrder) {
+      return leftSellerOrder - rightSellerOrder;
     }
 
     return asString(left.nome).localeCompare(asString(right.nome), "pt-BR", {
@@ -169,6 +169,18 @@ const omitRowColumnCaseInsensitive = (row: Row, columnName: string): Row =>
 const nowIso = (): string => new Date().toISOString();
 const resolveStoreTenantId = (tenantId?: string | null): string =>
   resolveStoredTenantScopeId(asString(tenantId).trim());
+const normalizeStoreSellerType = (value: unknown): "tenant" | "mini_vendor" | "league" => {
+  const raw = asString(value).trim().toLowerCase();
+  if (raw === "mini_vendor") return "mini_vendor";
+  if (raw === "league") return "league";
+  return "tenant";
+};
+const getStoreSellerSortOrder = (value: unknown): number => {
+  const sellerType = normalizeStoreSellerType(value);
+  if (sellerType === "tenant") return 0;
+  if (sellerType === "mini_vendor") return 1;
+  return 2;
+};
 
 const shouldFallbackToClient = (error: unknown): boolean => {
   const code = getBackendErrorCode(error)?.toLowerCase();
@@ -1312,7 +1324,7 @@ export async function createStoreCategory(
         buttonColor?: string;
         logoUrl?: string;
         displayOrder?: number;
-        sellerType?: "tenant" | "mini_vendor";
+        sellerType?: "tenant" | "mini_vendor" | "league";
         sellerId?: string;
         tenantId?: string | null;
       }
@@ -1330,7 +1342,7 @@ export async function upsertStoreCategory(payload: {
     logoUrl?: string;
     displayOrder?: number;
     visible?: boolean;
-    sellerType?: "tenant" | "mini_vendor";
+    sellerType?: "tenant" | "mini_vendor" | "league";
     sellerId?: string;
     tenantId?: string | null;
   };
@@ -1343,7 +1355,7 @@ export async function upsertStoreCategory(payload: {
   const logoUrl = asString(source.logoUrl).trim().slice(0, 400);
   const displayOrder = asInt(source.displayOrder);
   const visible = typeof source.visible === "boolean" ? source.visible : true;
-  const sellerType = source.sellerType === "mini_vendor" ? "mini_vendor" : "tenant";
+  const sellerType = normalizeStoreSellerType(source.sellerType);
   const sellerId = asString(source.sellerId).trim().slice(0, 120);
   const scopedTenantId = resolveStoreTenantId(source.tenantId);
   if (!cleanNome) return;
@@ -1517,13 +1529,13 @@ export async function renameStoreProductsCategory(payload: {
   previousName: string;
   nextName: string;
   tenantId?: string | null;
-  sellerType?: "tenant" | "mini_vendor";
+  sellerType?: "tenant" | "mini_vendor" | "league";
   sellerId?: string;
 }): Promise<void> {
   const previousName = payload.previousName.trim();
   const nextName = payload.nextName.trim().slice(0, 80);
   const scopedTenantId = resolveStoreTenantId(payload.tenantId);
-  const sellerType = payload.sellerType === "mini_vendor" ? "mini_vendor" : "tenant";
+  const sellerType = normalizeStoreSellerType(payload.sellerType);
   const sellerId = asString(payload.sellerId).trim().slice(0, 120);
 
   if (!previousName || !nextName || previousName === nextName) {

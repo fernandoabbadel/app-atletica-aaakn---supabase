@@ -117,6 +117,7 @@ export const ensureEventTicketEntries = (options: {
     titular: paymentConfig.titular,
     ...(paymentConfig.whatsapp ? { whatsapp: paymentConfig.whatsapp } : {}),
     ...(paymentConfig.recipient ? { recipient: paymentConfig.recipient } : {}),
+    ...(paymentConfig.recipients?.length ? { recipients: paymentConfig.recipients } : {}),
     ticketEntries: createEventTicketEntries({
       orderId: options.orderId,
       quantity: options.quantity,

@@ -17,7 +17,7 @@ import {
   buildEventReceiptWhatsappMessage,
   resolveReceiptContactProfile,
 } from "../../../lib/tenantBranding";
-import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
+import type { CommercePaymentConfig, CommercePaymentRecipient } from "@/lib/commerceCatalog";
 import { keepDigits } from "@/utils/contactFields";
 // Interfaces para tipagem forte (fim do any)
 interface Lote {
@@ -39,6 +39,13 @@ interface EventoData {
 
 type PixData = CommercePaymentConfig;
 
+const buildPaymentRecipientKey = (
+  recipient: CommercePaymentRecipient,
+  index: number
+): string =>
+  recipient.userId?.trim() ||
+  `${recipient.name || "recebedor"}-${recipient.phone || "sem-telefone"}-${index}`;
+
 // Componente interno que usa useSearchParams
 function CompraContent() {
   const router = useRouter();
@@ -54,6 +61,7 @@ function CompraContent() {
   const [evento, setEvento] = useState<EventoData | null>(null);
   const [lote, setLote] = useState<Lote | null>(null);
   const [pixData, setPixData] = useState<PixData>({ chave: "Carregando...", banco: "...", titular: "..." });
+  const [selectedRecipientKey, setSelectedRecipientKey] = useState("");
   
   const [quantidade, setQuantidade] = useState(1);
   const [step, setStep] = useState(1);
@@ -61,17 +69,60 @@ function CompraContent() {
   const [fetching, setFetching] = useState(true);
   const financeFallback = buildTenantFinanceFallback({ tenantSigla, tenantName });
   const eventosHref = tenantSlug ? withTenantSlug(tenantSlug, "/eventos") : "/eventos";
+  const recipientOptions = React.useMemo(
+      () =>
+          Array.isArray(pixData.recipients)
+              ? pixData.recipients.map((recipient, index) => ({
+                    key: buildPaymentRecipientKey(recipient, index),
+                    recipient,
+                }))
+              : [],
+      [pixData.recipients]
+  );
+  const selectedRecipient = React.useMemo(() => {
+      if (recipientOptions.length === 0) return null;
+      return (
+          recipientOptions.find((entry) => entry.key === selectedRecipientKey)?.recipient ||
+          recipientOptions[0]?.recipient ||
+          null
+      );
+  }, [recipientOptions, selectedRecipientKey]);
+  const checkoutPaymentConfig = React.useMemo<PixData>(
+      () =>
+          selectedRecipient
+              ? {
+                    ...pixData,
+                    recipient: selectedRecipient,
+                    whatsapp: selectedRecipient.phone || pixData.whatsapp,
+                }
+              : pixData,
+      [pixData, selectedRecipient]
+  );
   const checkoutRecipient = React.useMemo(
       () =>
           resolveReceiptContactProfile({
-              paymentConfig: pixData,
+              paymentConfig: checkoutPaymentConfig,
               tenantSigla,
               tenantName,
               fallbackAvatarUrl: evento?.imagem || "/logo.png",
-              fallbackPhone: pixData.whatsapp || financeFallback.whatsapp,
+              fallbackPhone: checkoutPaymentConfig.whatsapp || financeFallback.whatsapp,
           }),
-      [evento?.imagem, financeFallback.whatsapp, pixData, tenantName, tenantSigla]
+      [checkoutPaymentConfig, evento?.imagem, financeFallback.whatsapp, tenantName, tenantSigla]
   );
+
+    useEffect(() => {
+      if (recipientOptions.length === 0) {
+          setSelectedRecipientKey("");
+          return;
+      }
+      setSelectedRecipientKey((current) => {
+          if (current && recipientOptions.some((entry) => entry.key === current)) return current;
+          const configuredKey = pixData.recipient
+              ? recipientOptions.find((entry) => entry.recipient.userId === pixData.recipient?.userId)?.key
+              : "";
+          return configuredKey || recipientOptions[0]?.key || "";
+      });
+  }, [pixData.recipient, recipientOptions]);
 
     useEffect(() => {
       const loadData = async () => {
@@ -137,11 +188,11 @@ function CompraContent() {
               tenantId: tenantId || undefined,
               userPlanNames,
               userPlanIds,
-              paymentConfig: { ...pixData },
+              paymentConfig: { ...checkoutPaymentConfig },
           });
 
           // 2. Gerar Link do WhatsApp
-          const adminPhone = keepDigits(pixData.whatsapp || financeFallback.whatsapp);
+          const adminPhone = keepDigits(checkoutPaymentConfig.whatsapp || financeFallback.whatsapp);
           if (!adminPhone) {
               throw new Error("WhatsApp do evento nao configurado.");
           }
@@ -284,7 +335,25 @@ function CompraContent() {
                     </div>
                 </div>
 
-                <div className="space-y-3 pt-2">
+          <div className="space-y-3 pt-2">
+                    {recipientOptions.length > 1 ? (
+                        <div className="rounded-2xl border border-zinc-700 bg-black/30 p-3 text-left">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                                Enviar comprovante para
+                            </label>
+                            <select
+                                value={selectedRecipientKey}
+                                onChange={(event) => setSelectedRecipientKey(event.target.value)}
+                                className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-bold text-white outline-none focus:border-emerald-500"
+                            >
+                                {recipientOptions.map(({ key, recipient }) => (
+                                    <option key={key} value={key}>
+                                        {recipient.name || "Recebedor"}{recipient.turma ? ` - ${recipient.turma}` : ""}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    ) : null}
                     <ReceiptContactButton
                         recipient={checkoutRecipient}
                         onClick={() => void handleFinish()}

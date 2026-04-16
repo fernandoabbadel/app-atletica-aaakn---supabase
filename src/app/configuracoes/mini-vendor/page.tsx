@@ -62,17 +62,9 @@ export default function MiniVendorSettingsPage() {
         title: "Pedidos pendentes",
         description:
           "Mostra somente a fila que ainda precisa de aprovacao, sem misturar com o historico.",
-        href:
-          profile?.storeName?.trim()
-            ? tenantSlug
-              ? withTenantSlug(
-                  tenantSlug,
-                  `/configuracoes/mini-vendor/pedidos-pendentes/${encodeURIComponent(profile.storeName.trim())}`
-                )
-              : `/configuracoes/mini-vendor/pedidos-pendentes/${encodeURIComponent(profile.storeName.trim())}`
-            : tenantSlug
-            ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-pendentes")
-            : "/configuracoes/mini-vendor/pedidos-pendentes",
+        href: tenantSlug
+          ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-pendentes")
+          : "/configuracoes/mini-vendor/pedidos-pendentes",
         Icon: Clock3,
         accentClass:
           "border-yellow-500/30 bg-yellow-500/10 text-yellow-300 shadow-yellow-500/10",
@@ -81,23 +73,15 @@ export default function MiniVendorSettingsPage() {
         title: "Pedidos aprovados",
         description:
           "Historico separado para conferir somente os pagamentos que ja foram confirmados.",
-        href:
-          profile?.storeName?.trim()
-            ? tenantSlug
-              ? withTenantSlug(
-                  tenantSlug,
-                  `/configuracoes/mini-vendor/pedidos-aprovados/${encodeURIComponent(profile.storeName.trim())}`
-                )
-              : `/configuracoes/mini-vendor/pedidos-aprovados/${encodeURIComponent(profile.storeName.trim())}`
-            : tenantSlug
-            ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-aprovados")
-            : "/configuracoes/mini-vendor/pedidos-aprovados",
+        href: tenantSlug
+          ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-aprovados")
+          : "/configuracoes/mini-vendor/pedidos-aprovados",
         Icon: CheckCircle2,
         accentClass:
           "border-cyan-500/30 bg-cyan-500/10 text-cyan-300 shadow-cyan-500/10",
       },
     ],
-    [profile?.storeName, tenantSlug]
+    [tenantSlug]
   );
 
   useEffect(() => {

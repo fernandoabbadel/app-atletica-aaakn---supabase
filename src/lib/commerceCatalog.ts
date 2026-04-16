@@ -56,11 +56,12 @@ export interface CommercePaymentConfig {
   titular: string;
   whatsapp?: string;
   recipient?: CommercePaymentRecipient;
+  recipients?: CommercePaymentRecipient[];
   ticketEntries?: CommerceTicketEntry[];
 }
 
 export interface CommerceSellerSnapshot {
-  type: "tenant" | "mini_vendor";
+  type: "tenant" | "mini_vendor" | "league";
   id: string;
   name: string;
   logoUrl: string;
@@ -124,6 +125,28 @@ const normalizePaymentRecipient = (
     avatarUrl,
     phone,
   };
+};
+
+const normalizePaymentRecipients = (value: unknown): CommercePaymentRecipient[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+
+  return value
+    .map((entry) => normalizePaymentRecipient(entry))
+    .filter((entry): entry is CommercePaymentRecipient => entry !== null)
+    .filter((entry) => {
+      const key = [
+        entry.userId,
+        entry.name,
+        entry.turma,
+        entry.phone,
+      ]
+        .map((part) => normalizeString(part).toLowerCase())
+        .join("|");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 };
 
 const normalizeTicketEntries = (value: unknown): CommerceTicketEntry[] => {
@@ -250,11 +273,22 @@ export const normalizePaymentConfig = (
       avatarUrl: row.recipientUserAvatar || row.recipientAvatarUrl,
       phone: row.recipientUserPhone || row.recipientPhone || row.whatsapp,
     });
+  const recipients = normalizePaymentRecipients(
+    row.recipients || row.paymentRecipients || row.receivers
+  );
   const ticketEntries = normalizeTicketEntries(
     row.ticketEntries || row.tickets || row.ingressos
   );
 
-  if (!chave && !banco && !titular && !whatsapp && !recipient && ticketEntries.length === 0) {
+  if (
+    !chave &&
+    !banco &&
+    !titular &&
+    !whatsapp &&
+    !recipient &&
+    recipients.length === 0 &&
+    ticketEntries.length === 0
+  ) {
     return null;
   }
 
@@ -264,6 +298,7 @@ export const normalizePaymentConfig = (
     titular,
     ...(whatsapp ? { whatsapp } : {}),
     ...(recipient ? { recipient } : {}),
+    ...(recipients.length > 0 ? { recipients } : {}),
     ...(ticketEntries.length > 0 ? { ticketEntries } : {}),
   };
 };
@@ -281,7 +316,7 @@ export const normalizeSellerSnapshot = (
   if (!id && !name && !logoUrl) return null;
 
   return {
-    type: typeRaw === "mini_vendor" ? "mini_vendor" : "tenant",
+    type: typeRaw === "mini_vendor" ? "mini_vendor" : typeRaw === "league" ? "league" : "tenant",
     id,
     name,
     logoUrl,

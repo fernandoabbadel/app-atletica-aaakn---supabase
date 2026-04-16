@@ -12,6 +12,7 @@ import Link from "next/link";
 import Image from "next/image"; 
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
+import { PaymentReceiversManager } from "@/components/PaymentReceiversManager";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import {
@@ -41,7 +42,7 @@ import {
   upsertAdminEvent,
   type DateLike,
 } from "../../../lib/eventsNativeService";
-import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
+import { normalizePaymentConfig, type CommercePaymentConfig } from "@/lib/commerceCatalog";
 import {
   fetchTenantPaymentRecipients,
   findTenantPaymentRecipient,
@@ -110,6 +111,7 @@ interface Participante {
   valorTotal?: string;
   dataAprovacao?: DateLike | Date | null; 
   aprovadoPor?: string | null; 
+  comprovantePara?: string | null;
   tipo: 'rsvp' | 'venda';
   origemVenda?: boolean; // 🦈 Adicionado para evitar @ts-ignore
 }
@@ -170,6 +172,16 @@ const formatTimestamp = (timestamp: DateLike | Date | null | undefined, type: 'd
     if (type === 'date') return date.toLocaleDateString('pt-BR');
     if (type === 'time') return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     return "-";
+};
+
+const resolvePaymentRecipientLabel = (value: unknown): string => {
+    const paymentConfig = normalizePaymentConfig(value);
+    const recipient = paymentConfig?.recipient;
+    if (!recipient) return "";
+    return [recipient.name, recipient.turma, recipient.phone]
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean)
+      .join(" - ");
 };
 
 const buildLotePlanPrices = (
@@ -233,6 +245,7 @@ export default function AdminEventosPage() {
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
   const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
   const [loadingPaymentRecipients, setLoadingPaymentRecipients] = useState(false);
+  const [showReceiversManager, setShowReceiversManager] = useState(false);
 
   const [novoEvento, setNovoEvento] = useState<Partial<Evento>>({
     titulo: "", data: "", hora: "", local: "", tipo: "Festa", destaque: "", mapsUrl: "", imagem: "", descricao: "", lotes: [],
@@ -400,6 +413,7 @@ export default function AdminEventosPage() {
               valorTotal: String(raw.valorTotal || "-"),
               dataAprovacao: raw.dataAprovacao as DateLike | Date | null | undefined,
               aprovadoPor: String(raw.aprovadoPor || ""),
+              comprovantePara: resolvePaymentRecipientLabel(raw.payment_config),
               tipo: "venda",
               origemVenda: true,
           });
@@ -631,7 +645,11 @@ export default function AdminEventosPage() {
         status: novoEvento.status || "ativo",
         sale_status: novoEvento.saleStatus || "ativo",
         payment_config:
-          novoEvento.pixChave || novoEvento.pixBanco || novoEvento.pixTitular || novoEvento.contatoComprovante
+          novoEvento.pixChave ||
+          novoEvento.pixBanco ||
+          novoEvento.pixTitular ||
+          novoEvento.contatoComprovante ||
+          paymentRecipients.length > 0
             ? {
                 chave: String(novoEvento.pixChave || "").trim(),
                 banco: String(novoEvento.pixBanco || "").trim(),
@@ -643,13 +661,14 @@ export default function AdminEventosPage() {
                         userId: String(novoEvento.recipientUserId || "").trim(),
                         name: String(novoEvento.recipientUserName || "").trim(),
                         turma: String(novoEvento.recipientUserTurma || "").trim(),
-                        avatarUrl: String(novoEvento.recipientUserAvatar || "").trim(),
-                        phone: normalizePhoneToBrE164(String(novoEvento.contatoComprovante || "").trim()),
-                      },
-                    }
-                  : {}),
-              }
-            : null,
+                    avatarUrl: String(novoEvento.recipientUserAvatar || "").trim(),
+                    phone: normalizePhoneToBrE164(String(novoEvento.contatoComprovante || "").trim()),
+                  },
+                }
+              : {}),
+              ...(paymentRecipients.length > 0 ? { recipients: paymentRecipients } : {}),
+            }
+          : null,
         updatedAt: new Date().toISOString(),
     };
 
@@ -999,6 +1018,14 @@ export default function AdminEventosPage() {
             >
               Encerrados ({eventosArquivados.length})
           </Link>
+          <button
+            type="button"
+            onClick={() => setShowReceiversManager(true)}
+            className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-cyan-300 transition hover:bg-cyan-500/20"
+          >
+            <Users size={14} />
+            Adicionar recebedores
+          </button>
           <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
             <Plus size={16} /> Novo Evento
           </button>
@@ -1080,6 +1107,14 @@ export default function AdminEventosPage() {
         </div>
       </main>
 
+      <PaymentReceiversManager
+        tenantId={activeTenantId}
+        open={showReceiversManager}
+        recipients={paymentRecipients}
+        onClose={() => setShowReceiversManager(false)}
+        onSaved={setPaymentRecipients}
+      />
+
       {/* MODAL GESTÃO LISTA (MANTIDO IGUAL AO ANTERIOR) */}
       {showGestaoModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={(e) => e.stopPropagation()}>
@@ -1113,7 +1148,7 @@ export default function AdminEventosPage() {
                               <thead className="text-zinc-500 border-b border-zinc-800 bg-zinc-950 sticky top-0 z-10">
                                   <tr>
                                       <th className="p-3">Usuário</th><th className="p-3">Turma</th><th className="p-3">RSVP</th><th className="p-3">Pagamento</th><th className="p-3 text-center">Ação</th>
-                                      <th className="p-3 text-center">Data Aprov.</th><th className="p-3 text-center">Hora Aprov.</th><th className="p-3">Aprovado Por</th><th className="p-3">Valor</th><th className="p-3">Lote</th><th className="p-3 text-center">Qtd</th>
+                                      <th className="p-3 text-center">Data Aprov.</th><th className="p-3 text-center">Hora Aprov.</th><th className="p-3">Aprovado Por</th><th className="p-3">Comprovante Para</th><th className="p-3">Valor</th><th className="p-3">Lote</th><th className="p-3 text-center">Qtd</th>
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-zinc-800">
@@ -1127,6 +1162,7 @@ export default function AdminEventosPage() {
                                           <td className="p-3 text-center text-zinc-400">{formatTimestamp(p.dataAprovacao, 'date')}</td>
                                           <td className="p-3 text-center text-zinc-400">{formatTimestamp(p.dataAprovacao, 'time')}</td>
                                           <td className="p-3 text-zinc-400 italic text-[10px] truncate max-w-[100px]">{p.aprovadoPor || "-"}</td>
+                                          <td className="p-3 text-zinc-400 text-[10px] truncate max-w-[160px]">{p.comprovantePara || "-"}</td>
                                           <td className="p-3 font-mono text-emerald-400">{p.valorTotal ? `R$ ${p.valorTotal}` : "-"}</td>
                                           <td className="p-3 text-zinc-400">{p.lote || "-"}</td>
                                           <td className="p-3 text-center">{p.quantidade && p.quantidade > 1 ? <span className="bg-purple-500 text-white px-1.5 rounded font-bold">{p.quantidade}</span> : "1"}</td>
@@ -1280,7 +1316,7 @@ export default function AdminEventosPage() {
                     <PaymentRecipientSelect
                         id="admin-event-payment-recipient"
                         name="admin_event_payment_recipient"
-                        label="Usuario da tenant para receber"
+                        label="Usuarios que podem receber."
                         options={paymentRecipients}
                         selectedUserId={String(novoEvento.recipientUserId || "")}
                         loading={loadingPaymentRecipients}

@@ -17,6 +17,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
+import { normalizePaymentConfig, type CommercePaymentConfig } from "@/lib/commerceCatalog";
 import { logActivity } from "@/lib/logger";
 import { fetchTenantMiniVendors } from "@/lib/miniVendorService";
 import {
@@ -43,6 +44,7 @@ type OrderRow = {
   itens?: number;
   status?: string;
   approvedBy?: string;
+  payment_config?: CommercePaymentConfig | null;
   createdAt?: string;
   updatedAt?: string;
   productCategory?: string;
@@ -401,6 +403,16 @@ export function AdminStoreOrdersStatusPage({
     if (approvedBy === "admin") return "Admin";
     return approverNames[approvedBy] || compactUserId(approvedBy);
   };
+
+  const resolveReceiverLabel = (row: OrderRow): string => {
+    const paymentConfig = normalizePaymentConfig(row.payment_config);
+    const recipient = paymentConfig?.recipient;
+    if (!recipient) return "Nao informado";
+    return [recipient.name, recipient.turma, recipient.phone]
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean)
+      .join(" - ") || "Nao informado";
+  };
   const groupedRows = useMemo(() => {
     if (normalizedCategory) {
       return [
@@ -572,6 +584,7 @@ export function AdminStoreOrdersStatusPage({
             const isEditing = editingId === row.id;
             const isBusy = actionId === row.id;
             const totalValue = Number(row.total || row.price || 0);
+            const receiverLabel = resolveReceiverLabel(row);
 
             return (
               <article
@@ -596,15 +609,24 @@ export function AdminStoreOrdersStatusPage({
                     <p className="mt-1 text-[11px] text-zinc-500">
                       Quantidade: {Math.max(1, Number(row.quantidade || row.itens || 1) || 1)}
                     </p>
+                    <p className="mt-1 text-[11px] text-zinc-500">
+                      Comprovante para: {receiverLabel}
+                    </p>
                     <p className="text-[10px] font-mono text-zinc-500">#{row.id.slice(0, 10)}</p>
 
                     {mode === "approved" && (
-                      <div className="mt-3 grid gap-2 text-[11px] text-zinc-400 sm:grid-cols-2">
+                      <div className="mt-3 grid gap-2 text-[11px] text-zinc-400 sm:grid-cols-3">
                         <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
                           <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
                             Aprovado por
                           </p>
                           <p className="mt-1 font-bold text-white">{resolveApproverLabel(row)}</p>
+                        </div>
+                        <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                            Comprovante para
+                          </p>
+                          <p className="mt-1 font-bold text-white">{receiverLabel}</p>
                         </div>
                         <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
                           <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">

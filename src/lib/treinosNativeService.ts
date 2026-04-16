@@ -41,8 +41,10 @@ const TREINOS_SELECT_COLUMNS =
   "id,modalidade,diaSemana,dia,horario,local,treinador,treinadorId,treinadorAvatar,descricao,imagem,ordemDia,status,confirmedCount,createdAt,updatedAt";
 const TREINOS_RSVPS_SELECT_COLUMNS =
   "id,treinoId,userId,userName,userAvatar,userTurma,status,timestamp";
+const TREINOS_CHAMADA_BASE_SELECT_COLUMNS =
+  "id,treinoId,userId,nome,avatar,turma,status,origem,pagamento,timestamp,updatedAt";
 const TREINOS_CHAMADA_SELECT_COLUMNS =
-  "id,treinoId,userId,nome,avatar,turma,status,origem,pagamento,performanceRating,performanceRatedBy,performanceRatedAt,timestamp,updatedAt";
+  `${TREINOS_CHAMADA_BASE_SELECT_COLUMNS},performanceRating,performanceRatedBy,performanceRatedAt`;
 const DIRECTORY_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const directoryInitialCountsCache = new Map<string, CacheEntry<Record<string, number>>>();
 const directorySegmentsCache = new Map<string, CacheEntry<TreinoUserDirectorySegment[]>>();
@@ -68,6 +70,36 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
 };
 const buildDirectoryCacheKey = (...parts: Array<string | number | null | undefined>): string =>
   parts.map((entry) => `${entry ?? "_"}`).join(":");
+
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [raw.message, raw.details]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+const isMissingTreinoPerformanceColumn = (error: unknown): boolean => {
+  const column = extractMissingSchemaColumn(error)?.trim().toLowerCase() || "";
+  return (
+    column === "performancerating" ||
+    column === "performanceratedby" ||
+    column === "performanceratedat"
+  );
+};
 
 const normalizeModalidades = (value: unknown): string[] => {
   const unique = new Set<string>();
@@ -705,7 +737,7 @@ export async function fetchTreinosAdminList(options?: {
   const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
-  return ((data ?? []) as Row[])
+  return ((data ?? []) as unknown as Row[])
     .map((entry) => normalizeTreino(asString(entry.id), normalizeRowTimestamps(entry)))
     .filter((entry): entry is TreinoRecord => entry !== null);
 }
@@ -736,7 +768,7 @@ export async function fetchTreinosByDateRange(payload: {
   const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
-  return ((data ?? []) as Row[])
+  return ((data ?? []) as unknown as Row[])
     .map((entry) => normalizeTreino(asString(entry.id), normalizeRowTimestamps(entry)))
     .filter((entry): entry is TreinoRecord => entry !== null);
 }
@@ -813,7 +845,7 @@ export async function fetchTreinoRsvpsPage(
   const { data, error } = await query.range(offset, offset + pageSize);
   if (error) throwSupabaseError(error);
 
-  const rawRows = (data ?? []) as Row[];
+  const rawRows = (data ?? []) as unknown as Row[];
   const hasMore = rawRows.length > pageSize;
   const rows = rawRows
     .slice(0, pageSize)
@@ -832,18 +864,27 @@ export async function fetchTreinoChamada(
   const supabase = getSupabaseClient();
   const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
   const maxResults = boundedLimit(options?.maxResults ?? 180, MAX_CHAMADA_RESULTS);
-  let query = supabase
-    .from("treinos_chamada")
-    .select(TREINOS_CHAMADA_SELECT_COLUMNS)
-    .eq("treinoId", cleanTreinoId)
-    .order("timestamp", { ascending: false });
-  if (scopedTenantId) {
-    query = query.eq("tenant_id", scopedTenantId);
+  const runQuery = async (selectColumns: string) => {
+    let query = supabase
+      .from("treinos_chamada")
+      .select(selectColumns)
+      .eq("treinoId", cleanTreinoId)
+      .order("timestamp", { ascending: false });
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    return query.limit(maxResults);
+  };
+
+  let { data, error } = await runQuery(TREINOS_CHAMADA_SELECT_COLUMNS);
+  if (error && isMissingTreinoPerformanceColumn(error)) {
+    const fallback = await runQuery(TREINOS_CHAMADA_BASE_SELECT_COLUMNS);
+    data = fallback.data;
+    error = fallback.error;
   }
-  const { data, error } = await query.limit(maxResults);
   if (error) throwSupabaseError(error);
 
-  return ((data ?? []) as Row[])
+  return ((data ?? []) as unknown as Row[])
     .map((entry) => normalizeChamada(asString(entry.id), normalizeRowTimestamps(entry)))
     .filter((entry): entry is TreinoChamadaRecord => entry !== null);
 }
@@ -859,18 +900,27 @@ export async function fetchTreinoChamadaPage(
   const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
   const pageSize = boundedLimit(options?.pageSize ?? 10, MAX_CHAMADA_RESULTS);
   const offset = parseOffsetCursor(options?.cursorId);
-  let query = supabase
-    .from("treinos_chamada")
-    .select(TREINOS_CHAMADA_SELECT_COLUMNS)
-    .eq("treinoId", cleanTreinoId)
-    .order("timestamp", { ascending: false });
-  if (scopedTenantId) {
-    query = query.eq("tenant_id", scopedTenantId);
+  const runQuery = async (selectColumns: string) => {
+    let query = supabase
+      .from("treinos_chamada")
+      .select(selectColumns)
+      .eq("treinoId", cleanTreinoId)
+      .order("timestamp", { ascending: false });
+    if (scopedTenantId) {
+      query = query.eq("tenant_id", scopedTenantId);
+    }
+    return query.range(offset, offset + pageSize);
+  };
+
+  let { data, error } = await runQuery(TREINOS_CHAMADA_SELECT_COLUMNS);
+  if (error && isMissingTreinoPerformanceColumn(error)) {
+    const fallback = await runQuery(TREINOS_CHAMADA_BASE_SELECT_COLUMNS);
+    data = fallback.data;
+    error = fallback.error;
   }
-  const { data, error } = await query.range(offset, offset + pageSize);
   if (error) throwSupabaseError(error);
 
-  const rawRows = (data ?? []) as Row[];
+  const rawRows = (data ?? []) as unknown as Row[];
   const hasMore = rawRows.length > pageSize;
   const rows = rawRows
     .slice(0, pageSize)

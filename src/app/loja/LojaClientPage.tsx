@@ -28,6 +28,8 @@ interface Variante {
   vendidos?: number;
 }
 
+type StoreSellerType = "tenant" | "mini_vendor" | "league";
+
 export interface Produto {
   id: string;
   nome: string;
@@ -49,7 +51,7 @@ export interface Produto {
   createdAt?: unknown;
   status?: "ativo" | "em_breve" | "esgotado";
   seller?: {
-    type: "tenant" | "mini_vendor";
+    type: StoreSellerType;
     id: string;
     name: string;
     logoUrl: string;
@@ -64,7 +66,7 @@ export type StoreCategory = {
   logo_url?: string;
   display_order?: number | null;
   is_receiving_orders?: boolean;
-  seller_type?: "tenant" | "mini_vendor";
+  seller_type?: StoreSellerType;
   seller_id?: string;
 };
 
@@ -130,14 +132,28 @@ const getCategoryDisplayOrder = (category: StoreCategory): number =>
     ? Math.max(0, Math.floor(category.display_order))
     : Number.MAX_SAFE_INTEGER;
 
+const getStoreSellerType = (value: unknown): StoreSellerType => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "mini_vendor") return "mini_vendor";
+  if (raw === "league") return "league";
+  return "tenant";
+};
+
+const getStoreSellerSortOrder = (value: unknown): number => {
+  const sellerType = getStoreSellerType(value);
+  if (sellerType === "tenant") return 0;
+  if (sellerType === "mini_vendor") return 1;
+  return 2;
+};
+
 const buildCategoryListKey = (
   category: Pick<StoreCategory, "nome" | "seller_type" | "seller_id">
 ): string => {
   const nome = String(category.nome || "").trim().toLowerCase();
-  const sellerType = category.seller_type === "mini_vendor" ? "mini_vendor" : "tenant";
+  const sellerType = getStoreSellerType(category.seller_type);
   const sellerId = String(category.seller_id || "").trim().toLowerCase();
-  return sellerType === "mini_vendor"
-    ? `mini_vendor:${sellerId || "_"}:${nome}`
+  return sellerType !== "tenant"
+    ? `${sellerType}:${sellerId || "_"}:${nome}`
     : `tenant:${nome}`;
 };
 
@@ -349,7 +365,7 @@ export default function LojaClientPage({
       categoriasCatalogo.forEach((category) => {
         const nome = String(category.nome || "").trim();
         if (!nome) return;
-        const sellerType = category.seller_type === "mini_vendor" ? "mini_vendor" : "tenant";
+        const sellerType = getStoreSellerType(category.seller_type);
         const categoryLogo =
           sellerType === "tenant"
             ? tenantLogo
@@ -375,12 +391,12 @@ export default function LojaClientPage({
       produtos.forEach((product) => {
         const nome = String(product.categoria || "").trim();
         if (!nome) return;
-        const sellerType = product.seller?.type === "mini_vendor" ? "mini_vendor" : "tenant";
+        const sellerType = getStoreSellerType(product.seller?.type);
         const vendorCategory =
-          sellerType === "mini_vendor"
+          sellerType !== "tenant"
             ? categoriasCatalogo.find(
                 (category) =>
-                  category.seller_type === "mini_vendor" &&
+                  getStoreSellerType(category.seller_type) === sellerType &&
                   String(category.seller_id || "").trim() === String(product.seller?.id || "").trim()
               )
             : null;
@@ -402,7 +418,7 @@ export default function LojaClientPage({
           button_color: categoryColor,
           logo_url: categoryLogo,
           display_order: vendorCategory?.display_order,
-          is_receiving_orders: vendorCategory?.is_receiving_orders ?? sellerType !== "mini_vendor",
+          is_receiving_orders: vendorCategory?.is_receiving_orders ?? sellerType === "tenant",
           seller_type: sellerType,
           seller_id: product.seller?.id || "",
         };
@@ -413,10 +429,10 @@ export default function LojaClientPage({
       });
 
       return Array.from(categoriesByKey.values()).sort((left, right) => {
-        const leftMiniVendor = left.seller_type === "mini_vendor";
-        const rightMiniVendor = right.seller_type === "mini_vendor";
-        if (leftMiniVendor !== rightMiniVendor) {
-          return leftMiniVendor ? 1 : -1;
+        const leftSellerOrder = getStoreSellerSortOrder(left.seller_type);
+        const rightSellerOrder = getStoreSellerSortOrder(right.seller_type);
+        if (leftSellerOrder !== rightSellerOrder) {
+          return leftSellerOrder - rightSellerOrder;
         }
         const leftOrder = getCategoryDisplayOrder(left);
         const rightOrder = getCategoryDisplayOrder(right);
@@ -436,10 +452,10 @@ export default function LojaClientPage({
           return matchNome && matchCat;
         })
         .sort((left, right) => {
-          const leftMiniVendor = left.seller?.type === "mini_vendor";
-          const rightMiniVendor = right.seller?.type === "mini_vendor";
-          if (leftMiniVendor !== rightMiniVendor) {
-            return leftMiniVendor ? 1 : -1;
+          const leftSellerOrder = getStoreSellerSortOrder(left.seller?.type);
+          const rightSellerOrder = getStoreSellerSortOrder(right.seller?.type);
+          if (leftSellerOrder !== rightSellerOrder) {
+            return leftSellerOrder - rightSellerOrder;
           }
           return left.nome.localeCompare(right.nome, "pt-BR");
         }),
@@ -463,7 +479,7 @@ export default function LojaClientPage({
     () =>
       categoriasDisponiveis.find(
         (category) =>
-          category.seller_type !== "mini_vendor" &&
+          getStoreSellerType(category.seller_type) === "tenant" &&
           ((typeof category.cover_img === "string" && category.cover_img.trim()) ||
             (typeof category.logo_url === "string" && category.logo_url.trim()))
       ) || null,
@@ -659,6 +675,8 @@ export default function LojaClientPage({
                     const status = prod.status || (estoqueTotal > 0 ? "ativo" : "esgotado");
                     const sellerLogo = prod.seller?.logoUrl || tenantLogoUrl || "/logo.png";
                     const sellerName = prod.seller?.name || brandLabel;
+                    const sellerKindLabel =
+                      prod.seller?.type === "league" ? "Loja da liga" : "Loja da atletica";
                     const isDisabledSale = status !== "ativo";
                     const productHref = tenantSlug ? withTenantSlug(tenantSlug, `/loja/${prod.id}`) : `/loja/${prod.id}`;
                     const sellerHref =
@@ -746,7 +764,7 @@ export default function LojaClientPage({
                                     </div>
                                     <div className="min-w-0">
                                       <p className="truncate text-[10px] font-black uppercase tracking-wide text-zinc-400">
-                                        Loja da atletica
+                                        {sellerKindLabel}
                                       </p>
                                       <p className="truncate text-[11px] font-bold text-zinc-200">{sellerName}</p>
                                     </div>

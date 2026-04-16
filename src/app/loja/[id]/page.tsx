@@ -35,7 +35,7 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { collectUserPlanScope } from "@/lib/userPlanScope";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
-import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
+import type { CommercePaymentConfig, CommercePaymentRecipient } from "@/lib/commerceCatalog";
 import {
   buildTenantFinanceFallback,
   buildProductReceiptWhatsappMessage,
@@ -68,7 +68,7 @@ interface Produto {
   status?: "ativo" | "em_breve" | "esgotado";
   payment_config?: PixData | null;
   seller?: {
-    type: "tenant" | "mini_vendor";
+    type: "tenant" | "mini_vendor" | "league";
     id: string;
     name: string;
     logoUrl: string;
@@ -98,6 +98,13 @@ interface DateLike {
 }
 
 type PixData = CommercePaymentConfig;
+
+const buildPaymentRecipientKey = (
+  recipient: CommercePaymentRecipient,
+  index: number
+): string =>
+  recipient.userId?.trim() ||
+  `${recipient.name || "recebedor"}-${recipient.phone || "sem-telefone"}-${index}`;
 
 const getAvailabilityLabel = (status?: Produto["status"]): string => {
   if (status === "em_breve") return "Em-breve";
@@ -197,6 +204,7 @@ export default function DetalheProdutoPage() {
     titular: "...",
     whatsapp: "",
   });
+  const [selectedRecipientKey, setSelectedRecipientKey] = useState("");
   const [loadingPixData, setLoadingPixData] = useState(false);
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
   const [isImageViewerZoomed, setIsImageViewerZoomed] = useState(false);
@@ -306,6 +314,11 @@ export default function DetalheProdutoPage() {
             ? rawConfig.whatsapp.trim()
             : pixData.whatsapp || financeFallback.whatsapp,
         ...(rawConfig?.recipient ? { recipient: rawConfig.recipient } : pixData.recipient ? { recipient: pixData.recipient } : {}),
+        ...(Array.isArray(rawConfig?.recipients)
+          ? { recipients: rawConfig.recipients }
+          : Array.isArray(pixData.recipients)
+          ? { recipients: pixData.recipients }
+          : {}),
         ...(Array.isArray(rawConfig?.ticketEntries)
           ? { ticketEntries: rawConfig.ticketEntries }
           : Array.isArray(pixData.ticketEntries)
@@ -317,15 +330,46 @@ export default function DetalheProdutoPage() {
   );
   const sellerLogo = produto?.seller?.logoUrl || tenantLogoUrl || "/logo.png";
   const sellerName = produto?.seller?.name || brandLabel;
+  const sellerKindLabel =
+    produto?.seller?.type === "league" ? "Loja da liga" : "Loja da atletica";
+  const recipientOptions = useMemo(
+    () =>
+      Array.isArray(pixData.recipients)
+        ? pixData.recipients.map((recipient, index) => ({
+            key: buildPaymentRecipientKey(recipient, index),
+            recipient,
+          }))
+        : [],
+    [pixData.recipients]
+  );
+  const selectedRecipient = useMemo(() => {
+    if (recipientOptions.length === 0) return null;
+    return (
+      recipientOptions.find((entry) => entry.key === selectedRecipientKey)?.recipient ||
+      recipientOptions[0]?.recipient ||
+      null
+    );
+  }, [recipientOptions, selectedRecipientKey]);
+  const checkoutPaymentConfig = useMemo<PixData>(
+    () =>
+      selectedRecipient
+        ? {
+            ...pixData,
+            recipient: selectedRecipient,
+            whatsapp: selectedRecipient.phone || pixData.whatsapp,
+          }
+        : pixData,
+    [pixData, selectedRecipient]
+  );
   const checkoutRecipient = useMemo(
     () =>
       resolveReceiptContactProfile({
-        paymentConfig: pixData,
+        paymentConfig: checkoutPaymentConfig,
         tenantName: sellerName,
         fallbackAvatarUrl: sellerLogo,
-        fallbackPhone: pixData.whatsapp || financeFallback.whatsapp,
+        fallbackPhone: checkoutPaymentConfig.whatsapp || financeFallback.whatsapp,
       }),
-    [financeFallback.whatsapp, pixData, sellerLogo, sellerName]
+    [checkoutPaymentConfig, financeFallback.whatsapp, sellerLogo, sellerName]
   );
   const sellerProfileHref =
     produto?.seller?.type === "mini_vendor" && produto.seller.id
@@ -337,6 +381,20 @@ export default function DetalheProdutoPage() {
   useEffect(() => {
     setCheckoutQuantity((prev) => Math.min(prev, checkoutMaxQuantity));
   }, [checkoutMaxQuantity]);
+
+  useEffect(() => {
+    if (recipientOptions.length === 0) {
+      setSelectedRecipientKey("");
+      return;
+    }
+    setSelectedRecipientKey((current) => {
+      if (current && recipientOptions.some((entry) => entry.key === current)) return current;
+      const configuredKey = pixData.recipient
+        ? recipientOptions.find((entry) => entry.recipient.userId === pixData.recipient?.userId)?.key
+        : "";
+      return configuredKey || recipientOptions[0]?.key || "";
+    });
+  }, [pixData.recipient, recipientOptions]);
 
   const refreshProductData = useCallback(
     async (forceRefresh = true) => {
@@ -416,10 +474,24 @@ export default function DetalheProdutoPage() {
 
   const loadStorePixData = useCallback(async () => {
     if (loadingPixData) return;
-    if (produto?.payment_config) {
-      setPixData(produto.payment_config);
-      return;
-    }
+    const productPayment = produto?.payment_config || null;
+    const mergeProductPayment = (base: PixData): PixData => ({
+      chave: productPayment?.chave?.trim() || base.chave,
+      banco: productPayment?.banco?.trim() || base.banco,
+      titular: productPayment?.titular?.trim() || base.titular,
+      whatsapp: productPayment?.whatsapp?.trim() || base.whatsapp,
+      ...(productPayment?.recipient ? { recipient: productPayment.recipient } : base.recipient ? { recipient: base.recipient } : {}),
+      ...(productPayment?.recipients?.length
+        ? { recipients: productPayment.recipients }
+        : base.recipients?.length
+        ? { recipients: base.recipients }
+        : {}),
+      ...(productPayment?.ticketEntries?.length
+        ? { ticketEntries: productPayment.ticketEntries }
+        : base.ticketEntries?.length
+        ? { ticketEntries: base.ticketEntries }
+        : {}),
+    });
     setLoadingPixData(true);
     try {
       if (
@@ -434,12 +506,12 @@ export default function DetalheProdutoPage() {
         });
         const sellerPayment = resolveMiniVendorPaymentConfig(sellerProfile);
         if (sellerPayment) {
-          setPixData({
+          setPixData(mergeProductPayment({
             chave: typeof sellerPayment.chave === "string" ? sellerPayment.chave : "",
             banco: typeof sellerPayment.banco === "string" ? sellerPayment.banco : "",
             titular: typeof sellerPayment.titular === "string" ? sellerPayment.titular : "",
             whatsapp: typeof sellerPayment.whatsapp === "string" ? sellerPayment.whatsapp : "",
-          });
+          }));
           return;
         }
       }
@@ -465,7 +537,7 @@ export default function DetalheProdutoPage() {
           ? financeiro.whatsapp.trim()
           : financeFallback.whatsapp;
 
-      setPixData({ chave, banco, titular, whatsapp });
+      setPixData(mergeProductPayment({ chave, banco, titular, whatsapp }));
     } catch (error: unknown) {
       console.error(error);
       setPixData(financeFallback);
@@ -532,7 +604,7 @@ export default function DetalheProdutoPage() {
         tenantId: tenantId || undefined,
         userPlanNames,
         userPlanIds,
-        paymentConfig: produto.payment_config ? { ...produto.payment_config } : null,
+        paymentConfig: { ...checkoutPaymentConfig },
       });
 
       setCheckoutOrderId(order.id);
@@ -559,7 +631,7 @@ export default function DetalheProdutoPage() {
 
   const handleSendReceiptWhatsapp = () => {
     if (!produto || !checkoutOrderId) return;
-    const adminPhone = (pixData.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
+    const adminPhone = (checkoutPaymentConfig.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
     const buyerName = user?.nome?.trim() || "Cliente";
     const buyerTurma = user?.turma?.trim() || "Sem turma";
     const buyerPhone = user?.telefone?.trim() || "Nao informado";
@@ -737,7 +809,7 @@ export default function DetalheProdutoPage() {
                   </div>
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                      Loja da atletica
+                      {sellerKindLabel}
                     </p>
                     <p className="text-sm font-bold text-zinc-200">{sellerName}</p>
                   </div>
@@ -1087,6 +1159,24 @@ export default function DetalheProdutoPage() {
                         </div>
                       )}
                     </div>
+                    {recipientOptions.length > 1 ? (
+                      <div className="space-y-1">
+                        <label className="text-xs text-zinc-400 font-bold uppercase">
+                          Enviar comprovante para
+                        </label>
+                        <select
+                          value={selectedRecipientKey}
+                          onChange={(event) => setSelectedRecipientKey(event.target.value)}
+                          className="w-full rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm font-bold text-white outline-none focus:border-emerald-500"
+                        >
+                          {recipientOptions.map(({ key, recipient }) => (
+                            <option key={key} value={key}>
+                              {recipient.name || "Recebedor"}{recipient.turma ? ` - ${recipient.turma}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
                     <div className="border-t border-zinc-800 pt-3 flex items-center justify-between gap-3">
                       <span className="text-xs text-zinc-300 font-black uppercase">Valor</span>
                       <span className="text-xl font-black text-emerald-400">

@@ -19,7 +19,7 @@ interface PaymentRecipientSelectProps {
 export function PaymentRecipientSelect({
   id,
   name,
-  label = "Usuario para receber o comprovante",
+  label = "Usuarios que podem receber.",
   options,
   selectedUserId,
   loading = false,
@@ -48,7 +48,7 @@ export function PaymentRecipientSelect({
         <option value="">Manual / sem usuario vinculado</option>
         {options.map((entry) => (
           <option key={entry.userId} value={entry.userId}>
-            {entry.name} • {entry.turma || "Sem turma"}
+            {entry.name} - {entry.turma || "Sem turma"}
           </option>
         ))}
       </select>
@@ -75,7 +75,7 @@ export function PaymentRecipientSelect({
             </p>
             <p className="truncate text-[11px] text-zinc-500">
               {selectedRecipient.turma || "Sem turma"}
-              {selectedRecipient.phone ? ` • ${selectedRecipient.phone}` : ""}
+              {selectedRecipient.phone ? ` - ${selectedRecipient.phone}` : ""}
             </p>
           </div>
         </div>

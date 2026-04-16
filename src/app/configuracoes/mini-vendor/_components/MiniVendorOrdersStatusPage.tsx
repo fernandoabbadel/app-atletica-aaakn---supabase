@@ -150,16 +150,12 @@ export function MiniVendorOrdersStatusPage({
   const normalizedCategory = String(categoryLabel || "").trim();
   const pageCopy = PAGE_COPY[mode];
   const buildOrdersHref = useCallback(
-    (targetMode: OrdersMode, targetCategory?: string | null) => {
+    (targetMode: OrdersMode) => {
       const basePath =
         targetMode === "pending"
           ? "/configuracoes/mini-vendor/pedidos-pendentes"
           : "/configuracoes/mini-vendor/pedidos-aprovados";
-      const nextPath =
-        targetCategory && targetCategory.trim()
-          ? `${basePath}/${encodeURIComponent(targetCategory.trim())}`
-          : basePath;
-      const scopedPath = tenantSlug ? withTenantSlug(tenantSlug, nextPath) : nextPath;
+      const scopedPath = tenantSlug ? withTenantSlug(tenantSlug, basePath) : basePath;
       return isAdminManagingVendor
         ? `${scopedPath}?userId=${encodeURIComponent(managedUserId)}`
         : scopedPath;
@@ -344,7 +340,7 @@ export function MiniVendorOrdersStatusPage({
       actions={
         <div className="flex flex-wrap gap-2">
           <Link
-            href={buildOrdersHref("pending", normalizedCategory || null)}
+            href={buildOrdersHref("pending")}
             className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
               mode === "pending"
                 ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
@@ -355,7 +351,7 @@ export function MiniVendorOrdersStatusPage({
             Pendentes
           </Link>
           <Link
-            href={buildOrdersHref("approved", normalizedCategory || null)}
+            href={buildOrdersHref("approved")}
             className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-black uppercase tracking-wide transition ${
               mode === "approved"
                 ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"

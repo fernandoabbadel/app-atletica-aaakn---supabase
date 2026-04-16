@@ -248,6 +248,27 @@ const readTicketEntries = (paymentConfig: unknown): Row[] => {
   return Array.isArray(entries) ? entries.filter((entry): entry is Row => Boolean(asObject(entry))) : [];
 };
 
+const extractMissingSchemaColumn = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const raw = error as { message?: unknown; details?: unknown };
+  const text = [raw.message, raw.details]
+    .map((entry) => (typeof entry === "string" ? entry : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+  if (!text) return null;
+
+  const patterns = [
+    /column\s+[a-z0-9_]+\.(\w+)\s+does not exist/i,
+    /column\s+(\w+)\s+does not exist/i,
+    /could not find the ['"]?(\w+)['"]? column/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
 async function queryRows(
   table: string,
   select: string,
@@ -256,13 +277,52 @@ async function queryRows(
   limit = 2500
 ): Promise<Row[]> {
   const supabase = getSupabaseClient();
-  let query = supabase.from(table).select(select).order(orderColumn, { ascending: false }).limit(limit);
-  if (tenantId) {
-    query = query.eq("tenant_id", tenantId);
+  let selectColumns = select
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  let canOrder = true;
+  let canFilterTenant = tenantId.trim().length > 0;
+
+  while (selectColumns.length > 0) {
+    let query = supabase.from(table).select(selectColumns.join(",")).limit(limit);
+    if (canOrder) {
+      query = query.order(orderColumn, { ascending: false });
+    }
+    if (canFilterTenant) {
+      query = query.eq("tenant_id", tenantId);
+    }
+    const { data, error } = await query;
+    if (!error) return Array.isArray(data) ? (data as unknown as Row[]) : [];
+
+    const missingColumn = extractMissingSchemaColumn(error)?.trim().toLowerCase() || "";
+    if (missingColumn) {
+      if (canFilterTenant && missingColumn === "tenant_id") {
+        canFilterTenant = false;
+        continue;
+      }
+      if (canOrder && missingColumn === orderColumn.trim().toLowerCase()) {
+        canOrder = false;
+        continue;
+      }
+
+      const nextColumns = selectColumns.filter(
+        (column) => column.trim().toLowerCase() !== missingColumn
+      );
+      if (nextColumns.length > 0 && nextColumns.length < selectColumns.length) {
+        selectColumns = nextColumns;
+        continue;
+      }
+    }
+
+    if (canOrder) {
+      canOrder = false;
+      continue;
+    }
+    throw error;
   }
-  const { data, error } = await query;
-  if (error) throw error;
-  return Array.isArray(data) ? (data as unknown as Row[]) : [];
+
+  return [];
 }
 
 async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise<LoadedData> {

@@ -17,10 +17,12 @@ import {
   ShoppingBag,
   Tags,
   Trash2,
+  UserPlus,
   X,
 } from "lucide-react";
 
 import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
+import { PaymentReceiversManager } from "@/components/PaymentReceiversManager";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
@@ -290,6 +292,7 @@ export default function AdminLojaProdutosPage() {
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
   const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
   const [loadingPaymentRecipients, setLoadingPaymentRecipients] = useState(false);
+  const [showReceiversManager, setShowReceiversManager] = useState(false);
 
   useEffect(() => {
     if (categoryName.trim() || categoryCoverImg.trim()) return;
@@ -597,7 +600,11 @@ export default function AdminLojaProdutosPage() {
       variantes: mappedVariants,
       planScopeRows: buildPlanScopeRows(planCatalog, row.plan_prices, row.plan_visibility),
       payment: {
-        enabled: Boolean(row.payment_config),
+        enabled: Boolean(
+          row.payment_config?.chave ||
+            row.payment_config?.banco ||
+            row.payment_config?.titular
+        ),
         chave: row.payment_config?.chave || "",
         banco: row.payment_config?.banco || "",
         titular: row.payment_config?.titular || "",
@@ -811,6 +818,12 @@ export default function AdminLojaProdutosPage() {
       .filter((line) => line.length > 0)
       .join("\n");
 
+    const hasPaymentConfig =
+      form.payment.enabled ||
+      paymentRecipients.length > 0 ||
+      form.payment.recipientUserId.trim().length > 0 ||
+      form.payment.whatsapp.trim().length > 0;
+
     const payload: Record<string, unknown> = {
       nome,
       categoria,
@@ -836,11 +849,11 @@ export default function AdminLojaProdutosPage() {
         planName: entry.planName,
         visible: entry.visible,
       })),
-      payment_config: form.payment.enabled
+      payment_config: hasPaymentConfig
         ? {
-            chave: form.payment.chave.trim(),
-            banco: form.payment.banco.trim(),
-            titular: form.payment.titular.trim(),
+            chave: form.payment.enabled ? form.payment.chave.trim() : "",
+            banco: form.payment.enabled ? form.payment.banco.trim() : "",
+            titular: form.payment.enabled ? form.payment.titular.trim() : "",
             whatsapp: form.payment.whatsapp.trim(),
             ...(form.payment.recipientUserId
               ? {
@@ -853,6 +866,7 @@ export default function AdminLojaProdutosPage() {
                   },
                 }
               : {}),
+            ...(paymentRecipients.length > 0 ? { recipients: paymentRecipients } : {}),
           }
         : null,
       seller_type: "tenant",
@@ -1097,6 +1111,14 @@ export default function AdminLojaProdutosPage() {
               {isInactiveOnlyPage ? "Pagina Atual" : "Ver Desativados"}
             </Link>
             <Link href={categoryManagerHref} className="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[11px] font-black uppercase text-blue-300 hover:bg-blue-500/20"><Tags size={14} /> Categorias</Link>
+            <button
+              type="button"
+              onClick={() => setShowReceiversManager(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+            >
+              <UserPlus size={14} />
+              Adicionar recebedores
+            </button>
             <button onClick={openCreateProduct} className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20"><Plus size={14} /> Novo Produto</button>
           </div>
         </div>
@@ -1417,11 +1439,11 @@ export default function AdminLojaProdutosPage() {
                 <PaymentRecipientSelect
                   id="admin-store-product-payment-recipient"
                   name="admin_store_product_payment_recipient"
-                  label="Usuario da tenant para receber"
+                  label="Usuarios que podem receber."
                   options={paymentRecipients}
                   selectedUserId={form.payment.recipientUserId}
                   loading={loadingPaymentRecipients}
-                  disabled={!form.payment.enabled}
+                  disabled={loadingPaymentRecipients}
                   onChange={handleSelectPaymentRecipient}
                 />
                 <input
@@ -1743,6 +1765,13 @@ export default function AdminLojaProdutosPage() {
             : "Cada abertura consulta so a categoria ativa. Pedidos e reviews continuam em modulos separados para manter leve."}
         </div>
       </main>
+      <PaymentReceiversManager
+        tenantId={activeTenantId}
+        open={showReceiversManager}
+        recipients={paymentRecipients}
+        onClose={() => setShowReceiversManager(false)}
+        onSaved={setPaymentRecipients}
+      />
     </div>
   );
 }
