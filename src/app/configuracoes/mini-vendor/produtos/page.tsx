@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { ImagePlus, Loader2, Pencil, Plus, Save, Tags, Trash2, X } from "lucide-react";
 
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
+import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
@@ -15,6 +16,11 @@ import {
   fetchMiniVendorProducts,
   type MiniVendorProfile,
 } from "@/lib/miniVendorService";
+import {
+  fetchTenantPaymentRecipients,
+  findTenantPaymentRecipient,
+  type TenantPaymentRecipientOption,
+} from "@/lib/paymentRecipients";
 import { fetchPlanCatalog, type PlanRecord } from "@/lib/plansPublicService";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
 import { upsertStoreProduct } from "@/lib/storeService";
@@ -79,6 +85,8 @@ export default function MiniVendorProductsPage() {
   const [isProductOpen, setIsProductOpen] = useState(false);
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
   const [productForm, setProductForm] = useState<ProductFormState>(EMPTY_PRODUCT_FORM);
+  const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
+  const [loadingPaymentRecipients, setLoadingPaymentRecipients] = useState(false);
   const draftRestoredRef = useRef(false);
 
   const currentUserId = user?.uid?.trim() || "";
@@ -107,6 +115,34 @@ export default function MiniVendorProductsPage() {
     if (!tenantId.trim() || !managedUserId) return "";
     return `mini-vendor:${tenantId}:${managedUserId}:product-draft`;
   }, [managedUserId, tenantId]);
+
+  useEffect(() => {
+    const cleanTenantId = tenantId.trim();
+    if (!cleanTenantId) {
+      setPaymentRecipients([]);
+      setLoadingPaymentRecipients(false);
+      return;
+    }
+
+    let mounted = true;
+    setLoadingPaymentRecipients(true);
+    const run = async () => {
+      try {
+        const recipients = await fetchTenantPaymentRecipients(cleanTenantId);
+        if (mounted) setPaymentRecipients(recipients);
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) setPaymentRecipients([]);
+      } finally {
+        if (mounted) setLoadingPaymentRecipients(false);
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId]);
 
   const loadProducts = useCallback(async (sellerId: string, forceRefresh = true) => {
     const rows = await fetchMiniVendorProducts({
@@ -262,6 +298,23 @@ export default function MiniVendorProductsPage() {
     removeDraftObject(productDraftKey);
   };
 
+  const handleSelectPaymentRecipient = (recipientUserId: string) => {
+    const recipient = findTenantPaymentRecipient(paymentRecipients, recipientUserId);
+    setProductForm((previous) => ({
+      ...previous,
+      payment: {
+        ...previous.payment,
+        recipientUserId: recipient?.userId || "",
+        recipientUserName: recipient?.name || "",
+        recipientUserTurma: recipient?.turma || "",
+        recipientUserAvatar: recipient?.avatarUrl || "",
+        whatsapp: recipient?.phone
+          ? normalizePhoneToBrE164(recipient.phone)
+          : previous.payment.whatsapp,
+      },
+    }));
+  };
+
   const handleUploadProductImage = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -386,6 +439,17 @@ export default function MiniVendorProductsPage() {
               banco: productForm.payment.banco.trim(),
               titular: productForm.payment.titular.trim(),
               whatsapp: productForm.payment.whatsapp.trim(),
+              ...(productForm.payment.recipientUserId
+                ? {
+                    recipient: {
+                      userId: productForm.payment.recipientUserId.trim(),
+                      name: productForm.payment.recipientUserName.trim(),
+                      turma: productForm.payment.recipientUserTurma.trim(),
+                      avatarUrl: productForm.payment.recipientUserAvatar.trim(),
+                      phone: productForm.payment.whatsapp.trim(),
+                    },
+                  }
+                : {}),
             }
           : null,
         seller_type: "mini_vendor",
@@ -612,10 +676,20 @@ export default function MiniVendorProductsPage() {
                         Usar pagamento proprio
                       </label>
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                        <input value={productForm.payment.chave} maxLength={PIX_KEY_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, chave: event.target.value.slice(0, PIX_KEY_MAX_LENGTH) } }))} placeholder="Chave PIX" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
-                        <input value={productForm.payment.banco} maxLength={PIX_BANK_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, banco: event.target.value.slice(0, PIX_BANK_MAX_LENGTH) } }))} placeholder="Banco" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
-                        <input value={productForm.payment.titular} maxLength={PIX_HOLDER_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, titular: event.target.value.slice(0, PIX_HOLDER_MAX_LENGTH) } }))} placeholder="Titular" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
-                        <input value={productForm.payment.whatsapp} maxLength={PHONE_MAX_LENGTH} inputMode="tel" onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, whatsapp: normalizePhoneToBrE164(event.target.value) } }))} placeholder="WhatsApp" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
+                        <input id="mini-vendor-product-pix-key" name="mini_vendor_product_pix_key" value={productForm.payment.chave} maxLength={PIX_KEY_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, chave: event.target.value.slice(0, PIX_KEY_MAX_LENGTH) } }))} placeholder="Chave PIX" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
+                        <input id="mini-vendor-product-pix-bank" name="mini_vendor_product_pix_bank" value={productForm.payment.banco} maxLength={PIX_BANK_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, banco: event.target.value.slice(0, PIX_BANK_MAX_LENGTH) } }))} placeholder="Banco" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
+                        <input id="mini-vendor-product-pix-holder" name="mini_vendor_product_pix_holder" value={productForm.payment.titular} maxLength={PIX_HOLDER_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, titular: event.target.value.slice(0, PIX_HOLDER_MAX_LENGTH) } }))} placeholder="Titular" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
+                        <PaymentRecipientSelect
+                          id="mini-vendor-product-payment-recipient"
+                          name="mini_vendor_product_payment_recipient"
+                          label="Usuario da tenant para receber"
+                          options={paymentRecipients}
+                          selectedUserId={productForm.payment.recipientUserId}
+                          loading={loadingPaymentRecipients}
+                          disabled={!productForm.payment.enabled}
+                          onChange={handleSelectPaymentRecipient}
+                        />
+                        <input id="mini-vendor-product-payment-whatsapp" name="mini_vendor_product_payment_whatsapp" value={productForm.payment.whatsapp} maxLength={PHONE_MAX_LENGTH} inputMode="tel" onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, whatsapp: normalizePhoneToBrE164(event.target.value) } }))} placeholder="WhatsApp" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
                       </div>
                     </div>
                   </div>

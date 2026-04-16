@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, Suspense } from "react";
-import { ArrowLeft, MessageCircle, Loader2, Copy, Ticket, Minus, Plus, Wallet, Clock } from "lucide-react";
+import { ArrowLeft, Loader2, Copy, Ticket, Minus, Plus, Wallet, Clock } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; // Importando Image
 import { useRouter, useSearchParams } from "next/navigation";
+import { ReceiptContactButton } from "@/components/ReceiptContactButton";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import { createEventTicketRequest, fetchEventCheckoutData } from "../../../lib/eventsService";
@@ -14,7 +15,9 @@ import { collectUserPlanScope } from "@/lib/userPlanScope";
 import {
   buildTenantFinanceFallback,
   buildEventReceiptWhatsappMessage,
+  resolveReceiptContactProfile,
 } from "../../../lib/tenantBranding";
+import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
 import { keepDigits } from "@/utils/contactFields";
 // Interfaces para tipagem forte (fim do any)
 interface Lote {
@@ -34,12 +37,7 @@ interface EventoData {
     [key: string]: unknown; // Flexibilidade para outros campos do evento
 }
 
-interface PixData {
-    chave: string;
-    banco: string;
-    titular: string;
-    whatsapp?: string;
-}
+type PixData = CommercePaymentConfig;
 
 // Componente interno que usa useSearchParams
 function CompraContent() {
@@ -63,6 +61,17 @@ function CompraContent() {
   const [fetching, setFetching] = useState(true);
   const financeFallback = buildTenantFinanceFallback({ tenantSigla, tenantName });
   const eventosHref = tenantSlug ? withTenantSlug(tenantSlug, "/eventos") : "/eventos";
+  const checkoutRecipient = React.useMemo(
+      () =>
+          resolveReceiptContactProfile({
+              paymentConfig: pixData,
+              tenantSigla,
+              tenantName,
+              fallbackAvatarUrl: evento?.imagem || "/logo.png",
+              fallbackPhone: pixData.whatsapp || financeFallback.whatsapp,
+          }),
+      [evento?.imagem, financeFallback.whatsapp, pixData, tenantName, tenantSigla]
+  );
 
     useEffect(() => {
       const loadData = async () => {
@@ -152,6 +161,8 @@ function CompraContent() {
               ticketLabel: `${quantidade}x ${lote.nome}`,
               totalValue: valorTotal.toFixed(2),
               orderCode: ticketRequest.id.slice(0, 8).toUpperCase(),
+              recipientName: checkoutRecipient.name,
+              recipientTurma: checkoutRecipient.turma,
           });
           const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
 
@@ -274,14 +285,12 @@ function CompraContent() {
                 </div>
 
                 <div className="space-y-3 pt-2">
-                    <button onClick={handleFinish} disabled={loading} className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-black font-black uppercase py-4 rounded-xl shadow-[0_0_20px_rgba(37,211,102,0.2)] transition active:scale-95 flex justify-center items-center gap-2">
-                        {loading ? <Loader2 className="animate-spin"/> : (
-                            <>
-                                <MessageCircle size={20} fill="black" className="text-black"/>
-                                Enviar Comprovante
-                            </>
-                        )}
-                    </button>
+                    <ReceiptContactButton
+                        recipient={checkoutRecipient}
+                        onClick={() => void handleFinish()}
+                        disabled={loading}
+                        helperText="Depois do PIX, envie o comprovante para esse responsavel validar seu ingresso."
+                    />
                     <p className="text-[10px] text-zinc-600 max-w-xs mx-auto leading-relaxed">
                         O comprovante deve ser enviado no WhatsApp para validarmos seu ingresso.
                     </p>

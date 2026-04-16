@@ -11,14 +11,21 @@ import {
 } from 'lucide-react';
 import Image from "next/image";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
+import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
 import { useToast } from "../../context/ToastContext";
 import { ClientCache } from "@/lib/clientCache";
+import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
 import {
   clearEventsNativeCaches,
   EVENT_POLL_OPTION_MAX_CHARS,
   EVENT_POLL_OPTION_MAX_COUNT,
   EVENT_POLL_QUESTION_MAX_CHARS,
 } from "@/lib/eventsNativeService";
+import {
+  fetchTenantPaymentRecipients,
+  findTenantPaymentRecipient,
+  type TenantPaymentRecipientOption,
+} from "@/lib/paymentRecipients";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -127,6 +134,11 @@ interface LeagueEvent {
     pixBanco?: string;
     pixTitular?: string;
     contatoComprovante?: string;
+    recipientUserId?: string;
+    recipientUserName?: string;
+    recipientUserTurma?: string;
+    recipientUserAvatar?: string;
+    paymentConfig?: CommercePaymentConfig | null;
 }
 
 type LigaAdminTab = 'visual' | 'members' | 'events' | 'shark';
@@ -229,6 +241,22 @@ const normalizeEditableLeagueEvent = (value: unknown): Partial<LeagueEvent> => {
         pixBanco: String(raw.pixBanco || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
         pixTitular: String(raw.pixTitular || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
         contatoComprovante: String(raw.contatoComprovante || "").slice(0, PHONE_MAX_LENGTH),
+        recipientUserId: String(
+            raw.recipientUserId || raw.paymentConfig?.recipient?.userId || ""
+        ).slice(0, 120),
+        recipientUserName: String(
+            raw.recipientUserName || raw.paymentConfig?.recipient?.name || ""
+        ).slice(0, 120),
+        recipientUserTurma: String(
+            raw.recipientUserTurma || raw.paymentConfig?.recipient?.turma || ""
+        ).slice(0, 80),
+        recipientUserAvatar: String(
+            raw.recipientUserAvatar || raw.paymentConfig?.recipient?.avatarUrl || ""
+        ).slice(0, 600),
+        paymentConfig:
+            raw.paymentConfig && typeof raw.paymentConfig === "object"
+                ? (raw.paymentConfig as CommercePaymentConfig)
+                : null,
     };
 };
 
@@ -253,6 +281,11 @@ const createEmptyEventDraft = (): Partial<LeagueEvent> => ({
     pixBanco: "",
     pixTitular: "",
     contatoComprovante: "",
+    recipientUserId: "",
+    recipientUserName: "",
+    recipientUserTurma: "",
+    recipientUserAvatar: "",
+    paymentConfig: null,
 });
 
 const readSessionStorageValue = (key: string): string | null => {
@@ -493,6 +526,8 @@ export default function LigasAdminPageContent({
   const isLoggingOutRef = useRef(false);
   const [uploadingLeagueAsset, setUploadingLeagueAsset] = useState(false);
   const [uploadingEventImg, setUploadingEventImg] = useState(false);
+  const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
+  const [loadingPaymentRecipients, setLoadingPaymentRecipients] = useState(false);
   const [novoLote, setNovoLote] = useState<NovoLoteDraft>(createEmptyLoteDraft());
 
   // --- 🦈 MODAL DE GESTÃO DE ENQUETES (NOVO) ---
@@ -504,6 +539,34 @@ export default function LigasAdminPageContent({
   useEffect(() => {
       setActiveTab(lockedTab || routeTab);
   }, [lockedTab, routeTab]);
+
+  useEffect(() => {
+      const cleanTenantId = tenantScopeId.trim();
+      if (!cleanTenantId) {
+          setPaymentRecipients([]);
+          setLoadingPaymentRecipients(false);
+          return;
+      }
+
+      let mounted = true;
+      setLoadingPaymentRecipients(true);
+      const run = async () => {
+          try {
+              const recipients = await fetchTenantPaymentRecipients(cleanTenantId);
+              if (mounted) setPaymentRecipients(recipients);
+          } catch (error: unknown) {
+              console.error("Erro ao carregar responsaveis de comprovante da liga:", error);
+              if (mounted) setPaymentRecipients([]);
+          } finally {
+              if (mounted) setLoadingPaymentRecipients(false);
+          }
+      };
+
+      void run();
+      return () => {
+          mounted = false;
+      };
+  }, [tenantScopeId]);
 
   useEffect(() => {
       const preferredLeagueId = routeLeagueId || readSessionStorageValue(lastSelectedStorageKey);
@@ -1145,6 +1208,20 @@ export default function LigasAdminPageContent({
       }));
   };
 
+  const handleSelectEventPaymentRecipient = (recipientUserId: string) => {
+      const recipient = findTenantPaymentRecipient(paymentRecipients, recipientUserId);
+      setCurrentEvent((prev) => ({
+          ...normalizeEditableLeagueEvent(prev),
+          recipientUserId: recipient?.userId || "",
+          recipientUserName: recipient?.name || "",
+          recipientUserTurma: recipient?.turma || "",
+          recipientUserAvatar: recipient?.avatarUrl || "",
+          contatoComprovante: recipient?.phone
+              ? normalizePhoneToBrE164(recipient.phone)
+              : String(prev?.contatoComprovante || ""),
+      }));
+  };
+
   const saveEventLocal = async () => {
       if (!ligaData || !currentEvent.titulo) return addToast("Título obrigatório!", "error");
       const novosEventos = [...(ligaData.eventos || [])];
@@ -1155,6 +1232,36 @@ export default function LigasAdminPageContent({
       ) {
           return addToast("Informe um WhatsApp valido para comprovante.", "error");
       }
+      const selectedRecipient = findTenantPaymentRecipient(
+          paymentRecipients,
+          String(currentEvent.recipientUserId || "").trim()
+      );
+      const normalizedWhatsapp = normalizePhoneToBrE164(
+          String(currentEvent.contatoComprovante || "").trim()
+      ).slice(0, PHONE_MAX_LENGTH);
+      const paymentConfig =
+          String(currentEvent.pixChave || "").trim() ||
+          String(currentEvent.pixBanco || "").trim() ||
+          String(currentEvent.pixTitular || "").trim() ||
+          normalizedWhatsapp
+              ? {
+                    chave: String(currentEvent.pixChave || "").trim(),
+                    banco: String(currentEvent.pixBanco || "").trim(),
+                    titular: String(currentEvent.pixTitular || "").trim(),
+                    ...(normalizedWhatsapp ? { whatsapp: normalizedWhatsapp } : {}),
+                    ...(selectedRecipient
+                        ? {
+                              recipient: {
+                                  userId: selectedRecipient.userId,
+                                  name: selectedRecipient.name,
+                                  turma: selectedRecipient.turma,
+                                  avatarUrl: selectedRecipient.avatarUrl,
+                                  phone: normalizedWhatsapp || selectedRecipient.phone,
+                              },
+                          }
+                        : {}),
+                }
+              : null;
       const eventoSalvo = {
           ...normalizeEditableLeagueEvent(currentEvent),
           id: String(currentEvent.id || Date.now()),
@@ -1168,7 +1275,12 @@ export default function LigasAdminPageContent({
           pixChave: String(currentEvent.pixChave || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
           pixBanco: String(currentEvent.pixBanco || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
           pixTitular: String(currentEvent.pixTitular || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
-          contatoComprovante: normalizePhoneToBrE164(String(currentEvent.contatoComprovante || "").trim()).slice(0, PHONE_MAX_LENGTH),
+          contatoComprovante: normalizedWhatsapp,
+          recipientUserId: selectedRecipient?.userId || "",
+          recipientUserName: selectedRecipient?.name || "",
+          recipientUserTurma: selectedRecipient?.turma || "",
+          recipientUserAvatar: selectedRecipient?.avatarUrl || "",
+          paymentConfig,
           pollQuestion: String(currentEvent.pollQuestion || "").trim().slice(0, EVENT_POLL_QUESTION_MAX_CHARS),
           lotes: (Array.isArray(currentEvent.lotes) ? currentEvent.lotes : [])
               .map((lote, index) => normalizeEditorLote(lote, index))
@@ -2318,6 +2430,15 @@ export default function LigasAdminPageContent({
                               <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.pixBanco || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pixBanco: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH) })} />
                               <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.pixTitular || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pixTitular: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH) })} />
                           </div>
+                          <PaymentRecipientSelect
+                              id="league-event-payment-recipient"
+                              name="league_event_payment_recipient"
+                              label="Usuario da tenant para receber"
+                              options={paymentRecipients}
+                              selectedUserId={String(currentEvent.recipientUserId || "")}
+                              loading={loadingPaymentRecipients}
+                              onChange={handleSelectEventPaymentRecipient}
+                          />
                           <input type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.contatoComprovante || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), contatoComprovante: normalizePhoneToBrE164(e.target.value) })} />
                       </div>
 

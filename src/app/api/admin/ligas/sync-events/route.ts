@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
+import { normalizePaymentConfig, type CommercePaymentConfig } from "@/lib/commerceCatalog";
 import { clearEventsNativeCaches } from "@/lib/eventsNativeService";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -44,6 +45,11 @@ type NormalizedLeagueEvent = {
   pixBanco: string;
   pixTitular: string;
   contatoComprovante: string;
+  recipientUserId: string;
+  recipientUserName: string;
+  recipientUserTurma: string;
+  recipientUserAvatar: string;
+  paymentConfig: CommercePaymentConfig | null;
 };
 
 const normalizeStatus = (value: unknown): "ativo" | "em_breve" | "esgotado" => {
@@ -90,6 +96,25 @@ const normalizeEvents = (value: unknown, leagueLogoUrl: string): NormalizedLeagu
     if (seen.has(globalEventId)) continue;
     seen.add(globalEventId);
 
+    const normalizedPaymentConfig =
+      normalizePaymentConfig(raw.paymentConfig ?? raw.payment_config) ||
+      normalizePaymentConfig({
+        chave: raw.pixChave,
+        banco: raw.pixBanco,
+        titular: raw.pixTitular,
+        whatsapp: raw.contatoComprovante,
+        recipient: {
+          userId: raw.recipientUserId,
+          name: raw.recipientUserName,
+          turma: raw.recipientUserTurma,
+          avatarUrl: raw.recipientUserAvatar,
+          phone: raw.contatoComprovante,
+        },
+      });
+    const normalizedWhatsapp =
+      asString(normalizedPaymentConfig?.whatsapp).trim().slice(0, 32) ||
+      asString(raw.contatoComprovante).trim().slice(0, 32);
+
     normalized.push({
       id: asString(raw.id).trim() || globalEventId,
       globalEventId,
@@ -106,10 +131,37 @@ const normalizeEvents = (value: unknown, leagueLogoUrl: string): NormalizedLeagu
       descricao: asString(raw.descricao).trim().slice(0, 1200),
       pollQuestion: asString(raw.pollQuestion).trim().slice(0, 280),
       saleStatus: normalizeStatus(raw.saleStatus),
-      pixChave: asString(raw.pixChave).trim().slice(0, 140),
-      pixBanco: asString(raw.pixBanco).trim().slice(0, 140),
-      pixTitular: asString(raw.pixTitular).trim().slice(0, 140),
-      contatoComprovante: asString(raw.contatoComprovante).trim().slice(0, 32),
+      pixChave:
+        asString(normalizedPaymentConfig?.chave).trim().slice(0, 140) ||
+        asString(raw.pixChave).trim().slice(0, 140),
+      pixBanco:
+        asString(normalizedPaymentConfig?.banco).trim().slice(0, 140) ||
+        asString(raw.pixBanco).trim().slice(0, 140),
+      pixTitular:
+        asString(normalizedPaymentConfig?.titular).trim().slice(0, 140) ||
+        asString(raw.pixTitular).trim().slice(0, 140),
+      contatoComprovante: normalizedWhatsapp,
+      recipientUserId: asString(
+        raw.recipientUserId || normalizedPaymentConfig?.recipient?.userId
+      )
+        .trim()
+        .slice(0, 120),
+      recipientUserName: asString(
+        raw.recipientUserName || normalizedPaymentConfig?.recipient?.name
+      )
+        .trim()
+        .slice(0, 120),
+      recipientUserTurma: asString(
+        raw.recipientUserTurma || normalizedPaymentConfig?.recipient?.turma
+      )
+        .trim()
+        .slice(0, 80),
+      recipientUserAvatar: asString(
+        raw.recipientUserAvatar || normalizedPaymentConfig?.recipient?.avatarUrl
+      )
+        .trim()
+        .slice(0, 600),
+      paymentConfig: normalizedPaymentConfig,
     });
   }
 
@@ -271,6 +323,7 @@ export async function POST(request: NextRequest) {
         pixBanco: event.pixBanco,
         pixTitular: event.pixTitular,
         contatoComprovante: event.contatoComprovante,
+        ...(event.paymentConfig ? { payment_config: event.paymentConfig } : {}),
         status: "ativo",
         sale_status: event.saleStatus,
         tenant_id: effectiveTenantId,
@@ -313,6 +366,11 @@ export async function POST(request: NextRequest) {
         pixBanco: event.pixBanco,
         pixTitular: event.pixTitular,
         contatoComprovante: event.contatoComprovante,
+        recipientUserId: event.recipientUserId,
+        recipientUserName: event.recipientUserName,
+        recipientUserTurma: event.recipientUserTurma,
+        recipientUserAvatar: event.recipientUserAvatar,
+        paymentConfig: event.paymentConfig,
       };
 
       if (event.pollQuestion) {

@@ -32,9 +32,9 @@ const MAX_ORDERS = 1200;
 const MAX_REVIEWS = 600;
 const MAX_CATEGORIES = 300;
 const STORE_PRODUCT_SELECT_COLUMNS =
-  "id,tenant_id,nome,categoria,descricao,img,preco,precoAntigo,estoque,lote,tagLabel,tagColor,tagEffect,cores,variantes,caracteristicas,badge,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,cliques,likes,createdAt,updatedAt";
+  "id,tenant_id,nome,categoria,descricao,img,preco,precoAntigo,estoque,lote,tagLabel,tagColor,tagEffect,cores,variantes,caracteristicas,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,cliques,likes,createdAt,updatedAt";
 const STORE_CATEGORY_SELECT_COLUMNS =
-  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order,visible,createdAt,updatedAt";
+  "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order,visible,createdAt";
 const STORE_ORDER_SELECT_COLUMNS =
   "id,tenant_id,userId,userName,productId,productName,price,total,quantidade,itens,data,status,approvedBy,seller_type,seller_id,seller_name,seller_logo_url,payment_config,createdAt,updatedAt";
 const STORE_REVIEW_SELECT_COLUMNS =

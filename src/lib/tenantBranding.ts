@@ -1,3 +1,5 @@
+import type { CommercePaymentConfig } from "./commerceCatalog";
+
 const cleanString = (value?: string | null): string =>
   typeof value === "string" ? value.trim() : "";
 
@@ -42,6 +44,14 @@ export interface TenantFinanceFallback {
   whatsapp: string;
 }
 
+export interface ReceiptContactProfile {
+  userId: string;
+  name: string;
+  turma: string;
+  avatarUrl: string;
+  phone: string;
+}
+
 export const buildTenantFinanceFallback = (options?: {
   tenantSigla?: string | null;
   tenantName?: string | null;
@@ -51,6 +61,84 @@ export const buildTenantFinanceFallback = (options?: {
   titular: resolveTenantBrandLabel(options?.tenantSigla, options?.tenantName),
   whatsapp: "",
 });
+
+export const resolveReceiptContactProfile = (options: {
+  paymentConfig?: CommercePaymentConfig | null;
+  tenantSigla?: string | null;
+  tenantName?: string | null;
+  fallbackAvatarUrl?: string | null;
+  fallbackPhone?: string | null;
+}): ReceiptContactProfile => {
+  const paymentConfig = options.paymentConfig;
+  const recipient = paymentConfig?.recipient;
+  const tenantLabel = resolveTenantBrandLabel(options.tenantSigla, options.tenantName);
+
+  return {
+    userId: cleanString(recipient?.userId),
+    name: cleanString(recipient?.name) || tenantLabel,
+    turma: cleanString(recipient?.turma) || "Financeiro",
+    avatarUrl:
+      cleanString(recipient?.avatarUrl) ||
+      cleanString(options.fallbackAvatarUrl) ||
+      "/logo.png",
+    phone:
+      cleanString(paymentConfig?.whatsapp) ||
+      cleanString(recipient?.phone) ||
+      cleanString(options.fallbackPhone),
+  };
+};
+
+const buildReceiptTargetBlock = (recipientName?: string | null, recipientTurma?: string | null): string[] => {
+  const cleanRecipientName = cleanString(recipientName) || "Financeiro";
+  const cleanRecipientTurma = cleanString(recipientTurma) || "Sem turma";
+  return ["Enviado para", cleanRecipientName, cleanRecipientTurma];
+};
+
+export const buildProductReceiptWhatsappMessage = (options: {
+  organizerLabel?: string | null;
+  productName?: string | null;
+  buyerName?: string | null;
+  buyerTurma?: string | null;
+  buyerPhone?: string | null;
+  quantity?: number | string | null;
+  color?: string | null;
+  totalValue?: string | number | null;
+  orderCode?: string | null;
+  recipientName?: string | null;
+  recipientTurma?: string | null;
+}): string => {
+  const organizerLabel = cleanString(options.organizerLabel) || "Atletica";
+  const productName = cleanString(options.productName).replace(/[.!?]+$/g, "") || "produto";
+  const buyerName = cleanString(options.buyerName) || "Aluno";
+  const buyerTurma = cleanString(options.buyerTurma) || "Sem turma";
+  const buyerPhone = cleanString(options.buyerPhone) || "Nao informado";
+  const quantity =
+    typeof options.quantity === "number"
+      ? String(Math.max(1, Math.floor(options.quantity)))
+      : cleanString(String(options.quantity ?? "")) || "1";
+  const color = cleanString(options.color);
+  const totalValue =
+    typeof options.totalValue === "number"
+      ? options.totalValue.toFixed(2)
+      : cleanString(String(options.totalValue ?? "")) || "0.00";
+  const orderCode = cleanString(options.orderCode) || "Nao informado";
+
+  return [
+    `Fala, equipe *${organizerLabel}*! Quero finalizar a compra do produto ${productName}.`,
+    "",
+    `*CLIENTE:* ${buyerName}`,
+    `*TURMA:* ${buyerTurma}`,
+    `*CONTATO:* ${buyerPhone}`,
+    `*PRODUTO:* ${productName}`,
+    `*QTD:* ${quantity}`,
+    ...(color ? [`*COR:* ${color}`] : []),
+    `*VALOR:* R$ ${totalValue}`,
+    `*PEDIDO:* ${orderCode}`,
+    "",
+    "Segue o comprovante do PIX!",
+    ...buildReceiptTargetBlock(options.recipientName, options.recipientTurma),
+  ].join("\n");
+};
 
 export const buildEventReceiptWhatsappMessage = (options: {
   tenantSigla?: string | null;
@@ -64,6 +152,8 @@ export const buildEventReceiptWhatsappMessage = (options: {
   ticketLabel?: string | null;
   totalValue?: string | number | null;
   orderCode?: string | null;
+  recipientName?: string | null;
+  recipientTurma?: string | null;
 }): string => {
   const tenantLabel = resolveTenantBrandLabel(options.tenantSigla, options.tenantName);
   const titleParts = extractBracketPrefixedTitle(options.eventTitle);
@@ -88,15 +178,16 @@ export const buildEventReceiptWhatsappMessage = (options: {
   const orderCode = cleanString(options.orderCode) || "Nao informado";
 
   return [
-    `Fala, equipe ${organizerLabel}! Quero garantir meu lugar no evento ${eventTitle}.`,
+    `Fala, equipe *${organizerLabel}*! Quero garantir meu lugar no evento ${eventTitle}.`,
     "",
-    `Nome: ${buyerName}`,
-    `Turma: ${buyerTurma}`,
-    `Contato: ${buyerPhone}`,
-    `Ingresso: ${ticketLabel}`,
-    `Valor total: R$ ${totalValue}`,
-    `Pedido: ${orderCode}`,
+    `*NOME:* ${buyerName}`,
+    `*TURMA:* ${buyerTurma}`,
+    `*CONTATO:* ${buyerPhone}`,
+    `*INGRESSO:* ${ticketLabel}`,
+    `*VALOR TOTAL:* R$ ${totalValue}`,
+    `*PEDIDO:* ${orderCode}`,
     "",
     "Segue o comprovante!",
+    ...buildReceiptTargetBlock(options.recipientName, options.recipientTurma),
   ].join("\n");
 };

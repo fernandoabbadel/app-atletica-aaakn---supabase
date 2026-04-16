@@ -1,4 +1,5 @@
 import type { MiniVendorProfile } from "@/lib/miniVendorService";
+import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
 import type { PlanRecord } from "@/lib/plansPublicService";
 
 export type ProductStatus = "ativo" | "em_breve" | "esgotado";
@@ -16,6 +17,10 @@ export type PaymentFormState = {
   banco: string;
   titular: string;
   whatsapp: string;
+  recipientUserId: string;
+  recipientUserName: string;
+  recipientUserTurma: string;
+  recipientUserAvatar: string;
 };
 
 export type VariantForm = {
@@ -49,7 +54,7 @@ export type ProductRow = {
   status?: ProductStatus;
   plan_prices?: Array<{ planId?: string; planName?: string; price?: number }>;
   plan_visibility?: Array<{ planId?: string; planName?: string; visible?: boolean }>;
-  payment_config?: { chave?: string; banco?: string; titular?: string; whatsapp?: string } | null;
+  payment_config?: CommercePaymentConfig | null;
 };
 
 export type OrderRow = {
@@ -148,6 +153,10 @@ export const EMPTY_PRODUCT_FORM: ProductFormState = {
     banco: "",
     titular: "",
     whatsapp: "",
+    recipientUserId: "",
+    recipientUserName: "",
+    recipientUserTurma: "",
+    recipientUserAvatar: "",
   },
 };
 
@@ -400,6 +409,10 @@ export const restoreProductFormDraft = (
         banco: asString(rawPayment?.banco),
         titular: asString(rawPayment?.titular),
         whatsapp: asString(rawPayment?.whatsapp),
+        recipientUserId: asString(rawPayment?.recipientUserId),
+        recipientUserName: asString(rawPayment?.recipientUserName),
+        recipientUserTurma: asString(rawPayment?.recipientUserTurma),
+        recipientUserAvatar: asString(rawPayment?.recipientUserAvatar),
       },
     },
   };
@@ -459,6 +472,10 @@ export const mapProductRowToForm = (
       banco: row.payment_config?.banco || "",
       titular: row.payment_config?.titular || "",
       whatsapp: row.payment_config?.whatsapp || "",
+      recipientUserId: row.payment_config?.recipient?.userId || "",
+      recipientUserName: row.payment_config?.recipient?.name || "",
+      recipientUserTurma: row.payment_config?.recipient?.turma || "",
+      recipientUserAvatar: row.payment_config?.recipient?.avatarUrl || "",
     },
   };
 };

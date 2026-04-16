@@ -20,12 +20,19 @@ import {
   X,
 } from "lucide-react";
 
+import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
+import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
 import { fetchPlanCatalog, type PlanRecord } from "@/lib/plansPublicService";
 import { logActivity } from "@/lib/logger";
+import {
+  fetchTenantPaymentRecipients,
+  findTenantPaymentRecipient,
+  type TenantPaymentRecipientOption,
+} from "@/lib/paymentRecipients";
 import {
   buildDraftAssetFileName,
   sanitizeStoragePathSegment,
@@ -63,6 +70,10 @@ type PaymentFormState = {
   banco: string;
   titular: string;
   whatsapp: string;
+  recipientUserId: string;
+  recipientUserName: string;
+  recipientUserTurma: string;
+  recipientUserAvatar: string;
 };
 
 type ProductRow = {
@@ -88,7 +99,7 @@ type ProductRow = {
   variantes?: Array<{ id?: string; cor?: string; tamanho?: string; estoque?: number; vendidos?: number }>;
   plan_prices?: Array<{ planId?: string; planName?: string; price?: number }>;
   plan_visibility?: Array<{ planId?: string; planName?: string; visible?: boolean }>;
-  payment_config?: { chave?: string; banco?: string; titular?: string; whatsapp?: string } | null;
+  payment_config?: CommercePaymentConfig | null;
 };
 
 type CategoryRow = {
@@ -163,6 +174,10 @@ const EMPTY_FORM: ProductForm = {
     banco: "",
     titular: "",
     whatsapp: "",
+    recipientUserId: "",
+    recipientUserName: "",
+    recipientUserTurma: "",
+    recipientUserAvatar: "",
   },
 };
 
@@ -273,11 +288,42 @@ export default function AdminLojaProdutosPage() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [inactiveRows, setInactiveRows] = useState<ProductRow[]>([]);
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+  const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
+  const [loadingPaymentRecipients, setLoadingPaymentRecipients] = useState(false);
 
   useEffect(() => {
     if (categoryName.trim() || categoryCoverImg.trim()) return;
     setCategoryButtonColor(tenantCategoryColor);
   }, [categoryCoverImg, categoryName, tenantCategoryColor]);
+
+  useEffect(() => {
+    const cleanTenantId = activeTenantId.trim();
+    if (!cleanTenantId) {
+      setPaymentRecipients([]);
+      setLoadingPaymentRecipients(false);
+      return;
+    }
+
+    let mounted = true;
+    setLoadingPaymentRecipients(true);
+
+    const run = async () => {
+      try {
+        const recipients = await fetchTenantPaymentRecipients(cleanTenantId);
+        if (mounted) setPaymentRecipients(recipients);
+      } catch (error: unknown) {
+        console.error(error);
+        if (mounted) setPaymentRecipients([]);
+      } finally {
+        if (mounted) setLoadingPaymentRecipients(false);
+      }
+    };
+
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantId]);
 
   const categoryNames = useMemo(() => {
     const merged = new Set<string>();
@@ -556,9 +602,30 @@ export default function AdminLojaProdutosPage() {
         banco: row.payment_config?.banco || "",
         titular: row.payment_config?.titular || "",
         whatsapp: row.payment_config?.whatsapp || "",
+        recipientUserId: row.payment_config?.recipient?.userId || "",
+        recipientUserName: row.payment_config?.recipient?.name || "",
+        recipientUserTurma: row.payment_config?.recipient?.turma || "",
+        recipientUserAvatar: row.payment_config?.recipient?.avatarUrl || "",
       },
     });
     setIsProductOpen(true);
+  };
+
+  const handleSelectPaymentRecipient = (recipientUserId: string) => {
+    const recipient = findTenantPaymentRecipient(paymentRecipients, recipientUserId);
+    setForm((prev) => ({
+      ...prev,
+      payment: {
+        ...prev.payment,
+        recipientUserId: recipient?.userId || "",
+        recipientUserName: recipient?.name || "",
+        recipientUserTurma: recipient?.turma || "",
+        recipientUserAvatar: recipient?.avatarUrl || "",
+        whatsapp: recipient?.phone
+          ? normalizePhoneToBrE164(recipient.phone)
+          : prev.payment.whatsapp,
+      },
+    }));
   };
 
   useEffect(() => {
@@ -775,6 +842,17 @@ export default function AdminLojaProdutosPage() {
             banco: form.payment.banco.trim(),
             titular: form.payment.titular.trim(),
             whatsapp: form.payment.whatsapp.trim(),
+            ...(form.payment.recipientUserId
+              ? {
+                  recipient: {
+                    userId: form.payment.recipientUserId.trim(),
+                    name: form.payment.recipientUserName.trim(),
+                    turma: form.payment.recipientUserTurma.trim(),
+                    avatarUrl: form.payment.recipientUserAvatar.trim(),
+                    phone: form.payment.whatsapp.trim(),
+                  },
+                }
+              : {}),
           }
         : null,
       seller_type: "tenant",
@@ -1283,6 +1361,8 @@ export default function AdminLojaProdutosPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <input
+                  id="admin-store-product-pix-key"
+                  name="admin_store_product_pix_key"
                   value={form.payment.chave}
                   maxLength={PIX_KEY_MAX_LENGTH}
                   onChange={(e) =>
@@ -1299,6 +1379,8 @@ export default function AdminLojaProdutosPage() {
                   className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
                 />
                 <input
+                  id="admin-store-product-pix-bank"
+                  name="admin_store_product_pix_bank"
                   value={form.payment.banco}
                   maxLength={PIX_BANK_MAX_LENGTH}
                   onChange={(e) =>
@@ -1315,6 +1397,8 @@ export default function AdminLojaProdutosPage() {
                   className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
                 />
                 <input
+                  id="admin-store-product-pix-holder"
+                  name="admin_store_product_pix_holder"
                   value={form.payment.titular}
                   maxLength={PIX_HOLDER_MAX_LENGTH}
                   onChange={(e) =>
@@ -1330,7 +1414,19 @@ export default function AdminLojaProdutosPage() {
                   disabled={!form.payment.enabled}
                   className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
                 />
+                <PaymentRecipientSelect
+                  id="admin-store-product-payment-recipient"
+                  name="admin_store_product_payment_recipient"
+                  label="Usuario da tenant para receber"
+                  options={paymentRecipients}
+                  selectedUserId={form.payment.recipientUserId}
+                  loading={loadingPaymentRecipients}
+                  disabled={!form.payment.enabled}
+                  onChange={handleSelectPaymentRecipient}
+                />
                 <input
+                  id="admin-store-product-payment-whatsapp"
+                  name="admin_store_product_payment_whatsapp"
                   value={form.payment.whatsapp}
                   maxLength={PHONE_MAX_LENGTH}
                   onChange={(e) =>

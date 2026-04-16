@@ -26,14 +26,21 @@ import {
   voteEventPollOption,
   type DateLike,
 } from "../../../lib/eventsNativeService";
+import { ReceiptContactButton } from "@/components/ReceiptContactButton";
 import { getTurmaImage } from "../../../constants/turmaImages";
 import { useAuth } from "../../../context/AuthContext";
 import { useTenantTheme } from "../../../context/TenantThemeContext";
 import { useToast } from "../../../context/ToastContext";
 import { resolvePlanIcon, resolvePlanTextClass, resolveUserPlanIcon } from "../../../constants/planVisuals";
-import { resolvePlanScopedPriceInfo } from "../../../lib/commerceCatalog";
+import {
+  resolvePlanScopedPriceInfo,
+  type CommercePaymentConfig,
+} from "../../../lib/commerceCatalog";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "../../../lib/roles";
-import { buildEventReceiptWhatsappMessage } from "../../../lib/tenantBranding";
+import {
+  buildEventReceiptWhatsappMessage,
+  resolveReceiptContactProfile,
+} from "../../../lib/tenantBranding";
 import { withTenantSlug } from "../../../lib/tenantRouting";
 import { collectUserPlanScope } from "../../../lib/userPlanScope";
 
@@ -79,12 +86,7 @@ interface PedidoIngresso {
     quantidade: number;
     valorTotal: string;
     status: string;
-    payment_config?: {
-      chave?: string;
-      banco?: string;
-      titular?: string;
-      whatsapp?: string;
-    } | null;
+    payment_config?: CommercePaymentConfig | null;
     dataSolicitacao?: DateLike | null;
     dataAprovacao?: DateLike | null;
 }
@@ -479,6 +481,10 @@ export default function DetalhesEventoPage() {
                       contatoFinanceiro ||
                       ""
                   ).trim(),
+              ...(paymentConfig?.recipient ? { recipient: paymentConfig.recipient } : {}),
+              ...(Array.isArray(paymentConfig?.ticketEntries)
+                  ? { ticketEntries: paymentConfig.ticketEntries }
+                  : {}),
           };
       },
       [contatoFinanceiro, evento, globalFinanceiro]
@@ -516,6 +522,13 @@ export default function DetalhesEventoPage() {
           const buyerPhone = user?.telefone || "Nao informado";
           const buyerTurma = user?.turma || "Sem turma";
           const total = formatCurrencyValue(pedido.valorTotal);
+          const recipient = resolveReceiptContactProfile({
+              paymentConfig: payment,
+              tenantSigla,
+              tenantName,
+              fallbackAvatarUrl: evento.imagem || "/logo.png",
+              fallbackPhone: payment.whatsapp || contatoFinanceiro,
+          });
           const message = buildEventReceiptWhatsappMessage({
               tenantSigla,
               tenantName,
@@ -528,12 +541,15 @@ export default function DetalhesEventoPage() {
               ticketLabel: `${pedido.quantidade}x ${pedido.loteNome}`,
               totalValue: total,
               orderCode: pedido.id.slice(0, 8).toUpperCase(),
+              recipientName: recipient.name,
+              recipientTurma: recipient.turma,
           });
           const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
           window.open(whatsappUrl, "_blank");
       },
       [
           addToast,
+          contatoFinanceiro,
           evento,
           resolvePedidoPaymentConfig,
           tenantName,
@@ -1288,17 +1304,19 @@ export default function DetalhesEventoPage() {
                                                 <Copy size={12} />
                                                 Copiar PIX
                                             </button>
-                                            {pedidoWhatsapp ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleSendPedidoReceiptWhatsapp(pedido)}
-                                                    className="inline-flex items-center gap-2 rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 px-3 py-2 text-[10px] font-black uppercase text-[#8bf0b0] hover:bg-[#25D366]/20"
-                                                >
-                                                    <MessageCircle size={12} />
-                                                    Enviar comprovante
-                                                </button>
-                                            ) : null}
                                         </div>
+                                        {pedidoWhatsapp ? (
+                                            <ReceiptContactButton
+                                                recipient={resolveReceiptContactProfile({
+                                                    paymentConfig: payment,
+                                                    tenantSigla,
+                                                    tenantName,
+                                                    fallbackAvatarUrl: evento?.imagem || "/logo.png",
+                                                    fallbackPhone: payment.whatsapp || contatoFinanceiro,
+                                                })}
+                                                onClick={() => handleSendPedidoReceiptWhatsapp(pedido)}
+                                            />
+                                        ) : null}
                                     </div>
                                 </div>
                             </article>
@@ -1336,6 +1354,19 @@ export default function DetalhesEventoPage() {
                             <div className="mt-3 text-xs text-zinc-300">
                                 {pedido.quantidade}x {pedido.loteNome} • R$ {formatCurrencyValue(pedido.valorTotal)}
                             </div>
+                            <Link
+                                href={
+                                    tenantSlug
+                                        ? withTenantSlug(
+                                              tenantSlug,
+                                              `/configuracoes/pedidos/eventos?pedido=${encodeURIComponent(pedido.id)}`
+                                          )
+                                        : `/configuracoes/pedidos/eventos?pedido=${encodeURIComponent(pedido.id)}`
+                                }
+                                className="mt-3 inline-flex items-center gap-2 text-[11px] font-black uppercase text-emerald-400 hover:text-emerald-300"
+                            >
+                                Ver pedido / ingresso
+                            </Link>
                         </article>
                     ))}
                 </div>

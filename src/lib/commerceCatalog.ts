@@ -21,11 +21,42 @@ export interface CommercePlanVisibilityEntry extends CommercePlanEntry {
   visible: boolean;
 }
 
+export type CommerceTicketStatus = "ativo" | "lido";
+
+export interface CommercePaymentRecipient {
+  userId?: string;
+  name: string;
+  turma: string;
+  avatarUrl: string;
+  phone: string;
+}
+
+export interface CommerceTicketEntry {
+  id: string;
+  token: string;
+  label: string;
+  unitIndex: number;
+  status: CommerceTicketStatus;
+  orderId?: string;
+  orderCode?: string;
+  eventId?: string;
+  eventTitle?: string;
+  loteName?: string;
+  holderName?: string;
+  holderTurma?: string;
+  scannedAt?: string;
+  scannedByUserId?: string;
+  scannedByUserName?: string;
+  scannedByUserTurma?: string;
+}
+
 export interface CommercePaymentConfig {
   chave: string;
   banco: string;
   titular: string;
   whatsapp?: string;
+  recipient?: CommercePaymentRecipient;
+  ticketEntries?: CommerceTicketEntry[];
 }
 
 export interface CommerceSellerSnapshot {
@@ -62,6 +93,82 @@ const normalizeOptionalPrice = (value: unknown): number | null => {
     return null;
   }
   return null;
+};
+
+const normalizeTicketStatus = (value: unknown): CommerceTicketStatus => {
+  const status = normalizeString(value).toLowerCase();
+  return status === "lido" ? "lido" : "ativo";
+};
+
+const normalizePaymentRecipient = (
+  value: unknown
+): CommercePaymentRecipient | null => {
+  if (typeof value !== "object" || value === null) return null;
+  const row = value as Record<string, unknown>;
+  const userId = normalizeString(row.userId || row.uid || row.id);
+  const name = normalizeString(row.name || row.nome || row.userName);
+  const turma = normalizeString(row.turma || row.userTurma || row.className);
+  const avatarUrl = normalizeString(
+    row.avatarUrl || row.foto || row.photoUrl || row.userAvatar
+  );
+  const phone = normalizeString(
+    row.phone || row.telefone || row.whatsapp || row.userPhone
+  );
+
+  if (!userId && !name && !turma && !avatarUrl && !phone) return null;
+
+  return {
+    ...(userId ? { userId } : {}),
+    name,
+    turma,
+    avatarUrl,
+    phone,
+  };
+};
+
+const normalizeTicketEntries = (value: unknown): CommerceTicketEntry[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry, index) => {
+      if (typeof entry !== "object" || entry === null) return null;
+      const row = entry as Record<string, unknown>;
+      const token = normalizeString(row.token || row.ticketToken);
+      const unitIndexRaw = Number(row.unitIndex ?? row.index ?? index + 1);
+      const unitIndex =
+        Number.isFinite(unitIndexRaw) && unitIndexRaw > 0
+          ? Math.floor(unitIndexRaw)
+          : index + 1;
+      const id =
+        normalizeString(row.id || row.ticketId) || `${token || "ticket"}-${unitIndex}`;
+      if (!token && !id) return null;
+
+      return {
+        id,
+        token: token || id,
+        label: normalizeString(row.label) || `Ingresso ${unitIndex}`,
+        unitIndex,
+        status: normalizeTicketStatus(row.status),
+        ...(normalizeString(row.orderId) ? { orderId: normalizeString(row.orderId) } : {}),
+        ...(normalizeString(row.orderCode) ? { orderCode: normalizeString(row.orderCode) } : {}),
+        ...(normalizeString(row.eventId) ? { eventId: normalizeString(row.eventId) } : {}),
+        ...(normalizeString(row.eventTitle) ? { eventTitle: normalizeString(row.eventTitle) } : {}),
+        ...(normalizeString(row.loteName) ? { loteName: normalizeString(row.loteName) } : {}),
+        ...(normalizeString(row.holderName) ? { holderName: normalizeString(row.holderName) } : {}),
+        ...(normalizeString(row.holderTurma) ? { holderTurma: normalizeString(row.holderTurma) } : {}),
+        ...(normalizeString(row.scannedAt) ? { scannedAt: normalizeString(row.scannedAt) } : {}),
+        ...(normalizeString(row.scannedByUserId)
+          ? { scannedByUserId: normalizeString(row.scannedByUserId) }
+          : {}),
+        ...(normalizeString(row.scannedByUserName)
+          ? { scannedByUserName: normalizeString(row.scannedByUserName) }
+          : {}),
+        ...(normalizeString(row.scannedByUserTurma)
+          ? { scannedByUserTurma: normalizeString(row.scannedByUserTurma) }
+          : {}),
+      } satisfies CommerceTicketEntry;
+    })
+    .filter((entry): entry is CommerceTicketEntry => entry !== null);
 };
 
 export const normalizeAvailabilityStatus = (
@@ -134,14 +241,30 @@ export const normalizePaymentConfig = (
   const banco = normalizeString(row.banco);
   const titular = normalizeString(row.titular);
   const whatsapp = normalizeString(row.whatsapp);
+  const recipient =
+    normalizePaymentRecipient(row.recipient) ||
+    normalizePaymentRecipient({
+      userId: row.recipientUserId,
+      name: row.recipientUserName || row.recipientName,
+      turma: row.recipientUserTurma || row.recipientTurma,
+      avatarUrl: row.recipientUserAvatar || row.recipientAvatarUrl,
+      phone: row.recipientUserPhone || row.recipientPhone || row.whatsapp,
+    });
+  const ticketEntries = normalizeTicketEntries(
+    row.ticketEntries || row.tickets || row.ingressos
+  );
 
-  if (!chave && !banco && !titular && !whatsapp) return null;
+  if (!chave && !banco && !titular && !whatsapp && !recipient && ticketEntries.length === 0) {
+    return null;
+  }
 
   return {
     chave,
     banco,
     titular,
     ...(whatsapp ? { whatsapp } : {}),
+    ...(recipient ? { recipient } : {}),
+    ...(ticketEntries.length > 0 ? { ticketEntries } : {}),
   };
 };
 

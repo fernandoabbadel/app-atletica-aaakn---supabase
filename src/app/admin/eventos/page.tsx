@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import Image from "next/image"; 
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
+import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import {
@@ -40,6 +41,12 @@ import {
   upsertAdminEvent,
   type DateLike,
 } from "../../../lib/eventsNativeService";
+import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
+import {
+  fetchTenantPaymentRecipients,
+  findTenantPaymentRecipient,
+  type TenantPaymentRecipientOption,
+} from "@/lib/paymentRecipients";
 import { fetchPlanCatalog, type PlanRecord } from "../../../lib/plansPublicService";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -131,12 +138,11 @@ interface Evento {
   pixBanco?: string;
   pixTitular?: string;
   contatoComprovante?: string;
-  paymentConfig?: {
-    chave?: string;
-    banco?: string;
-    titular?: string;
-    whatsapp?: string;
-  } | null;
+  recipientUserId?: string;
+  recipientUserName?: string;
+  recipientUserTurma?: string;
+  recipientUserAvatar?: string;
+  paymentConfig?: CommercePaymentConfig | null;
 }
 
 // LÓGICA DO CONTADOR COOL
@@ -225,17 +231,47 @@ export default function AdminEventosPage() {
   const [uploading, setUploading] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
+  const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
+  const [loadingPaymentRecipients, setLoadingPaymentRecipients] = useState(false);
 
   const [novoEvento, setNovoEvento] = useState<Partial<Evento>>({
     titulo: "", data: "", hora: "", local: "", tipo: "Festa", destaque: "", mapsUrl: "", imagem: "", descricao: "", lotes: [],
     imagePositionY: 50,
     // 🦈 Inicialização dos novos campos
-    pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", paymentConfig: null
+    pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", recipientUserId: "", recipientUserName: "", recipientUserTurma: "", recipientUserAvatar: "", paymentConfig: null
   });
   const [novoLote, setNovoLote] = useState<{ nome: string; preco: string; status: StatusLote }>({ nome: "", preco: "", status: "ativo" });
   
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
   const [pollDraftOptions, setPollDraftOptions] = useState<string[]>(["", ""]);
+
+  useEffect(() => {
+      const cleanTenantId = activeTenantId.trim();
+      if (!cleanTenantId) {
+          setPaymentRecipients([]);
+          setLoadingPaymentRecipients(false);
+          return;
+      }
+
+      let mounted = true;
+      setLoadingPaymentRecipients(true);
+      const run = async () => {
+          try {
+              const recipients = await fetchTenantPaymentRecipients(cleanTenantId);
+              if (mounted) setPaymentRecipients(recipients);
+          } catch (error: unknown) {
+              console.error(error);
+              if (mounted) setPaymentRecipients([]);
+          } finally {
+              if (mounted) setLoadingPaymentRecipients(false);
+          }
+      };
+
+      void run();
+      return () => {
+          mounted = false;
+      };
+  }, [activeTenantId]);
 
   const mapEventRow = (raw: Record<string, unknown>): Evento => ({
       id: String(raw.id || ""),
@@ -272,6 +308,22 @@ export default function AdminEventosPage() {
       pixBanco: String(raw.pixBanco || ""),
       pixTitular: String(raw.pixTitular || ""),
       contatoComprovante: String(raw.contatoComprovante || ""),
+      recipientUserId:
+        typeof (raw.payment_config as CommercePaymentConfig | null | undefined)?.recipient?.userId === "string"
+          ? (raw.payment_config as CommercePaymentConfig).recipient?.userId || ""
+          : "",
+      recipientUserName:
+        typeof (raw.payment_config as CommercePaymentConfig | null | undefined)?.recipient?.name === "string"
+          ? (raw.payment_config as CommercePaymentConfig).recipient?.name || ""
+          : "",
+      recipientUserTurma:
+        typeof (raw.payment_config as CommercePaymentConfig | null | undefined)?.recipient?.turma === "string"
+          ? (raw.payment_config as CommercePaymentConfig).recipient?.turma || ""
+          : "",
+      recipientUserAvatar:
+        typeof (raw.payment_config as CommercePaymentConfig | null | undefined)?.recipient?.avatarUrl === "string"
+          ? (raw.payment_config as CommercePaymentConfig).recipient?.avatarUrl || ""
+          : "",
       paymentConfig:
         raw.payment_config && typeof raw.payment_config === "object"
           ? (raw.payment_config as Evento["paymentConfig"])
@@ -490,7 +542,7 @@ export default function AdminEventosPage() {
   const handleOpenCreate = () => {
       setNovoEvento({ 
           titulo: "", data: "", hora: "", local: "", tipo: "Festa", destaque: "", mapsUrl: "", imagem: "", descricao: "", lotes: [], imagePositionY: 50,
-          pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", paymentConfig: null
+          pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", recipientUserId: "", recipientUserName: "", recipientUserTurma: "", recipientUserAvatar: "", paymentConfig: null
       });
       setEditingId(null);
       setIsEditing(false);
@@ -511,6 +563,10 @@ export default function AdminEventosPage() {
           pixTitular: evento.pixTitular || "",
           contatoComprovante: evento.contatoComprovante || "",
           saleStatus: evento.saleStatus || "ativo",
+          recipientUserId: evento.recipientUserId || "",
+          recipientUserName: evento.recipientUserName || "",
+          recipientUserTurma: evento.recipientUserTurma || "",
+          recipientUserAvatar: evento.recipientUserAvatar || "",
           paymentConfig: evento.paymentConfig || null,
       });
       if (!isValidDate || !isValidTime) addToast("Formato de data antigo. Por favor, atualize.", "info");
@@ -526,6 +582,20 @@ export default function AdminEventosPage() {
       if (!targetEvent) return;
       handleOpenEdit(targetEvent);
   }, [eventos, handleOpenEdit, searchParams, showModal]);
+
+  const handleSelectEventPaymentRecipient = (recipientUserId: string) => {
+      const recipient = findTenantPaymentRecipient(paymentRecipients, recipientUserId);
+      setNovoEvento((prev) => ({
+          ...prev,
+          recipientUserId: recipient?.userId || "",
+          recipientUserName: recipient?.name || "",
+          recipientUserTurma: recipient?.turma || "",
+          recipientUserAvatar: recipient?.avatarUrl || "",
+          contatoComprovante: recipient?.phone
+              ? normalizePhoneToBrE164(recipient.phone)
+              : String(prev.contatoComprovante || ""),
+      }));
+  };
 
   const handleSave = async () => {
     if (!novoEvento.titulo?.trim()) return addToast("Titulo obrigatorio!", "error");
@@ -567,6 +637,17 @@ export default function AdminEventosPage() {
                 banco: String(novoEvento.pixBanco || "").trim(),
                 titular: String(novoEvento.pixTitular || "").trim(),
                 whatsapp: normalizePhoneToBrE164(String(novoEvento.contatoComprovante || "").trim()),
+                ...(String(novoEvento.recipientUserId || "").trim()
+                  ? {
+                      recipient: {
+                        userId: String(novoEvento.recipientUserId || "").trim(),
+                        name: String(novoEvento.recipientUserName || "").trim(),
+                        turma: String(novoEvento.recipientUserTurma || "").trim(),
+                        avatarUrl: String(novoEvento.recipientUserAvatar || "").trim(),
+                        phone: normalizePhoneToBrE164(String(novoEvento.contatoComprovante || "").trim()),
+                      },
+                    }
+                  : {}),
               }
             : null,
         updatedAt: new Date().toISOString(),
@@ -1190,13 +1271,22 @@ export default function AdminEventosPage() {
                     <p className="text-[10px] text-zinc-500 -mt-2 mb-2">Preencha para substituir a conta global neste evento.</p>
                     
                     <div className="grid grid-cols-1 gap-2">
-                        <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Chave PIX (ex: CNPJ, Email)" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixChave} onChange={e => setNovoEvento({...novoEvento, pixChave: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
+                        <input id="admin-event-pix-key" name="admin_event_pix_key" type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Chave PIX (ex: CNPJ, Email)" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixChave} onChange={e => setNovoEvento({...novoEvento, pixChave: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                        <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixBanco} onChange={e => setNovoEvento({...novoEvento, pixBanco: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
-                        <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixTitular} onChange={e => setNovoEvento({...novoEvento, pixTitular: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
+                        <input id="admin-event-pix-bank" name="admin_event_pix_bank" type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixBanco} onChange={e => setNovoEvento({...novoEvento, pixBanco: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
+                        <input id="admin-event-pix-holder" name="admin_event_pix_holder" type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixTitular} onChange={e => setNovoEvento({...novoEvento, pixTitular: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                     </div>
-                    <input type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.contatoComprovante} onChange={e => setNovoEvento({...novoEvento, contatoComprovante: normalizePhoneToBrE164(e.target.value)})} />
+                    <PaymentRecipientSelect
+                        id="admin-event-payment-recipient"
+                        name="admin_event_payment_recipient"
+                        label="Usuario da tenant para receber"
+                        options={paymentRecipients}
+                        selectedUserId={String(novoEvento.recipientUserId || "")}
+                        loading={loadingPaymentRecipients}
+                        onChange={handleSelectEventPaymentRecipient}
+                    />
+                    <input id="admin-event-payment-whatsapp" name="admin_event_payment_whatsapp" type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.contatoComprovante} onChange={e => setNovoEvento({...novoEvento, contatoComprovante: normalizePhoneToBrE164(e.target.value)})} />
                 </div>
                 
                 {/* Gestão de Lotes */}

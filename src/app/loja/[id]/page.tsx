@@ -16,7 +16,6 @@ import {
   Copy,
   Heart,
   Loader2,
-  MessageCircle,
   Minimize2,
   ShoppingBag,
   Wallet,
@@ -27,6 +26,7 @@ import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
 import { fetchFinanceiroConfig } from "../../../lib/eventsService";
 import { buildLoginPath } from "@/lib/authRedirect";
+import { ReceiptContactButton } from "@/components/ReceiptContactButton";
 import {
   fetchMiniVendorProfileById,
   resolveMiniVendorPaymentConfig,
@@ -35,8 +35,11 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { collectUserPlanScope } from "@/lib/userPlanScope";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "@/lib/roles";
+import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
 import {
   buildTenantFinanceFallback,
+  buildProductReceiptWhatsappMessage,
+  resolveReceiptContactProfile,
   resolveTenantBrandLabel,
 } from "../../../lib/tenantBranding";
 
@@ -94,12 +97,7 @@ interface DateLike {
   toDate: () => Date;
 }
 
-interface PixData {
-  chave: string;
-  banco: string;
-  titular: string;
-  whatsapp?: string;
-}
+type PixData = CommercePaymentConfig;
 
 const getAvailabilityLabel = (status?: Produto["status"]): string => {
   if (status === "em_breve") return "Em-breve";
@@ -307,12 +305,28 @@ export default function DetalheProdutoPage() {
           typeof rawConfig?.whatsapp === "string" && rawConfig.whatsapp.trim()
             ? rawConfig.whatsapp.trim()
             : pixData.whatsapp || financeFallback.whatsapp,
+        ...(rawConfig?.recipient ? { recipient: rawConfig.recipient } : pixData.recipient ? { recipient: pixData.recipient } : {}),
+        ...(Array.isArray(rawConfig?.ticketEntries)
+          ? { ticketEntries: rawConfig.ticketEntries }
+          : Array.isArray(pixData.ticketEntries)
+          ? { ticketEntries: pixData.ticketEntries }
+          : {}),
       };
     },
     [financeFallback.whatsapp, pixData]
   );
   const sellerLogo = produto?.seller?.logoUrl || tenantLogoUrl || "/logo.png";
   const sellerName = produto?.seller?.name || brandLabel;
+  const checkoutRecipient = useMemo(
+    () =>
+      resolveReceiptContactProfile({
+        paymentConfig: pixData,
+        tenantName: sellerName,
+        fallbackAvatarUrl: sellerLogo,
+        fallbackPhone: pixData.whatsapp || financeFallback.whatsapp,
+      }),
+    [financeFallback.whatsapp, pixData, sellerLogo, sellerName]
+  );
   const sellerProfileHref =
     produto?.seller?.type === "mini_vendor" && produto.seller.id
       ? tenantSlug
@@ -549,7 +563,19 @@ export default function DetalheProdutoPage() {
     const buyerName = user?.nome?.trim() || "Cliente";
     const buyerTurma = user?.turma?.trim() || "Sem turma";
     const buyerPhone = user?.telefone?.trim() || "Nao informado";
-    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[CLIENTE] ${buyerName}\n[TURMA] ${buyerTurma}\n[CONTATO] ${buyerPhone}\n[PRODUTO] ${produto.nome}\n[QTD] ${checkoutQuantity}\n${checkoutColor.trim() ? `[COR] ${checkoutColor.trim()}\n` : ""}[VALOR] R$ ${checkoutTotal.toFixed(2)}\n[PEDIDO] ${checkoutOrderId.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+    const message = buildProductReceiptWhatsappMessage({
+      organizerLabel: sellerName,
+      productName: produto.nome,
+      buyerName,
+      buyerTurma,
+      buyerPhone,
+      quantity: checkoutQuantity,
+      color: checkoutColor.trim(),
+      totalValue: checkoutTotal.toFixed(2),
+      orderCode: checkoutOrderId.slice(0, 8).toUpperCase(),
+      recipientName: checkoutRecipient.name,
+      recipientTurma: checkoutRecipient.turma,
+    });
     const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, "_blank");
     setCheckoutStep(3);
@@ -573,6 +599,12 @@ export default function DetalheProdutoPage() {
   const handleSendOrderReceiptWhatsapp = (order: Order) => {
     if (!produto) return;
     const payment = resolveOrderPaymentConfig(order);
+    const recipient = resolveReceiptContactProfile({
+      paymentConfig: payment,
+      tenantName: sellerName,
+      fallbackAvatarUrl: sellerLogo,
+      fallbackPhone: payment.whatsapp || financeFallback.whatsapp,
+    });
     const adminPhone = (payment.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
     if (!adminPhone) {
       addToast("WhatsApp financeiro nao configurado para este pedido.", "error");
@@ -585,7 +617,19 @@ export default function DetalheProdutoPage() {
     const buyerName = user?.nome?.trim() || order.userName || "Cliente";
     const buyerTurma = user?.turma?.trim() || order.userTurma || "Sem turma";
     const buyerPhone = user?.telefone?.trim() || "Nao informado";
-    const message = `Fala, equipe ${sellerName}! Quero finalizar a compra do produto *${produto.nome}*.\n\n[CLIENTE] ${buyerName}\n[TURMA] ${buyerTurma}\n[CONTATO] ${buyerPhone}\n[PRODUTO] ${produto.nome}\n[QTD] ${quantity}\n${selectedColor ? `[COR] ${selectedColor}\n` : ""}[VALOR] R$ ${total}\n[PEDIDO] ${order.id.slice(0, 8).toUpperCase()}\n\nSegue o comprovante do PIX!`;
+    const message = buildProductReceiptWhatsappMessage({
+      organizerLabel: sellerName,
+      productName: produto.nome,
+      buyerName,
+      buyerTurma,
+      buyerPhone,
+      quantity,
+      color: selectedColor,
+      totalValue: total,
+      orderCode: order.id.slice(0, 8).toUpperCase(),
+      recipientName: recipient.name,
+      recipientTurma: recipient.turma,
+    });
     const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, "_blank");
   };
@@ -886,17 +930,18 @@ export default function DetalheProdutoPage() {
                                   <Copy size={12} />
                                   Copiar PIX
                                 </button>
-                                {orderWhatsapp ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSendOrderReceiptWhatsapp(order)}
-                                    className="inline-flex items-center gap-2 rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 px-3 py-2 text-[10px] font-black uppercase text-[#8bf0b0] hover:bg-[#25D366]/20"
-                                  >
-                                    <MessageCircle size={12} />
-                                    Enviar comprovante
-                                  </button>
-                                ) : null}
                               </div>
+                              {orderWhatsapp ? (
+                                <ReceiptContactButton
+                                  recipient={resolveReceiptContactProfile({
+                                    paymentConfig: payment,
+                                    tenantName: sellerName,
+                                    fallbackAvatarUrl: sellerLogo,
+                                    fallbackPhone: payment.whatsapp || financeFallback.whatsapp,
+                                  })}
+                                  onClick={() => handleSendOrderReceiptWhatsapp(order)}
+                                />
+                              ) : null}
                             </div>
                           </div>
                         );
@@ -1099,14 +1144,12 @@ export default function DetalheProdutoPage() {
                     </div>
                   </div>
 
-                  <button
+                  <ReceiptContactButton
+                    recipient={checkoutRecipient}
                     onClick={handleSendReceiptWhatsapp}
                     disabled={!checkoutOrderId}
-                    className="w-full py-3 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-black text-xs font-black uppercase transition disabled:opacity-50 inline-flex items-center justify-center gap-2"
-                  >
-                    <MessageCircle size={16} fill="black" />
-                    Enviar Comprovante no WhatsApp
-                  </button>
+                    helperText="Depois de pagar o PIX, envie o comprovante para esse responsavel liberar manualmente o pedido."
+                  />
 
                   <p className="text-[11px] text-zinc-500 leading-relaxed">
                     Depois de pagar o PIX, envie o comprovante para o contato financeiro para liberacao manual do pedido.

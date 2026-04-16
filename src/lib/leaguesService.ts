@@ -14,6 +14,7 @@ import {
   resolveLeagueRoleLabel,
   sortLeagueMembersByRole,
 } from "./leagueRoles";
+import { normalizePaymentConfig, type CommercePaymentConfig } from "./commerceCatalog";
 
 type CacheEntry<T> = {
   cachedAt: number;
@@ -847,6 +848,21 @@ export async function syncLeagueEvents(payload: {
       imagePositionY: Math.max(0, Math.min(100, asNumber(event.imagePositionY, 50))),
       lotes: Array.isArray(event.lotes) ? event.lotes : [],
       pollQuestion: asString(event.pollQuestion).trim(),
+      paymentConfig:
+        normalizePaymentConfig(event.paymentConfig) ||
+        normalizePaymentConfig({
+          chave: event.pixChave,
+          banco: event.pixBanco,
+          titular: event.pixTitular,
+          whatsapp: event.contatoComprovante,
+          recipient: {
+            userId: event.recipientUserId,
+            name: event.recipientUserName,
+            turma: event.recipientUserTurma,
+            avatarUrl: event.recipientUserAvatar,
+            phone: event.contatoComprovante,
+          },
+        }),
     };
 
     let eventPayload: Record<string, unknown> = {
@@ -866,6 +882,7 @@ export async function syncLeagueEvents(payload: {
       pixBanco: asString(nextEvent.pixBanco).trim(),
       pixTitular: asString(nextEvent.pixTitular).trim(),
       contatoComprovante: asString(nextEvent.contatoComprovante).trim(),
+      ...(nextEvent.paymentConfig ? { payment_config: nextEvent.paymentConfig } : {}),
       categoria: "Liga",
       status: "ativo",
       sale_status: asString(nextEvent.saleStatus, "ativo").trim() || "ativo",
@@ -1037,6 +1054,11 @@ export interface LeagueEventRecord {
   pixBanco?: string;
   pixTitular?: string;
   contatoComprovante?: string;
+  recipientUserId?: string;
+  recipientUserName?: string;
+  recipientUserTurma?: string;
+  recipientUserAvatar?: string;
+  paymentConfig?: CommercePaymentConfig | null;
 }
 
 export interface LeagueRecord {

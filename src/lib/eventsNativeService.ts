@@ -18,6 +18,7 @@ import {
   normalizePaymentConfig,
   normalizePlanPriceEntries,
 } from "./commerceCatalog";
+import { ensureEventTicketEntries } from "./eventTickets";
 import { fetchCanonicalUserVisuals } from "./userVisualsService";
 import {
   hydrateEventPollRows,
@@ -52,7 +53,7 @@ const EVENTOS_ENQUETES_SELECT_COLUMNS =
   "id,eventoId,question,allowUserOptions,options,createdAt,updatedAt";
 const PATENTES_SELECT_COLUMNS = "id,titulo,minXp,cor,iconName,bg,border,text";
 const SOLICITACOES_INGRESSOS_SELECT_COLUMNS =
-  "id,eventoId,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,payment_config,dataSolicitacao,dataAprovacao,aprovadoPor";
+  "id,eventoId,eventoNome,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,payment_config,dataSolicitacao,dataAprovacao,aprovadoPor";
 const FINANCEIRO_CONFIG_SELECT_COLUMNS =
   "id,data,chave,banco,titular,whatsapp,updatedAt,createdAt";
 const MONTHS_PT_BR: Record<string, number> = {
@@ -1239,13 +1240,35 @@ export async function setAdminTicketPayment(payload: {
   if (!ticketRequestId) return;
 
   const supabase = getSupabaseClient();
+  const { data: existingRow, error: existingError } = await supabase
+    .from("solicitacoes_ingressos")
+    .select("id,eventoId,eventoNome,userName,userTurma,loteNome,quantidade,payment_config")
+    .eq("id", ticketRequestId)
+    .maybeSingle();
+  if (existingError) throwSupabaseError(existingError);
+
+  const normalizedExisting = asObject(existingRow) ?? {};
+  const updatePayload: Row = {
+    status: payload.isApproving ? "aprovado" : "pendente",
+    dataAprovacao: payload.isApproving ? nowIso() : null,
+    aprovadoPor: payload.isApproving ? payload.approvedBy : null,
+  };
+  if (payload.isApproving) {
+    updatePayload.payment_config = ensureEventTicketEntries({
+      paymentConfig: normalizePaymentConfig(normalizedExisting.payment_config),
+      orderId: ticketRequestId,
+      quantity: Math.max(1, Math.floor(asNum(normalizedExisting.quantidade, 1))),
+      eventId: asString(normalizedExisting.eventoId).trim(),
+      eventTitle: asString(normalizedExisting.eventoNome).trim(),
+      loteName: asString(normalizedExisting.loteNome).trim(),
+      holderName: asString(normalizedExisting.userName).trim(),
+      holderTurma: asString(normalizedExisting.userTurma).trim(),
+    });
+  }
+
   const { error } = await supabase
     .from("solicitacoes_ingressos")
-    .update({
-      status: payload.isApproving ? "aprovado" : "pendente",
-      dataAprovacao: payload.isApproving ? nowIso() : null,
-      aprovadoPor: payload.isApproving ? payload.approvedBy : null,
-    })
+    .update(updatePayload)
     .eq("id", ticketRequestId);
   if (error) throwSupabaseError(error);
 
