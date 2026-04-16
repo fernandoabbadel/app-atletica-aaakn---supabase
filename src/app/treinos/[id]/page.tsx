@@ -3,10 +3,11 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { 
   ArrowLeft, MapPin, Clock, User, Trophy, Users, CheckCircle, 
-  Share2, XCircle, Calendar, Crown, Navigation, UserX 
+  Share2, XCircle, Calendar, Crown, Navigation, UserX, QrCode, X
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
+import { QRCodeSVG } from "qrcode.react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../../context/ToastContext";
@@ -89,6 +90,7 @@ export default function TreinoDetalhesPage() {
   const [loading, setLoading] = useState(true);
   const [userRsvp, setUserRsvp] = useState<"going" | "not_going" | null>(null);
   const [loadingAction, setLoadingAction] = useState(false);
+  const [showPresenceQr, setShowPresenceQr] = useState(false);
 
   // 1. CARREGAR DADOS (TREINO + RSVPS + CHAMADA OFICIAL)
   const treinoId = typeof params.id === "string" ? params.id : "";
@@ -258,6 +260,21 @@ export default function TreinoDetalhesPage() {
       return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(treino.local)}`;
   };
 
+  const presenceQrPayload = useMemo(() => {
+      if (!treino || !user?.uid) return "";
+      return JSON.stringify({
+          t: "treino-presenca",
+          v: 1,
+          tid: treino.id,
+          ten: tenantId || "",
+          uid: user.uid,
+          n: user.nome || "Atleta",
+          tu: user.turma || "Geral",
+          av: user.foto || "",
+          ts: Date.now(),
+      });
+  }, [tenantId, treino, user?.foto, user?.nome, user?.turma, user?.uid]);
+
   if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><div className="w-10 h-10 border-4 border-emerald-500 rounded-full animate-spin border-t-transparent"></div></div>;
   if (!treino) return null;
 
@@ -352,6 +369,20 @@ export default function TreinoDetalhesPage() {
                 {loadingAction ? <span className="animate-spin">⌛</span> : userRsvp === 'going' ? <><CheckCircle size={24}/> Confirmado</> : "Confirmar Presença"}
             </button>
         </div>
+
+        <button
+            type="button"
+            onClick={() => {
+                if (!user?.uid) {
+                    addToast("Faca login para abrir seu QR de presenca.", "info");
+                    return;
+                }
+                setShowPresenceQr(true);
+            }}
+            className="w-full rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-4 text-sm font-black uppercase tracking-widest text-emerald-300 transition hover:bg-emerald-500/15 flex items-center justify-center gap-2"
+        >
+            <QrCode size={20} /> Abrir QR de presenca
+        </button>
 
         {/* 2. RESPONSÁVEL & DESCRIÇÃO */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -454,6 +485,48 @@ export default function TreinoDetalhesPage() {
         </section>
 
       </div>
+
+      {showPresenceQr && presenceQrPayload ? (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 p-5"
+          onClick={() => setShowPresenceQr(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl border border-emerald-500/30 bg-zinc-950 p-6 text-center shadow-[0_0_50px_rgba(16,185,129,0.22)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div className="text-left">
+                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-400">
+                  QR do treino
+                </p>
+                <h2 className="mt-1 text-lg font-black uppercase text-white">
+                  {treino.modalidade}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPresenceQr(false)}
+                className="rounded-full border border-zinc-700 bg-black p-2 text-zinc-300"
+                aria-label="Fechar QR"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mx-auto inline-flex rounded-3xl bg-white p-4">
+              <QRCodeSVG value={presenceQrPayload} size={230} includeMargin />
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-zinc-800 bg-black/50 px-4 py-3 text-left">
+              <p className="text-sm font-black text-white">{user?.nome || "Atleta"}</p>
+              <p className="mt-1 text-xs font-bold uppercase tracking-wide text-zinc-500">
+                {user?.turma || "Geral"} - {treino.dia || "-"} - {treino.horario || "-"}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -42,7 +42,7 @@ const TREINOS_SELECT_COLUMNS =
 const TREINOS_RSVPS_SELECT_COLUMNS =
   "id,treinoId,userId,userName,userAvatar,userTurma,status,timestamp";
 const TREINOS_CHAMADA_SELECT_COLUMNS =
-  "id,treinoId,userId,nome,avatar,turma,status,origem,pagamento,timestamp,updatedAt";
+  "id,treinoId,userId,nome,avatar,turma,status,origem,pagamento,performanceRating,performanceRatedBy,performanceRatedAt,timestamp,updatedAt";
 const DIRECTORY_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const directoryInitialCountsCache = new Map<string, CacheEntry<Record<string, number>>>();
 const directorySegmentsCache = new Map<string, CacheEntry<TreinoUserDirectorySegment[]>>();
@@ -409,6 +409,12 @@ const normalizeChamada = (id: string, raw: unknown): TreinoChamadaRecord | null 
     status,
     origem,
     ...(pagamento ? { pagamento } : {}),
+    performanceRating:
+      asNumber(data.performanceRating, 0) >= 1 && asNumber(data.performanceRating, 0) <= 5
+        ? Math.floor(asNumber(data.performanceRating, 0))
+        : null,
+    performanceRatedBy: asString(data.performanceRatedBy).trim().slice(0, 160),
+    performanceRatedAt: asString(data.performanceRatedAt).trim(),
   };
 };
 
@@ -493,6 +499,9 @@ export interface TreinoChamadaRecord {
   status: "presente" | "falta" | "justificado" | "inscrito";
   origem: "app" | "manual";
   pagamento?: "pago" | "pendente";
+  performanceRating?: number | null;
+  performanceRatedBy?: string;
+  performanceRatedAt?: string;
 }
 
 export interface TreinoUserDirectoryItem {
@@ -1589,6 +1598,60 @@ export async function addUserToChamada(payload: {
     status: "presente",
     tenantId: payload.tenantId,
   });
+}
+
+export async function fetchTreinoUserPresenceProfile(
+  userId: string,
+  options?: { tenantId?: string | null }
+): Promise<TreinoUserDirectoryItem | null> {
+  const cleanUserId = userId.trim();
+  if (!cleanUserId) return null;
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(options?.tenantId);
+  let query = supabase
+    .from("users")
+    .select(USER_DIRECTORY_SELECT_COLUMNS)
+    .eq("uid", cleanUserId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) throwSupabaseError(error);
+  return data ? normalizeUserDirectoryEntry(cleanUserId, data) : null;
+}
+
+export async function updateChamadaPerformanceRating(payload: {
+  treinoId: string;
+  chamadaId: string;
+  rating: number;
+  ratedBy?: string;
+  tenantId?: string | null;
+}): Promise<void> {
+  const treinoId = payload.treinoId.trim();
+  const chamadaId = payload.chamadaId.trim();
+  if (!treinoId || !chamadaId) return;
+
+  const rating = Math.max(1, Math.min(5, Math.floor(payload.rating)));
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  const selector = await resolveChamadaFilter(treinoId, chamadaId, scopedTenantId);
+  let query = supabase
+    .from("treinos_chamada")
+    .update({
+      performanceRating: rating,
+      performanceRatedBy: asString(payload.ratedBy).trim().slice(0, 160),
+      performanceRatedAt: nowIso(),
+      updatedAt: nowIso(),
+    })
+    .eq("treinoId", treinoId);
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+  query = query.eq(selector.column, selector.value);
+  const { error } = await query;
+  if (error) throwSupabaseError(error);
 }
 
 export function clearTreinosServiceCaches(): void {

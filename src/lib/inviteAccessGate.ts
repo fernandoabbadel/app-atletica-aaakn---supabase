@@ -8,6 +8,7 @@ type InviteGateUserLike = {
   tenant_status?: unknown;
   isAnonymous?: unknown;
   role?: unknown;
+  tenant_role?: unknown;
 };
 
 const asString = (value: unknown): string =>
@@ -48,6 +49,24 @@ export const resolveTenantInviteGateRedirect = (payload: {
   const cleanTenantId = asString(payload.tenantId);
 
   if (!user || Boolean(user.isAnonymous) || isPlatformMaster(user)) {
+    return null;
+  }
+
+  const roleCandidates = [asString(user.role), asString(user.tenant_role)]
+    .map((role) => role.toLowerCase())
+    .filter(Boolean);
+  const canBypassInviteGate = roleCandidates.some((role) =>
+    [
+      "master",
+      "master_tenant",
+      "admin_tenant",
+      "admin_geral",
+      "admin_gestor",
+      "admin_treino",
+      "treinador",
+    ].includes(role)
+  );
+  if (canBypassInviteGate) {
     return null;
   }
 

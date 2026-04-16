@@ -168,7 +168,15 @@ export default function ScanFestasPage() {
       );
       await html5QrCode.start(
         preferredCamera?.id || cameras[0]?.id || { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 240, height: 240 } },
+        {
+          fps: 12,
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            const minEdge = Math.max(1, Math.min(viewfinderWidth, viewfinderHeight));
+            const size = Math.min(320, Math.max(220, Math.floor(minEdge * 0.72)));
+            return { width: size, height: size };
+          },
+          disableFlip: false,
+        },
         (decodedText) => {
           void processScan(decodedText);
         },
@@ -286,7 +294,7 @@ export default function ScanFestasPage() {
           <section className="space-y-4 rounded-3xl border border-zinc-800 bg-zinc-950/80 p-5">
             <div
               id="scan-festas-reader"
-              className="min-h-[360px] overflow-hidden rounded-3xl border border-dashed border-zinc-700 bg-black/40"
+              className="qr-reader-surface min-h-[360px] overflow-hidden rounded-3xl border border-dashed border-zinc-700 bg-black/40"
             />
 
             {processingScan ? (

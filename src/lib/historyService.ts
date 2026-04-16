@@ -233,7 +233,7 @@ export async function fetchHistoryPageConfig(options?: {
   }
 
   const supabase = getSupabaseClient();
-  let selectColumns = ["id", "tituloPagina", "subtituloPagina", "fotoCapa", "data"];
+  let selectColumns = ["id", "data"];
   let data: Record<string, unknown> | null = null;
   const docId = resolveHistoryConfigDocId(scopedTenantId);
 

@@ -446,9 +446,12 @@ export default function AlbumTurmaPage() {
         scannerRef.current = html5QrCode;
 
         const scannerConfig = {
-          fps: 8,
-          qrbox: { width: 230, height: 230 },
-          aspectRatio: 1,
+          fps: 12,
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            const minEdge = Math.max(1, Math.min(viewfinderWidth, viewfinderHeight));
+            const size = Math.min(320, Math.max(220, Math.floor(minEdge * 0.72)));
+            return { width: size, height: size };
+          },
           disableFlip: false,
         };
 
@@ -806,10 +809,10 @@ export default function AlbumTurmaPage() {
       )}
 
       {showScanner && (
-        <div className="fixed inset-0 z-[100] bg-black flex flex-col animate-in fade-in duration-300">
+        <div className="fixed inset-0 z-[9999] h-[100dvh] bg-black flex flex-col animate-in fade-in duration-300">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-green-400 to-emerald-500 z-50 animate-pulse" />
           <div className="flex-1 relative flex items-center justify-center bg-black">
-            <div id="reader" className="w-full h-full max-w-lg overflow-hidden" />
+            <div id="reader" className="qr-reader-surface w-full h-full overflow-hidden" />
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
               <div className="w-64 h-64 border-4 border-emerald-500/50 rounded-3xl relative" />
             </div>

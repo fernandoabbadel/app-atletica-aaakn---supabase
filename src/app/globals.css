@@ -199,6 +199,50 @@ samp {
     border-color: rgb(var(--tenant-primary-rgb) / 0.72);
     box-shadow: 0 0 0 1px rgb(var(--tenant-primary-rgb) / 0.26);
   }
+
+  .qr-reader-surface,
+  #reader,
+  #partner-reader,
+  #scan-festas-reader,
+  #treino-presence-reader {
+    position: relative;
+    min-height: 320px;
+    background: #000;
+  }
+
+  .qr-reader-surface video,
+  #reader video,
+  #partner-reader video,
+  #scan-festas-reader video,
+  #treino-presence-reader video {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: inherit;
+    object-fit: cover !important;
+  }
+
+  .qr-reader-surface img,
+  #reader img,
+  #partner-reader img,
+  #scan-festas-reader img,
+  #treino-presence-reader img {
+    display: none !important;
+  }
+
+  .qr-reader-surface__dashboard,
+  #reader__dashboard,
+  #partner-reader__dashboard,
+  #scan-festas-reader__dashboard,
+  #treino-presence-reader__dashboard {
+    display: none !important;
+  }
+
+  #reader__scan_region,
+  #partner-reader__scan_region,
+  #scan-festas-reader__scan_region,
+  #treino-presence-reader__scan_region {
+    min-height: inherit;
+  }
 }
 
 /* Brand override para utilitarios emerald antigos nas telas tenant/admin. */
