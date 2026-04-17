@@ -9,7 +9,6 @@ import {
   Calendar,
   Loader2,
   CheckCircle2,
-  Info,
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -212,13 +211,6 @@ export default function AdminCarteirinhaPage() {
             <h3 className="text-sm font-bold text-white uppercase flex items-center gap-2">
               <ImageIcon size={16} className="text-emerald-500" /> Personalizar Fundos
             </h3>
-            <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl max-w-xs">
-              <p className="text-[10px] text-blue-300 leading-relaxed flex gap-2">
-                <Info size={14} className="shrink-0 mt-0.5" />
-                Por padrao, o sistema usa o arquivo <b>/turmaX.jpeg</b> da pasta public.
-                Use os botoes abaixo apenas se quiser substituir por uma imagem diferente.
-              </p>
-            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">

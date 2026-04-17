@@ -7,6 +7,8 @@ import { Html5Qrcode } from "html5-qrcode";
 import { fetchEventsFeed } from "@/lib/eventsNativeService";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { useAuth } from "@/context/AuthContext";
+import { isPlatformMaster } from "@/lib/roles";
 
 type EventOption = {
   id: string;
@@ -25,8 +27,9 @@ type ScanResult = {
   alreadyScanned: boolean;
 };
 
-export default function ScanFestasPage() {
+export default function ScaneventosPage() {
   const { tenantId } = useTenantTheme();
+  const { user } = useAuth();
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastPayloadRef = useRef("");
   const [events, setEvents] = useState<EventOption[]>([]);
@@ -56,6 +59,8 @@ export default function ScanFestasPage() {
           forceRefresh: true,
         });
         if (!mounted) return;
+        const isMaster = isPlatformMaster(user);
+        const now = new Date();
         const mapped = rows
           .map((row) => ({
             id: String(row.id || "").trim(),
@@ -63,6 +68,18 @@ export default function ScanFestasPage() {
             data: String(row.data || "").trim(),
             hora: String(row.hora || "").trim(),
           }))
+          .filter((row) => {
+            if (isMaster) return true;
+            const eventDate = new Date(`${row.data}T${row.hora || "00:00"}`);
+            if (Number.isNaN(eventDate.getTime())) return false;
+            const start = new Date(eventDate);
+            start.setDate(start.getDate() - 1);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(eventDate);
+            end.setDate(end.getDate() + 1);
+            end.setHours(23, 59, 59, 999);
+            return now >= start && now <= end;
+          })
           .filter((row) => row.id.length > 0);
         setEvents(mapped);
         setSelectedEventId((previous) => previous || mapped[0]?.id || "");
@@ -77,7 +94,7 @@ export default function ScanFestasPage() {
     return () => {
       mounted = false;
     };
-  }, [tenantId]);
+  }, [tenantId, user]);
 
   useEffect(() => {
     return () => {
@@ -97,7 +114,7 @@ export default function ScanFestasPage() {
   }, []);
 
   const selectedEventLabel = useMemo(
-    () => events.find((event) => event.id === selectedEventId)?.titulo || "Selecione a festa",
+    () => events.find((event) => event.id === selectedEventId)?.titulo || "Selecione o evento",
     [events, selectedEventId]
   );
 
@@ -160,7 +177,7 @@ export default function ScanFestasPage() {
     setStartingScanner(true);
     setErrorMessage("");
     try {
-      const html5QrCode = new Html5Qrcode("scan-festas-reader");
+      const html5QrCode = new Html5Qrcode("scan-eventos-reader");
       scannerRef.current = html5QrCode;
       const cameras = await Html5Qrcode.getCameras();
       const preferredCamera = cameras.find((camera) =>
@@ -222,11 +239,11 @@ export default function ScanFestasPage() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.3em] text-emerald-400">
-                Scan Festas
+                Scan Eventos
               </p>
               <h1 className="mt-2 text-3xl font-black uppercase">Baixa de ingressos via QR</h1>
               <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-                Escolha a festa, abra a camera e valide os ingressos. A leitura grava no mesmo
+                Escolha o evento, abra a camera e valide os ingressos. A leitura grava no mesmo
                 pagamento do evento quem fez a leitura e quando ela aconteceu.
               </p>
             </div>
@@ -234,7 +251,7 @@ export default function ScanFestasPage() {
             <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
               <p className="font-black uppercase">{selectedEventLabel}</p>
               <p className="text-xs text-emerald-100/70">
-                {selectedEventId ? "Pronto para leitura" : "Selecione uma festa"}
+                {selectedEventId ? "Pronto para leitura" : "Selecione um evento"}
               </p>
             </div>
           </div>
@@ -244,14 +261,14 @@ export default function ScanFestasPage() {
           <section className="space-y-4 rounded-3xl border border-zinc-800 bg-zinc-950/80 p-5">
             <div>
               <label
-                htmlFor="scan-festas-event"
+                htmlFor="scan-eventos-event"
                 className="mb-2 block text-[10px] font-black uppercase tracking-widest text-zinc-500"
               >
-                Festa para validar
+                Evento para validar
               </label>
               <select
-                id="scan-festas-event"
-                name="scan_festas_event"
+                id="scan-eventos-event"
+                name="scan_eventos_event"
                 value={selectedEventId}
                 onChange={(event) => setSelectedEventId(event.target.value)}
                 className="w-full rounded-2xl border border-zinc-700 bg-black px-3 py-3 text-sm text-white outline-none focus:border-emerald-500"
@@ -287,13 +304,13 @@ export default function ScanFestasPage() {
             </div>
 
             <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4 text-sm text-zinc-400">
-              {loadingEvents ? "Carregando festas..." : `${events.length} festas disponiveis para validacao.`}
+              {loadingEvents ? "Carregando eventos..." : `${events.length} eventos disponiveis para validacao.`}
             </div>
           </section>
 
           <section className="space-y-4 rounded-3xl border border-zinc-800 bg-zinc-950/80 p-5">
             <div
-              id="scan-festas-reader"
+              id="scan-eventos-reader"
               className="qr-reader-surface min-h-[360px] overflow-hidden rounded-3xl border border-dashed border-zinc-700 bg-black/40"
             />
 

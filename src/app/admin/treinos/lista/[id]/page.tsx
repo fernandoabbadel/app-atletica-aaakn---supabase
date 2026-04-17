@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   CheckCircle,
@@ -115,6 +115,7 @@ const parseTreinoPresenceQrPayload = (rawPayload: string): TreinoPresenceQrPaylo
 
 export default function AdminTreinoListaPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const treinoId = params?.id?.trim() || "";
 
   const { addToast } = useToast();
@@ -124,6 +125,7 @@ export default function AdminTreinoListaPage() {
 
   const [titulo, setTitulo] = useState("Treino");
   const [subtitulo, setSubtitulo] = useState("-");
+  const floatingScanHandledRef = useRef(false);
 
   const [chamadaRows, setChamadaRows] = useState<TreinoChamadaRecord[]>([]);
   const [rsvpRows, setRsvpRows] = useState<TreinoRsvpRecord[]>([]);
@@ -428,6 +430,14 @@ export default function AdminTreinoListaPage() {
     },
     [activeTenantId, addToast, treinoId]
   );
+
+  useEffect(() => {
+    if (floatingScanHandledRef.current) return;
+    const uid = searchParams.get("uid")?.trim() || "";
+    if (!uid || !treinoId) return;
+    floatingScanHandledRef.current = true;
+    void processTreinoQrScan(JSON.stringify({ t: "treino-presenca", tid: treinoId, uid }));
+  }, [processTreinoQrScan, searchParams, treinoId]);
 
   useEffect(() => {
     if (!showScanner || scannerRef.current) return;

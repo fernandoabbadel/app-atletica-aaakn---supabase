@@ -19,6 +19,7 @@ import { resolvePlanTextClass, resolveUserPlanIcon } from "@/constants/planVisua
 import { parseTenantScopedPath, shouldAutoScopePath, withTenantSlug } from "@/lib/tenantRouting";
 import { usePermission } from "@/hooks/usePermission";
 import { buildLoginPath } from "@/lib/authRedirect";
+import { getAccessRoleCandidates } from "@/lib/roles";
 import { fetchCurrentMiniVendorProfile } from "@/lib/miniVendorService";
 import {
   createDefaultTenantAppModulesConfig,
@@ -446,7 +447,18 @@ export default function BottomNavbar() {
   const bottomItemsBase: NavItemProps[] = [
       { id: 'home', label: 'Inicio', icon: <Home size={22}/>, path: '/dashboard' },
       { id: 'eventos', label: 'Eventos', icon: <Calendar size={22}/>, path: '/eventos', moduleKey: 'eventos' },
-      { id: 'scan', label: 'Scanner', icon: <ScanLine size={28}/>, path: `/album/${currentTurmaSlug}?scan=1`, isMain: true, moduleKey: 'album' },
+      {
+        id: 'scan',
+        label: 'Scanner',
+        icon: <ScanLine size={28}/>,
+        path: getAccessRoleCandidates(currentUser).some((role) =>
+          ["admin_treino", "treinador", "vendas", "master_tenant", "master"].includes(role)
+        )
+          ? "/scanner"
+          : `/album/${currentTurmaSlug}?scan=1`,
+        isMain: true,
+        moduleKey: 'album'
+      },
       { id: 'carteira', label: 'Carteira', icon: <Wallet size={22}/>, path: '/carteirinha', moduleKey: 'carteirinha' },
       { id: 'menu', label: 'Menu', icon: <Menu size={22}/>, action: () => setIsSidebarOpen(true) },
   ];

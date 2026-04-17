@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Download,
   Loader2,
+  QrCode,
   RotateCcw,
   Users,
 } from "lucide-react";
@@ -41,6 +42,14 @@ interface MergedParticipant {
 }
 
 const PAGE_SIZE = 20;
+const ALPHA_GROUPS = [
+  { id: "todos", label: "Todos", test: () => true },
+  { id: "ad", label: "A-D", test: (value: string) => /^[A-D]/i.test(value) },
+  { id: "ej", label: "E-J", test: (value: string) => /^[E-J]/i.test(value) },
+  { id: "ko", label: "K-O", test: (value: string) => /^[K-O]/i.test(value) },
+  { id: "pr", label: "P-R", test: (value: string) => /^[P-R]/i.test(value) },
+  { id: "sz", label: "S-Z", test: (value: string) => /^[S-Z]/i.test(value) },
+];
 
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
@@ -143,6 +152,19 @@ export default function AdminEventoListaPage() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [alphaGroup, setAlphaGroup] = useState("todos");
+  const [page, setPage] = useState(1);
+
+  const filteredRows = React.useMemo(() => {
+    const selected = ALPHA_GROUPS.find((entry) => entry.id === alphaGroup) ?? ALPHA_GROUPS[0];
+    return rows.filter((row) => selected.test(row.userName.trim()));
+  }, [alphaGroup, rows]);
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const visibleRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [alphaGroup]);
 
   const loadHeader = useCallback(async () => {
     if (!eventId) return;
@@ -319,12 +341,33 @@ export default function AdminEventoListaPage() {
           >
             <Download size={14} /> CSV
           </button>
+          <Link
+            href={`/admin/eventos/scan/${eventId}`}
+            className="px-3 py-2 rounded-lg bg-emerald-500 text-black hover:bg-emerald-400 text-xs font-black uppercase flex items-center gap-2"
+          >
+            <QrCode size={14} /> Scan Eventos
+          </Link>
         </div>
       </header>
 
       <main className="px-6 py-6 space-y-4">
         <div className="text-xs text-zinc-500 uppercase font-black">
           Participantes carregados: {rows.length}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {ALPHA_GROUPS.map((entry) => (
+            <button
+              key={entry.id}
+              onClick={() => setAlphaGroup(entry.id)}
+              className={`rounded-lg border px-3 py-2 text-xs font-black uppercase ${
+                alphaGroup === entry.id
+                  ? "border-emerald-400 bg-emerald-500 text-black"
+                  : "border-zinc-800 bg-zinc-950 text-zinc-400"
+              }`}
+            >
+              {entry.label}
+            </button>
+          ))}
         </div>
 
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -349,14 +392,14 @@ export default function AdminEventoListaPage() {
                       <Loader2 className="animate-spin mx-auto text-emerald-500" />
                     </td>
                   </tr>
-                ) : rows.length === 0 ? (
+                ) : visibleRows.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="p-8 text-center text-zinc-500">
                       Nenhum participante encontrado.
                     </td>
                   </tr>
                 ) : (
-                  rows.map((row) => (
+                  visibleRows.map((row) => (
                     <tr key={buildPresenceRowKey(row)} className="hover:bg-zinc-800/40">
                       <td className="p-4">
                         <div className="flex items-center gap-2">
@@ -428,6 +471,13 @@ export default function AdminEventoListaPage() {
         </section>
 
         <div className="grid grid-cols-1 gap-3">
+          <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs font-bold text-zinc-400">
+            <span>Pagina {page} de {totalPages} - {filteredRows.length} registros</span>
+            <div className="flex gap-2">
+              <button disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-lg border border-zinc-700 px-3 py-2 disabled:opacity-40">Anterior</button>
+              <button disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="rounded-lg border border-zinc-700 px-3 py-2 disabled:opacity-40">Proxima</button>
+            </div>
+          </div>
           <button
             onClick={() => void handleLoadMore()}
             disabled={!hasMore || loadingMore}

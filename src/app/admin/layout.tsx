@@ -219,7 +219,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { group: "Comercial", name: "Mini Vendor Admin", path: "/admin/mini-vendors", icon: <Store size={18} /> },
     { group: "Comercial", name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
     { group: "Comercial", name: "Scanner", path: "/admin/scanner", icon: <ScanBarcode size={18} /> },
-    { group: "Comercial", name: "Scan Festas", path: "/admin/scan-festas", icon: <QrCode size={18} /> },
+    { group: "Comercial", name: "Scan Eventos", path: "/admin/scan-eventos", icon: <QrCode size={18} /> },
     { group: "Governanca", name: "Logs", path: "/admin/logs", icon: <FileText size={18} /> },
     { group: "Governanca", name: "Permissoes", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
     {

@@ -1,7 +1,7 @@
 "use client";
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { User as SupabaseAuthUser } from "@supabase/supabase-js";
-import { clearSupabaseBrowserSessionStorage, getSupabaseClient } from "@/lib/supabase";
+import { getSupabaseClient } from "@/lib/supabase";
 import { useRouter, usePathname } from "next/navigation"; 
 import { logActivity } from "../lib/logger"; 
 import LoadingScreen from "../app/loading";
@@ -550,6 +550,58 @@ const MISSING_USER_SELECT_COLUMNS = new Set<string>();
 const SESSION_REFRESH_TTL_MS = 60_000;
 const FULL_PROFILE_REFRESH_TTL_MS = 300_000;
 const VISUAL_MAINTENANCE_TTL_MS = 600_000;
+const USER_MAINTENANCE_FAILURE_TTL_MS = 300_000;
+const VERIFIED_AUTH_USER_SNAPSHOT_TTL_MS = 12 * 60 * 60 * 1000;
+const VERIFIED_AUTH_USER_SNAPSHOT_STORAGE_PREFIX = "usc:verified-auth-user:v1";
+
+const getVerifiedAuthUserSnapshotKey = (uid: string): string =>
+  `${VERIFIED_AUTH_USER_SNAPSHOT_STORAGE_PREFIX}:${uid}`;
+
+const readVerifiedAuthUserSnapshot = (authUser: SupabaseAuthUser): User | null => {
+  if (typeof window === "undefined") return null;
+
+  const key = getVerifiedAuthUserSnapshotKey(authUser.id);
+  try {
+    const rawSnapshot = window.localStorage.getItem(key);
+    if (!rawSnapshot) return null;
+
+    const parsed = JSON.parse(rawSnapshot) as {
+      savedAt?: unknown;
+      user?: unknown;
+    };
+    const savedAt = typeof parsed.savedAt === "number" ? parsed.savedAt : 0;
+    if (!savedAt || Date.now() - savedAt > VERIFIED_AUTH_USER_SNAPSHOT_TTL_MS) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+
+    const snapshotUser = asRecord(parsed.user);
+    if (!snapshotUser || asString(snapshotUser.uid) !== authUser.id) return null;
+    return normalizeUserRow(snapshotUser, authUser);
+  } catch {
+    window.localStorage.removeItem(key);
+    return null;
+  }
+};
+
+const writeVerifiedAuthUserSnapshot = (user: User): void => {
+  if (typeof window === "undefined") return;
+  if (!user.uid || user.isAnonymous) return;
+
+  try {
+    window.localStorage.setItem(
+      getVerifiedAuthUserSnapshotKey(user.uid),
+      JSON.stringify({ savedAt: Date.now(), user })
+    );
+  } catch {
+    // Ignora storage cheio/privado; o perfil em memoria continua sendo a fonte ativa.
+  }
+};
+
+const removeVerifiedAuthUserSnapshot = (uid: string): void => {
+  if (typeof window === "undefined" || !uid) return;
+  window.localStorage.removeItem(getVerifiedAuthUserSnapshotKey(uid));
+};
 
 const filterMissingUsersWriteColumns = (
   patch: Record<string, unknown>
@@ -617,6 +669,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const lastMaintenanceUid = useRef<string | null>(null);
   const lastMaintenanceAtRef = useRef(0);
+  const lastMaintenanceFailedRef = useRef(false);
   const lastUserRefreshAtRef = useRef(0);
   const lastFullProfileUidRef = useRef<string | null>(null);
   const lastFullProfileAtRef = useRef(0);
@@ -627,6 +680,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const syncingAuthUidRef = useRef<string | null>(null);
   const authSyncFallbackUidRef = useRef<string | null>(null);
   const currentUserUidRef = useRef<string | null>(null);
+  const currentUserRef = useRef<User | null>(null);
 
   const router = useRouter();
   const pathnameRaw = usePathname();
@@ -668,7 +722,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     currentUserUidRef.current = user?.uid || null;
-  }, [user?.uid]);
+    currentUserRef.current = user;
+  }, [user]);
 
   // Helper: Calcula Patente
   const calculatePatenteData = useCallback((xp: number, patentes: PatenteConfig[]) => {
@@ -796,6 +851,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!active || currentToken !== syncToken) return;
           authSyncFallbackUidRef.current = null;
           const normalized = normalizeUserRow(existingRow, authUser);
+          writeVerifiedAuthUserSnapshot(normalized);
           setUser((previous) => mergeUserSnapshot(previous, normalized));
           setIsAdmin(hasAdminPanelAccess(normalized));
           setLoading(false);
@@ -839,6 +895,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!active || currentToken !== syncToken) return;
 
         const normalized = normalizeUserRow(insertedRow, authUser);
+        writeVerifiedAuthUserSnapshot(normalized);
         authSyncFallbackUidRef.current = null;
         setUser((previous) => mergeUserSnapshot(previous, normalized));
         setIsAdmin(false);
@@ -846,13 +903,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void ensureAlbumSelfCollected(normalized.uid).catch(() => {});
         void logActivity(normalized.uid, normalized.nome, "CREATE", "Usuarios", "Novo cadastro via Google");
       } catch (error: unknown) {
+        const isRetryableNetworkError = isSupabaseRetryableFetchError(error);
         if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
-          console.warn("Falha na sincronizacao do usuario (fallback ativo):", formatBackendErrorForConsole(error));
+          console.warn(
+            "Falha na sincronizacao do usuario:",
+            formatBackendErrorForConsole(error)
+          );
         }
         if (!active || currentToken !== syncToken) return;
 
-        // Fallback local: mantem sessao autenticada ativa mesmo se a sincronizacao SQL falhar.
-        // Isso evita loop de "faca login" enquanto corrigimos schema/RLS no Supabase.
+        if (isRetryableNetworkError) {
+          const currentUserSnapshot = currentUserRef.current;
+          const preservedUser =
+            currentUserSnapshot?.uid === authUser.id
+              ? currentUserSnapshot
+              : readVerifiedAuthUserSnapshot(authUser);
+
+          if (preservedUser) {
+            authSyncFallbackUidRef.current = null;
+            setUser(preservedUser);
+            setIsAdmin(hasAdminPanelAccess(preservedUser));
+            setLoading(false);
+            return;
+          }
+        }
+
+        // Fallback local apenas para erro persistente de schema/RLS sem perfil previamente validado.
+        // Em timeout de rede preservamos o ultimo perfil confirmado para nao disparar convite indevido.
         const fallbackUser = normalizeUserRow(
           {
             ...DEFAULT_USER_PROPS,
@@ -907,6 +984,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         lastMaintenanceUid.current = null;
         lastMaintenanceAtRef.current = 0;
+        lastMaintenanceFailedRef.current = false;
         lastFullProfileUidRef.current = null;
         lastFullProfileAtRef.current = 0;
         lastPlanReconcileKeyRef.current = null;
@@ -926,9 +1004,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
           console.error("Erro ao recuperar sessao:", error);
-        }
-        if (isSupabaseRetryableFetchError(error)) {
-          clearSupabaseBrowserSessionStorage();
         }
         if (active) {
           setLoading(false);
@@ -1026,12 +1101,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!recoveredRow) throw new Error("Falha ao recuperar perfil do usuario.");
 
         const recoveredNormalized = normalizeUserRow(recoveredRow);
+        writeVerifiedAuthUserSnapshot(recoveredNormalized);
         setUser((previous) => mergeUserSnapshot(previous, recoveredNormalized));
         setIsAdmin(hasAdminPanelAccess(recoveredNormalized));
         return recoveredNormalized;
       }
 
       const normalized = normalizeUserRow(data);
+      writeVerifiedAuthUserSnapshot(normalized);
       setUser((previous) => mergeUserSnapshot(previous, normalized));
       setIsAdmin(hasAdminPanelAccess(normalized));
       return normalized;
@@ -1063,7 +1140,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (
           lastMaintenanceUid.current === maintenanceKey &&
-          now - lastMaintenanceAtRef.current < SESSION_REFRESH_TTL_MS
+          now - lastMaintenanceAtRef.current <
+            (lastMaintenanceFailedRef.current
+              ? USER_MAINTENANCE_FAILURE_TTL_MS
+              : SESSION_REFRESH_TTL_MS)
         ) return;
 
         const updates: Record<string, unknown> = {};
@@ -1375,10 +1455,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
-        if (!maintenanceFailed) {
-            lastMaintenanceUid.current = maintenanceKey;
-            lastMaintenanceAtRef.current = Date.now();
-        }
+        lastMaintenanceUid.current = maintenanceKey;
+        lastMaintenanceAtRef.current = Date.now();
+        lastMaintenanceFailedRef.current = maintenanceFailed;
     };
 
     void runMaintenance();
@@ -1514,6 +1593,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAdmin(false);
     lastMaintenanceUid.current = null;
     lastMaintenanceAtRef.current = 0;
+    lastMaintenanceFailedRef.current = false;
     lastUserRefreshAtRef.current = 0;
     lastFullProfileUidRef.current = null;
     lastFullProfileAtRef.current = 0;
@@ -1522,6 +1602,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     lastVisualMaintenanceKeyRef.current = null;
     lastVisualMaintenanceAtRef.current = 0;
     authSyncFallbackUidRef.current = null;
+    removeVerifiedAuthUserSnapshot(user?.uid || "");
     router.push("/");
   };
 
@@ -1603,6 +1684,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!data || !active) return;
 
         const normalized = normalizeUserRow(data);
+        writeVerifiedAuthUserSnapshot(normalized);
         lastFullProfileUidRef.current = user.uid;
         lastFullProfileAtRef.current = Date.now();
         setUser((previous) => mergeUserSnapshot(previous, normalized));
@@ -1641,6 +1723,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!data) return;
 
         const normalized = normalizeUserRow(data);
+        writeVerifiedAuthUserSnapshot(normalized);
         setUser((previous) => {
           const merged = mergeUserSnapshot(previous, normalized);
           if (!previous) return merged;

@@ -803,11 +803,16 @@ async function fetchDashboardTreinoRows(options: {
 
       const { data: treinoRows, error: treinoError } = await treinoQuery;
       if (treinoError) throwSupabaseError(treinoError);
+      const now = Date.now();
       const rows = ((treinoRows ?? []) as Row[])
         .sort((left, right) => {
-          const dateDiff = toMillis(right.dia) - toMillis(left.dia);
+          const leftDate = toMillis(left.dia);
+          const rightDate = toMillis(right.dia);
+          const leftDistance = leftDate >= now ? leftDate - now : Number.MAX_SAFE_INTEGER + (now - leftDate);
+          const rightDistance = rightDate >= now ? rightDate - now : Number.MAX_SAFE_INTEGER + (now - rightDate);
+          const dateDiff = leftDistance - rightDistance;
           if (dateDiff !== 0) return dateDiff;
-          return toMillis(right.createdAt) - toMillis(left.createdAt);
+          return toMillis(left.createdAt) - toMillis(right.createdAt);
         })
         .slice(0, DASHBOARD_TREINOS_LIMIT);
 
@@ -817,7 +822,7 @@ async function fetchDashboardTreinoRows(options: {
 
   return fetchRowsWithFallback("treinos", DASHBOARD_TREINOS_SELECT, [
     {
-      orderBy: { column: "createdAt", ascending: false },
+      orderBy: { column: "dia", ascending: true },
       limit: DASHBOARD_TREINOS_LIMIT,
       ...(cleanTenantId ? { eq: { tenant_id: cleanTenantId } } : {}),
     },

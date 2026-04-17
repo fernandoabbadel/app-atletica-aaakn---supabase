@@ -129,7 +129,7 @@ export const TENANT_ADMIN_SIDEBAR_ITEMS: TenantAdminSidebarItemDefinition[] = [
   sidebarItem("planos_lista_lenda", "Comercial", "Planos - Lista Lenda", "/admin/planos/lista_lenda", "Base do plano Lenda.", ["planos"]),
   sidebarItem("fidelidade", "Comercial", "Fidelidade", "/admin/fidelidade", "Clube de fidelidade e recompensas comerciais."),
   sidebarItem("scanner", "Comercial", "Scanner", "/admin/scanner", "Scanner e operacoes presenciais do tenant."),
-  sidebarItem("scan_festas", "Comercial", "Scan Festas", "/admin/scan-festas", "Leitura de QR code e baixa de ingressos das festas do tenant."),
+  sidebarItem("scan_festas", "Comercial", "Scan Eventos", "/admin/scan-eventos", "Leitura de QR code e baixa de ingressos dos eventos do tenant."),
   sidebarItem("comunidade", "Conteudo", "Comunidade", "/admin/comunidade", "Moderacao e configuracao da comunidade."),
   sidebarItem("conquistas", "Conteudo", "Conquistas", "/admin/conquistas", "Conquistas, patentes e recompensas do tenant."),
   sidebarItem("apadrinhamento", "Conteudo", "Apadrinhamento", "/admin/apadrinhamento", "Configuracao dos titulos e regras de apadrinhamento da atletica."),

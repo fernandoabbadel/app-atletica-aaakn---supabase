@@ -16,7 +16,11 @@ export const runtime = "nodejs";
 export async function POST(request: NextRequest) {
   try {
     const scope = await getLeagueAdminAuthScope(request);
-    if (!scope.isPlatformMaster && (!scope.canManageTenant || scope.tenantStatus !== "approved")) {
+    const canScanEvents =
+      scope.isPlatformMaster ||
+      (scope.tenantStatus === "approved" &&
+        (scope.canManageTenant || scope.tenantRole === "vendas" || scope.userRole === "vendas"));
+    if (!canScanEvents) {
       throw new LeagueAdminApiError("Sem permissao para validar ingressos.", 403);
     }
     const { data: readerProfileRow } = await supabaseAdmin
@@ -31,14 +35,23 @@ export async function POST(request: NextRequest) {
     const body = asObject(await request.json());
     const qrPayload = asString(body?.qrPayload);
     const selectedEventId = asString(body?.eventId);
-    const parsedPayload = parseEventTicketQrPayload(qrPayload);
-    if (!parsedPayload) {
+    const manualOrderId = asString(body?.orderId);
+    const manualTicketToken = asString(body?.ticketToken);
+    const parsedPayload =
+      parseEventTicketQrPayload(qrPayload) ||
+      (manualOrderId
+        ? {
+            orderId: manualOrderId,
+            ticketToken: manualTicketToken,
+          }
+        : null);
+    if (!parsedPayload?.orderId) {
       throw new LeagueAdminApiError("QR code invalido para ingresso.", 400);
     }
 
     const { data: orderRow, error: orderError } = await supabaseAdmin
       .from("solicitacoes_ingressos")
-      .select("id,tenant_id,eventoId,eventoNome,userName,userTurma,payment_config")
+      .select("id,tenant_id,eventoId,eventoNome,userName,userTurma,status,payment_config")
       .eq("id", parsedPayload.orderId)
       .maybeSingle();
     if (orderError) {
@@ -53,14 +66,21 @@ export async function POST(request: NextRequest) {
     const orderTenantId = asString(order.tenant_id);
     const eventId = asString(order.eventoId);
     if (selectedEventId && selectedEventId !== eventId) {
-      throw new LeagueAdminApiError("Esse ingresso pertence a outra festa.", 400);
+      throw new LeagueAdminApiError("Esse ingresso pertence a outro evento.", 400);
     }
     if (!scope.isPlatformMaster && scope.userTenantId !== orderTenantId) {
       throw new LeagueAdminApiError("Ingresso fora do tenant ativo.", 403);
     }
+    if (!["aprovado", "approved", "pago", "paid", "entregue", "presente"].includes(asString(order.status).toLowerCase())) {
+      throw new LeagueAdminApiError("Pagamento ainda nao aprovado para check-in.", 400);
+    }
 
     const paymentConfig = normalizePaymentConfig(order.payment_config);
-    const ticketEntry = findEventTicketEntry(paymentConfig, parsedPayload.ticketToken);
+    const ticketEntry = parsedPayload.ticketToken
+      ? findEventTicketEntry(paymentConfig, parsedPayload.ticketToken)
+      : paymentConfig?.ticketEntries?.find((entry) => entry.status !== "lido") ||
+        paymentConfig?.ticketEntries?.[0] ||
+        null;
     if (!ticketEntry || !paymentConfig?.ticketEntries) {
       throw new LeagueAdminApiError("Ingresso nao encontrado para esse QR code.", 404);
     }
@@ -68,7 +88,7 @@ export async function POST(request: NextRequest) {
     const alreadyScanned = ticketEntry.status === "lido";
     const scannedAt = new Date().toISOString();
     const nextTicketEntries = paymentConfig.ticketEntries.map((entry) =>
-      entry.token === parsedPayload.ticketToken
+      entry.token === ticketEntry.token
         ? {
             ...entry,
             status: "lido" as const,
@@ -93,7 +113,7 @@ export async function POST(request: NextRequest) {
       throw new LeagueAdminApiError(updateError.message, 400);
     }
 
-    const updatedEntry = nextTicketEntries.find((entry) => entry.token === parsedPayload.ticketToken);
+    const updatedEntry = nextTicketEntries.find((entry) => entry.token === ticketEntry.token);
     return NextResponse.json({
       ok: true,
       alreadyScanned,

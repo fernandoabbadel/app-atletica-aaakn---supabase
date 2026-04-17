@@ -124,6 +124,43 @@ type OrderRow = Row & {
   data?: unknown;
 };
 type UserRow = Row & { uid?: unknown; turma?: unknown };
+type BiDimensionRow = Row & {
+  evento_id?: unknown;
+  produto_id?: unknown;
+  evento_nome?: unknown;
+  produto_nome?: unknown;
+  modalidade?: unknown;
+  dimension_type?: unknown;
+  dimension_value?: unknown;
+  pedidos?: unknown;
+  quantidade?: unknown;
+  valor?: unknown;
+  ticket_medio?: unknown;
+  presencas?: unknown;
+  usuarios_unicos?: unknown;
+  treinos_com_presenca?: unknown;
+  nota_media?: unknown;
+};
+type BiCheckinHourRow = Row & {
+  evento_id?: unknown;
+  hora_label?: unknown;
+  checkins?: unknown;
+};
+type BiTrainingModalityRow = Row & {
+  modalidade?: unknown;
+  sessoes?: unknown;
+  presencas?: unknown;
+  confirmacoes?: unknown;
+  no_shows?: unknown;
+  nota_media?: unknown;
+};
+type BiProductEngagementRow = Row & {
+  produto_id?: unknown;
+  produto_nome?: unknown;
+  likes?: unknown;
+  cliques?: unknown;
+  vendidos?: unknown;
+};
 
 type LoadedData = {
   events: EventRow[];
@@ -134,10 +171,27 @@ type LoadedData = {
   products: ProductRow[];
   orders: OrderRow[];
   users: UserRow[];
+  eventSales: BiDimensionRow[];
+  eventCheckins: BiCheckinHourRow[];
+  trainingPresence: BiDimensionRow[];
+  trainingModalities: BiTrainingModalityRow[];
+  productSales: BiDimensionRow[];
+  productEngagement: BiProductEngagementRow[];
 };
 
 const COLORS = ["#2dd4bf", "#60a5fa", "#fbbf24", "#f472b6", "#a78bfa", "#34d399", "#fb7185"];
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"];
+const chartTooltipProps = {
+  contentStyle: {
+    backgroundColor: "#09090b",
+    border: "1px solid #27272a",
+    borderRadius: 8,
+    color: "#e4e4e7",
+    boxShadow: "0 18px 50px rgba(0,0,0,0.45)",
+  },
+  labelStyle: { color: "#67e8f9", fontWeight: 800 },
+  itemStyle: { color: "#e4e4e7", fontWeight: 700 },
+};
 
 const emptyLoadedData: LoadedData = {
   events: [],
@@ -148,6 +202,12 @@ const emptyLoadedData: LoadedData = {
   products: [],
   orders: [],
   users: [],
+  eventSales: [],
+  eventCheckins: [],
+  trainingPresence: [],
+  trainingModalities: [],
+  productSales: [],
+  productEngagement: [],
 };
 
 const formatCurrency = (value: number): string =>
@@ -248,6 +308,38 @@ const readTicketEntries = (paymentConfig: unknown): Row[] => {
   return Array.isArray(entries) ? entries.filter((entry): entry is Row => Boolean(asObject(entry))) : [];
 };
 
+const aggregateDimensionRows = (
+  rows: BiDimensionRow[],
+  dimensionType: string,
+  options?: {
+    quantityField?: "quantidade" | "presencas" | "pedidos" | "usuarios_unicos" | "treinos_com_presenca";
+    valueField?: "valor" | "nota_media";
+    secondaryField?: "pedidos" | "usuarios_unicos" | "treinos_com_presenca" | "presencas";
+    limit?: number;
+  }
+): MetricRow[] => {
+  const map = new Map<string, MetricRow>();
+  const quantityField = options?.quantityField ?? "quantidade";
+  const valueField = options?.valueField ?? "valor";
+
+  rows
+    .filter((row) => asString(row.dimension_type) === dimensionType)
+    .forEach((row) => {
+      addMetric(
+        map,
+        asString(row.dimension_value, "Sem dado"),
+        parseNumber(row[quantityField], 0),
+        parseNumber(row[valueField], 0),
+        options?.secondaryField ? parseNumber(row[options.secondaryField], 0) : 0
+      );
+    });
+
+  return metricRows(map, options?.limit);
+};
+
+const hasBiRows = (...groups: Row[][]): boolean =>
+  groups.some((group) => Array.isArray(group) && group.length > 0);
+
 const extractMissingSchemaColumn = (error: unknown): string | null => {
   if (!error || typeof error !== "object") return null;
   const raw = error as { message?: unknown; details?: unknown };
@@ -325,23 +417,60 @@ async function queryRows(
   return [];
 }
 
+async function queryRowsOptional(
+  table: string,
+  select: string,
+  tenantId: string,
+  orderColumn: string,
+  limit = 2500
+): Promise<Row[]> {
+  try {
+    return await queryRows(table, select, tenantId, orderColumn, limit);
+  } catch (error) {
+    console.warn(`BI agregado indisponivel em ${table}; usando dados crus quando possivel.`, error);
+    return [];
+  }
+}
+
 async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise<LoadedData> {
   if (mode === "eventos") {
-    const [events, tickets] = await Promise.all([
+    const [events, eventSales, eventCheckins] = await Promise.all([
       queryRows("eventos", "id,titulo,data,hora,lotes,stats,tenant_id,createdAt", tenantId, "data", 160),
-      queryRows(
+      queryRowsOptional(
+        "bi_eventos_vendas_dimensoes",
+        "tenant_id,evento_id,evento_nome,dimension_type,dimension_value,pedidos,quantidade,valor,ticket_medio",
+        tenantId,
+        "quantidade",
+        5000
+      ),
+      queryRowsOptional(
+        "bi_eventos_checkins_hora",
+        "tenant_id,evento_id,evento_nome,hora_label,turma,lote,leitor,checkins",
+        tenantId,
+        "hora_label",
+        5000
+      ),
+    ]);
+    const tickets = hasBiRows(eventSales, eventCheckins)
+      ? []
+      : await queryRows(
         "solicitacoes_ingressos",
         "id,eventoId,eventoNome,userId,userName,userTurma,status,loteNome,quantidade,valorTotal,dataSolicitacao,dataAprovacao,aprovadoPor,payment_config,tenant_id",
         tenantId,
         "dataSolicitacao",
         3500
-      ),
-    ]);
-    return { ...emptyLoadedData, events: events as EventRow[], tickets: tickets as TicketRow[] };
+      );
+    return {
+      ...emptyLoadedData,
+      events: events as EventRow[],
+      tickets: tickets as TicketRow[],
+      eventSales: eventSales as BiDimensionRow[],
+      eventCheckins: eventCheckins as BiCheckinHourRow[],
+    };
   }
 
   if (mode === "treinos") {
-    const [treinos, chamada, rsvps] = await Promise.all([
+    const [treinos, trainingPresence, trainingModalities] = await Promise.all([
       queryRows(
         "treinos",
         "id,modalidade,dia,diaSemana,horario,local,treinador,status,tenant_id,createdAt",
@@ -349,7 +478,25 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
         "dia",
         1200
       ),
-      queryRows(
+      queryRowsOptional(
+        "bi_treinos_presencas_dimensoes",
+        "tenant_id,modalidade,dimension_type,dimension_value,presencas,treinos_com_presenca,usuarios_unicos,nota_media",
+        tenantId,
+        "presencas",
+        5000
+      ),
+      queryRowsOptional(
+        "bi_treinos_modalidades",
+        "tenant_id,modalidade,sessoes,presencas,confirmacoes,no_shows,nota_media",
+        tenantId,
+        "presencas",
+        1200
+      ),
+    ]);
+    const [chamada, rsvps] = hasBiRows(trainingPresence, trainingModalities)
+      ? [[], []]
+      : await Promise.all([
+        queryRows(
         "treinos_chamada",
         "id,treinoId,userId,nome,turma,status,origem,performanceRating,timestamp,tenant_id",
         tenantId,
@@ -369,10 +516,12 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
       treinos: treinos as TreinoRow[],
       chamada: chamada as ChamadaRow[],
       rsvps: rsvps as RsvpRow[],
+      trainingPresence: trainingPresence as BiDimensionRow[],
+      trainingModalities: trainingModalities as BiTrainingModalityRow[],
     };
   }
 
-  const [products, orders, users] = await Promise.all([
+  const [products, productSales, productEngagement] = await Promise.all([
     queryRows(
       "produtos",
       "id,nome,lote,categoria,preco,likes,cliques,vendidos,seller_type,seller_id,seller_name,tenant_id,createdAt",
@@ -380,6 +529,24 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
       "createdAt",
       1600
     ),
+    queryRowsOptional(
+      "bi_produtos_vendas_dimensoes",
+      "tenant_id,produto_id,produto_nome,dimension_type,dimension_value,pedidos,quantidade,valor,ticket_medio",
+      tenantId,
+      "quantidade",
+      5000
+    ),
+    queryRowsOptional(
+      "bi_produtos_engajamento",
+      "tenant_id,produto_id,produto_nome,lote,categoria,seller_type,seller_id,seller_name,likes,cliques,vendidos,conversao_clique_compra",
+      tenantId,
+      "likes",
+      2000
+    ),
+  ]);
+  const [orders, users] = hasBiRows(productSales, productEngagement)
+    ? [[], []]
+    : await Promise.all([
     queryRows(
       "orders",
       "id,userId,userName,productId,productName,quantidade,total,price,status,createdAt,seller_type,seller_id,seller_name,data,tenant_id",
@@ -394,6 +561,8 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
     products: products as ProductRow[],
     orders: orders as OrderRow[],
     users: users as UserRow[],
+    productSales: productSales as BiDimensionRow[],
+    productEngagement: productEngagement as BiProductEngagementRow[],
   };
 }
 
@@ -441,7 +610,7 @@ function Bars({ data, dataKey = "quantity" }: { data: MetricRow[]; dataKey?: "qu
         <CartesianGrid stroke="#27272a" horizontal={false} />
         <XAxis type="number" stroke="#71717a" tick={{ fontSize: 11 }} />
         <YAxis dataKey="name" type="category" width={92} stroke="#a1a1aa" tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(value) => (dataKey === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))} />
+        <Tooltip {...chartTooltipProps} formatter={(value) => (dataKey === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))} />
         <Bar dataKey={dataKey} radius={[0, 6, 6, 0]} fill="#2dd4bf" />
       </BarChart>
     </ResponsiveContainer>
@@ -457,7 +626,7 @@ function BarsDual({ data }: { data: MetricRow[] }) {
         <XAxis dataKey="name" stroke="#a1a1aa" tick={{ fontSize: 11 }} />
         <YAxis yAxisId="left" stroke="#2dd4bf" tick={{ fontSize: 11 }} />
         <YAxis yAxisId="right" orientation="right" stroke="#fbbf24" tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(value, name) => (name === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))} />
+        <Tooltip {...chartTooltipProps} formatter={(value, name) => (name === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))} />
         <Legend />
         <Bar yAxisId="left" dataKey="quantity" name="Qtd" fill="#2dd4bf" radius={[6, 6, 0, 0]} />
         <Bar yAxisId="right" dataKey="value" name="Valor" fill="#fbbf24" radius={[6, 6, 0, 0]} />
@@ -476,7 +645,7 @@ function PieMetric({ data }: { data: MetricRow[] }) {
             <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
           ))}
         </Pie>
-        <Tooltip formatter={(value) => formatNumber(Number(value))} />
+        <Tooltip {...chartTooltipProps} formatter={(value) => formatNumber(Number(value))} />
         <Legend />
       </PieChart>
     </ResponsiveContainer>
@@ -497,7 +666,7 @@ function Trend({ data, valueKey = "quantity" }: { data: MetricRow[]; valueKey?: 
         <CartesianGrid stroke="#27272a" vertical={false} />
         <XAxis dataKey="name" stroke="#a1a1aa" tick={{ fontSize: 11 }} />
         <YAxis stroke="#71717a" tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(value) => (valueKey === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))} />
+        <Tooltip {...chartTooltipProps} formatter={(value) => (valueKey === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))} />
         <Area type="monotone" dataKey={valueKey} stroke="#2dd4bf" fill={`url(#bi-${valueKey})`} strokeWidth={3} />
       </AreaChart>
     </ResponsiveContainer>
@@ -512,7 +681,7 @@ function LineMetric({ data }: { data: MetricRow[] }) {
         <CartesianGrid stroke="#27272a" vertical={false} />
         <XAxis dataKey="name" stroke="#a1a1aa" tick={{ fontSize: 11 }} />
         <YAxis stroke="#71717a" tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(value) => formatNumber(Number(value))} />
+        <Tooltip {...chartTooltipProps} formatter={(value) => formatNumber(Number(value))} />
         <Line type="monotone" dataKey="quantity" stroke="#2dd4bf" strokeWidth={3} dot={{ r: 4 }} />
       </LineChart>
     </ResponsiveContainer>
@@ -532,8 +701,64 @@ function EventsBi({ data }: { data: LoadedData }) {
         : data.tickets.filter((row) => asString(row.eventoId) === eventId);
     return rows.filter((row) => isApprovedStatus(row.status));
   }, [data.tickets, eventId]);
+  const selectedEventSales = useMemo(
+    () =>
+      eventId === "todos"
+        ? data.eventSales
+        : data.eventSales.filter((row) => asString(row.evento_id) === eventId),
+    [data.eventSales, eventId]
+  );
+  const selectedEventCheckins = useMemo(
+    () =>
+      eventId === "todos"
+        ? data.eventCheckins
+        : data.eventCheckins.filter((row) => asString(row.evento_id) === eventId),
+    [data.eventCheckins, eventId]
+  );
 
   const analytics = useMemo(() => {
+    if (selectedEventSales.length > 0) {
+      const baseRows = selectedEventSales.filter((row) => asString(row.dimension_type) === "turma");
+      const revenue = baseRows.reduce((sum, row) => sum + parseNumber(row.valor, 0), 0);
+      const quantity = baseRows.reduce((sum, row) => sum + parseNumber(row.quantidade, 0), 0);
+      const pedidos = baseRows.reduce((sum, row) => sum + parseNumber(row.pedidos, 0), 0);
+      const checkinsByHour = new Map<string, MetricRow>();
+      let scanned = 0;
+
+      selectedEventCheckins.forEach((row) => {
+        const checkins = parseNumber(row.checkins, 0);
+        scanned += checkins;
+        addMetric(checkinsByHour, asString(row.hora_label, "Sem horario"), checkins, 0);
+      });
+
+      return {
+        revenue,
+        quantity,
+        pedidos,
+        scanned,
+        byClass: aggregateDimensionRows(selectedEventSales, "turma"),
+        byLote: aggregateDimensionRows(selectedEventSales, "lote"),
+        byWeekday: WEEKDAYS.map(
+          (day) =>
+            aggregateDimensionRows(selectedEventSales, "dia_semana").find((row) => row.name === day) ?? {
+              name: day,
+              quantity: 0,
+              value: 0,
+            }
+        ),
+        byPeriod: ["Madrugada", "Manha", "Tarde", "Noite"].map(
+          (period) =>
+            aggregateDimensionRows(selectedEventSales, "periodo").find((row) => row.name === period) ?? {
+              name: period,
+              quantity: 0,
+              value: 0,
+            }
+        ),
+        byApprover: aggregateDimensionRows(selectedEventSales, "aprovador", { limit: 10 }),
+        byScanHour: metricRows(checkinsByHour).sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    }
+
     const byClass = new Map<string, MetricRow>();
     const byLote = new Map<string, MetricRow>();
     const byWeekday = new Map<string, MetricRow>();
@@ -566,6 +791,7 @@ function EventsBi({ data }: { data: LoadedData }) {
     return {
       revenue,
       quantity,
+      pedidos: selectedTickets.length,
       scanned,
       byClass: metricRows(byClass),
       byLote: metricRows(byLote),
@@ -576,7 +802,7 @@ function EventsBi({ data }: { data: LoadedData }) {
       byApprover: metricRows(byApprover, 10),
       byScanHour: metricRows(byScanHour).sort((a, b) => a.name.localeCompare(b.name)),
     };
-  }, [selectedTickets]);
+  }, [selectedEventCheckins, selectedEventSales, selectedTickets]);
 
   const kpis: Kpi[] = [
     {
@@ -588,7 +814,7 @@ function EventsBi({ data }: { data: LoadedData }) {
     },
     {
       label: "Pedidos aprovados",
-      value: formatNumber(selectedTickets.length),
+      value: formatNumber(analytics.pedidos),
       hint: "comprovantes aprovados",
       icon: <Ticket size={18} />,
       tone: "bg-cyan-500/15 text-cyan-300",
@@ -632,7 +858,10 @@ function TrainingsBi({ data }: { data: LoadedData }) {
     [data.treinos]
   );
   const options = Array.from(
-    new Set(data.treinos.map((treino) => asString(treino.modalidade, "Treino")).filter(Boolean))
+    new Set([
+      ...data.treinos.map((treino) => asString(treino.modalidade, "Treino")).filter(Boolean),
+      ...data.trainingModalities.map((row) => asString(row.modalidade, "Treino")).filter(Boolean),
+    ])
   ).map((name) => ({ id: name, title: name }));
   const selectedTreinoIds = new Set(
     data.treinos
@@ -646,6 +875,45 @@ function TrainingsBi({ data }: { data: LoadedData }) {
   );
 
   const analytics = useMemo(() => {
+    if (data.trainingPresence.length > 0 || data.trainingModalities.length > 0) {
+      const presenceRows =
+        modalidade === "todas"
+          ? data.trainingPresence
+          : data.trainingPresence.filter((row) => asString(row.modalidade, "Treino") === modalidade);
+      const modalityRows =
+        modalidade === "todas"
+          ? data.trainingModalities
+          : data.trainingModalities.filter((row) => asString(row.modalidade, "Treino") === modalidade);
+      const modalidadeMetrics = new Map<string, MetricRow>();
+      let ratingSum = 0;
+      let ratingWeight = 0;
+
+      modalityRows.forEach((row) => {
+        const name = asString(row.modalidade, "Treino");
+        const presencas = parseNumber(row.presencas, 0);
+        addMetric(modalidadeMetrics, name, presencas, 0, parseNumber(row.sessoes, 0));
+        const nota = parseNumber(row.nota_media, 0);
+        if (nota > 0 && presencas > 0) {
+          ratingSum += nota * presencas;
+          ratingWeight += presencas;
+        }
+      });
+
+      return {
+        noShows: modalityRows.reduce((sum, row) => sum + parseNumber(row.no_shows, 0), 0),
+        ratingAverage: ratingWeight ? ratingSum / ratingWeight : 0,
+        sessions: modalityRows.reduce((sum, row) => sum + parseNumber(row.sessoes, 0), 0),
+        rsvps: modalityRows.reduce((sum, row) => sum + parseNumber(row.confirmacoes, 0), 0),
+        presences: modalityRows.reduce((sum, row) => sum + parseNumber(row.presencas, 0), 0),
+        byClass: aggregateDimensionRows(presenceRows, "turma", { quantityField: "presencas" }),
+        byUser: aggregateDimensionRows(presenceRows, "usuario", { quantityField: "presencas", limit: 12 }),
+        byModalidade: metricRows(modalidadeMetrics),
+        byWeekday: aggregateDimensionRows(presenceRows, "dia_semana", { quantityField: "presencas" }),
+        byHour: aggregateDimensionRows(presenceRows, "horario", { quantityField: "presencas" }),
+        byCoach: aggregateDimensionRows(presenceRows, "treinador", { quantityField: "presencas", limit: 10 }),
+      };
+    }
+
     const byClass = new Map<string, MetricRow>();
     const byUser = new Map<string, MetricRow>();
     const byModalidade = new Map<string, MetricRow>();
@@ -686,6 +954,9 @@ function TrainingsBi({ data }: { data: LoadedData }) {
     return {
       noShows,
       ratingAverage,
+      sessions: selectedTreinoIds.size,
+      rsvps: selectedRsvps.length,
+      presences: presentes.length,
       byClass: metricRows(byClass),
       byUser: metricRows(byUser, 12),
       byModalidade: metricRows(byModalidade),
@@ -693,26 +964,26 @@ function TrainingsBi({ data }: { data: LoadedData }) {
       byHour: metricRows(byHour),
       byCoach: metricRows(byCoach, 10),
     };
-  }, [data.treinos, modalidade, presentes, selectedRsvps, treinoMap]);
+  }, [data.trainingModalities, data.trainingPresence, data.treinos, modalidade, presentes, selectedRsvps, selectedTreinoIds.size, treinoMap]);
 
   const kpis: Kpi[] = [
     {
       label: "Treinos",
-      value: formatNumber(selectedTreinoIds.size),
+      value: formatNumber(analytics.sessions),
       hint: "sessoes no filtro",
       icon: <CalendarDays size={18} />,
       tone: "bg-cyan-500/15 text-cyan-300",
     },
     {
       label: "Confirmacoes",
-      value: formatNumber(selectedRsvps.length),
+      value: formatNumber(analytics.rsvps),
       hint: "RSVPs no app",
       icon: <Users size={18} />,
       tone: "bg-violet-500/15 text-violet-300",
     },
     {
       label: "Presencas reais",
-      value: formatNumber(presentes.length),
+      value: formatNumber(analytics.presences),
       hint: `${formatNumber(analytics.noShows)} no-shows`,
       icon: <Trophy size={18} />,
       tone: "bg-emerald-500/15 text-emerald-300",
@@ -761,8 +1032,55 @@ function ProductsBi({ data }: { data: LoadedData }) {
     if (productId === "todos") return true;
     return asString(order.productId) === productId;
   });
+  const selectedProductSales = useMemo(
+    () =>
+      productId === "todos"
+        ? data.productSales
+        : data.productSales.filter((row) => asString(row.produto_id) === productId),
+    [data.productSales, productId]
+  );
+  const selectedProductEngagement = useMemo(
+    () =>
+      productId === "todos"
+        ? data.productEngagement
+        : data.productEngagement.filter((row) => asString(row.produto_id) === productId),
+    [data.productEngagement, productId]
+  );
 
   const analytics = useMemo(() => {
+    if (selectedProductSales.length > 0 || selectedProductEngagement.length > 0) {
+      const baseRows = selectedProductSales.filter((row) => asString(row.dimension_type) === "lote");
+      const likes = new Map<string, MetricRow>();
+      selectedProductEngagement.forEach((product) => {
+        addMetric(
+          likes,
+          asString(product.produto_nome, "Produto"),
+          parseNumber(product.likes, 0),
+          0,
+          parseNumber(product.cliques, 0)
+        );
+      });
+
+      return {
+        revenue: baseRows.reduce((sum, row) => sum + parseNumber(row.valor, 0), 0),
+        quantity: baseRows.reduce((sum, row) => sum + parseNumber(row.quantidade, 0), 0),
+        pedidos: baseRows.reduce((sum, row) => sum + parseNumber(row.pedidos, 0), 0),
+        byLote: aggregateDimensionRows(selectedProductSales, "lote"),
+        byWeekday: WEEKDAYS.map(
+          (day) =>
+            aggregateDimensionRows(selectedProductSales, "dia_semana").find((row) => row.name === day) ?? {
+              name: day,
+              quantity: 0,
+              value: 0,
+            }
+        ),
+        byClass: aggregateDimensionRows(selectedProductSales, "turma"),
+        byUser: aggregateDimensionRows(selectedProductSales, "usuario", { limit: 12 }),
+        likes: metricRows(likes, 12),
+        vendors: aggregateDimensionRows(selectedProductSales, "vendedor", { limit: 12 }),
+      };
+    }
+
     const byLote = new Map<string, MetricRow>();
     const byWeekday = new Map<string, MetricRow>();
     const byClass = new Map<string, MetricRow>();
@@ -805,6 +1123,7 @@ function ProductsBi({ data }: { data: LoadedData }) {
     return {
       revenue,
       quantity,
+      pedidos: selectedOrders.length,
       byLote: metricRows(byLote),
       byWeekday: WEEKDAYS.map((day) => byWeekday.get(day) ?? { name: day, quantity: 0, value: 0 }),
       byClass: metricRows(byClass),
@@ -812,7 +1131,7 @@ function ProductsBi({ data }: { data: LoadedData }) {
       likes: metricRows(likes, 12),
       vendors: metricRows(vendors, 12),
     };
-  }, [data.products, productId, productMap, selectedOrders, userTurma]);
+  }, [data.products, productId, productMap, selectedOrders, selectedProductEngagement, selectedProductSales, userTurma]);
 
   const likeTotal = analytics.likes.reduce((sum, row) => sum + row.quantity, 0);
   const kpis: Kpi[] = [
@@ -825,7 +1144,7 @@ function ProductsBi({ data }: { data: LoadedData }) {
     },
     {
       label: "Pedidos",
-      value: formatNumber(selectedOrders.length),
+      value: formatNumber(analytics.pedidos),
       hint: "aprovados no filtro",
       icon: <Package size={18} />,
       tone: "bg-cyan-500/15 text-cyan-300",
