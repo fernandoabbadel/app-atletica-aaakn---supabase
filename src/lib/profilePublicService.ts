@@ -1308,21 +1308,6 @@ export async function toggleFollowProfile(payload: {
     turma: payload.targetData.turma.trim().slice(0, 40) || "Geral",
   };
 
-  const rpcResult = await toggleFollowProfileViaRpc({
-    supabase,
-    viewerUid,
-    targetUid,
-    viewerData,
-    targetData,
-    currentlyFollowing: payload.currentlyFollowing,
-    scopedTenantId,
-  });
-  if (rpcResult) {
-    clearProfilePublicCachesForUser(targetUid, scopedTenantId);
-    clearProfilePublicCachesForUser(viewerUid, scopedTenantId);
-    return rpcResult;
-  }
-
   const apiResult = await toggleFollowProfileViaApi({
     supabase,
     viewerUid,
@@ -1336,6 +1321,21 @@ export async function toggleFollowProfile(payload: {
     clearProfilePublicCachesForUser(targetUid, scopedTenantId);
     clearProfilePublicCachesForUser(viewerUid, scopedTenantId);
     return apiResult;
+  }
+
+  const rpcResult = await toggleFollowProfileViaRpc({
+    supabase,
+    viewerUid,
+    targetUid,
+    viewerData,
+    targetData,
+    currentlyFollowing: payload.currentlyFollowing,
+    scopedTenantId,
+  });
+  if (rpcResult) {
+    clearProfilePublicCachesForUser(targetUid, scopedTenantId);
+    clearProfilePublicCachesForUser(viewerUid, scopedTenantId);
+    return rpcResult;
   }
 
   let existingFollowerQuery = supabase

@@ -2,6 +2,7 @@
 import { isEventExpiredByGrace } from "./eventDateUtils";
 import { hydrateEventViewerState } from "./hotPathRelations";
 import { toggleEventLike as toggleEventLikeNative } from "./eventsNativeService";
+import { fetchTreinoSettings } from "./treinosNativeService";
 
 type CacheEntry<T> = { cachedAt: number; value: T };
 
@@ -15,11 +16,11 @@ const DASHBOARD_TENANT_PRODUCTS_PRIORITY_COUNT = 2;
 const DASHBOARD_MINI_VENDOR_PRODUCTS_MAX = 2;
 const DASHBOARD_POSTS_LIMIT = 2;
 const DASHBOARD_TREINOS_LIMIT = 4;
+const DASHBOARD_TREINOS_FETCH_LIMIT = 24;
 const DASHBOARD_PARTNERS_LIMIT = 50;
 const DASHBOARD_MINI_VENDORS_LIMIT = 200;
 const DASHBOARD_LIGAS_DASHBOARD_LIMIT = 2;
 const DASHBOARD_LIGAS_QUERY_WINDOW = 6;
-const DASHBOARD_TREINO_RSVPS_LIMIT = 12;
 const DASHBOARD_LIKES_SAMPLE_PER_PRODUCT = 10;
 const DASHBOARD_USERS_IN_CHUNK = 10;
 const DASHBOARD_TOTAL_CACA_RPC = "dashboard_total_caca_calouros";
@@ -39,7 +40,7 @@ const DASHBOARD_LIGAS_SELECT =
   "id,nome,sigla,foto,logoUrl,logo,descricao,bizu,ativa,visivel,status,likes,createdAt,updatedAt";
 const DASHBOARD_POSTS_SELECT =
   "id,userId,userName,avatar,createdAt,texto,likes,tenant_id";
-const DASHBOARD_TREINOS_SELECT = "id,imagem,dia,createdAt,status,tenant_id";
+const DASHBOARD_TREINOS_SELECT = "id,modalidade,imagem,dia,horario,createdAt,status,tenant_id";
 
 const dashboardCache = new Map<string, CacheEntry<DashboardBundle>>();
 let dashboardHomeBundleRpcUnavailableUntil = 0;
@@ -92,6 +93,31 @@ const toMillis = (value: unknown): number => {
     if (parsed instanceof Date) return parsed.getTime();
   }
   return 0;
+};
+
+const toLocalDateKey = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const toDashboardModalidadeKey = (value: unknown): string =>
+  asString(value).trim().replace(/\s+/g, " ").slice(0, 40).toLowerCase();
+
+const isActiveDashboardTreino = (row: Row): boolean => {
+  const status = asString(row.status, "ativo").toLowerCase().trim();
+  return status !== "cancelado" && status !== "encerrado" && status !== "inativo";
+};
+
+const compareDashboardTreinoRows = (left: Row, right: Row): number => {
+  const dateDiff = asString(left.dia).localeCompare(asString(right.dia));
+  if (dateDiff !== 0) return dateDiff;
+
+  const timeDiff = asString(left.horario).localeCompare(asString(right.horario));
+  if (timeDiff !== 0) return timeDiff;
+
+  return toMillis(left.createdAt) - toMillis(right.createdAt);
 };
 
 const resolveFollowedLeagueIdsFromUserExtra = (
@@ -764,70 +790,80 @@ async function fetchDashboardTreinoRows(options: {
   userId?: string;
 }): Promise<Row[]> {
   const cleanTenantId = asString(options.tenantId).trim();
-  const cleanUserId = asString(options.userId).trim();
   const supabase = getSupabaseClient();
+  const today = toLocalDateKey();
 
-  if (cleanUserId) {
-    let rsvpQuery = supabase
-      .from("treinos_rsvps")
-      .select("treinoId,timestamp,status")
-      .eq("userId", cleanUserId)
-      .eq("status", "going")
-      .order("timestamp", { ascending: false })
-      .limit(DASHBOARD_TREINO_RSVPS_LIMIT);
+  try {
+    let query = supabase
+      .from("treinos")
+      .select(DASHBOARD_TREINOS_SELECT)
+      .gte("dia", today)
+      .order("dia", { ascending: true })
+      .order("horario", { ascending: true })
+      .limit(DASHBOARD_TREINOS_FETCH_LIMIT);
     if (cleanTenantId) {
-      rsvpQuery = rsvpQuery.eq("tenant_id", cleanTenantId);
+      query = query.eq("tenant_id", cleanTenantId);
     }
 
-    const { data: rsvpRows, error: rsvpError } = await rsvpQuery;
-    if (rsvpError) throwSupabaseError(rsvpError);
+    const { data, error } = await query;
+    if (error) throw error;
 
-    const treinoIds = Array.from(
-      new Set(
-        ((rsvpRows ?? []) as Row[])
-          .map((row) => asString(row.treinoId).trim())
-          .filter((entry) => entry.length > 0)
-      )
-    );
+    const rows = ((data ?? []) as Row[])
+      .filter(isActiveDashboardTreino)
+      .sort(compareDashboardTreinoRows)
+      .slice(0, DASHBOARD_TREINOS_LIMIT);
 
-    if (treinoIds.length > 0) {
-      let treinoQuery = supabase
-        .from("treinos")
-        .select(DASHBOARD_TREINOS_SELECT)
-        .in("id", treinoIds)
-        .eq("status", "ativo")
-        .limit(treinoIds.length);
-      if (cleanTenantId) {
-        treinoQuery = treinoQuery.eq("tenant_id", cleanTenantId);
-      }
-
-      const { data: treinoRows, error: treinoError } = await treinoQuery;
-      if (treinoError) throwSupabaseError(treinoError);
-      const now = Date.now();
-      const rows = ((treinoRows ?? []) as Row[])
-        .sort((left, right) => {
-          const leftDate = toMillis(left.dia);
-          const rightDate = toMillis(right.dia);
-          const leftDistance = leftDate >= now ? leftDate - now : Number.MAX_SAFE_INTEGER + (now - leftDate);
-          const rightDistance = rightDate >= now ? rightDate - now : Number.MAX_SAFE_INTEGER + (now - rightDate);
-          const dateDiff = leftDistance - rightDistance;
-          if (dateDiff !== 0) return dateDiff;
-          return toMillis(left.createdAt) - toMillis(right.createdAt);
-        })
-        .slice(0, DASHBOARD_TREINOS_LIMIT);
-
-      if (rows.length > 0) return rows;
-    }
+    if (rows.length > 0) return rows;
+  } catch (error: unknown) {
+    console.warn("[dashboard] Falha ao buscar proximos treinos otimizados; usando fallback.", error);
   }
 
-  return fetchRowsWithFallback("treinos", DASHBOARD_TREINOS_SELECT, [
+  const fallbackRows = await fetchRowsWithFallback("treinos", DASHBOARD_TREINOS_SELECT, [
     {
       orderBy: { column: "dia", ascending: true },
-      limit: DASHBOARD_TREINOS_LIMIT,
+      limit: DASHBOARD_TREINOS_FETCH_LIMIT,
       ...(cleanTenantId ? { eq: { tenant_id: cleanTenantId } } : {}),
     },
-    { limit: DASHBOARD_TREINOS_LIMIT, ...(cleanTenantId ? { eq: { tenant_id: cleanTenantId } } : {}) },
+    { limit: DASHBOARD_TREINOS_FETCH_LIMIT, ...(cleanTenantId ? { eq: { tenant_id: cleanTenantId } } : {}) },
   ]);
+  return fallbackRows
+    .filter((row) => asString(row.dia) >= today)
+    .filter(isActiveDashboardTreino)
+    .sort(compareDashboardTreinoRows)
+    .slice(0, DASHBOARD_TREINOS_LIMIT);
+}
+
+async function resolveDashboardTreinoImages(rows: Row[], tenantId?: string): Promise<string[]> {
+  if (rows.length === 0) return [];
+
+  let modalidadeImagens: Record<string, string> = {};
+  try {
+    const settings = await fetchTreinoSettings({ tenantId });
+    modalidadeImagens = settings.modalidadeImagens;
+  } catch (error: unknown) {
+    console.warn("[dashboard] Falha ao carregar imagens das modalidades de treino.", error);
+  }
+
+  return rows
+    .map((row) => {
+      const modalidadeImage = modalidadeImagens[toDashboardModalidadeKey(row.modalidade)];
+      return asString(modalidadeImage).trim() || asString(row.imagem).trim();
+    })
+    .filter((entry) => entry.length > 0)
+    .slice(0, DASHBOARD_TREINOS_LIMIT);
+}
+
+async function fetchDashboardTreinoPreviewImages(options: {
+  tenantId?: string;
+  userId?: string;
+}): Promise<string[]> {
+  try {
+    const rows = await fetchDashboardTreinoRows(options);
+    return resolveDashboardTreinoImages(rows, options.tenantId);
+  } catch (error: unknown) {
+    console.warn("[dashboard] Falha ao montar preview de treinos.", error);
+    return [];
+  }
 }
 
 const normalizeEvento = (id: string, raw: unknown): DashboardEvent | null => {
@@ -1032,15 +1068,16 @@ async function fetchDashboardBundleViaRpc(options: {
     .map((entry) => normalizePost(asString(asObject(entry)?.id), entry, cleanUserId || undefined))
     .filter((entry): entry is DashboardPost => entry !== null);
 
-  const treinos = asArray(payload.treinos)
-    .map((entry) => asString(entry).trim())
-    .filter((entry) => entry.length > 0);
-  const [dashboardProducts, resolvedTotalCaca] = await Promise.all([
+  const [dashboardProducts, resolvedTotalCaca, treinos] = await Promise.all([
     resolveDashboardProducts({
       tenantId: cleanTenantId || undefined,
       userId: cleanUserId || undefined,
     }),
     cleanUserId ? fetchDashboardTotalCaca(cleanTenantId || undefined, cleanUserId) : Promise.resolve(0),
+    fetchDashboardTreinoPreviewImages({
+      tenantId: cleanTenantId || undefined,
+      userId: cleanUserId || undefined,
+    }),
   ]);
 
   return {
@@ -1064,7 +1101,7 @@ async function fetchDashboardDegradedBundle(options: {
   const userId = asString(options.userId).trim();
   const tenantFilter = tenantId ? { tenant_id: tenantId } : null;
 
-  const [eventRows, dashboardProducts, partnerRows, postRows, totalAlunos, totalCaca] = await Promise.all([
+  const [eventRows, dashboardProducts, partnerRows, postRows, totalAlunos, totalCaca, treinos] = await Promise.all([
     fetchDashboardEventRows(tenantId || undefined, userId || undefined),
     resolveDashboardProducts({
       tenantId: tenantId || undefined,
@@ -1090,6 +1127,10 @@ async function fetchDashboardDegradedBundle(options: {
     ]),
     safeUsersCount(tenantId || undefined),
     fetchDashboardTotalCaca(tenantId || undefined, userId || undefined),
+    fetchDashboardTreinoPreviewImages({
+      tenantId: tenantId || undefined,
+      userId: userId || undefined,
+    }),
   ]);
 
   const events = eventRows
@@ -1122,7 +1163,7 @@ async function fetchDashboardDegradedBundle(options: {
     parceiros,
     ligas: [],
     mensagens,
-    treinos: [],
+    treinos,
     totalCaca,
     totalAlunos,
     productTurmaStats: dashboardProducts.productTurmaStats,
@@ -1211,7 +1252,7 @@ async function fetchDashboardLegacyFallbackBundle(options: {
     .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt))
     .map((row) => normalizePost(asString(row.id), row, userId || undefined))
     .filter((row): row is DashboardPost => row !== null);
-  const treinos = treinoRows.map((row) => asString(row.imagem)).filter((entry) => entry.length > 0);
+  const treinos = await resolveDashboardTreinoImages(treinoRows, tenantId || undefined);
 
   return {
     events,
