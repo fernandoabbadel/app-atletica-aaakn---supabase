@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Camera, Loader2, ScanLine, ShieldCheck } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -32,8 +32,8 @@ export default function ScaneventosPage() {
   const { user } = useAuth();
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastPayloadRef = useRef("");
+  const processingScanRef = useRef(false);
   const [events, setEvents] = useState<EventOption[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState("");
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [startingScanner, setStartingScanner] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
@@ -82,7 +82,6 @@ export default function ScaneventosPage() {
           })
           .filter((row) => row.id.length > 0);
         setEvents(mapped);
-        setSelectedEventId((previous) => previous || mapped[0]?.id || "");
       } catch (error: unknown) {
         console.error(error);
       } finally {
@@ -113,15 +112,11 @@ export default function ScaneventosPage() {
     };
   }, []);
 
-  const selectedEventLabel = useMemo(
-    () => events.find((event) => event.id === selectedEventId)?.titulo || "Selecione o evento",
-    [events, selectedEventId]
-  );
-
   const processScan = async (qrPayload: string) => {
-    if (!qrPayload.trim() || processingScan) return;
+    if (!qrPayload.trim() || processingScanRef.current) return;
     if (lastPayloadRef.current === qrPayload.trim()) return;
 
+    processingScanRef.current = true;
     setProcessingScan(true);
     setErrorMessage("");
     lastPayloadRef.current = qrPayload.trim();
@@ -141,7 +136,6 @@ export default function ScaneventosPage() {
         },
         body: JSON.stringify({
           qrPayload,
-          eventId: selectedEventId || undefined,
         }),
       });
       const payload = (await response.json().catch(() => null)) as
@@ -168,6 +162,7 @@ export default function ScaneventosPage() {
       setTimeout(() => {
         lastPayloadRef.current = "";
       }, 1800);
+      processingScanRef.current = false;
       setProcessingScan(false);
     }
   };
@@ -243,15 +238,15 @@ export default function ScaneventosPage() {
               </p>
               <h1 className="mt-2 text-3xl font-black uppercase">Baixa de ingressos via QR</h1>
               <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-                Escolha o evento, abra a camera e valide os ingressos. A leitura grava no mesmo
-                pagamento do evento quem fez a leitura e quando ela aconteceu.
+                Abra a camera e valide os ingressos. A leitura grava no mesmo pagamento do evento
+                quem fez a leitura e quando ela aconteceu.
               </p>
             </div>
 
             <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              <p className="font-black uppercase">{selectedEventLabel}</p>
+              <p className="font-black uppercase">Evento pelo QR</p>
               <p className="text-xs text-emerald-100/70">
-                {selectedEventId ? "Pronto para leitura" : "Selecione um evento"}
+                {loadingEvents ? "Carregando eventos" : "Pronto para leitura"}
               </p>
             </div>
           </div>
@@ -259,34 +254,11 @@ export default function ScaneventosPage() {
 
         <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
           <section className="space-y-4 rounded-3xl border border-zinc-800 bg-zinc-950/80 p-5">
-            <div>
-              <label
-                htmlFor="scan-eventos-event"
-                className="mb-2 block text-[10px] font-black uppercase tracking-widest text-zinc-500"
-              >
-                Evento para validar
-              </label>
-              <select
-                id="scan-eventos-event"
-                name="scan_eventos_event"
-                value={selectedEventId}
-                onChange={(event) => setSelectedEventId(event.target.value)}
-                className="w-full rounded-2xl border border-zinc-700 bg-black px-3 py-3 text-sm text-white outline-none focus:border-emerald-500"
-              >
-                <option value="">Selecione</option>
-                {events.map((event) => (
-                  <option key={event.id} value={event.id}>
-                    {event.titulo} {event.data ? `• ${event.data}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
               <button
                 type="button"
                 onClick={() => void startScanner()}
-                disabled={!selectedEventId || loadingEvents || scannerActive || startingScanner}
+                disabled={scannerActive || startingScanner}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-black uppercase text-black transition hover:bg-emerald-400 disabled:opacity-50"
               >
                 {startingScanner ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}

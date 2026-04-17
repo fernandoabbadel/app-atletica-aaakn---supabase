@@ -56,6 +56,34 @@ const SOLICITACOES_INGRESSOS_SELECT_COLUMNS =
   "id,eventoId,eventoNome,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,payment_config,dataSolicitacao,dataAprovacao,aprovadoPor";
 const FINANCEIRO_CONFIG_SELECT_COLUMNS =
   "id,data,chave,banco,titular,whatsapp,updatedAt,createdAt";
+const EVENTOS_WRITABLE_COLUMNS = new Set([
+  "titulo",
+  "data",
+  "hora",
+  "local",
+  "tipo",
+  "categoria",
+  "destaque",
+  "mapsUrl",
+  "imagem",
+  "imagePositionY",
+  "descricao",
+  "lotes",
+  "status",
+  "sale_status",
+  "payment_config",
+  "isLowStock",
+  "stats",
+  "vendasTotais",
+  "pixChave",
+  "pixBanco",
+  "pixTitular",
+  "contatoComprovante",
+  "data_extra",
+  "tenant_id",
+  "createdAt",
+  "updatedAt",
+]);
 const MONTHS_PT_BR: Record<string, number> = {
   JAN: 0,
   FEV: 1,
@@ -83,6 +111,14 @@ const financeiroCache = new Map<string, CacheEntry<Row | null>>();
 const nowIso = (): string => new Date().toISOString();
 const resolveEventsTenantId = (tenantId?: string | null): string =>
   resolveStoredTenantScopeId(asString(tenantId).trim());
+
+const pickWritableEventoPayload = (payload: Row): Row =>
+  Object.entries(payload).reduce<Row>((accumulator, [key, value]) => {
+    if (EVENTOS_WRITABLE_COLUMNS.has(key)) {
+      accumulator[key] = value;
+    }
+    return accumulator;
+  }, {});
 
 const asNum = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -1119,6 +1155,11 @@ export async function upsertAdminEvent(payload: {
     rawData.payment_config !== undefined ? rawData.payment_config : rawData.paymentConfig;
   delete rawData.saleStatus;
   delete rawData.paymentConfig;
+  delete rawData.recipientUserId;
+  delete rawData.recipientUserName;
+  delete rawData.recipientUserTurma;
+  delete rawData.recipientUserAvatar;
+  delete rawData.id;
 
   const lotes = Array.isArray(rawData.lotes)
     ? rawData.lotes.map((entry: unknown) => {
@@ -1133,13 +1174,13 @@ export async function upsertAdminEvent(payload: {
       })
     : [];
   const paymentConfig = normalizePaymentConfig(paymentConfigSource);
-  const normalizedPayload: Row = {
+  const normalizedPayload: Row = pickWritableEventoPayload({
     ...rawData,
     lotes,
     sale_status: normalizeAvailabilityStatus(saleStatus, "ativo"),
     payment_config: paymentConfig,
     ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
-  };
+  });
 
   if (eventId) {
     let updateQuery = supabase

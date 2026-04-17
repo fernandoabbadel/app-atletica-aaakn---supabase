@@ -1,51 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Loader2, ScanLine } from "lucide-react";
+import { Camera, CheckCircle2, Loader2, ScanLine, ShieldCheck } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { getSupabaseClient } from "@/lib/supabase";
-import { getAccessRoleCandidates, isPlatformMaster } from "@/lib/roles";
+import { getAccessRoleCandidates } from "@/lib/roles";
+import { parseKnownAppQrPayload } from "@/lib/qrPayloads";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
-type ScanMode = "album" | "treino" | "evento";
-type Option = { id: string; title: string; date?: string; hour?: string };
-
-const extractUserIdFromQr = (rawValue: string): string => {
-  const raw = rawValue.trim();
-  if (!raw) return "";
-  if (/^[A-Za-z0-9_-]{24,60}$/.test(raw)) return raw;
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const value = parsed.uid || parsed.userId || parsed.targetUid || parsed.id;
-    if (typeof value === "string" && /^[A-Za-z0-9_-]{24,60}$/.test(value.trim())) return value.trim();
-  } catch {}
-  try {
-    const url = new URL(raw);
-    for (const key of ["uid", "userId", "targetUid", "id"]) {
-      const value = url.searchParams.get(key)?.trim();
-      if (value && /^[A-Za-z0-9_-]{24,60}$/.test(value)) return value;
-    }
-  } catch {}
-  return "";
+type ScannerStatus = {
+  tone: "info" | "success" | "error";
+  title: string;
+  detail?: string;
 };
 
-const isEventInScanWindow = (event: Option, platformMaster: boolean): boolean => {
-  if (platformMaster) return true;
-  const eventDate = new Date(`${event.date || ""}T${event.hour || "00:00"}`);
-  if (Number.isNaN(eventDate.getTime())) return false;
-  const now = new Date();
-  const start = new Date(eventDate);
-  start.setDate(start.getDate() - 1);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(eventDate);
-  end.setDate(end.getDate() + 1);
-  end.setHours(23, 59, 59, 999);
-  return now >= start && now <= end;
+const toneClass: Record<ScannerStatus["tone"], string> = {
+  info: "border-zinc-800 bg-zinc-950 text-zinc-200",
+  success: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100",
+  error: "border-red-500/30 bg-red-500/10 text-red-100",
 };
+
+const normalizeTurmaSlug = (value: string): string =>
+  value.trim().toLowerCase().replace(/\s+/g, "-") || "t8";
 
 export default function FloatingScannerPage() {
   const router = useRouter();
@@ -53,123 +33,173 @@ export default function FloatingScannerPage() {
   const { tenantId, tenantSlug } = useTenantTheme();
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastPayloadRef = useRef("");
-  const [mode, setMode] = useState<ScanMode>("album");
-  const [treinos, setTreinos] = useState<Option[]>([]);
-  const [eventos, setEventos] = useState<Option[]>([]);
-  const [selectedTreinoId, setSelectedTreinoId] = useState("");
-  const [selectedEventId, setSelectedEventId] = useState("");
+  const processingRef = useRef(false);
   const [starting, setStarting] = useState(false);
   const [active, setActive] = useState(false);
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<ScannerStatus>({
+    tone: "info",
+    title: "Leitor pronto",
+    detail: "Abra a camera para iniciar.",
+  });
 
   const roles = useMemo(() => getAccessRoleCandidates(user), [user]);
-  const canScanTreino = roles.some((role) => ["admin_treino", "treinador", "master_tenant", "master"].includes(role));
-  const canScanEvento = roles.some((role) => ["vendas", "master_tenant", "master"].includes(role));
-  const platformMaster = isPlatformMaster(user);
+  const canScanTreino = roles.some((role) =>
+    ["admin_treino", "treinador", "master_tenant", "master"].includes(role)
+  );
+  const canScanEvento = roles.some((role) =>
+    ["vendas", "master_tenant", "master"].includes(role)
+  );
 
-  useEffect(() => {
-    if (canScanTreino) setMode("treino");
-    else if (canScanEvento) setMode("evento");
-    else setMode("album");
-  }, [canScanEvento, canScanTreino]);
-
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    const load = async () => {
-      const cleanTenantId = tenantId.trim();
-      if (canScanTreino) {
-        let query = supabase
-          .from("treinos")
-          .select("id,modalidade,dia,horario,tenant_id,status")
-          .eq("status", "ativo")
-          .order("dia", { ascending: true })
-          .limit(40);
-        if (cleanTenantId) query = query.eq("tenant_id", cleanTenantId);
-        const { data } = await query;
-        const rows = (data ?? []).map((row) => ({
-          id: String(row.id || ""),
-          title: `${String(row.modalidade || "Treino")} - ${String(row.dia || "")}`,
-          date: String(row.dia || ""),
-          hour: String(row.horario || ""),
-        })).filter((row) => row.id);
-        setTreinos(rows);
-        setSelectedTreinoId((previous) => previous || rows[0]?.id || "");
-      }
-      if (canScanEvento) {
-        let query = supabase
-          .from("eventos")
-          .select("id,titulo,data,hora,tenant_id")
-          .order("data", { ascending: true })
-          .limit(80);
-        if (cleanTenantId) query = query.eq("tenant_id", cleanTenantId);
-        const { data } = await query;
-        const rows = (data ?? []).map((row) => ({
-          id: String(row.id || ""),
-          title: String(row.titulo || "Evento"),
-          date: String(row.data || ""),
-          hour: String(row.hora || ""),
-        })).filter((row) => row.id && isEventInScanWindow(row, platformMaster));
-        setEventos(rows);
-        setSelectedEventId((previous) => previous || rows[0]?.id || "");
-      }
-    };
-    void load();
-  }, [canScanEvento, canScanTreino, platformMaster, tenantId]);
-
-  useEffect(() => () => {
-    if (!scannerRef.current) return;
-    void scannerRef.current.stop().catch(() => {});
+  const stopScanner = useCallback(async () => {
+    const scanner = scannerRef.current;
+    if (!scanner) return;
     try {
-      scannerRef.current.clear();
+      if (scanner.isScanning) {
+        await scanner.stop();
+      }
+      await scanner.clear();
     } catch {
-      // scanner ja desmontado
+      // scanner ja pode ter sido desmontado pelo navegador.
+    } finally {
+      scannerRef.current = null;
+      setActive(false);
     }
   }, []);
 
+  useEffect(() => {
+    return () => {
+      void stopScanner();
+    };
+  }, [stopScanner]);
+
+  const validateEventTicket = async (qrPayload: string) => {
+    if (!canScanEvento) {
+      setStatus({
+        tone: "error",
+        title: "Sem permissao",
+        detail: "Seu perfil nao pode validar ingressos de evento.",
+      });
+      return;
+    }
+
+    const session = await getSupabaseClient().auth.getSession();
+    const token = session.data.session?.access_token || "";
+    const response = await fetch("/api/admin/event-tickets/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ qrPayload }),
+    });
+    const payload = await response.json().catch(() => null);
+    setStatus(
+      response.ok
+        ? {
+            tone: "success",
+            title: payload?.alreadyScanned ? "Ingresso ja lido" : "Entrada liberada",
+            detail: `${payload?.holderName || "Ingresso"} - ${payload?.eventTitle || "Evento"}`,
+          }
+        : {
+            tone: "error",
+            title: "Falha no check-in",
+            detail: payload?.error || "Nao foi possivel validar esse ingresso.",
+          }
+    );
+  };
+
+  const openTrainingPresence = (payload: {
+    treinoId: string;
+    userId: string;
+    tenantId: string;
+  }) => {
+    if (!canScanTreino) {
+      setStatus({
+        tone: "error",
+        title: "Sem permissao",
+        detail: "Seu perfil nao pode registrar presenca em treino.",
+      });
+      return;
+    }
+    if (payload.tenantId && tenantId && payload.tenantId !== tenantId) {
+      setStatus({
+        tone: "error",
+        title: "QR de outro tenant",
+        detail: "Esse QR pertence a outra atletica.",
+      });
+      return;
+    }
+
+    const path = `/admin/treinos/lista/${encodeURIComponent(payload.treinoId)}?uid=${encodeURIComponent(payload.userId)}&scanSource=floating`;
+    router.push(tenantSlug ? withTenantSlug(tenantSlug, path) : path);
+  };
+
+  const openAlbumCapture = (payload: { userId: string; userTurma: string }) => {
+    if (!user?.uid) {
+      setStatus({
+        tone: "error",
+        title: "Login necessario",
+        detail: "Entre na sua conta para registrar o QR de usuario.",
+      });
+      return;
+    }
+
+    const turmaSlug = normalizeTurmaSlug(payload.userTurma || user.turma || "t8");
+    const path = `/album/${encodeURIComponent(turmaSlug)}?targetUid=${encodeURIComponent(payload.userId)}`;
+    router.push(tenantSlug ? withTenantSlug(tenantSlug, path) : path);
+  };
+
   const handleScan = async (decoded: string) => {
     const clean = decoded.trim();
-    if (!clean || lastPayloadRef.current === clean) return;
+    if (!clean || lastPayloadRef.current === clean || processingRef.current) return;
     lastPayloadRef.current = clean;
     setTimeout(() => {
-      lastPayloadRef.current = "";
+      if (lastPayloadRef.current === clean) lastPayloadRef.current = "";
     }, 1800);
 
-    if (mode === "treino") {
-      const uid = extractUserIdFromQr(clean);
-      if (!uid || !selectedTreinoId) {
-        setMessage("QR de usuario invalido ou treino nao selecionado.");
+    processingRef.current = true;
+    setStatus({ tone: "info", title: "QR lido", detail: "Identificando destino..." });
+    try {
+      const payload = parseKnownAppQrPayload(clean);
+      if (!payload) {
+        setStatus({
+          tone: "error",
+          title: "QR nao reconhecido",
+          detail: "Use um QR de ingresso, treino ou usuario do app.",
+        });
         return;
       }
-      const path = `/admin/treinos/lista/${encodeURIComponent(selectedTreinoId)}?uid=${encodeURIComponent(uid)}&scanSource=floating`;
-      router.push(tenantSlug ? withTenantSlug(tenantSlug, path) : path);
-      return;
-    }
 
-    if (mode === "evento") {
-      const session = await getSupabaseClient().auth.getSession();
-      const token = session.data.session?.access_token || "";
-      const response = await fetch("/api/admin/event-tickets/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ qrPayload: clean, eventId: selectedEventId || undefined }),
+      if (payload.kind === "evento-ingresso") {
+        await validateEventTicket(clean);
+        return;
+      }
+
+      if (payload.kind === "treino-presenca") {
+        openTrainingPresence(payload);
+        return;
+      }
+
+      openAlbumCapture(payload);
+    } catch (error: unknown) {
+      setStatus({
+        tone: "error",
+        title: "Erro ao processar QR",
+        detail: error instanceof Error ? error.message : "Tente novamente.",
       });
-      const payload = await response.json().catch(() => null);
-      setMessage(response.ok ? `Check-in OK: ${payload?.holderName || "ingresso"}` : payload?.error || "Falha no check-in.");
-      return;
+    } finally {
+      processingRef.current = false;
     }
-
-    router.push(tenantSlug ? withTenantSlug(tenantSlug, `/album/${user?.turma || "t8"}?scan=1`) : `/album/${user?.turma || "t8"}?scan=1`);
   };
 
   const start = async () => {
     if (active || starting) return;
     setStarting(true);
-    setMessage("");
+    setStatus({ tone: "info", title: "Abrindo camera", detail: "Aguardando permissao." });
     try {
       const scanner = new Html5Qrcode("floating-main-scanner");
       scannerRef.current = scanner;
       const cameras = await Html5Qrcode.getCameras().catch(() => []);
-      const camera = cameras.find((entry) => /back|rear|traseira|environment/i.test(entry.label)) || cameras[0];
+      const camera =
+        cameras.find((entry) => /back|rear|traseira|environment/i.test(entry.label)) ||
+        cameras[0];
       await scanner.start(
         camera?.id || { facingMode: "environment" },
         {
@@ -185,8 +215,13 @@ export default function FloatingScannerPage() {
         () => undefined
       );
       setActive(true);
+      setStatus({ tone: "info", title: "Camera ativa", detail: "Leitura automatica ligada." });
     } catch {
-      setMessage("Nao foi possivel abrir a camera.");
+      setStatus({
+        tone: "error",
+        title: "Camera indisponivel",
+        detail: "Nao foi possivel abrir a camera neste dispositivo.",
+      });
     } finally {
       setStarting(false);
     }
@@ -196,34 +231,50 @@ export default function FloatingScannerPage() {
     <main className="min-h-screen bg-[#050505] p-6 text-white">
       <div className="mx-auto max-w-3xl space-y-5">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">Scanner</p>
-          <h1 className="mt-2 text-2xl font-black uppercase">Leitura da barra flutuante</h1>
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">
+            Scanner
+          </p>
+          <h1 className="mt-2 text-2xl font-black uppercase">Leitura automatica</h1>
         </div>
 
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-3">
-          <select value={mode} onChange={(event) => setMode(event.target.value as ScanMode)} className="w-full rounded-xl border border-zinc-700 bg-black p-3 text-sm">
-            <option value="album">Album</option>
-            {canScanTreino ? <option value="treino">Presenca em treino</option> : null}
-            {canScanEvento ? <option value="evento">Check-in de evento</option> : null}
-          </select>
-          {mode === "treino" ? (
-            <select value={selectedTreinoId} onChange={(event) => setSelectedTreinoId(event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black p-3 text-sm">
-              {treinos.map((treino) => <option key={treino.id} value={treino.id}>{treino.title}</option>)}
-            </select>
-          ) : null}
-          {mode === "evento" ? (
-            <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black p-3 text-sm">
-              {eventos.map((evento) => <option key={evento.id} value={evento.id}>{evento.title} - {evento.date}</option>)}
-            </select>
-          ) : null}
-          <button onClick={() => void start()} disabled={starting || active} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 p-3 text-sm font-black uppercase text-black disabled:opacity-50">
-            {starting ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
-            Abrir camera
-          </button>
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              onClick={() => void start()}
+              disabled={starting || active}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 p-3 text-sm font-black uppercase text-black disabled:opacity-50"
+            >
+              {starting ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+              Abrir camera
+            </button>
+            <button
+              type="button"
+              onClick={() => void stopScanner()}
+              disabled={!active}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-black p-3 text-sm font-black uppercase text-zinc-200 disabled:opacity-50"
+            >
+              <ScanLine size={16} />
+              Parar leitura
+            </button>
+          </div>
         </section>
 
-        <div id="floating-main-scanner" className="qr-reader-surface min-h-[360px] overflow-hidden rounded-3xl border border-dashed border-zinc-700 bg-black" />
-        {message ? <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-200"><ScanLine size={16} className="mr-2 inline" />{message}</div> : null}
+        <div
+          id="floating-main-scanner"
+          className="qr-reader-surface min-h-[360px] overflow-hidden rounded-3xl border border-dashed border-zinc-700 bg-black"
+        />
+
+        <div className={`rounded-xl border p-4 text-sm ${toneClass[status.tone]}`}>
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5">
+              {status.tone === "success" ? <ShieldCheck size={18} /> : status.tone === "error" ? <ScanLine size={18} /> : <CheckCircle2 size={18} />}
+            </div>
+            <div>
+              <p className="font-black uppercase tracking-wide">{status.title}</p>
+              {status.detail ? <p className="mt-1 text-xs opacity-80">{status.detail}</p> : null}
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   );

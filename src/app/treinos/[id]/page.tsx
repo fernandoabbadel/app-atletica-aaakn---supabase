@@ -20,6 +20,7 @@ import {
 } from "../../../lib/treinosNativeService";
 import { getTurmaImage } from "../../../constants/turmaImages";
 import { resolveEffectiveAccessRole } from "@/lib/roles";
+import { buildTreinoPresenceQrPayload } from "@/lib/qrPayloads";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGENS (O Escudo do Código) ---
@@ -262,16 +263,13 @@ export default function TreinoDetalhesPage() {
 
   const presenceQrPayload = useMemo(() => {
       if (!treino || !user?.uid) return "";
-      return JSON.stringify({
-          t: "treino-presenca",
-          v: 1,
-          tid: treino.id,
-          ten: tenantId || "",
-          uid: user.uid,
-          n: user.nome || "Atleta",
-          tu: user.turma || "Geral",
-          av: user.foto || "",
-          ts: Date.now(),
+      return buildTreinoPresenceQrPayload({
+          treinoId: treino.id,
+          tenantId,
+          userId: user.uid,
+          userName: user.nome || "Atleta",
+          userTurma: user.turma || "Geral",
+          userAvatar: user.foto || "",
       });
   }, [tenantId, treino, user?.foto, user?.nome, user?.turma, user?.uid]);
 

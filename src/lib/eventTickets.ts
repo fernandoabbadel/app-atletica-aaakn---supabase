@@ -32,6 +32,22 @@ export const parseEventTicketQrPayload = (
   const raw = value.trim();
   if (!raw) return null;
 
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const type = asString(parsed.t || parsed.type || parsed.kind);
+    const orderId = asString(parsed.orderId || parsed.pedidoId);
+    const ticketToken = asString(parsed.ticketToken || parsed.token);
+    if (
+      ["evento-ingresso", "event-ticket", "ingresso-evento"].includes(type) &&
+      orderId &&
+      ticketToken
+    ) {
+      return { orderId, ticketToken };
+    }
+  } catch {
+    // QR publico usa URL; QRs antigos podem nao ser JSON.
+  }
+
   const extractFromPath = (pathname: string): { orderId: string; ticketToken: string } | null => {
     const match = pathname.match(/\/public\/ingressos\/([^/]+)\/([^/]+)/i);
     if (!match) return null;

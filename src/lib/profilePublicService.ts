@@ -22,8 +22,9 @@ const PROFILE_PUBLIC_FALLBACK_LIGA_LIMIT = 3;
 const PROFILE_RPC_BREAKER_TTL_MS = 10 * 60 * 1000;
 const PROFILE_PUBLIC_BUNDLE_RPC = "profile_public_bundle";
 const PROFILE_FOLLOW_LIST_PAGE_RPC = "profile_follow_list_page";
+const PROFILE_TOGGLE_FOLLOW_RPC = "profile_toggle_follow";
 const PROFILE_USER_SELECT_COLUMNS =
-  "uid,nome,apelido,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,tenant_role,status,whatsappPublico,idadePublica,relacionamentoPublico,esportes,pets,statusRelacionamento,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,tier,level,xp,stats";
+  "uid,nome,apelido,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,tenant_id,tenant_role,status,whatsappPublico,idadePublica,relacionamentoPublico,esportes,pets,statusRelacionamento,plano,plano_cor,plano_icon,patente,patente_icon,patente_cor,tier,level,xp,stats";
 
 const publicBundleCache = new Map<string, CacheEntry<PublicProfileBundle | null>>();
 const followListCache = new Map<string, CacheEntry<FollowListItem[]>>();
@@ -255,6 +256,7 @@ export interface ProfileUserRecord {
   cidadeOrigem?: string;
   dataNascimento?: string;
   role?: string;
+  tenant_id?: string;
   status?: string;
   whatsappPublico?: boolean;
   idadePublica?: boolean;
@@ -319,6 +321,12 @@ export interface FollowCounts {
   followersCount: number;
   followingCount: number;
 }
+
+type FollowToggleResult = {
+  isFollowing: boolean;
+  followersCount: number;
+  followingCount: number;
+};
 
 export interface OwnProfileBundle {
   profile: ProfileUserRecord;
@@ -385,6 +393,7 @@ const normalizeUserProfile = (raw: unknown): ProfileUserRecord | null => {
   const cidadeOrigem = asString(data.cidadeOrigem) || undefined;
   const dataNascimento = asString(data.dataNascimento) || undefined;
   const role = asString(data.role) || undefined;
+  const tenantId = asString(data.tenant_id) || undefined;
   const status = asString(data.status) || undefined;
   const pets = asString(data.pets) || undefined;
   const statusRelacionamento = asString(data.statusRelacionamento) || undefined;
@@ -403,6 +412,7 @@ const normalizeUserProfile = (raw: unknown): ProfileUserRecord | null => {
     ...(cidadeOrigem ? { cidadeOrigem } : {}),
     ...(dataNascimento ? { dataNascimento } : {}),
     ...(role ? { role } : {}),
+    ...(tenantId ? { tenant_id: tenantId } : {}),
     ...(status ? { status } : {}),
     ...(pets ? { pets } : {}),
     ...(statusRelacionamento ? { statusRelacionamento } : {}),
@@ -1153,6 +1163,112 @@ export async function fetchFollowCounts(
   return counts;
 }
 
+const normalizeFollowToggleResult = (raw: unknown): FollowToggleResult | null => {
+  const payload = asObject(raw);
+  if (!payload) return null;
+
+  return {
+    isFollowing: asBoolean(payload.isFollowing, false),
+    followersCount: Math.max(0, asNumber(payload.followersCount, 0)),
+    followingCount: Math.max(0, asNumber(payload.followingCount, 0)),
+  };
+};
+
+async function toggleFollowProfileViaRpc(payload: {
+  supabase: ReturnType<typeof getSupabaseClient>;
+  viewerUid: string;
+  targetUid: string;
+  currentlyFollowing: boolean;
+  viewerData: FollowListItem;
+  targetData: FollowListItem;
+  scopedTenantId: string;
+}): Promise<FollowToggleResult | undefined> {
+  const { data, error } = await payload.supabase.rpc(PROFILE_TOGGLE_FOLLOW_RPC, {
+    p_tenant_id: payload.scopedTenantId || null,
+    p_viewer_user_id: payload.viewerUid,
+    p_target_user_id: payload.targetUid,
+    p_currently_following: payload.currentlyFollowing,
+    p_viewer_data: payload.viewerData,
+    p_target_data: payload.targetData,
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      return undefined;
+    }
+    throwSupabaseError(error);
+  }
+
+  const normalized = normalizeFollowToggleResult(data);
+  if (!normalized) {
+    throw new Error("Resposta invalida do toggle de follow.");
+  }
+  return normalized;
+}
+
+async function toggleFollowProfileViaApi(payload: {
+  supabase: ReturnType<typeof getSupabaseClient>;
+  viewerUid: string;
+  targetUid: string;
+  currentlyFollowing: boolean;
+  viewerData: FollowListItem;
+  targetData: FollowListItem;
+  scopedTenantId: string;
+}): Promise<FollowToggleResult | undefined> {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  const { data: sessionData } = await payload.supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) {
+    return undefined;
+  }
+
+  try {
+    const response = await fetch("/api/profile/follow", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tenantId: payload.scopedTenantId || null,
+        viewerUid: payload.viewerUid,
+        targetUid: payload.targetUid,
+        currentlyFollowing: payload.currentlyFollowing,
+        viewerData: payload.viewerData,
+        targetData: payload.targetData,
+      }),
+      cache: "no-store",
+    });
+
+    if (response.status === 404) {
+      return undefined;
+    }
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const errorMessage =
+        typeof asObject(data)?.error === "string"
+          ? String(asObject(data)?.error)
+          : "Falha ao seguir perfil.";
+      throw new Error(errorMessage);
+    }
+
+    const normalized = normalizeFollowToggleResult(data);
+    if (!normalized) {
+      throw new Error("Resposta invalida do toggle de follow.");
+    }
+    return normalized;
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 export async function toggleFollowProfile(payload: {
   viewerUid: string;
   targetUid: string;
@@ -1160,7 +1276,7 @@ export async function toggleFollowProfile(payload: {
   viewerData: FollowListItem;
   targetData: FollowListItem;
   tenantId?: string | null;
-}): Promise<{ isFollowing: boolean; followersCount: number; followingCount: number }> {
+}): Promise<FollowToggleResult> {
   const supabase = getSupabaseClient();
   const viewerUid = payload.viewerUid.trim();
   const targetUid = payload.targetUid.trim();
@@ -1192,6 +1308,36 @@ export async function toggleFollowProfile(payload: {
     turma: payload.targetData.turma.trim().slice(0, 40) || "Geral",
   };
 
+  const rpcResult = await toggleFollowProfileViaRpc({
+    supabase,
+    viewerUid,
+    targetUid,
+    viewerData,
+    targetData,
+    currentlyFollowing: payload.currentlyFollowing,
+    scopedTenantId,
+  });
+  if (rpcResult) {
+    clearProfilePublicCachesForUser(targetUid, scopedTenantId);
+    clearProfilePublicCachesForUser(viewerUid, scopedTenantId);
+    return rpcResult;
+  }
+
+  const apiResult = await toggleFollowProfileViaApi({
+    supabase,
+    viewerUid,
+    targetUid,
+    viewerData,
+    targetData,
+    currentlyFollowing: payload.currentlyFollowing,
+    scopedTenantId,
+  });
+  if (apiResult) {
+    clearProfilePublicCachesForUser(targetUid, scopedTenantId);
+    clearProfilePublicCachesForUser(viewerUid, scopedTenantId);
+    return apiResult;
+  }
+
   let existingFollowerQuery = supabase
     .from("users_followers")
     .select("id")
@@ -1200,21 +1346,13 @@ export async function toggleFollowProfile(payload: {
   if (scopedTenantId) {
     existingFollowerQuery = existingFollowerQuery.eq("tenant_id", scopedTenantId);
   }
-  const { data: existingFollower, error: existingError } =
-    await existingFollowerQuery.maybeSingle();
+  const { error: existingError } = await existingFollowerQuery.maybeSingle();
   if (existingError) {
     if (!scopedTenantId || !isMissingTenantIdColumn(existingError)) {
       throwSupabaseError(existingError);
     }
 
-    const fallbackExisting = await supabase
-      .from("users_followers")
-      .select("id")
-      .eq("userId", targetUid)
-      .eq("uid", viewerUid)
-      .maybeSingle();
-    if (fallbackExisting.error) throwSupabaseError(fallbackExisting.error);
-    const shouldUnfollow = payload.currentlyFollowing || Boolean(fallbackExisting.data);
+    const shouldUnfollow = payload.currentlyFollowing;
     return completeToggleFollowProfile({
       supabase,
       viewerUid,
@@ -1227,7 +1365,7 @@ export async function toggleFollowProfile(payload: {
     });
   }
 
-  const shouldUnfollow = payload.currentlyFollowing || Boolean(existingFollower);
+  const shouldUnfollow = payload.currentlyFollowing;
 
   return completeToggleFollowProfile({
     supabase,
@@ -1250,7 +1388,7 @@ async function completeToggleFollowProfile(payload: {
   shouldUnfollow: boolean;
   scopedTenantId: string;
   tenantIdSupported: boolean;
-}): Promise<{ isFollowing: boolean; followersCount: number; followingCount: number }> {
+}): Promise<FollowToggleResult> {
   const {
     supabase,
     viewerUid,

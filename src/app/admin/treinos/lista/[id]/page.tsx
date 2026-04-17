@@ -43,6 +43,10 @@ import {
   updateChamadaStatus,
 } from "@/lib/treinosNativeService";
 import { isPermissionError } from "@/lib/backendErrors";
+import {
+  parseTreinoPresenceQrPayload,
+  type TreinoPresenceQrPayload,
+} from "@/lib/qrPayloads";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 10;
@@ -65,54 +69,6 @@ const mergeUniqueById = <T extends { id?: string; userId: string }>(
   return merged;
 };
 
-type TreinoPresenceQrPayload = {
-  treinoId: string;
-  userId: string;
-  userName: string;
-  userTurma: string;
-  userAvatar: string;
-  tenantId: string;
-};
-
-const asPayloadString = (value: unknown): string =>
-  typeof value === "string" ? value.trim() : "";
-
-const parseTreinoPresenceQrPayload = (rawPayload: string): TreinoPresenceQrPayload | null => {
-  let candidate = rawPayload.trim();
-  if (!candidate) return null;
-
-  try {
-    const url = new URL(candidate);
-    candidate =
-      url.searchParams.get("treinoQr") ||
-      url.searchParams.get("payload") ||
-      url.searchParams.get("qr") ||
-      candidate;
-  } catch {
-    // QR local usa JSON direto.
-  }
-
-  try {
-    const parsed = JSON.parse(candidate) as Record<string, unknown>;
-    const type = asPayloadString(parsed.t || parsed.type);
-    const treinoId = asPayloadString(parsed.tid || parsed.treinoId);
-    const userId = asPayloadString(parsed.uid || parsed.userId);
-    if (type && type !== "treino-presenca") return null;
-    if (!treinoId || !userId) return null;
-
-    return {
-      treinoId,
-      userId,
-      userName: asPayloadString(parsed.n || parsed.userName || parsed.nome) || "Atleta",
-      userTurma: asPayloadString(parsed.tu || parsed.userTurma || parsed.turma) || "Geral",
-      userAvatar: asPayloadString(parsed.av || parsed.userAvatar || parsed.avatar),
-      tenantId: asPayloadString(parsed.ten || parsed.tenantId),
-    };
-  } catch {
-    return null;
-  }
-};
-
 export default function AdminTreinoListaPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -126,8 +82,10 @@ export default function AdminTreinoListaPage() {
   const [titulo, setTitulo] = useState("Treino");
   const [subtitulo, setSubtitulo] = useState("-");
   const floatingScanHandledRef = useRef(false);
+  const lastTreinoScanPayloadRef = useRef("");
 
   const [chamadaRows, setChamadaRows] = useState<TreinoChamadaRecord[]>([]);
+  const chamadaRowsRef = useRef<TreinoChamadaRecord[]>([]);
   const [rsvpRows, setRsvpRows] = useState<TreinoRsvpRecord[]>([]);
 
   const [loading, setLoading] = useState(true);
@@ -148,6 +106,8 @@ export default function AdminTreinoListaPage() {
   const [scannerStarting, setScannerStarting] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
   const [scanError, setScanError] = useState("");
+  const [scannedPresenceForRating, setScannedPresenceForRating] =
+    useState<TreinoChamadaRecord | null>(null);
 
   const [userPool, setUserPool] = useState<TreinoUserDirectoryItem[]>([]);
   const [userSegments, setUserSegments] = useState<TreinoUserDirectorySegment[]>(
@@ -210,6 +170,10 @@ export default function AdminTreinoListaPage() {
   useEffect(() => {
     void loadInitial();
   }, [loadInitial]);
+
+  useEffect(() => {
+    chamadaRowsRef.current = chamadaRows;
+  }, [chamadaRows]);
 
   const loadUserSegments = useCallback(
     async (forceRefresh = false) => {
@@ -357,13 +321,23 @@ export default function AdminTreinoListaPage() {
 
   const processTreinoQrScan = useCallback(
     async (decodedText: string) => {
-      if (processingScanRef.current) return;
+      const cleanDecodedText = decodedText.trim();
+      if (!cleanDecodedText || processingScanRef.current) return;
+      if (lastTreinoScanPayloadRef.current === cleanDecodedText) return;
+      lastTreinoScanPayloadRef.current = cleanDecodedText;
+      window.setTimeout(() => {
+        if (lastTreinoScanPayloadRef.current === cleanDecodedText) {
+          lastTreinoScanPayloadRef.current = "";
+        }
+      }, 2500);
+
       processingScanRef.current = true;
       setScanError("");
       setScanMessage("Validando QR do treino...");
 
       try {
-        const payload = parseTreinoPresenceQrPayload(decodedText);
+        const payload: TreinoPresenceQrPayload | null =
+          parseTreinoPresenceQrPayload(cleanDecodedText);
         if (!payload) {
           throw new Error("QR invalido para chamada de treino.");
         }
@@ -405,6 +379,10 @@ export default function AdminTreinoListaPage() {
           status: "presente",
           origem: "app",
         };
+        const previousRow = chamadaRowsRef.current.find((entry) => entry.userId === aluno.uid);
+        setScannedPresenceForRating(
+          previousRow ? { ...previousRow, ...nextRow, id: previousRow.id || nextRow.id } : nextRow
+        );
         setChamadaRows((prev) => {
           const hasRow = prev.some((entry) => entry.userId === aluno.uid);
           if (hasRow) {
@@ -414,7 +392,7 @@ export default function AdminTreinoListaPage() {
           }
           return [nextRow, ...prev];
         });
-        setScanMessage(`${aluno.nome} confirmado na chamada.`);
+        setScanMessage(`${aluno.nome} confirmado. Selecione o desempenho do treino.`);
         addToast("Presenca registrada pelo QR.", "success");
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Falha ao ler QR do treino.";
@@ -424,7 +402,7 @@ export default function AdminTreinoListaPage() {
       } finally {
         window.setTimeout(() => {
           processingScanRef.current = false;
-          setScanMessage((current) => (current.includes("confirmado") ? "" : current));
+          setScanMessage((current) => (current.includes("confirmado") ? current : ""));
         }, 1400);
       }
     },
@@ -433,11 +411,12 @@ export default function AdminTreinoListaPage() {
 
   useEffect(() => {
     if (floatingScanHandledRef.current) return;
+    if (loading) return;
     const uid = searchParams.get("uid")?.trim() || "";
     if (!uid || !treinoId) return;
     floatingScanHandledRef.current = true;
     void processTreinoQrScan(JSON.stringify({ t: "treino-presenca", tid: treinoId, uid }));
-  }, [processTreinoQrScan, searchParams, treinoId]);
+  }, [loading, processTreinoQrScan, searchParams, treinoId]);
 
   useEffect(() => {
     if (!showScanner || scannerRef.current) return;
@@ -575,13 +554,15 @@ export default function AdminTreinoListaPage() {
   const handleRatePerformance = async (row: TreinoChamadaRecord, rating: number) => {
     if (!treinoId) return;
 
+    const ratedBy = user?.nome || user?.email || "Admin";
+    const ratedAt = new Date().toISOString();
     setUpdatingId(`${row.id}:rating`);
     try {
       await updateChamadaPerformanceRating({
         treinoId,
         chamadaId: row.id,
         rating,
-        ratedBy: user?.nome || user?.email || "Admin",
+        ratedBy,
         tenantId: activeTenantId || undefined,
       });
       setChamadaRows((prev) =>
@@ -590,18 +571,87 @@ export default function AdminTreinoListaPage() {
             ? {
                 ...entry,
                 performanceRating: rating,
-                performanceRatedBy: user?.nome || user?.email || "Admin",
-                performanceRatedAt: new Date().toISOString(),
+                performanceRatedBy: ratedBy,
+                performanceRatedAt: ratedAt,
               }
             : entry
         )
       );
+      setScannedPresenceForRating((current) =>
+        current && current.id === row.id
+          ? {
+              ...current,
+              performanceRating: rating,
+              performanceRatedBy: ratedBy,
+              performanceRatedAt: ratedAt,
+            }
+          : current
+      );
+      setScanMessage(`Desempenho de ${row.nome} salvo com ${rating} estrela${rating > 1 ? "s" : ""}.`);
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
       addToast("Erro ao salvar desempenho.", "error");
     } finally {
       setUpdatingId(null);
     }
+  };
+
+  const renderScannedPresenceRatingPanel = (compact = false) => {
+    if (!scannedPresenceForRating) return null;
+
+    const row = scannedPresenceForRating;
+    const savingRating = updatingId === `${row.id}:rating`;
+    return (
+      <div
+        className={
+          compact
+            ? "rounded-2xl border border-yellow-400/25 bg-yellow-400/10 px-4 py-3"
+            : "fixed inset-x-4 bottom-4 z-[9998] mx-auto max-w-lg rounded-3xl border border-yellow-400/30 bg-zinc-950 p-5 text-white shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
+        }
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-yellow-300">
+              Desempenho do treino
+            </p>
+            <h3 className="mt-1 text-sm font-black uppercase text-white">{row.nome}</h3>
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
+              {row.turma || "Geral"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setScannedPresenceForRating(null)}
+            className="rounded-full border border-white/10 bg-white/5 p-2 text-zinc-300"
+            aria-label="Fechar avaliacao"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="mt-3 flex items-center gap-2" aria-label={`Desempenho ${row.performanceRating || 0} de 5`}>
+          {[1, 2, 3, 4, 5].map((rating) => (
+            <button
+              key={rating}
+              type="button"
+              onClick={() => void handleRatePerformance(row, rating)}
+              disabled={savingRating}
+              className="rounded-xl border border-yellow-400/20 bg-black/40 p-2 text-yellow-300 transition hover:bg-yellow-400/10 disabled:opacity-50"
+              title={`${rating} estrela${rating > 1 ? "s" : ""}`}
+            >
+              <Star
+                size={24}
+                className={
+                  rating <= Math.max(0, row.performanceRating || 0)
+                    ? "fill-yellow-400 text-yellow-400"
+                    : "text-zinc-600"
+                }
+              />
+            </button>
+          ))}
+          {savingRating ? <Loader2 size={18} className="animate-spin text-yellow-300" /> : null}
+        </div>
+      </div>
+    );
   };
 
   const handleRemoveFromChamada = async (row: TreinoChamadaRecord) => {
@@ -1061,6 +1111,8 @@ export default function AdminTreinoListaPage() {
         )}
       </main>
 
+      {!showScanner ? renderScannedPresenceRatingPanel(false) : null}
+
       {showScanner ? (
         <div className="fixed inset-0 z-[9999] flex h-[100dvh] flex-col bg-black text-white">
           <div className="flex items-center justify-between border-b border-white/10 bg-black/90 px-4 py-3">
@@ -1114,6 +1166,7 @@ export default function AdminTreinoListaPage() {
                   {scanError}
                 </div>
               ) : null}
+              {renderScannedPresenceRatingPanel(true)}
             </div>
           </div>
         </div>

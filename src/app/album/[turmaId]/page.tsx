@@ -177,6 +177,7 @@ export default function AlbumTurmaPage() {
   const processingScanRef = useRef(false);
   const lastScanAtRef = useRef(0);
   const autoScanHandledRef = useRef(false);
+  const directCaptureHandledRef = useRef("");
   const meuAlbumRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -424,6 +425,17 @@ export default function AlbumTurmaPage() {
     },
     [user, meuAlbum, addToast, stopScanner, effectiveTenantId]
   );
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const targetUid =
+      searchParams.get("targetUid")?.trim() ||
+      searchParams.get("uid")?.trim() ||
+      "";
+    if (!targetUid || directCaptureHandledRef.current === targetUid) return;
+    directCaptureHandledRef.current = targetUid;
+    void handleFoundUser(targetUid);
+  }, [handleFoundUser, searchParams, user?.uid]);
 
   useEffect(() => {
     if (!showScanner || scannerRef.current) return;

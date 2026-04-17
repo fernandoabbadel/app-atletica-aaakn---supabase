@@ -26,7 +26,7 @@ const MAX_FOLLOW_RESULTS = 260;
 const PROFILE_TOGGLE_FOLLOW_CALLABLE = "profileToggleFollow";
 const PROFILE_ADMIN_RECOUNT_FOLLOWS_CALLABLE = "profileAdminRecountFollowStats";
 const PROFILE_USER_SELECT_COLUMNS =
-  "uid,nome,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,status,pets,statusRelacionamento,esportes,whatsappPublico,idadePublica,relacionamentoPublico,stats";
+  "uid,nome,foto,turma,bio,instagram,telefone,cidadeOrigem,dataNascimento,role,tenant_id,status,pets,statusRelacionamento,esportes,whatsappPublico,idadePublica,relacionamentoPublico,stats";
 const PROFILE_POST_SELECT_COLUMNS = "id,texto,imagem,createdAt,likes,comentarios,userId";
 const PROFILE_EVENT_SELECT_COLUMNS = "id,titulo,data,local,imagem,imagePositionY";
 const PROFILE_TREINO_SELECT_COLUMNS = "id,modalidade,dia,horario,imagem,local,confirmedCount";
@@ -303,6 +303,7 @@ export interface ProfileUserRecord {
   cidadeOrigem?: string;
   dataNascimento?: string;
   role?: string;
+  tenant_id?: string;
   status?: string;
   whatsappPublico?: boolean;
   idadePublica?: boolean;

@@ -1,7 +1,7 @@
 // src/app/cadastro/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { 
   User, Hash, Instagram, FileText, Phone, Save, Loader2, ShieldAlert, 
   Eye, EyeOff, CheckCircle2, MapPin, Heart, Trophy, PawPrint, 
@@ -115,6 +115,98 @@ const normalizeInviteJoinFailureMessage = (message: string): string => {
 };
 
 const GUEST_PLACEHOLDER_NAME = "visitante usc";
+const CADASTRO_DRAFT_PREFIX = "usc:cadastro:draft:v2";
+const CADASTRO_DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+type CadastroDraftPayload = {
+  updatedAt: number;
+  data: Partial<UserFormData>;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+
+const buildCadastroDraftKey = (uid: string, tenantId: string, tenantSlugValue: string): string => {
+  const scope = tenantId.trim() || tenantSlugValue.trim().toLowerCase() || "global";
+  return `${CADASTRO_DRAFT_PREFIX}:${scope}:${uid.trim()}`;
+};
+
+const normalizeCadastroDraftData = (value: unknown): Partial<UserFormData> => {
+  const raw = asRecord(value);
+  if (!raw) return {};
+
+  const data: Partial<UserFormData> = {};
+  const stringFields: Array<keyof UserFormData> = [
+    "nome",
+    "apelido",
+    "matricula",
+    "turma",
+    "instagram",
+    "telefone",
+    "bio",
+    "dataNascimento",
+    "cidadeOrigem",
+    "estadoOrigem",
+    "statusRelacionamento",
+    "pets",
+    "foto",
+  ];
+  stringFields.forEach((field) => {
+    if (typeof raw[field] === "string") {
+      (data as Record<string, unknown>)[field] = raw[field];
+    }
+  });
+
+  const booleanFields: Array<keyof UserFormData> = [
+    "whatsappPublico",
+    "idadePublica",
+    "relacionamentoPublico",
+  ];
+  booleanFields.forEach((field) => {
+    if (typeof raw[field] === "boolean") {
+      (data as Record<string, unknown>)[field] = raw[field];
+    }
+  });
+
+  if (Array.isArray(raw.esportes)) {
+    data.esportes = raw.esportes.filter((item): item is string => typeof item === "string");
+  }
+
+  return data;
+};
+
+const readCadastroDraft = (key: string): Partial<UserFormData> | null => {
+  if (typeof window === "undefined" || !key) return null;
+
+  try {
+    const parsed = asRecord(JSON.parse(window.localStorage.getItem(key) || "null"));
+    if (!parsed) return null;
+    const updatedAt = typeof parsed?.updatedAt === "number" ? parsed.updatedAt : 0;
+    if (!updatedAt || Date.now() - updatedAt > CADASTRO_DRAFT_MAX_AGE_MS) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return normalizeCadastroDraftData(parsed.data);
+  } catch {
+    window.localStorage.removeItem(key);
+    return null;
+  }
+};
+
+const writeCadastroDraft = (key: string, data: UserFormData): void => {
+  if (typeof window === "undefined" || !key) return;
+
+  const payload: CadastroDraftPayload = {
+    updatedAt: Date.now(),
+    data,
+  };
+  window.localStorage.setItem(key, JSON.stringify(payload));
+};
+
+const clearCadastroDraft = (key: string): void => {
+  if (typeof window === "undefined" || !key) return;
+  window.localStorage.removeItem(key);
+};
 
 export default function CadastroPage() {
   const { user, updateUser, logout, loading: authLoading } = useAuth();
@@ -195,11 +287,25 @@ export default function CadastroPage() {
     pets: "nenhum",
     foto: "" 
   });
+  const formDraftReadyRef = useRef(false);
+  const suppressDraftWriteRef = useRef(false);
+  const hydratedDraftKeyRef = useRef("");
 
   const scopedPath = (path: string) =>
     effectiveTenantSlug ? withTenantSlug(effectiveTenantSlug, path) : path;
 
   const profilePath = user?.uid ? scopedPath(`/perfil/${user.uid}`) : scopedPath("/perfil");
+  const cadastroDraftKey = useMemo(
+    () =>
+      user?.uid
+        ? buildCadastroDraftKey(user.uid, effectiveTenantId, effectiveTenantSlug)
+        : "",
+    [effectiveTenantId, effectiveTenantSlug, user?.uid]
+  );
+  const clearCurrentCadastroDraft = useCallback(() => {
+    suppressDraftWriteRef.current = true;
+    clearCadastroDraft(cadastroDraftKey);
+  }, [cadastroDraftKey]);
   const pendingPath = scopedPath("/aguardando-aprovacao");
   const landingPath = scopedPath("/");
   const currentRoutePath = routePathInfo.tenantSlug
@@ -333,6 +439,7 @@ export default function CadastroPage() {
   // ðŸ¦ˆ LOAD DE DADOS COM SANITIZAÃ‡ÃƒO
   useEffect(() => {
     if (user) {
+      suppressDraftWriteRef.current = true;
       const resolvedIdentityName =
         isGuestUser && isGuestPlaceholderName ? "" : String(user.nome || "");
       // ðŸ¦ˆ ID 1: Verifica se localização já existe para travar
@@ -369,6 +476,59 @@ export default function CadastroPage() {
       });
     }
   }, [isGuestPlaceholderName, isGuestUser, user]);
+
+  useEffect(() => {
+    if (!cadastroDraftKey || !formDraftReadyRef.current) return;
+    if (hydratedDraftKeyRef.current !== cadastroDraftKey) return;
+    if (suppressDraftWriteRef.current) return;
+    writeCadastroDraft(cadastroDraftKey, formData);
+  }, [cadastroDraftKey, formData]);
+
+  useEffect(() => {
+    if (!user || !cadastroDraftKey) return;
+
+    const draft = readCadastroDraft(cadastroDraftKey);
+    hydratedDraftKeyRef.current = cadastroDraftKey;
+    formDraftReadyRef.current = true;
+
+    if (!draft) {
+      suppressDraftWriteRef.current = false;
+      return;
+    }
+
+    const hasLockedLocation = Boolean(user.estadoOrigem && user.cidadeOrigem);
+    const draftEstadoOrigem = hasLockedLocation
+      ? String(user.estadoOrigem || "")
+      : typeof draft.estadoOrigem === "string"
+        ? draft.estadoOrigem
+        : "";
+    if (draftEstadoOrigem) {
+      setUfSelected(draftEstadoOrigem);
+    }
+
+    setFormData((prev) => {
+      const nextForm: UserFormData = {
+        ...prev,
+        ...draft,
+        esportes: normalizeSelectedSportIds(
+          Array.isArray(draft.esportes) ? draft.esportes : prev.esportes,
+          cadastroConfig.sportOptions
+        ),
+      };
+
+      if (!isGuestUser) {
+        nextForm.nome = prev.nome;
+      }
+
+      if (hasLockedLocation) {
+        nextForm.estadoOrigem = String(user.estadoOrigem || "");
+        nextForm.cidadeOrigem = String(user.cidadeOrigem || "");
+      }
+
+      return nextForm;
+    });
+    suppressDraftWriteRef.current = false;
+  }, [cadastroConfig.sportOptions, cadastroDraftKey, isGuestUser, user]);
 
   useEffect(() => {
     if (authLoading || user) return;
@@ -665,12 +825,14 @@ export default function CadastroPage() {
         }
 
         if (membership?.status === "pending") {
+          clearCurrentCadastroDraft();
           clearStoredInviteToken();
           addToast(`Cadastro concluido. ${inviteTenantLabel} vai analisar seu acesso.`, "info");
           router.push(pendingPath);
           return;
         }
         if (membership?.status === "approved") {
+          clearCurrentCadastroDraft();
           clearStoredInviteToken();
           addToast("Perfil atualizado com sucesso.", "success");
           router.push(profilePath);
@@ -710,6 +872,7 @@ export default function CadastroPage() {
             await updateUser(membershipPatch);
 
             if (manualMembership.status === "pending") {
+              clearCurrentCadastroDraft();
               clearStoredInviteToken();
               addToast(
                 inviteJoinFailedMessage
@@ -723,6 +886,7 @@ export default function CadastroPage() {
 
             if (false) {
               await updateUser({ role: "user" });
+              clearCurrentCadastroDraft();
               clearStoredInviteToken();
               addToast("Perfil atualizado com sucesso.", "success");
               router.push(profilePath);
@@ -731,6 +895,7 @@ export default function CadastroPage() {
 
             if (manualMembership.status === "approved") {
               await updateUser({ role: "user" });
+              clearCurrentCadastroDraft();
               clearStoredInviteToken();
               addToast("Perfil atualizado com sucesso.", "success");
               router.push(profilePath);
@@ -757,6 +922,7 @@ export default function CadastroPage() {
         return;
       }
 
+      clearCurrentCadastroDraft();
       clearStoredInviteToken();
       addToast("Perfil atualizado com sucesso.", "success");
       router.push(profilePath); 
@@ -789,6 +955,7 @@ export default function CadastroPage() {
   };
 
   const handleExit = async () => {
+    clearCurrentCadastroDraft();
     await logout();
     router.replace(landingPath);
   };

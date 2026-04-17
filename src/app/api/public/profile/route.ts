@@ -60,6 +60,13 @@ export async function GET(request: Request) {
       });
     }
 
+    if (tenantId && typeof rawPayload.profile === "object" && rawPayload.profile !== null) {
+      rawPayload.profile = {
+        ...(rawPayload.profile as Record<string, unknown>),
+        tenant_id: (rawPayload.profile as Record<string, unknown>).tenant_id || tenantId,
+      };
+    }
+
     const enriched = await enrichPublicProfileBundleWithAchievements(
       rawPayload,
       tenantId || undefined
