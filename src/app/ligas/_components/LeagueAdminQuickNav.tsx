@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Calendar, Home, Info, LayoutGrid, ShoppingBag, Users } from "lucide-react";
+import { Calendar, Home, Info, LayoutGrid, ShoppingBag, Users, Wallet } from "lucide-react";
 
 export type LeagueAdminQuickNavKey =
   | "home"
@@ -9,6 +9,7 @@ export type LeagueAdminQuickNavKey =
   | "members"
   | "events"
   | "store"
+  | "finance"
   | "board";
 
 interface LeagueAdminQuickNavProps {
@@ -18,16 +19,18 @@ interface LeagueAdminQuickNavProps {
   membersHref: string;
   eventsHref: string;
   storeHref: string;
+  financeHref: string;
   boardHref: string;
   className?: string;
 }
 
 const navItems = [
-  { key: "home", label: "Inicio", icon: Home },
+  { key: "home", label: "Início", icon: Home },
   { key: "visual", label: "Informações", icon: Info },
   { key: "members", label: "Membros", icon: Users },
   { key: "events", label: "Agenda", icon: Calendar },
   { key: "store", label: "Loja", icon: ShoppingBag },
+  { key: "finance", label: "Gestão", icon: Wallet },
   { key: "board", label: "Board Round", icon: LayoutGrid },
 ] as const;
 
@@ -38,6 +41,7 @@ export function LeagueAdminQuickNav({
   membersHref,
   eventsHref,
   storeHref,
+  financeHref,
   boardHref,
   className = "",
 }: LeagueAdminQuickNavProps) {
@@ -47,12 +51,13 @@ export function LeagueAdminQuickNav({
     members: membersHref,
     events: eventsHref,
     store: storeHref,
+    finance: financeHref,
     board: boardHref,
   };
 
   return (
     <nav
-      aria-label="Navegacao da liga"
+      aria-label="Navegação da liga"
       className={`flex flex-wrap gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-2 ${className}`}
     >
       {navItems.map((item) => {

@@ -1362,7 +1362,7 @@ export interface LeaguePollRecord {
   voters: string[];
 }
 
-export type LeagueStorageImageKind = "logo" | "member" | "event" | "question";
+export type LeagueStorageImageKind = "logo" | "member" | "event" | "question" | "store" | "product";
 
 const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
   const data = asObject(raw);
@@ -1681,6 +1681,8 @@ const leagueImageFolderByKind: Record<LeagueStorageImageKind, string> = {
   member: "membros",
   event: "eventos",
   question: "perguntas",
+  store: "loja",
+  product: "produtos",
 };
 
 export async function uploadLeagueImageToStorage(options: {
@@ -1698,19 +1700,24 @@ export async function uploadLeagueImageToStorage(options: {
   const isEventImage = options.kind === "event";
   const isLogoImage = options.kind === "logo";
   const isMemberImage = options.kind === "member";
-  const sourceMaxBytes = isEventImage ? 3 * 1024 * 1024 : 2 * 1024 * 1024;
+  const isStoreImage = options.kind === "store";
+  const isProductImage = options.kind === "product";
+  const isStoreAsset = isStoreImage || isProductImage;
+  const sourceMaxBytes = isStoreAsset ? 200 * 1024 : isEventImage ? 3 * 1024 * 1024 : 2 * 1024 * 1024;
   const sourceMaxWidth = isEventImage ? 4200 : isLogoImage ? 4000 : isMemberImage ? 3200 : 3600;
   const sourceMaxHeight = isEventImage ? 3200 : isLogoImage ? 4000 : isMemberImage ? 3200 : 3600;
   const sourceMaxPixels = isEventImage ? 12_000_000 : isLogoImage ? 16_000_000 : 9_000_000;
   const compressedMaxBytes = isEventImage
     ? 700 * 1024
-    : isLogoImage
+    : isStoreAsset
+      ? 200 * 1024
+      : isLogoImage
       ? 1500 * 1024
       : isMemberImage
         ? 450 * 1024
         : 500 * 1024;
-  const compressionMaxWidth = isEventImage ? 1800 : isLogoImage ? 900 : 1400;
-  const compressionMaxHeight = isEventImage ? 1200 : isLogoImage ? 900 : 1400;
+  const compressionMaxWidth = isEventImage ? 1800 : isLogoImage ? 900 : isStoreAsset ? 1600 : 1400;
+  const compressionMaxHeight = isEventImage ? 1200 : isLogoImage ? 900 : isStoreAsset ? 1600 : 1400;
   const fileName =
     options.kind === "logo"
       ? "logo"
@@ -1718,7 +1725,11 @@ export async function uploadLeagueImageToStorage(options: {
         ? "evento"
         : options.kind === "member"
           ? "membro"
-          : "pergunta";
+          : options.kind === "store"
+            ? "capa"
+            : options.kind === "product"
+              ? "produto"
+              : "pergunta";
 
   const { url, error } = await uploadImage(options.file, objectDir, {
     scopeKey: `ligas:${leagueSegment}:${options.kind}:${options.entityId || "root"}`,

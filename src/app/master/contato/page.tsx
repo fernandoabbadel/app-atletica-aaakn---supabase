@@ -10,6 +10,7 @@ import {
   resolveAdminReport,
   type AdminReportRecord,
 } from "@/lib/reportsService";
+import { dispatchMasterContactPendingChanged } from "@/lib/masterContactNotifications";
 
 const PAGE_SIZE = 20;
 
@@ -69,6 +70,7 @@ export default function MasterContatoPage() {
           entry.id === row.id ? { ...entry, status: "resolvida", respostaAdmin: response } : entry
         )
       );
+      dispatchMasterContactPendingChanged();
     } finally {
       setBusyId("");
     }
@@ -82,6 +84,7 @@ export default function MasterContatoPage() {
         originCollection: row.originCollection,
       });
       setRows((prev) => prev.filter((entry) => entry.id !== row.id));
+      dispatchMasterContactPendingChanged();
     } finally {
       setBusyId("");
     }
@@ -163,7 +166,7 @@ export default function MasterContatoPage() {
                 {row.respostaAdmin ? (
                   <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-100">
                     <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-emerald-300">
-                      Ultima resposta salva
+                      Última resposta salva
                     </span>
                     {row.respostaAdmin}
                   </div>
@@ -195,7 +198,7 @@ export default function MasterContatoPage() {
         {rows.length > PAGE_SIZE && (
           <div className="flex items-center justify-between pt-2 text-xs font-bold uppercase text-zinc-500">
             <span>
-              Pagina {page} de {totalPages}
+              Página {page} de {totalPages}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -210,7 +213,7 @@ export default function MasterContatoPage() {
                 disabled={page === totalPages}
                 className="rounded-lg border border-zinc-800 px-3 py-2 disabled:opacity-40"
               >
-                Avancar
+                Avançar
               </button>
             </div>
           </div>

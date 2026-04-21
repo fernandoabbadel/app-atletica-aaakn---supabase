@@ -20,6 +20,8 @@ import {
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { MASTER_CONTACT_PENDING_EVENT } from "@/lib/masterContactNotifications";
+import { fetchSupportReports } from "@/lib/reportsService";
 import { isPlatformMaster } from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
 
@@ -36,6 +38,7 @@ type MasterNavItem = {
   path: string;
   icon: React.ReactNode;
   disabled?: boolean;
+  pendingCount?: number;
 };
 
 export default function MasterLayout({
@@ -48,6 +51,7 @@ export default function MasterLayout({
   const { tenantId, tenantName, tenantSlug, isOverrideActive } = useTenantTheme();
   const [collapsed, setCollapsed] = useState(false);
   const [resolvedTenantSlug, setResolvedTenantSlug] = useState("");
+  const [pendingContactCount, setPendingContactCount] = useState(0);
 
   const canAccess = isPlatformMaster(user);
   const currentPath = useMemo(
@@ -59,6 +63,50 @@ export default function MasterLayout({
     if (typeof window === "undefined") return;
     setCollapsed(window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1");
   }, []);
+
+  useEffect(() => {
+    if (!canAccess || typeof window === "undefined") {
+      setPendingContactCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshPendingContacts = async () => {
+      try {
+        const reports = await fetchSupportReports(240);
+        if (cancelled) return;
+        setPendingContactCount(reports.filter((report) => report.status !== "resolvida").length);
+      } catch (error) {
+        console.error("Falha ao carregar marcador do Contato USC:", error);
+        if (!cancelled) setPendingContactCount(0);
+      }
+    };
+
+    const requestRefresh = () => {
+      void refreshPendingContacts();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        requestRefresh();
+      }
+    };
+
+    requestRefresh();
+    window.addEventListener(MASTER_CONTACT_PENDING_EVENT, requestRefresh);
+    window.addEventListener("focus", requestRefresh);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    const intervalId = window.setInterval(requestRefresh, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(MASTER_CONTACT_PENDING_EVENT, requestRefresh);
+      window.removeEventListener("focus", requestRefresh);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [canAccess]);
 
   useEffect(() => {
     if (tenantSlug.trim()) {
@@ -118,10 +166,10 @@ export default function MasterLayout({
     { name: "Dashboard Master", path: "/master", icon: <Building2 size={18} /> },
     { name: "Landing USC", path: "/master/landing", icon: <Rocket size={18} /> },
     { name: "FAQ USC", path: "/master/faq", icon: <CircleHelp size={18} /> },
-    { name: "Contato USC", path: "/master/contato", icon: <Mail size={18} /> },
-    { name: "Permissoes Globais", path: "/master/permissoes", icon: <Lock size={18} /> },
+    { name: "Contato USC", path: "/master/contato", icon: <Mail size={18} />, pendingCount: pendingContactCount },
+    { name: "Permissões Globais", path: "/master/permissoes", icon: <Lock size={18} /> },
     { name: "Perfis do Admin", path: "/master/permissoes/perfis-admin", icon: <PanelLeft size={18} /> },
-    { name: "Solicitacoes", path: "/master/solicitacoes", icon: <CreditCard size={18} /> },
+    { name: "Solicitações", path: "/master/solicitacoes", icon: <CreditCard size={18} /> },
     {
       name: "Painel da Atlética",
       path: tenantAdminPath,
@@ -196,7 +244,7 @@ export default function MasterLayout({
                 {isOverrideActive ? tenantName || "Atlética selecionada" : "Plataforma USC"}
               </p>
               <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
-                {isOverrideActive ? "navegando com contexto forcado" : "modo global ativo"}
+                {isOverrideActive ? "navegando com contexto forçado" : "modo global ativo"}
               </p>
             </div>
           )}
@@ -224,7 +272,12 @@ export default function MasterLayout({
                       title="Selecione uma atlética no topo antes de abrir o painel admin."
                       className={itemClassName}
                     >
-                      {item.icon}
+                      <span className="relative inline-flex shrink-0">
+                        {item.icon}
+                        {item.pendingCount ? (
+                          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-zinc-950 bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]" />
+                        ) : null}
+                      </span>
                       {!collapsed && (
                         <span className="text-xs font-bold uppercase tracking-[0.12em]">
                           {item.name}
@@ -241,7 +294,15 @@ export default function MasterLayout({
                     title={item.name}
                     className={itemClassName}
                   >
-                    {item.icon}
+                    <span className="relative inline-flex shrink-0">
+                      {item.icon}
+                      {item.pendingCount ? (
+                        <span
+                          aria-label={`${item.pendingCount} mensagens pendentes`}
+                          className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-zinc-950 bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]"
+                        />
+                      ) : null}
+                    </span>
                     {!collapsed && (
                       <span className="text-xs font-bold uppercase tracking-[0.12em]">
                         {item.name}

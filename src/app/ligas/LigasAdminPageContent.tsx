@@ -423,6 +423,11 @@ const buildLeagueStorePath = (leagueId?: string | null): string => {
     return cleanLeagueId ? `/ligas/${encodeURIComponent(cleanLeagueId)}/loja` : "/ligas/loja";
 };
 
+const buildLeagueFinancePath = (leagueId?: string | null): string => {
+    const cleanLeagueId = typeof leagueId === "string" ? leagueId.trim() : "";
+    return cleanLeagueId ? `/ligas/${encodeURIComponent(cleanLeagueId)}/gestao` : "/ligas/gestao";
+};
+
 const resolveLeagueLandingPath = (payload: {
     pageVariant: LigaAdminPageVariant;
     routeLeagueId?: string | null;
@@ -1588,6 +1593,10 @@ export default function LigasAdminPageContent({
       const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
       router.push(tenantPath(buildLeagueStorePath(scopedLeagueId)));
   };
+  const navigateToLeagueFinance = () => {
+      const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
+      router.push(tenantPath(buildLeagueFinancePath(scopedLeagueId)));
+  };
   const quickNavLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
   const quickNavActive: LeagueAdminQuickNavKey =
       pageVariant === "hub"
@@ -1605,6 +1614,7 @@ export default function LigasAdminPageContent({
       members: tenantPath(buildLeagueSectionPath("members", quickNavLeagueId)),
       events: tenantPath(buildLeagueSectionPath("events", quickNavLeagueId)),
       store: tenantPath(buildLeagueStorePath(quickNavLeagueId)),
+      finance: tenantPath(buildLeagueFinancePath(quickNavLeagueId)),
       board: tenantPath(buildLeagueSectionPath("shark", quickNavLeagueId)),
   };
   const openEventPresenceList = (eventId: string) => {
@@ -1683,16 +1693,14 @@ export default function LigasAdminPageContent({
                       membersHref={quickNavHref.members}
                       eventsHref={quickNavHref.events}
                       storeHref={quickNavHref.store}
+                      financeHref={quickNavHref.finance}
                       boardHref={quickNavHref.board}
                   />
 
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Acesso rapido</p>
                       <h2 className="mt-2 text-2xl font-black text-white">Escolha a área que você quer editar</h2>
-                      <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-                          Cada botão abre somente a página da seção escolhida, sem misturar as outras áreas do painel.
-                      </p>
-                      <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                      <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                           <button onClick={() => navigateToSection("visual")} className="rounded-2xl border border-zinc-800 bg-black/40 p-5 text-left transition hover:border-emerald-500/30 hover:bg-zinc-900">
                               <Layout className="text-emerald-400" size={20} />
                               <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Informações</p>
@@ -1717,6 +1725,11 @@ export default function LigasAdminPageContent({
                               <ShoppingBag className="text-emerald-400" size={20} />
                               <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Loja</p>
                               <p className="mt-2 text-lg font-black text-white">Produtos e pedidos</p>
+                          </button>
+                          <button onClick={navigateToLeagueFinance} className="rounded-2xl border border-zinc-800 bg-black/40 p-5 text-left transition hover:border-blue-500/30 hover:bg-zinc-900">
+                              <Wallet className="text-blue-400" size={20} />
+                              <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Gestão</p>
+                              <p className="mt-2 text-lg font-black text-white">Vendas e BI</p>
                           </button>
                       </div>
                   </div>
@@ -1748,6 +1761,7 @@ export default function LigasAdminPageContent({
                 membersHref={quickNavHref.members}
                 eventsHref={quickNavHref.events}
                 storeHref={quickNavHref.store}
+                financeHref={quickNavHref.finance}
                 boardHref={quickNavHref.board}
             />
 
