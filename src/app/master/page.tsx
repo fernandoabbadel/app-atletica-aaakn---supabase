@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Building2,
+  CircleHelp,
   CreditCard,
   Eye,
   EyeOff,
@@ -141,6 +142,13 @@ export default function MasterPage() {
             >
               <Rocket size={15} className="mb-2 text-red-300" />
               Landing USC
+            </Link>
+            <Link
+              href="/master/faq"
+              className="rounded-2xl border border-zinc-800 bg-black/35 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:border-red-500/25 hover:bg-zinc-900"
+            >
+              <CircleHelp size={15} className="mb-2 text-red-300" />
+              FAQ USC
             </Link>
             <Link
               href="/master/contato"

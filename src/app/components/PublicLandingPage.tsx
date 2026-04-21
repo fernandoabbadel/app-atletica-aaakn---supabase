@@ -575,10 +575,10 @@ export default function PublicLandingPage({
           ) : (
             <>
               <Link
-                href="/contato-usc"
+                href="/faq"
                 className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-zinc-100 hover:bg-white/10"
               >
-                Duvidas, contato e sugestoes
+                Duvidas e como usar
               </Link>
               <Link
                 href="/nova-atletica"

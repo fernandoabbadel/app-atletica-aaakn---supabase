@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import Image from "next/image";
 import {
   Building2,
+  CircleHelp,
   CreditCard,
   Lock,
   LogOut,
@@ -116,6 +117,7 @@ export default function MasterLayout({
   const navItems: MasterNavItem[] = [
     { name: "Dashboard Master", path: "/master", icon: <Building2 size={18} /> },
     { name: "Landing USC", path: "/master/landing", icon: <Rocket size={18} /> },
+    { name: "FAQ USC", path: "/master/faq", icon: <CircleHelp size={18} /> },
     { name: "Contato USC", path: "/master/contato", icon: <Mail size={18} /> },
     { name: "Permissoes Globais", path: "/master/permissoes", icon: <Lock size={18} /> },
     { name: "Perfis do Admin", path: "/master/permissoes/perfis-admin", icon: <PanelLeft size={18} /> },
