@@ -118,7 +118,7 @@ export default function EmpresaHistoricoPage() {
             </Link>
             <div>
               <h1 className="text-lg font-black uppercase tracking-tight">
-                Historico de Scans
+                Histórico de Scans
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">
                 {partner?.nome || "Empresa"}
@@ -126,7 +126,7 @@ export default function EmpresaHistoricoPage() {
             </div>
           </div>
           <div className="text-[10px] uppercase text-zinc-500 font-bold">
-            20 por pagina
+            20 por página
           </div>
         </div>
       </header>
@@ -202,7 +202,7 @@ export default function EmpresaHistoricoPage() {
             className="px-3 py-2 rounded-lg text-xs font-bold uppercase border border-zinc-800 bg-zinc-900 text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
           >
             <span className="flex items-center gap-1">
-              Proxima <ChevronRight size={14} />
+              Próxima <ChevronRight size={14} />
             </span>
           </button>
         </div>

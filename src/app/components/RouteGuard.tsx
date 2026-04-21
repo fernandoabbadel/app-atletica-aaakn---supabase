@@ -514,7 +514,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
       !isTenantAppModulePathVisible(modulesConfig, currentPath)
     ) {
       setAuthorizedSafe(false);
-      addToast("Esse modulo foi ocultado para esta atletica.", "error");
+      addToast("Esse módulo foi ocultado para esta atlética.", "error");
       safeReplace(semPermissaoPath);
       return;
     }
@@ -565,7 +565,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
         if (hasScopedTenantContext && userTenantId !== effectiveRouteTenantId) {
           setAuthorizedSafe(false);
-          addToast("Essa atletica nao pertence ao seu acesso atual.", "error");
+          addToast("Essa atlética não pertence ao seu acesso atual.", "error");
           safeReplace(dashboardPath);
           return;
         }
@@ -615,7 +615,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
       if (!isAllowed) {
         setAuthorizedSafe(false);
-        addToast("Essa area eh exclusiva para membros oficiais!", "error");
+        addToast("Essa área é exclusiva para membros oficiais!", "error");
         const fallbackPath =
           currentPath === "/dashboard" ? buildLoginPath(rawCurrentPath) : dashboardPath;
         safeReplace(fallbackPath);
@@ -677,7 +677,7 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
 
         if (!isRoleAllowed) {
           setAuthorizedSafe(false);
-          addToast("Eita! Voce nao tem permissao para essa area!", "error");
+          addToast("Eita! Você não tem permissão para essa área!", "error");
           safeReplace(user.isAnonymous ? dashboardPath : semPermissaoPath);
           return;
         }

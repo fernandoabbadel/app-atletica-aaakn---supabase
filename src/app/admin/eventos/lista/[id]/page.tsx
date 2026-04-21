@@ -192,7 +192,7 @@ export default function AdminEventoListaPage() {
       setHasMore(page.hasMore);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao carregar lista de presenca.", "error");
+      addToast("Erro ao carregar lista de presença.", "error");
     } finally {
       setLoading(false);
     }
@@ -291,7 +291,7 @@ export default function AdminEventoListaPage() {
       "Lote",
       "Quantidade",
       "Valor",
-      "Data Aprovacao",
+      "Data Aprovação",
       "Aprovado Por",
     ];
 
@@ -330,7 +330,7 @@ export default function AdminEventoListaPage() {
             </Link>
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
-                <Users size={18} className="text-emerald-400" /> Lista de Presenca
+                <Users size={18} className="text-emerald-400" /> Lista de Presença
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">{eventTitle}</p>
             </div>
@@ -375,14 +375,14 @@ export default function AdminEventoListaPage() {
             <table className="w-full text-left text-xs whitespace-nowrap">
               <thead className="bg-black/40 text-zinc-500 uppercase font-black">
                 <tr>
-                  <th className="p-4">Usuario</th>
+                  <th className="p-4">Usuário</th>
                   <th className="p-4">Turma</th>
                   <th className="p-4">RSVP</th>
                   <th className="p-4">Pagamento</th>
                   <th className="p-4">Lote</th>
                   <th className="p-4">Valor</th>
-                  <th className="p-4">Aprovacao</th>
-                  <th className="p-4 text-right">Acao</th>
+                  <th className="p-4">Aprovação</th>
+                  <th className="p-4 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800 text-zinc-200">
@@ -453,7 +453,7 @@ export default function AdminEventoListaPage() {
                                   ? "bg-zinc-900 text-zinc-300 border-zinc-700"
                                   : "bg-emerald-600 text-white border-emerald-500"
                               }`}
-                              title={row.pagamento === "pago" ? "Desfazer aprovacao" : "Aprovar pagamento"}
+                              title={row.pagamento === "pago" ? "Desfazer aprovação" : "Aprovar pagamento"}
                             >
                               {row.pagamento === "pago" ? <RotateCcw size={14} /> : <Check size={14} />}
                             </button>
@@ -472,10 +472,10 @@ export default function AdminEventoListaPage() {
 
         <div className="grid grid-cols-1 gap-3">
           <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs font-bold text-zinc-400">
-            <span>Pagina {page} de {totalPages} - {filteredRows.length} registros</span>
+            <span>Página {page} de {totalPages} - {filteredRows.length} registros</span>
             <div className="flex gap-2">
               <button disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-lg border border-zinc-700 px-3 py-2 disabled:opacity-40">Anterior</button>
-              <button disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="rounded-lg border border-zinc-700 px-3 py-2 disabled:opacity-40">Proxima</button>
+              <button disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="rounded-lg border border-zinc-700 px-3 py-2 disabled:opacity-40">Próxima</button>
             </div>
           </div>
           <button

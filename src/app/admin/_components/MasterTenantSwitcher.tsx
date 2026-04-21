@@ -15,7 +15,7 @@ import {
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message;
-  return "Nao foi possivel carregar a lista de tenants.";
+  return "Não foi possível carregar a lista de tenants.";
 };
 
 export default function MasterTenantSwitcher() {

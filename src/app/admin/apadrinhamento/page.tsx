@@ -19,7 +19,7 @@ const EMPTY_FORM: MentorshipLabelsConfig = {
   menteeLabel: "Afilhado/Afilhada",
   inviteMentorLabel: "Adicionar como meu padrinho/madrinha",
   inviteMenteeLabel: "Adicionar como meu afilhado/afilhada",
-  requestHelpText: "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atletica.",
+  requestHelpText: "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atlética.",
 };
 
 export default function AdminApadrinhamentoPage() {
@@ -43,7 +43,7 @@ export default function AdminApadrinhamentoPage() {
         if (mounted) setForm(next);
       } catch (error: unknown) {
         console.error(error);
-        if (mounted) addToast("Erro ao carregar configuracao do apadrinhamento.", "error");
+        if (mounted) addToast("Erro ao carregar configuração do apadrinhamento.", "error");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -60,10 +60,10 @@ export default function AdminApadrinhamentoPage() {
       setSaving(true);
       const next = await saveMentorshipLabels(form, { tenantId });
       setForm(next);
-      addToast("Configuracao de apadrinhamento salva.", "success");
+      addToast("Configuração de apadrinhamento salva.", "success");
     } catch (error: unknown) {
       console.error(error);
-      addToast(error instanceof Error ? error.message : "Erro ao salvar configuracao.", "error");
+      addToast(error instanceof Error ? error.message : "Erro ao salvar configuração.", "error");
     } finally {
       setSaving(false);
     }
@@ -80,7 +80,7 @@ export default function AdminApadrinhamentoPage() {
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight">Admin Apadrinhamento</h1>
               <p className="text-[11px] font-bold text-zinc-500">
-                Titulos dinamicos para {tenantName || "a atletica ativa"}
+                Títulos dinâmicos para {tenantName || "a atlética ativa"}
               </p>
             </div>
           </div>
@@ -107,7 +107,7 @@ export default function AdminApadrinhamentoPage() {
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">Rotulos Dinamicos</p>
               <h2 className="mt-1 text-xl font-black uppercase tracking-tight text-white">Personalize a linguagem do vinculo</h2>
               <p className="mt-2 max-w-3xl text-sm text-cyan-50/75">
-                O que for salvo aqui aparece no perfil publico, na central do usuario e na area de aceite dos convites.
+                O que for salvo aqui aparece no perfil público, na central do usuário e na área de aceite dos convites.
               </p>
             </div>
           </div>
@@ -122,7 +122,7 @@ export default function AdminApadrinhamentoPage() {
             <div className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
               <div className="grid gap-4 md:grid-cols-2">
                 <Field
-                  label="Titulo da area"
+                  label="Título da área"
                   value={form.hubTitle}
                   onChange={(value) => setForm((previous) => ({ ...previous, hubTitle: value }))}
                 />

@@ -193,7 +193,7 @@ const resolveFallbackBrand = (fallbackSlug: string): BrandState => {
   return {
     sigla: fallbackName,
     nome: fallbackName,
-    subtitle: "Landing oficial da atletica.",
+    subtitle: "Landing oficial da atlética.",
     logoUrl: PLATFORM_LOGO_URL,
   };
 };
@@ -219,7 +219,7 @@ const loadLandingPayloadFallback = async (
       ? {
           sigla: tenant.sigla || tenant.slug.toUpperCase() || "TENANT",
           nome: tenant.nome || tenant.sigla || tenant.slug.toUpperCase() || "TENANT",
-          subtitle: tenant.curso || tenant.faculdade || "Landing oficial da atletica.",
+          subtitle: tenant.curso || tenant.faculdade || "Landing oficial da atlética.",
           logoUrl: tenant.logoUrl || PLATFORM_LOGO_URL,
         }
       : tenantSlug
@@ -274,7 +274,7 @@ export default function PublicLandingPage({
     return {
       sigla: sigla || tenantSlug.toUpperCase() || "TENANT",
       nome: nome || sigla || tenantSlug.toUpperCase() || "TENANT",
-      subtitle: subtitle || "Landing oficial da atletica.",
+      subtitle: subtitle || "Landing oficial da atlética.",
       logoUrl: logoUrl || "/logo.png",
     };
   }, [
@@ -329,7 +329,7 @@ export default function PublicLandingPage({
       return "Abrir painel master";
     }
     if (normalizedActiveTenantSlug) {
-      return "Abrir minha atletica";
+      return "Abrir minha atlética";
     }
     return "Abrir dashboard";
   }, [isTenantLanding, normalizedActiveTenantSlug, user]);
@@ -584,7 +584,7 @@ export default function PublicLandingPage({
                 href="/nova-atletica"
                 className="rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
               >
-                Cadastrar Atletica
+                Cadastrar Atlética
               </Link>
             </>
           )}
@@ -706,7 +706,7 @@ export default function PublicLandingPage({
                   onClick={handleGuest}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-800/50 py-3.5 text-xs font-bold uppercase tracking-wider text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
                 >
-                  <Eye size={16} /> {isTenantLanding ? "Visitar esta atletica" : "Entrar como visitante"}
+                  <Eye size={16} /> {isTenantLanding ? "Visitar esta atlética" : "Entrar como visitante"}
                 </button>
                 {isTenantLanding && (
                   <Link
@@ -786,7 +786,7 @@ export default function PublicLandingPage({
                     </div>
 
                     <p className="line-clamp-3 text-sm leading-relaxed text-zinc-300">
-                      {partner.descricao || "Beneficios exclusivos para a comunidade da atletica."}
+                      {partner.descricao || "Benefícios exclusivos para a comunidade da atlética."}
                     </p>
 
                     <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
@@ -920,7 +920,7 @@ export default function PublicLandingPage({
             </p>
             <p className="mt-1">
               {isTenantLanding
-                ? "Landing oficial da atletica."
+                ? "Landing oficial da atlética."
                 : "Infraestrutura oficial para gestao de atleticas."}
             </p>
           </div>

@@ -394,11 +394,11 @@ export default function BoardRoundPage() {
     if (jogador.preso) {
         if (jogador.coracoes >= gameConfig.heartTarget) {
             setJogador(p => ({...p, preso: false, coracoes: 0}));
-            addToast(`Voce conseguiu ${gameConfig.heartTarget} coracoes e esta livre!`, "success");
+            addToast(`Você conseguiu ${gameConfig.heartTarget} corações e está livre!`, "success");
         } else {
             return setModalEvento({
               titulo: "Preso na DP",
-              msg: `Voce tem ${jogador.coracoes}/${gameConfig.heartTarget} coracoes. Pague ${gameConfig.bailCost} moedas ou espere ajuda.`,
+              msg: `Você tem ${jogador.coracoes}/${gameConfig.heartTarget} corações. Pague ${gameConfig.bailCost} moedas ou espere ajuda.`,
               tipo: 'error',
               isJail: true
             });
@@ -541,7 +541,7 @@ export default function BoardRoundPage() {
   const darCoracao = (targetId: string) => {
       setOutrosJogadores(prev => prev.map(p => {
           if (p.id === targetId && p.coracoes < gameConfig.heartTarget) {
-              addToast(`Voce ajudou ${p.nome}! +${gameConfig.heartHelpReward} moedas`, "success");
+              addToast(`Você ajudou ${p.nome}! +${gameConfig.heartHelpReward} moedas`, "success");
               setJogador(j => ({...j, tubas: j.tubas + gameConfig.heartHelpReward})); 
               return { ...p, coracoes: p.coracoes + 1 };
           }
@@ -573,7 +573,7 @@ export default function BoardRoundPage() {
       
       {/* HEADER */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 p-4 flex justify-between items-center shadow-lg">
-         <div className="flex items-center gap-3"><Link href={dashboardHref} className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition"><ArrowLeft size={24}/></Link><div><h1 className="font-black text-lg italic uppercase text-white">{boardroundDisplayName}</h1><p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">O jogo da atletica</p></div></div>
+         <div className="flex items-center gap-3"><Link href={dashboardHref} className="p-2 -ml-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/5 transition"><ArrowLeft size={24}/></Link><div><h1 className="font-black text-lg italic uppercase text-white">{boardroundDisplayName}</h1><p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">O jogo da atlética</p></div></div>
          <div className="flex gap-3 items-center">
               <Link href={rankingHref} className="p-2 bg-zinc-800 rounded-full border border-zinc-700 text-emerald-400 hover:bg-zinc-700 transition">
                 <Trophy size={18}/>
@@ -612,7 +612,7 @@ export default function BoardRoundPage() {
               {/* Logo Central */}
               <div className="col-start-3 col-end-10 row-start-3 row-end-10 flex flex-col items-center justify-center relative z-0">
                   <div className="absolute inset-0 bg-emerald-900/10 blur-3xl rounded-full animate-pulse"></div>
-                  <div className="w-40 h-40 md:w-64 md:h-64 relative mb-4 opacity-100 hover:scale-105 transition duration-500 animate-float"><Image src={tenantLogoUrl || "/logo.png"} alt="Logo da atletica" fill sizes="(max-width: 768px) 160px, 256px" className="object-contain drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]" unoptimized={Boolean(tenantLogoUrl && tenantLogoUrl.startsWith("http"))} priority /></div>
+                  <div className="w-40 h-40 md:w-64 md:h-64 relative mb-4 opacity-100 hover:scale-105 transition duration-500 animate-float"><Image src={tenantLogoUrl || "/logo.png"} alt="Logo da atlética" fill sizes="(max-width: 768px) 160px, 256px" className="object-contain drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]" unoptimized={Boolean(tenantLogoUrl && tenantLogoUrl.startsWith("http"))} priority /></div>
               </div>
 
               {tabuleiro.map((casa) => {
@@ -680,7 +680,7 @@ export default function BoardRoundPage() {
                                   </div>
                               </div>
                           ))}
-                          <p className="text-[9px] text-zinc-500 italic mt-2">* Clique no botao verde para dar 1 coracao e ganhar {gameConfig.heartHelpReward} moedas.</p>
+                          <p className="text-[9px] text-zinc-500 italic mt-2">* Clique no botão verde para dar 1 coração e ganhar {gameConfig.heartHelpReward} moedas.</p>
                       </div>
                   )}
               </div>
@@ -696,11 +696,11 @@ export default function BoardRoundPage() {
                 {modalEvento.isJail ? (
                     <div className="flex flex-col gap-3">
                         <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                            <p className="text-[10px] text-zinc-500 uppercase font-bold mb-2">Seus Coracoes ({jogador.coracoes}/{gameConfig.heartTarget})</p>
+                            <p className="text-[10px] text-zinc-500 uppercase font-bold mb-2">Seus Corações ({jogador.coracoes}/{gameConfig.heartTarget})</p>
                             <div className="flex justify-center gap-2 mb-3">{Array.from({ length: gameConfig.heartTarget }, (_, idx) => idx + 1).map(i => (<Heart key={i} size={20} className={`${i <= jogador.coracoes ? 'fill-red-500 text-red-500' : 'text-zinc-700'}`}/>))}</div>
                             <p className="text-xs text-zinc-600">Espere ajuda dos amigos...</p>
                         </div>
-                        <button onClick={() => { if(jogador.tubas>=gameConfig.bailCost){setJogador(p=>({...p, tubas:p.tubas-gameConfig.bailCost, preso:false, coracoes:0})); setModalEvento(null);} else {addToast("Sem moedas!", "error")} }} className="w-full bg-zinc-800 text-zinc-400 hover:text-white py-3 rounded-xl font-bold uppercase text-xs border border-zinc-700">Pagar fianca ({gameConfig.bailCost} moedas)</button>
+                        <button onClick={() => { if(jogador.tubas>=gameConfig.bailCost){setJogador(p=>({...p, tubas:p.tubas-gameConfig.bailCost, preso:false, coracoes:0})); setModalEvento(null);} else {addToast("Sem moedas!", "error")} }} className="w-full bg-zinc-800 text-zinc-400 hover:text-white py-3 rounded-xl font-bold uppercase text-xs border border-zinc-700">Pagar fiança ({gameConfig.bailCost} moedas)</button>
                     </div>
                 ) : (
                     <button onClick={() => modalEvento.move ? moverJogador(modalEvento.move) : setModalEvento(null)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg">Continuar</button>
@@ -771,7 +771,7 @@ export default function BoardRoundPage() {
                       </li>
                     ))}
                     <li><strong className="text-emerald-500">DP Anatomia:</strong> valor para se salvar: {gameConfig.bailCost} moedas.</li>
-                    <li><strong className="text-emerald-500">Coracoes:</strong> libertacao em {gameConfig.heartTarget} coracoes.</li>
+                    <li><strong className="text-emerald-500">Corações:</strong> libertação em {gameConfig.heartTarget} corações.</li>
                     <li><strong className="text-emerald-500">Dado:</strong> limite diario de {gameConfig.dailyRollsLimit} jogadas.</li>
                 </ul>
                 <button onClick={() => setModalRegras(false)} className="w-full mt-6 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl uppercase text-xs">Entendi</button>

@@ -436,7 +436,7 @@ export default function AdminTurmaPage() {
 
           <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <label className="text-[11px] font-bold uppercase text-zinc-400">Codigo</label>
+                <label className="text-[11px] font-bold uppercase text-zinc-400">Código</label>
               <input
                 value={form.id}
                 onChange={(event) =>
@@ -493,7 +493,7 @@ export default function AdminTurmaPage() {
                 {
                   key: "capa" as const,
                   label: "Capa da turma",
-                  helper: "Usada como destaque na pagina do album da turma.",
+                  helper: "Usada como destaque na página do álbum da turma.",
                   fallback: "/capa_t8.jpg",
                 },
               ] as const

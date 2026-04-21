@@ -150,7 +150,7 @@ export default function AdminTreinoListaPage() {
 
       if (treino) {
         setTitulo(treino.modalidade || "Treino");
-        setSubtitulo(`${treino.dia || "-"} â€¢ ${treino.horario || "-"} â€¢ ${treino.local || "-"}`);
+        setSubtitulo(`${treino.dia || "-"} • ${treino.horario || "-"} • ${treino.local || "-"}`);
       }
 
       setChamadaRows(chamadaPage.rows);
@@ -161,7 +161,7 @@ export default function AdminTreinoListaPage() {
       setHasMoreRsvp(rsvpPage.hasMore);
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao carregar lista de presenÃ§a.", "error");
+      addToast("Erro ao carregar lista de presença.", "error");
     } finally {
       setLoading(false);
     }
@@ -194,7 +194,7 @@ export default function AdminTreinoListaPage() {
         if (!isPermissionError(error)) {
           console.error(error);
         }
-        addToast("Erro ao montar grupos de usuarios.", "error");
+        addToast("Erro ao montar grupos de usuários.", "error");
       } finally {
         setLoadingSegments(false);
       }
@@ -215,7 +215,7 @@ export default function AdminTreinoListaPage() {
         if (!isPermissionError(error)) {
           console.error(error);
         }
-        addToast("Erro ao carregar grupo de usuarios.", "error");
+        addToast("Erro ao carregar grupo de usuários.", "error");
       } finally {
         setLoadingUsers(false);
       }
@@ -339,7 +339,7 @@ export default function AdminTreinoListaPage() {
         const payload: TreinoPresenceQrPayload | null =
           parseTreinoPresenceQrPayload(cleanDecodedText);
         if (!payload) {
-          throw new Error("QR invalido para chamada de treino.");
+          throw new Error("QR inválido para chamada de treino.");
         }
         if (payload.treinoId !== treinoId) {
           throw new Error("Este QR pertence a outro treino.");
@@ -393,7 +393,7 @@ export default function AdminTreinoListaPage() {
           return [nextRow, ...prev];
         });
         setScanMessage(`${aluno.nome} confirmado. Selecione o desempenho do treino.`);
-        addToast("Presenca registrada pelo QR.", "success");
+        addToast("Presença registrada pelo QR.", "success");
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Falha ao ler QR do treino.";
         setScanError(message);
@@ -462,14 +462,14 @@ export default function AdminTreinoListaPage() {
             started = true;
             break;
           } catch {
-            // tenta a proxima camera disponivel
+            // tenta a próxima câmera disponível
           }
         }
         if (!started) throw new Error("camera-not-found");
       } catch (error: unknown) {
         if (!mounted) return;
         console.error(error);
-        setScanError("Nao foi possivel abrir a camera neste aparelho.");
+        setScanError("Não foi possível abrir a câmera neste aparelho.");
         await stopTreinoScanner();
       } finally {
         if (mounted) setScannerStarting(false);
@@ -545,7 +545,7 @@ export default function AdminTreinoListaPage() {
       );
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao atualizar presenÃ§a.", "error");
+      addToast("Erro ao atualizar presença.", "error");
     } finally {
       setUpdatingId(null);
     }
@@ -623,7 +623,7 @@ export default function AdminTreinoListaPage() {
             type="button"
             onClick={() => setScannedPresenceForRating(null)}
             className="rounded-full border border-white/10 bg-white/5 p-2 text-zinc-300"
-            aria-label="Fechar avaliacao"
+            aria-label="Fechar avaliação"
           >
             <X size={16} />
           </button>
@@ -746,7 +746,7 @@ export default function AdminTreinoListaPage() {
   };
 
   const getRsvpStatusLabel = (status: TreinoRsvpRecord["status"]): string =>
-    status === "going" ? "Vou" : "Nao vou";
+    status === "going" ? "Vou" : "Não vou";
 
   const handleExportCsv = () => {
     if (!chamadaRows.length) {
@@ -785,9 +785,9 @@ export default function AdminTreinoListaPage() {
               <ArrowLeft size={18} className="text-zinc-300" />
             </Link>
             <div>
-              <h1 className="text-xl font-black uppercase tracking-tight">Lista de PresenÃ§a</h1>
+              <h1 className="text-xl font-black uppercase tracking-tight">Lista de Presença</h1>
               <p className="text-[11px] text-zinc-500 font-bold">
-                {titulo} â€¢ {subtitulo}
+                {titulo} • {subtitulo}
               </p>
               <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase">
                 <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">
@@ -831,7 +831,7 @@ export default function AdminTreinoListaPage() {
                     Adicionar Aluno Manualmente
                   </h2>
                   <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-zinc-500">
-                    Faixas dinamicas com ate 30 usuarios por grupo
+                    Faixas dinâmicas com até 30 usuários por grupo
                   </p>
                 </div>
                 <button
@@ -846,7 +846,7 @@ export default function AdminTreinoListaPage() {
               <div className="flex flex-wrap gap-2">
                 {userSegments.length === 0 ? (
                   <span className="text-[11px] text-zinc-500">
-                    Nenhum grupo disponivel.
+                    Nenhum grupo disponível.
                   </span>
                 ) : (
                   userSegments.map((segment) => (
@@ -868,8 +868,8 @@ export default function AdminTreinoListaPage() {
               {selectedUserSegment ? (
                 <div className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
                   {loadingUsers
-                    ? "Carregando usuarios do grupo..."
-                    : `Grupo ativo: ${selectedUserSegment.label} • ${selectedUserSegment.count} usuarios`}
+                    ? "Carregando usuários do grupo..."
+                    : `Grupo ativo: ${selectedUserSegment.label} • ${selectedUserSegment.count} usuários`}
                 </div>
               ) : null}
 
@@ -887,7 +887,7 @@ export default function AdminTreinoListaPage() {
                     {searchingUsers && (
                       <div className="px-3 py-2 text-xs text-zinc-400 flex items-center gap-2">
                         <Loader2 size={12} className="animate-spin" />
-                        Buscando usuarios...
+                        Buscando usuários...
                       </div>
                     )}
                     {userSuggestions.map((row) => (
@@ -921,7 +921,7 @@ export default function AdminTreinoListaPage() {
                       <th className="p-4">Status</th>
                       <th className="p-4">Origem</th>
                       <th className="p-4">Desempenho</th>
-                      <th className="p-4 text-right">Acoes</th>
+                      <th className="p-4 text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800 text-zinc-200">
@@ -1056,7 +1056,7 @@ export default function AdminTreinoListaPage() {
                                 onClick={() => void handleConfirmPendingRsvp(row)}
                                 disabled={updatingId === row.userId}
                                 className="p-2 rounded-lg bg-emerald-600 text-white border border-emerald-500 disabled:opacity-50"
-                                title="Confirmar presenÃ§a"
+                                title="Confirmar presença"
                               >
                                 {updatingId === row.userId ? (
                                   <Loader2 size={14} className="animate-spin" />
@@ -1118,7 +1118,7 @@ export default function AdminTreinoListaPage() {
           <div className="flex items-center justify-between border-b border-white/10 bg-black/90 px-4 py-3">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-400">
-                Leitor de presenca
+                Leitor de presença
               </p>
               <h2 className="text-sm font-black uppercase text-white">{titulo}</h2>
             </div>
@@ -1144,7 +1144,7 @@ export default function AdminTreinoListaPage() {
               <div className="absolute inset-0 flex items-center justify-center bg-black/75">
                 <div className="flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm font-bold text-zinc-200">
                   <Loader2 size={16} className="animate-spin text-emerald-400" />
-                  Abrindo camera...
+                  Abrindo câmera...
                 </div>
               </div>
             ) : null}
@@ -1154,7 +1154,7 @@ export default function AdminTreinoListaPage() {
             <div className="mx-auto max-w-lg space-y-2">
               <div className="flex items-center justify-center gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-xs font-black uppercase tracking-wide text-emerald-200">
                 <ScanLine size={15} />
-                Aponte para o QR aberto na pagina do treino
+                Aponte para o QR aberto na página do treino
               </div>
               {scanMessage ? (
                 <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-200">

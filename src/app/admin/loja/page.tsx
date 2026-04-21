@@ -22,42 +22,42 @@ const menuItems = [
   {
     href: "/admin/loja/categorias",
     title: "Categorias",
-    description: "Pagina propria para criar, editar e revisar as categorias",
+    description: "Página própria para criar, editar e revisar as categorias",
     icon: Plus,
     color: "text-cyan-400 border-cyan-500/30 bg-cyan-500/10",
   },
   {
     href: "/admin/loja/produtos",
     title: "Produtos",
-    description: "Catalogo admin com leitura dedicada",
+    description: "Catálogo admin com leitura dedicada",
     icon: Package,
     color: "text-blue-400 border-blue-500/30 bg-blue-500/10",
   },
   {
     href: "/admin/loja/produtos-desativados",
     title: "Desativados",
-    description: "Historico dos produtos fora do ar com reativacao segura",
+    description: "Histórico dos produtos fora do ar com reativação segura",
     icon: Package,
     color: "text-red-400 border-red-500/30 bg-red-500/10",
   },
   {
     href: "/admin/loja/pedidos-pendentes",
     title: "Pedidos Pendentes",
-    description: "Aprovacao separada para evitar bundle pesado",
+    description: "Aprovação separada para evitar bundle pesado",
     icon: ShoppingBag,
     color: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10",
   },
   {
     href: "/admin/loja/pedidos-aprovados",
     title: "Pedidos Aprovados",
-    description: "Historico editavel dos comprovantes confirmados",
+    description: "Histórico editável dos comprovantes confirmados",
     icon: ShoppingBag,
     color: "text-cyan-400 border-cyan-500/30 bg-cyan-500/10",
   },
   {
     href: "/admin/loja/review",
     title: "Reviews",
-    description: "Fila de avaliacoes moderada por pagina",
+    description: "Fila de avaliações moderada por página",
     icon: MessageSquare,
     color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
   },
@@ -260,7 +260,7 @@ export default function AdminLojaMenuPage() {
                   whatsapp: normalizePhoneInput(e.target.value),
                 }))
               }
-              placeholder="WhatsApp para enviar comprovante (somente numero com DDI)"
+              placeholder="WhatsApp para enviar comprovante (somente número com DDI)"
               className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
               disabled={loadingFinanceiro}
             />

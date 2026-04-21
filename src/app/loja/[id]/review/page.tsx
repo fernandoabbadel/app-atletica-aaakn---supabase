@@ -117,7 +117,7 @@ export default function LojaProdutoReviewPage() {
       const message =
         error instanceof Error && error.message
           ? error.message
-          : "Erro ao carregar dados para avaliacao.";
+          : "Erro ao carregar dados para avaliação.";
       addToast(message, "error");
     } finally {
       setLoading(false);
@@ -147,13 +147,13 @@ export default function LojaProdutoReviewPage() {
 
   const reviewBlockReason = useMemo(() => {
     if (approvedOrders.length === 0) {
-      return "Voce precisa de um pedido aprovado para avaliar.";
+      return "Você precisa de um pedido aprovado para avaliar.";
     }
     if (eligibleApprovedOrders.length === 0) {
-      return "Prazo encerrado: a avaliacao vale por 5 dias apos a aprovacao.";
+      return "Prazo encerrado: a avaliação vale por 5 dias após a aprovação.";
     }
     if (hasExistingReview) {
-      return "Voce ja avaliou este produto.";
+      return "Você já avaliou este produto.";
     }
     return "";
   }, [approvedOrders.length, eligibleApprovedOrders.length, hasExistingReview]);
@@ -169,7 +169,7 @@ export default function LojaProdutoReviewPage() {
     event.preventDefault();
     if (!user || !produto) return;
     if (!canReview) {
-      addToast(reviewBlockReason || "Avaliacao indisponivel para este produto.", "info");
+      addToast(reviewBlockReason || "Avaliação indisponível para este produto.", "info");
       return;
     }
 
@@ -184,13 +184,13 @@ export default function LojaProdutoReviewPage() {
         comment,
       });
 
-      addToast("Avaliacao enviada com sucesso.", "success");
+      addToast("Avaliação enviada com sucesso.", "success");
       setComment("");
       setRating(5);
       await refresh(true);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao enviar avaliacao.", "error");
+      addToast("Erro ao enviar avaliação.", "error");
     } finally {
       setSubmitting(false);
     }
@@ -241,7 +241,7 @@ export default function LojaProdutoReviewPage() {
   if (!produto) {
     return (
       <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center">
-        Produto nao encontrado.
+        Produto não encontrado.
       </div>
     );
   }
@@ -253,7 +253,7 @@ export default function LojaProdutoReviewPage() {
           <ArrowLeft size={18} />
         </Link>
         <div>
-          <h1 className="text-lg font-black uppercase">Avaliacao do Produto</h1>
+          <h1 className="text-lg font-black uppercase">Avaliação do Produto</h1>
           <p className="text-[11px] text-zinc-500 font-bold">{produto.nome}</p>
         </div>
       </header>
@@ -292,7 +292,7 @@ export default function LojaProdutoReviewPage() {
               onChange={(event) => setComment(event.target.value)}
               required
               rows={5}
-              placeholder="Escreva sua avaliacao"
+              placeholder="Escreva sua avaliação"
               className="w-full rounded-xl border border-zinc-700 bg-black p-3 text-sm outline-none focus:border-emerald-500"
             />
 
@@ -301,7 +301,7 @@ export default function LojaProdutoReviewPage() {
               disabled={submitting}
               className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-black uppercase disabled:opacity-60"
             >
-              {submitting ? "Enviando..." : "Enviar avaliacao"}
+              {submitting ? "Enviando..." : "Enviar avaliação"}
             </button>
           </form>
         )}

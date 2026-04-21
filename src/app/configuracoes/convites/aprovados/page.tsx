@@ -102,7 +102,7 @@ export default function InviteHistoryPage() {
     } catch (error: unknown) {
       console.error(error);
       setDashboard(EMPTY_INVITE_DASHBOARD);
-      addToast("Nao foi possivel carregar o historico de convites.", "error");
+      addToast("Não foi possível carregar o histórico de convites.", "error");
     } finally {
       setLoading(false);
     }
@@ -168,10 +168,10 @@ export default function InviteHistoryPage() {
       <main className="space-y-6 p-4">
         <section className="rounded-[2rem] border border-amber-400/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.24),rgba(10,10,10,0.96)_48%,rgba(120,53,15,0.14))] p-5 shadow-[0_18px_60px_rgba(245,158,11,0.10)]">
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300">
-            Historico da tenant
+            Histórico da tenant
           </p>
           <h2 className="mt-2 text-lg font-black uppercase text-white">
-            Convites encerrados de {tenantName || "sua atletica"}
+            Convites encerrados de {tenantName || "sua atlética"}
           </h2>
           <p className="mt-2 text-sm text-amber-100/75">
             Aqui ficam os convites aprovados e os links que ja expiraram, foram encerrados ou revogados.
@@ -236,7 +236,7 @@ export default function InviteHistoryPage() {
                     Expirados e encerrados
                   </p>
                   <p className="mt-1 text-sm text-zinc-400">
-                    Convites que ja nao podem mais ser usados.
+                    Convites que já não podem mais ser usados.
                   </p>
                 </div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-300">

@@ -82,10 +82,10 @@ export default function AdminAlbumPontuaCalouroPage() {
 
         {rows.length > PAGE_SIZE && (
           <div className="pt-2 flex items-center justify-between text-xs text-zinc-500 font-bold uppercase">
-            <span>Pagina {page} de {totalPages}</span>
+            <span>Página {page} de {totalPages}</span>
             <div className="flex items-center gap-2">
               <button onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page <= 1} className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40">Anterior</button>
-              <button onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page >= totalPages} className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40">Proxima</button>
+              <button onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page >= totalPages} className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40">Próxima</button>
             </div>
           </div>
         )}

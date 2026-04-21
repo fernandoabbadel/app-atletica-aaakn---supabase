@@ -125,7 +125,7 @@ export default function ScaneventosPage() {
       const session = await getSupabaseClient().auth.getSession();
       const accessToken = session.data.session?.access_token || "";
       if (!accessToken) {
-        throw new Error("Sessao admin nao encontrada.");
+    throw new Error("Sessão admin não encontrada.");
       }
 
       const response = await fetch("/api/admin/event-tickets/scan", {
@@ -197,7 +197,7 @@ export default function ScaneventosPage() {
       setScannerActive(true);
     } catch (error: unknown) {
       console.error(error);
-      setErrorMessage("Nao foi possivel iniciar a camera do scanner.");
+      setErrorMessage("Não foi possível iniciar a câmera do scanner.");
       if (scannerRef.current) {
         try {
           scannerRef.current.clear();

@@ -105,7 +105,7 @@ const fetchPublicGuestDashboard = async (options: {
   });
 
   if (!response.ok) {
-    throw new Error(`Falha ao carregar dashboard publico (${response.status})`);
+    throw new Error(`Falha ao carregar dashboard público (${response.status})`);
   }
 
   return (await response.json()) as PublicDashboardResponse;

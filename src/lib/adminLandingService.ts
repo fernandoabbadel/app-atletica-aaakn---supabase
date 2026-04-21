@@ -80,10 +80,10 @@ export interface LandingConfig {
 }
 
 export const DEFAULT_LOADING_PHRASES = [
-  "Preparando o ambiente para voce.",
-  "Carregando dados da pagina.",
+  "Preparando o ambiente para você.",
+  "Carregando dados da página.",
   "Conferindo seu acesso atual.",
-  "Sincronizando informacoes da atletica.",
+  "Sincronizando informações da atlética.",
   "Montando a proxima tela.",
   "Buscando os dados mais recentes.",
   "Organizando os modulos do app.",

@@ -91,7 +91,7 @@ export default function AdminBoardRound() {
         setRulesText(loadedConfig.rules.join("\n"));
       } catch (error: unknown) {
         console.error(error);
-        addToast("Erro ao carregar configuracoes.", "error");
+      addToast("Erro ao carregar configurações.", "error");
       } finally {
         setLoadingConfig(false);
       }
@@ -177,10 +177,10 @@ export default function AdminBoardRound() {
       });
       setConfig(payload);
       setRulesText(payload.rules.join("\n"));
-      addToast("Configuracoes salvas.", "success");
+      addToast("Configurações salvas.", "success");
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao salvar configuracoes.", "error");
+      addToast("Erro ao salvar configurações.", "error");
     } finally {
       setSavingConfig(false);
     }
@@ -207,7 +207,7 @@ export default function AdminBoardRound() {
           <div>
             <h1 className="text-2xl font-black uppercase">Admin BoardRound</h1>
             <p className="text-xs text-zinc-500">
-              Controle de ligas, tabuleiro e nome exibido ao usuario.
+              Controle de ligas, tabuleiro e nome exibido ao usuário.
             </p>
           </div>
         </div>
@@ -232,7 +232,7 @@ export default function AdminBoardRound() {
       <section className="mb-8 bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-black uppercase tracking-wide">Configuracao do jogo</h2>
+            <h2 className="text-sm font-black uppercase tracking-wide">Configuração do jogo</h2>
             <p className="text-[11px] text-zinc-500">Documento do BoardRound com compatibilidade legado `app_config/sharkround`</p>
           </div>
           <button

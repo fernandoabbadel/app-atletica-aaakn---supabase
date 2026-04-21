@@ -151,7 +151,7 @@ export default function AdminHistoricoOrganogramaPage() {
       } catch (error: unknown) {
         console.error(error);
         if (!mounted) return;
-        addToast("Erro ao montar grupos de usuarios.", "error");
+        addToast("Erro ao montar grupos de usuários.", "error");
       } finally {
         if (mounted) {
           setLoadingSegments(false);
@@ -184,7 +184,7 @@ export default function AdminHistoricoOrganogramaPage() {
       } catch (error: unknown) {
         console.error(error);
         if (!mounted) return;
-        addToast("Erro ao carregar usuarios do grupo.", "error");
+        addToast("Erro ao carregar usuários do grupo.", "error");
       } finally {
         if (mounted) {
           setLoadingSegmentUsers(false);
@@ -293,7 +293,7 @@ export default function AdminHistoricoOrganogramaPage() {
     }
 
     if (!form.userId.trim() && !nome) {
-      addToast("Selecione um usuario ou informe o nome manual.", "error");
+      addToast("Selecione um usuário ou informe o nome manual.", "error");
       return;
     }
 
@@ -420,7 +420,7 @@ export default function AdminHistoricoOrganogramaPage() {
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-                  Buscar usuario
+                  Buscar usuário
                 </p>
                 <h2 className="text-lg font-black uppercase">
                   Base segmentada
@@ -466,7 +466,7 @@ export default function AdminHistoricoOrganogramaPage() {
               <input
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Buscar usuario por nome"
+                    placeholder="Buscar usuário por nome"
                 className="w-full rounded-2xl border border-zinc-700 bg-black py-3 pl-11 pr-4 text-sm text-white outline-none focus:border-emerald-500"
               />
             </div>
@@ -478,7 +478,7 @@ export default function AdminHistoricoOrganogramaPage() {
                     ? "Resultados da busca"
                     : selectedSegment
                       ? `Grupo ${selectedSegment.label}`
-                      : "Usuarios"}
+                    : "Usuários"}
                 </p>
                 {(loadingSegments || loadingSegmentUsers || searchingUsers) && (
                   <Loader2 size={14} className="animate-spin text-emerald-500" />
@@ -487,7 +487,7 @@ export default function AdminHistoricoOrganogramaPage() {
 
               {visibleUsers.length === 0 ? (
                 <p className="text-sm text-zinc-500">
-                  Nenhum usuario encontrado nesse recorte.
+                  Nenhum usuário encontrado nesse recorte.
                 </p>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">
@@ -554,7 +554,7 @@ export default function AdminHistoricoOrganogramaPage() {
               <div className="mb-4 flex items-center justify-between rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">
-                    Usuario vinculado
+                    Usuário vinculado
                   </p>
                   <p className="text-sm font-black text-white">{form.nome || form.userId}</p>
                 </div>
@@ -567,8 +567,8 @@ export default function AdminHistoricoOrganogramaPage() {
               </div>
             ) : (
               <div className="mb-4 rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-xs text-zinc-400">
-                Se o membro ainda nao estiver cadastrado, preencha o nome manualmente.
-                A pagina publica usara o logo da atletica com visual opaco ate a vinculacao.
+                Se o membro ainda não estiver cadastrado, preencha o nome manualmente.
+                A página pública usará o logo da atlética com visual opaco até a vinculação.
               </div>
             )}
 
@@ -605,7 +605,7 @@ export default function AdminHistoricoOrganogramaPage() {
                     setForm((current) => ({ ...current, nome: event.target.value }))
                   }
                   className="mt-2 w-full rounded-2xl border border-zinc-700 bg-black px-4 py-3 text-sm text-white outline-none focus:border-emerald-500"
-                  placeholder="Use quando o usuario ainda nao existir"
+                    placeholder="Use quando o usuário ainda não existir"
                 />
               </label>
 

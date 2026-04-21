@@ -13,9 +13,9 @@ export default function TenantNotFoundPage() {
     <main className="min-h-screen bg-black text-white flex items-center justify-center px-6">
       <section className="w-full max-w-md rounded-3xl border border-white/10 bg-zinc-950/80 p-8 text-center">
         <p className="text-xs font-black tracking-[0.2em] text-zinc-400 uppercase">Tenant</p>
-        <h1 className="mt-3 text-3xl font-black uppercase text-brand-accent">Nao encontrado</h1>
+        <h1 className="mt-3 text-3xl font-black uppercase text-brand-accent">Não encontrado</h1>
         <p className="mt-4 text-sm text-zinc-300">
-          Nao foi possivel validar o tenant dessa URL. Confira o link ou volte para o dashboard.
+          Não foi possível validar o tenant dessa URL. Confira o link ou volte para o dashboard.
         </p>
         <Link
           href={dashboardHref}

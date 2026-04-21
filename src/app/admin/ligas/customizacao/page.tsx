@@ -31,7 +31,7 @@ export default function AdminLigasCustomizacaoPage() {
         if (!mounted) return;
         setConfig(nextConfig);
       } catch {
-        if (mounted) addToast("Erro ao carregar configuracao da pagina de ligas.", "error");
+        if (mounted) addToast("Erro ao carregar configuração da página de ligas.", "error");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -49,9 +49,9 @@ export default function AdminLigasCustomizacaoPage() {
       await saveLigasUscUiConfig(config, {
         tenantId: activeTenantId || undefined,
       });
-      addToast("Titulo e subtitulo da pagina /ligas_usc atualizados.", "success");
+      addToast("Título e subtítulo da página /ligas_usc atualizados.", "success");
     } catch {
-      addToast("Erro ao salvar configuracao da pagina de ligas.", "error");
+      addToast("Erro ao salvar configuração da página de ligas.", "error");
     } finally {
       setSaving(false);
     }
@@ -78,7 +78,7 @@ export default function AdminLigasCustomizacaoPage() {
           <div>
             <h1 className="text-xl font-black uppercase tracking-tight">Customizacao Ligas USC</h1>
             <p className="text-[11px] text-zinc-500 font-bold">
-              Ajuste o titulo e o subtitulo da pagina publica /ligas_usc
+              Ajuste o título e o subtítulo da página pública /ligas_usc
             </p>
           </div>
         </div>
@@ -88,7 +88,7 @@ export default function AdminLigasCustomizacaoPage() {
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div>
             <h2 className="text-sm font-black uppercase text-emerald-400">
-              Cabecalho da pagina
+              Cabeçalho da página
             </h2>
             <p className="mt-1 text-xs text-zinc-500">
               O tenant admin pode trocar esses dois textos quando quiser.
@@ -134,7 +134,7 @@ export default function AdminLigasCustomizacaoPage() {
               placeholder="Liga USC"
             />
             <p className="mt-1 text-[11px] text-zinc-500">
-              Esse texto aparece acima do nome em cada card da pagina /ligas_usc.
+              Esse texto aparece acima do nome em cada card da página /ligas_usc.
             </p>
           </div>
 
@@ -144,7 +144,7 @@ export default function AdminLigasCustomizacaoPage() {
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-xs font-black uppercase inline-flex items-center gap-2"
           >
             <Save size={14} />
-            {saving ? "Salvando..." : "Salvar pagina /ligas_usc"}
+            {saving ? "Salvando..." : "Salvar página /ligas_usc"}
           </button>
         </section>
 
@@ -152,7 +152,7 @@ export default function AdminLigasCustomizacaoPage() {
           <div>
             <h2 className="text-sm font-black uppercase text-cyan-400">Preview</h2>
             <p className="mt-1 text-xs text-zinc-500">
-              Assim o topo e o card publico vao aparecer depois de salvar.
+              Assim o topo e o card público vão aparecer depois de salvar.
             </p>
           </div>
 

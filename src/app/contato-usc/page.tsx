@@ -45,7 +45,7 @@ export default function ContatoUscPage() {
     try {
       await loginGoogle({ returnTo: "/contato-usc" });
     } catch {
-      addToast("Nao foi possivel abrir o login Google agora.", "error");
+      addToast("Não foi possível abrir o login Google agora.", "error");
     }
   };
 
@@ -78,7 +78,7 @@ export default function ContatoUscPage() {
       setSending(true);
       await submitSupportRequest({
         userId: user.uid,
-        userName: user.nome || "Usuario USC",
+        userName: user.nome || "Usuário USC",
         userEmail: cleanEmail,
         category: selectedOption.category,
         subject: `USC - ${selectedOption.label}`,
@@ -88,7 +88,7 @@ export default function ContatoUscPage() {
       setPhone("");
       addToast("Mensagem enviada para o painel master.", "success");
     } catch {
-      addToast("Nao foi possivel enviar a mensagem agora.", "error");
+      addToast("Não foi possível enviar a mensagem agora.", "error");
     } finally {
       setSending(false);
     }
@@ -124,7 +124,7 @@ export default function ContatoUscPage() {
               Entre com Google para abrir esse canal.
             </p>
             <p className="mt-2 text-sm text-zinc-300">
-              Esse formulario e global da USC, entao a identificacao do usuario precisa ser real.
+              Esse formulário é global da USC, então a identificação do usuário precisa ser real.
             </p>
             <button
               onClick={() => void handleGoogleAccess()}
@@ -209,7 +209,7 @@ export default function ContatoUscPage() {
 
             <p className="inline-flex items-center gap-2 text-[11px] text-zinc-500">
               <Phone size={12} />
-              A resposta vai aparecer no painel master e pode voltar para voce pelo contato informado.
+              A resposta vai aparecer no painel master e pode voltar para você pelo contato informado.
             </p>
           </section>
         )}

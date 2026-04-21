@@ -65,7 +65,7 @@ async function fetchViewerEventIdsFromTable(options: {
     }
     throw error instanceof Error
       ? error
-      : new Error("Falha ao consultar relacao de interacoes do evento.");
+      : new Error("Falha ao consultar relação de interações do evento.");
   }
 }
 

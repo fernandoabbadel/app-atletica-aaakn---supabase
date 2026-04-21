@@ -668,7 +668,7 @@ const submitLeagueMemberRequestViaRoute = async (payload: {
 
   if (!response.ok) {
     const message = asString(body.error).trim();
-    throw new Error(message || `Falha ao enviar solicitacao para a liga (${response.status}).`);
+    throw new Error(message || `Falha ao enviar solicitação para a liga (${response.status}).`);
   }
 
   if (!body.request) return null;
@@ -805,6 +805,21 @@ export async function syncLeagueMembers(payload: {
   });
 }
 
+const normalizeLeagueOwnedPaymentConfig = (
+  event: Partial<LeagueEventRecord>
+): CommercePaymentConfig | null => {
+  const source = normalizePaymentConfig(event.paymentConfig);
+  return normalizePaymentConfig({
+    chave: asString(source?.chave).trim() || asString(event.pixChave).trim(),
+    banco: asString(source?.banco).trim() || asString(event.pixBanco).trim(),
+    titular:
+      asString(source?.titular).trim() || asString(event.pixTitular).trim(),
+    whatsapp:
+      asString(source?.whatsapp).trim() ||
+      asString(event.contatoComprovante).trim(),
+  });
+};
+
 export async function syncLeagueEvents(payload: {
   leagueId: string;
   events: LeagueEventRecord[];
@@ -848,21 +863,11 @@ export async function syncLeagueEvents(payload: {
       imagePositionY: Math.max(0, Math.min(100, asNumber(event.imagePositionY, 50))),
       lotes: Array.isArray(event.lotes) ? event.lotes : [],
       pollQuestion: asString(event.pollQuestion).trim(),
-      paymentConfig:
-        normalizePaymentConfig(event.paymentConfig) ||
-        normalizePaymentConfig({
-          chave: event.pixChave,
-          banco: event.pixBanco,
-          titular: event.pixTitular,
-          whatsapp: event.contatoComprovante,
-          recipient: {
-            userId: event.recipientUserId,
-            name: event.recipientUserName,
-            turma: event.recipientUserTurma,
-            avatarUrl: event.recipientUserAvatar,
-            phone: event.contatoComprovante,
-          },
-        }),
+      recipientUserId: "",
+      recipientUserName: "",
+      recipientUserTurma: "",
+      recipientUserAvatar: "",
+      paymentConfig: normalizeLeagueOwnedPaymentConfig(event),
     };
 
     let eventPayload: Record<string, unknown> = {
@@ -2098,7 +2103,7 @@ export async function saveLeagueConfig(payload: {
         insertPayload = stripUndefinedEntries(nextPayload as Record<string, unknown>);
       }
 
-      throw new Error("Nao foi possivel salvar a liga.");
+      throw new Error("Não foi possível salvar a liga.");
     }
   );
 
@@ -2444,7 +2449,7 @@ export async function submitLeagueMemberRequest(payload: {
   });
 
   if (!request) {
-    throw new Error("Nao foi possivel enviar a solicitacao para a liga.");
+    throw new Error("Não foi possível enviar a solicitação para a liga.");
   }
 
   clearLeagueDependentCaches();
@@ -2566,7 +2571,7 @@ export async function createEventPoll(payload: {
         insertPayload = nextPayload as Record<string, unknown>;
       }
 
-      throw new Error("Nao foi possivel criar enquete para o evento.");
+      throw new Error("Não foi possível criar enquete para o evento.");
     }
   );
 

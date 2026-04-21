@@ -44,14 +44,20 @@ const ROLE_OPTIONS: RoleOption[] = [
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message;
-  return "Nao foi possivel carregar os tenants do master.";
+  return "Não foi possível carregar os tenants do master.";
 };
 
 const resolveMasterViewMode = (path: string): string => {
   if (path === "/master" || path.startsWith("/master/")) return "painel master";
-  if (path === "/admin" || path.startsWith("/admin/")) return "painel da atletica";
-  return "app da atletica";
+  if (path === "/admin" || path.startsWith("/admin/")) return "painel da atlética";
+  return "app da atlética";
 };
+
+const normalizeTenantDisplayText = (value: string): string =>
+  value
+    .replace(/\bATLETICA\b/g, "ATLÉTICA")
+    .replace(/\bAtletica\b/g, "Atlética")
+    .replace(/\batletica\b/g, "atlética");
 
 const getPreviewRole = (
   user: (TenantContextUserLike & { master_role_preview?: unknown }) | null | undefined
@@ -104,8 +110,10 @@ export default function MasterTopBar() {
     isMasterScope && !selectedTenantId
       ? "Plataforma USC"
       : selectedTenant
-        ? `${selectedTenant.sigla} - ${selectedTenant.nome}`
-        : tenantName.trim() || tenantSigla.trim() || pathInfo.tenantSlug.trim() || "Plataforma USC";
+        ? normalizeTenantDisplayText(`${selectedTenant.sigla} - ${selectedTenant.nome}`)
+        : normalizeTenantDisplayText(
+            tenantName.trim() || tenantSigla.trim() || pathInfo.tenantSlug.trim() || "Plataforma USC"
+          );
   const mode = resolveMasterViewMode(currentPath);
 
   useEffect(() => {
@@ -243,7 +251,7 @@ export default function MasterTopBar() {
               color: "var(--tenant-accent)",
             }}
           >
-            contexto forcado
+            contexto forçado
           </span>
         )}
 

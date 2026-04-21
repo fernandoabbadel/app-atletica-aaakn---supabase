@@ -661,7 +661,7 @@ export default function AdminLojaCategoriasPage() {
                   {editingCategory ? "Editar Categoria do Tenant" : "Nova Categoria do Tenant"}
                 </h2>
                 <p className="mt-1 text-[11px] text-zinc-500">
-                  Nome com ate 80 caracteres. A logo e herdada automaticamente da atletica.
+                  Nome com até 80 caracteres. A logo é herdada automaticamente da atlética.
                 </p>
               </div>
 
@@ -812,7 +812,7 @@ export default function AdminLojaCategoriasPage() {
                 </p>
                 <p className="mt-2 text-sm text-zinc-300">
                   As categorias do tenant usam a mesma logo do tenant. Por isso o campo de logo
-                  nao aparece mais aqui.
+                  não aparece mais aqui.
                 </p>
               </div>
 
@@ -829,7 +829,7 @@ export default function AdminLojaCategoriasPage() {
                       coverImg: event.target.value.slice(0, URL_MAX_LENGTH),
                     }))
                   }
-                  placeholder="Capa do card publico"
+                  placeholder="Capa do card público"
                   className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
                 />
               </label>
@@ -864,7 +864,7 @@ export default function AdminLojaCategoriasPage() {
 
               <label className="space-y-1 md:col-span-2">
                 <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                  Cor do botao
+                  Cor do botão
                 </span>
                 <div className="flex items-center gap-3 rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5">
                   <input

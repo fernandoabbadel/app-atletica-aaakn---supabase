@@ -39,7 +39,7 @@ export default function FloatingScannerPage() {
   const [status, setStatus] = useState<ScannerStatus>({
     tone: "info",
     title: "Leitor pronto",
-    detail: "Abra a camera para iniciar.",
+    detail: "Abra a câmera para iniciar.",
   });
 
   const roles = useMemo(() => getAccessRoleCandidates(user), [user]);
@@ -76,8 +76,8 @@ export default function FloatingScannerPage() {
     if (!canScanEvento) {
       setStatus({
         tone: "error",
-        title: "Sem permissao",
-        detail: "Seu perfil nao pode validar ingressos de evento.",
+        title: "Sem permissão",
+        detail: "Seu perfil não pode validar ingressos de evento.",
       });
       return;
     }
@@ -100,7 +100,7 @@ export default function FloatingScannerPage() {
         : {
             tone: "error",
             title: "Falha no check-in",
-            detail: payload?.error || "Nao foi possivel validar esse ingresso.",
+            detail: payload?.error || "Não foi possível validar esse ingresso.",
           }
     );
   };
@@ -113,8 +113,8 @@ export default function FloatingScannerPage() {
     if (!canScanTreino) {
       setStatus({
         tone: "error",
-        title: "Sem permissao",
-        detail: "Seu perfil nao pode registrar presenca em treino.",
+        title: "Sem permissão",
+        detail: "Seu perfil não pode registrar presença em treino.",
       });
       return;
     }
@@ -122,7 +122,7 @@ export default function FloatingScannerPage() {
       setStatus({
         tone: "error",
         title: "QR de outro tenant",
-        detail: "Esse QR pertence a outra atletica.",
+        detail: "Esse QR pertence a outra atlética.",
       });
       return;
     }
@@ -136,7 +136,7 @@ export default function FloatingScannerPage() {
       setStatus({
         tone: "error",
         title: "Login necessario",
-        detail: "Entre na sua conta para registrar o QR de usuario.",
+        detail: "Entre na sua conta para registrar o QR de usuário.",
       });
       return;
     }
@@ -161,8 +161,8 @@ export default function FloatingScannerPage() {
       if (!payload) {
         setStatus({
           tone: "error",
-          title: "QR nao reconhecido",
-          detail: "Use um QR de ingresso, treino ou usuario do app.",
+          title: "QR não reconhecido",
+          detail: "Use um QR de ingresso, treino ou usuário do app.",
         });
         return;
       }
@@ -192,7 +192,7 @@ export default function FloatingScannerPage() {
   const start = async () => {
     if (active || starting) return;
     setStarting(true);
-    setStatus({ tone: "info", title: "Abrindo camera", detail: "Aguardando permissao." });
+    setStatus({ tone: "info", title: "Abrindo câmera", detail: "Aguardando permissão." });
     try {
       const scanner = new Html5Qrcode("floating-main-scanner");
       scannerRef.current = scanner;
@@ -215,12 +215,12 @@ export default function FloatingScannerPage() {
         () => undefined
       );
       setActive(true);
-      setStatus({ tone: "info", title: "Camera ativa", detail: "Leitura automatica ligada." });
+      setStatus({ tone: "info", title: "Câmera ativa", detail: "Leitura automática ligada." });
     } catch {
       setStatus({
         tone: "error",
-        title: "Camera indisponivel",
-        detail: "Nao foi possivel abrir a camera neste dispositivo.",
+        title: "Câmera indisponível",
+        detail: "Não foi possível abrir a câmera neste dispositivo.",
       });
     } finally {
       setStarting(false);
@@ -234,7 +234,7 @@ export default function FloatingScannerPage() {
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">
             Scanner
           </p>
-          <h1 className="mt-2 text-2xl font-black uppercase">Leitura automatica</h1>
+          <h1 className="mt-2 text-2xl font-black uppercase">Leitura automática</h1>
         </div>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
@@ -245,7 +245,7 @@ export default function FloatingScannerPage() {
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 p-3 text-sm font-black uppercase text-black disabled:opacity-50"
             >
               {starting ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
-              Abrir camera
+              Abrir câmera
             </button>
             <button
               type="button"

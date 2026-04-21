@@ -279,7 +279,7 @@ export async function submitGymCheckin(payload: {
 }): Promise<{ postId: string; photoUrl: string }> {
   const userId = payload.userId.trim();
   const scopedTenantId = resolveGymTenantId(payload.tenantId);
-  if (!userId) throw new Error("Usuario invalido.");
+  if (!userId) throw new Error("Usuário inválido.");
 
   const originalFile = await convertDataUrlToFile(payload.photoDataUrl);
   const sourceValidationError = validateImageFile(originalFile);

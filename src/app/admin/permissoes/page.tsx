@@ -396,7 +396,7 @@ export default function AdminPermissoesPage() {
             setPermissionMatrix(mergeMatrixWithDefaults(defaultMatrix, fallbackMatrix));
             addToast("Modo leitura: usando matriz local em cache.", "info");
           } else if (isMasterScope && isPlatformMasterUser) {
-            addToast("Sem permissao para abrir o painel de permissoes.", "error");
+            addToast("Sem permissão para abrir o painel de permissões.", "error");
             router.push(semPermissaoPath);
             return;
           } else {
@@ -479,7 +479,7 @@ export default function AdminPermissoesPage() {
       addToast("Matriz de acessos atualizada.", "success");
     } catch (error: unknown) {
       if (isPermissionError(error)) {
-        addToast("Sem permissao para salvar a matriz.", "error");
+        addToast("Sem permissão para salvar a matriz.", "error");
         return;
       }
 
@@ -570,7 +570,7 @@ export default function AdminPermissoesPage() {
               <p className="mt-1 text-xs text-zinc-400">
                 {canEditMatrix
                   ? "Esta matriz controla o acesso por rota. A edicao global fica apenas no painel master."
-                  : "Aqui o admin da atletica so visualiza a matriz efetiva. Quando existir regra global salva pelo master, ela prevalece sobre registros antigos do tenant."}
+                  : "Aqui o admin da atlética só visualiza a matriz efetiva. Quando existir regra global salva pelo master, ela prevalece sobre registros antigos do tenant."}
               </p>
             </div>
           </div>

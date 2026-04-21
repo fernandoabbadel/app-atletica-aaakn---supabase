@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       (scope.tenantStatus === "approved" &&
         (scope.canManageTenant || scope.tenantRole === "vendas" || scope.userRole === "vendas"));
     if (!canScanEvents) {
-      throw new LeagueAdminApiError("Sem permissao para validar ingressos.", 403);
+      throw new LeagueAdminApiError("Sem permissão para validar ingressos.", 403);
     }
     const { data: readerProfileRow } = await supabaseAdmin
       .from("users")
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
           }
         : null);
     if (!parsedPayload?.orderId) {
-      throw new LeagueAdminApiError("QR code invalido para ingresso.", 400);
+      throw new LeagueAdminApiError("QR code inválido para ingresso.", 400);
     }
 
     const { data: orderRow, error: orderError } = await supabaseAdmin
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     const order = asObject(orderRow);
     if (!order) {
-      throw new LeagueAdminApiError("Pedido do ingresso nao encontrado.", 404);
+      throw new LeagueAdminApiError("Pedido do ingresso não encontrado.", 404);
     }
 
     const orderTenantId = asString(order.tenant_id);
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
       throw new LeagueAdminApiError("Ingresso fora do tenant ativo.", 403);
     }
     if (!["aprovado", "approved", "pago", "paid", "entregue", "presente"].includes(asString(order.status).toLowerCase())) {
-      throw new LeagueAdminApiError("Pagamento ainda nao aprovado para check-in.", 400);
+      throw new LeagueAdminApiError("Pagamento ainda não aprovado para check-in.", 400);
     }
 
     const paymentConfig = normalizePaymentConfig(order.payment_config);
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
         paymentConfig?.ticketEntries?.[0] ||
         null;
     if (!ticketEntry || !paymentConfig?.ticketEntries) {
-      throw new LeagueAdminApiError("Ingresso nao encontrado para esse QR code.", 404);
+      throw new LeagueAdminApiError("Ingresso não encontrado para esse QR code.", 404);
     }
 
     const alreadyScanned = ticketEntry.status === "lido";

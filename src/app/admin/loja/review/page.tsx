@@ -97,7 +97,7 @@ export default function AdminLojaReviewPage() {
             <article key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-bold truncate">{row.userName || "Usuario"}</p>
+                  <p className="text-sm font-bold truncate">{row.userName || "Usuário"}</p>
                   <p className="text-xs text-zinc-400 line-clamp-3">{row.comment || "Sem comentario"}</p>
                 </div>
                 <div className="shrink-0 flex items-center gap-1 text-yellow-400">
@@ -137,7 +137,7 @@ export default function AdminLojaReviewPage() {
 
         {pending.length > PAGE_SIZE && (
           <div className="pt-2 flex items-center justify-between text-xs text-zinc-500 font-bold uppercase">
-            <span>Pagina {page} de {totalPages}</span>
+            <span>Página {page} de {totalPages}</span>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setPage((prev) => Math.max(1, prev - 1))}
@@ -151,7 +151,7 @@ export default function AdminLojaReviewPage() {
                 disabled={page >= totalPages}
                 className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40"
               >
-                Proxima
+                Próxima
               </button>
             </div>
           </div>

@@ -82,7 +82,7 @@ const STATUS_OPTIONS: Array<{ value: TenantStatus; label: string }> = [
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message;
-  return "Nao foi possivel salvar a atletica.";
+  return "Não foi possível salvar a atlética.";
 };
 
 export default function MasterTenantEditPage() {
@@ -112,7 +112,7 @@ export default function MasterTenantEditPage() {
         const tenant = await fetchTenantById(tenantId);
         if (!mounted) return;
         if (!tenant) {
-          addToast("Atletica nao encontrada para edicao.", "error");
+          addToast("Atlética não encontrada para edição.", "error");
           router.replace("/master");
           return;
         }
@@ -210,7 +210,7 @@ export default function MasterTenantEditPage() {
         allowPublicSignup: form.allowPublicSignup,
         status: form.status,
       });
-      addToast(`Atletica ${form.sigla || form.nome} atualizada.`, "success");
+      addToast(`Atlética ${form.sigla || form.nome} atualizada.`, "success");
       router.refresh();
     } catch (error: unknown) {
       addToast(extractErrorMessage(error), "error");
@@ -242,15 +242,15 @@ export default function MasterTenantEditPage() {
               Voltar ao master
             </Link>
             <p className="mt-4 text-[10px] font-black uppercase tracking-[0.28em] text-red-200">
-              Atletica em edicao
+              Atlética em edição
             </p>
             <h1 className="mt-2 flex items-center gap-3 text-3xl font-black uppercase tracking-tight text-white">
-              <Building2 className="text-red-300" /> {form.sigla || form.nome || "Atletica"}
+              <Building2 className="text-red-300" /> {form.sigla || form.nome || "Atlética"}
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-300">
-              Ajuste os dados principais da atletica, troque a paleta, controle a aparicao na
+              Ajuste os dados principais da atlética, troque a paleta, controle a aparição na
               vitrine publica e defina se a entrada fica por convite ou com cadastro aberto para
-              aprovacao.
+              aprovação.
             </p>
           </div>
 
@@ -350,7 +350,7 @@ export default function MasterTenantEditPage() {
                   className="mt-2 brand-input"
                 >
                   <option value="" className="bg-zinc-950 text-white">
-                    Selecione a area
+                    Selecione a área
                   </option>
                   {TENANT_AREA_OPTIONS.map((option) => (
                     <option
@@ -379,14 +379,14 @@ export default function MasterTenantEditPage() {
           <div className="space-y-4">
             <div>
               <label className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                Logo da atletica
+                Logo da atlética
               </label>
               <div className="mt-2 flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-black/35 p-4">
                 <div className="flex items-center gap-4">
                   <div className="relative h-24 w-24 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950">
                     <Image
                       src={form.logoUrl || "/logo.png"}
-                      alt={`Logo ${form.sigla || form.nome || "atletica"}`}
+                      alt={`Logo ${form.sigla || form.nome || "atlética"}`}
                       fill
                       sizes="96px"
                       className="object-cover"
@@ -500,7 +500,7 @@ export default function MasterTenantEditPage() {
                 />
                 <div>
                   <span className="block text-sm font-bold text-zinc-200">
-                    Exibir na pagina visitante
+                    Exibir na página visitante
                   </span>
                   <span className="text-[11px] text-zinc-500">
                     Desmarcado: a atlética sai da vitrine, mas o link direto continua funcionando.
@@ -515,7 +515,7 @@ export default function MasterTenantEditPage() {
               className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-xs font-black uppercase tracking-[0.16em] text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {saving ? "Salvando atletica..." : "Salvar atletica"}
+              {saving ? "Salvando atlética..." : "Salvar atlética"}
             </button>
           </div>
         </div>

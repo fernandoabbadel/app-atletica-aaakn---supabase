@@ -178,7 +178,7 @@ export default function AdminLigasPage() {
     } catch (error: unknown) {
       console.error(error);
       setFormData({ ...liga, visaoGeral: liga.visaoGeral || "" });
-      addToast("Nao consegui buscar a versao mais recente da liga. Abrindo o ultimo dado carregado.", "info");
+      addToast("Não consegui buscar a versão mais recente da liga. Abrindo o último dado carregado.", "info");
     }
 
     setEditingId(liga.id);

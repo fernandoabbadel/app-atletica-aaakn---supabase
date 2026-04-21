@@ -1020,7 +1020,7 @@ export async function uploadProfileImage(payload: {
 }): Promise<string> {
   const uid = payload.uid.trim();
   if (!uid) {
-    throw new Error("Usuario invalido para upload.");
+    throw new Error("Usuário inválido para upload.");
   }
 
   const prefix =

@@ -300,7 +300,7 @@ const ensureTreinoDateWithinCreationWindow = (isoDate: string): void => {
   }
 
   if (parsed.getTime() > getTreinoCreationWindowMaxDate().getTime()) {
-    throw new Error("Treinos so podem ser cadastrados com ate 2 meses de antecedencia.");
+    throw new Error("Treinos só podem ser cadastrados com até 2 meses de antecedência.");
   }
 };
 
@@ -678,7 +678,7 @@ export async function upsertTreinoCategory(payload: {
 }): Promise<TreinoSettingsRecord> {
   const normalizedName = normalizeModalidadeName(payload.name);
   if (!normalizedName) {
-    throw new Error("Nome da categoria invalido.");
+    throw new Error("Nome da categoria inválido.");
   }
 
   const currentSettings = await fetchTreinoSettings({

@@ -259,7 +259,7 @@ export default function EmpresaDashboard() {
               );
           } catch (error: unknown) {
               console.error(error);
-              addToast("Nao foi possivel abrir a camera.", "error");
+              addToast("Não foi possível abrir a câmera.", "error");
               setShowScanner(false);
           }
       };
@@ -377,7 +377,7 @@ export default function EmpresaDashboard() {
                   href={companyHistoryPath}
                   className="p-2 bg-zinc-800 text-zinc-300 rounded-lg hover:bg-zinc-700 flex items-center gap-2 text-xs font-bold uppercase"
                 >
-                  <FileText size={14} /> Historico
+                  <FileText size={14} /> Histórico
                 </Link>
                 <button
                   onClick={() => setShowEditModal(true)}

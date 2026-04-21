@@ -27,7 +27,7 @@ const EMPTY_BUNDLE: MentorshipHubBundle = {
     menteeLabel: "Afilhado/Afilhada",
     inviteMentorLabel: "Adicionar como meu padrinho/madrinha",
     inviteMenteeLabel: "Adicionar como meu afilhado/afilhada",
-    requestHelpText: "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atletica.",
+    requestHelpText: "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atlética.",
   },
   mentor: null,
   mentee: null,
@@ -184,7 +184,7 @@ export default function ConfiguracoesApadrinhamentoPage() {
           <div>
             <h1 className="text-lg font-black uppercase tracking-tight">{labels.hubTitle}</h1>
             <p className="text-[11px] font-bold text-zinc-500">
-              Convites, aceite e visibilidade em {tenantName || "sua atletica"}
+              Convites, aceite e visibilidade em {tenantName || "sua atlética"}
             </p>
           </div>
         </div>
@@ -198,7 +198,7 @@ export default function ConfiguracoesApadrinhamentoPage() {
             </div>
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">
-                Relacoes da Atletica
+                Relações da Atlética
               </p>
               <h2 className="mt-1 text-xl font-black uppercase tracking-tight text-white">
                 {labels.mentorLabel} e {labels.menteeLabel}
@@ -217,7 +217,7 @@ export default function ConfiguracoesApadrinhamentoPage() {
             <section className="grid gap-4 md:grid-cols-2">
               <RoleCard
                 title={labels.mentorLabel}
-                emptyText={`Voce ainda nao tem ${labels.mentorLabel.toLowerCase()}.`}
+                emptyText={`Você ainda não tem ${labels.mentorLabel.toLowerCase()}.`}
                 item={bundle.mentor}
                 tenantSlug={tenantSlug}
                 editOptions={resolveMentorshipRoleOptions(
@@ -244,7 +244,7 @@ export default function ConfiguracoesApadrinhamentoPage() {
               />
               <RoleCard
                 title={labels.menteeLabel}
-                emptyText={`Voce ainda nao tem ${labels.menteeLabel.toLowerCase()}.`}
+                emptyText={`Você ainda não tem ${labels.menteeLabel.toLowerCase()}.`}
                 item={bundle.mentee}
                 tenantSlug={tenantSlug}
                 editOptions={resolveMentorshipRoleOptions(
@@ -279,7 +279,7 @@ export default function ConfiguracoesApadrinhamentoPage() {
                 </div>
                 <div className="space-y-3">
                   {bundle.incoming.length === 0 ? (
-                    <EmptyList text="Nenhum convite pendente para voce agora." />
+                    <EmptyList text="Nenhum convite pendente para você agora." />
                   ) : (
                     bundle.incoming.map((row) => {
                       const other = resolveOtherSide(row, user?.uid || "");
@@ -318,7 +318,7 @@ export default function ConfiguracoesApadrinhamentoPage() {
                 </div>
                 <div className="space-y-3">
                   {bundle.outgoing.length === 0 ? (
-                    <EmptyList text="Voce ainda nao enviou convite de apadrinhamento." />
+                    <EmptyList text="Você ainda não enviou convite de apadrinhamento." />
                   ) : (
                     bundle.outgoing.map((row) => {
                       const other = resolveOtherSide(row, user?.uid || "");

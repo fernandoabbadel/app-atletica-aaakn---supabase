@@ -20,6 +20,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
+import { LeagueAdminQuickNav } from "./_components/LeagueAdminQuickNav";
 import { fetchLeagueById, type LeagueRecord } from "@/lib/leaguesService";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import {
@@ -33,7 +34,12 @@ import {
   upsertStoreProduct,
 } from "@/lib/storeService";
 import { withTenantSlug } from "@/lib/tenantRouting";
-import { normalizePhoneToBrE164, PHONE_MAX_LENGTH, URL_MAX_LENGTH } from "@/utils/contactFields";
+import {
+  hasValidPhoneLength,
+  normalizePhoneToBrE164,
+  PHONE_MAX_LENGTH,
+  URL_MAX_LENGTH,
+} from "@/utils/contactFields";
 
 type LeagueStoreMode = "overview" | "products" | "pending" | "approved";
 type Row = Record<string, unknown>;
@@ -72,7 +78,7 @@ const formatCurrency = (value: unknown): string => `R$ ${asNumber(value).toFixed
 const formatDateTime = (value: unknown): string => {
   const raw = asString(value);
   const date = raw ? new Date(raw) : null;
-  if (!date || Number.isNaN(date.getTime())) return "Nao informado";
+  if (!date || Number.isNaN(date.getTime())) return "Não informado";
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
 };
 
@@ -102,12 +108,15 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
   const categoryVisible = category ? category.visible !== false : false;
   const visibleProducts = products.filter((row) => row.active !== false);
   const productIds = useMemo(() => products.map((row) => asString(row.id)).filter(Boolean), [products]);
-  const storeHref = tenantSlug
-    ? withTenantSlug(tenantSlug, `/ligas/${encodeURIComponent(leagueId)}/loja`)
-    : `/ligas/${encodeURIComponent(leagueId)}/loja`;
-  const leagueHomeHref = tenantSlug
+  const leagueBaseHref = tenantSlug
     ? withTenantSlug(tenantSlug, `/ligas/${encodeURIComponent(leagueId)}`)
     : `/ligas/${encodeURIComponent(leagueId)}`;
+  const storeHref = `${leagueBaseHref}/loja`;
+  const leagueHomeHref = leagueBaseHref;
+  const leagueInformationHref = `${leagueBaseHref}/informacoes`;
+  const leagueMembersHref = `${leagueBaseHref}/membros`;
+  const leagueEventsHref = `${leagueBaseHref}/eventos`;
+  const leagueBoardHref = `${leagueBaseHref}/board-round`;
   const publicStoreHref = tenantSlug ? withTenantSlug(tenantSlug, "/loja") : "/loja";
 
   const load = useCallback(
@@ -249,9 +258,13 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
   const handleSaveProduct = async () => {
     const nome = form.nome.trim();
     const preco = Number(String(form.preco).replace(",", "."));
+    const contatoComprovante = normalizePhoneToBrE164(form.contato).slice(0, PHONE_MAX_LENGTH);
     if (!league || !leagueId) return;
     if (!nome) return addToast("Nome do produto obrigatorio.", "error");
-    if (!Number.isFinite(preco) || preco < 0) return addToast("Preco invalido.", "error");
+    if (!Number.isFinite(preco) || preco < 0) return addToast("Preço inválido.", "error");
+    if (!contatoComprovante || !hasValidPhoneLength(contatoComprovante)) {
+      return addToast("Informe um WhatsApp valido para o comprovante da liga.", "error");
+    }
 
     setSaving(true);
     try {
@@ -274,7 +287,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
             chave: "",
             banco: "",
             titular: "",
-            whatsapp: normalizePhoneToBrE164(form.contato).slice(0, PHONE_MAX_LENGTH),
+            whatsapp: contatoComprovante,
           },
           seller_type: "league",
           seller_id: leagueId,
@@ -304,7 +317,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
       await approveStoreOrder({
         orderId,
         userId: asString(order.userId),
-        userName: asString(order.userName) || "Usuario",
+        userName: asString(order.userName) || "Usuário",
         productId: asString(order.productId),
         productName: asString(order.productName) || "Produto",
         price: asNumber(order.total || order.price),
@@ -349,7 +362,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
   if (!league) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#050505] text-white">
-        Liga nao encontrada.
+        Liga não encontrada.
       </div>
     );
   }
@@ -357,25 +370,36 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
   return (
     <div className="min-h-screen bg-[#050505] pb-24 text-white">
       <header className="sticky top-0 z-20 border-b border-zinc-800 bg-[#050505]/90 px-6 py-5 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => router.push(leagueHomeHref)} className="rounded-full border border-zinc-800 bg-zinc-900 p-2 hover:bg-zinc-800">
-              <ArrowLeft size={18} />
-            </button>
-            <div className="relative h-11 w-11 overflow-hidden rounded-xl border border-zinc-700 bg-black">
-              <Image src={leagueLogo} alt={leagueName} fill sizes="44px" className="object-cover" />
+        <div className="mx-auto flex max-w-6xl flex-col gap-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={() => router.push(leagueHomeHref)} className="rounded-full border border-zinc-800 bg-zinc-900 p-2 hover:bg-zinc-800">
+                <ArrowLeft size={18} />
+              </button>
+              <div className="relative h-11 w-11 overflow-hidden rounded-xl border border-zinc-700 bg-black">
+                <Image src={leagueLogo} alt={leagueName} fill sizes="44px" className="object-cover" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Loja da liga</p>
+                <h1 className="text-xl font-black uppercase">{leagueName}</h1>
+              </div>
             </div>
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Loja da liga</p>
-              <h1 className="text-xl font-black uppercase">{leagueName}</h1>
-            </div>
+            <nav className="flex flex-wrap gap-2">
+              <Link href={storeHref} className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 hover:bg-zinc-800">Loja</Link>
+              <Link href={`${storeHref}/produtos`} className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20">Produtos</Link>
+              <Link href={`${storeHref}/pedidos-pendentes`} className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] font-black uppercase text-yellow-300 hover:bg-yellow-500/20">Pendentes</Link>
+              <Link href={`${storeHref}/pedidos-aprovados`} className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20">Aprovados</Link>
+            </nav>
           </div>
-          <nav className="flex flex-wrap gap-2">
-            <Link href={storeHref} className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 hover:bg-zinc-800">Loja</Link>
-            <Link href={`${storeHref}/produtos`} className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20">Produtos</Link>
-            <Link href={`${storeHref}/pedidos-pendentes`} className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] font-black uppercase text-yellow-300 hover:bg-yellow-500/20">Pendentes</Link>
-            <Link href={`${storeHref}/pedidos-aprovados`} className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20">Aprovados</Link>
-          </nav>
+          <LeagueAdminQuickNav
+            active="store"
+            homeHref={leagueHomeHref}
+            informationHref={leagueInformationHref}
+            membersHref={leagueMembersHref}
+            eventsHref={leagueEventsHref}
+            storeHref={storeHref}
+            boardHref={leagueBoardHref}
+          />
         </div>
       </header>
 
@@ -405,7 +429,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
 
             <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
               <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <p className="text-xs font-black uppercase">Informacoes da loja</p>
+                <p className="text-xs font-black uppercase">Informações da loja</p>
                 <div className="grid gap-3 md:grid-cols-2">
                   <input value={leagueName} disabled className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm font-bold text-zinc-400" />
                   <input type="color" value={storeColor} onChange={(event) => setStoreColor(event.target.value)} className="h-10 rounded-xl border border-zinc-700 bg-black/40 px-2" />
@@ -449,12 +473,12 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <input value={form.nome} onChange={(event) => setForm((prev) => ({ ...prev, nome: event.target.value.slice(0, 120) }))} placeholder="Nome do produto" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
-                  <input value={form.preco} onChange={(event) => setForm((prev) => ({ ...prev, preco: event.target.value }))} placeholder="Preco" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+                  <input value={form.preco} onChange={(event) => setForm((prev) => ({ ...prev, preco: event.target.value }))} placeholder="Preço" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
                   <input value={form.estoque} onChange={(event) => setForm((prev) => ({ ...prev, estoque: event.target.value.replace(/[^\d]/g, "") }))} placeholder="Estoque" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
                   <input value={form.lote} onChange={(event) => setForm((prev) => ({ ...prev, lote: event.target.value.slice(0, 80) }))} placeholder="Lote" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
                   <input value={form.img} maxLength={URL_MAX_LENGTH} onChange={(event) => setForm((prev) => ({ ...prev, img: event.target.value.slice(0, URL_MAX_LENGTH) }))} placeholder="URL da imagem" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
                   <input value={form.contato} maxLength={PHONE_MAX_LENGTH} onChange={(event) => setForm((prev) => ({ ...prev, contato: normalizePhoneToBrE164(event.target.value) }))} placeholder="Telefone/WhatsApp para comprovante" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
-                  <textarea value={form.descricao} onChange={(event) => setForm((prev) => ({ ...prev, descricao: event.target.value.slice(0, 1200) }))} placeholder="Descricao" rows={4} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
+                  <textarea value={form.descricao} onChange={(event) => setForm((prev) => ({ ...prev, descricao: event.target.value.slice(0, 1200) }))} placeholder="Descrição" rows={4} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
                 </div>
                 <button onClick={() => void handleSaveProduct()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs font-black uppercase text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-60">
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <PackagePlus size={14} />} Salvar produto
@@ -500,7 +524,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
                       <p className="text-sm font-black">{asString(order.productName) || "Produto"}</p>
-                      <p className="text-[11px] text-zinc-500">Comprador: {asString(order.userName) || "Usuario"} - {formatDateTime(order.createdAt)}</p>
+                      <p className="text-[11px] text-zinc-500">Comprador: {asString(order.userName) || "Usuário"} - {formatDateTime(order.createdAt)}</p>
                       <p className="text-[11px] text-zinc-500">Qtd {asNumber(order.quantidade || order.itens) || 1} - {formatCurrency(order.total || order.price)}</p>
                     </div>
                     {mode === "pending" ? (

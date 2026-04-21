@@ -19,7 +19,7 @@ interface PaymentRecipientSelectProps {
 export function PaymentRecipientSelect({
   id,
   name,
-  label = "Usuarios que podem receber.",
+  label = "Usuários que podem receber.",
   options,
   selectedUserId,
   loading = false,
@@ -45,7 +45,7 @@ export function PaymentRecipientSelect({
         disabled={disabled || loading}
         className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500 disabled:opacity-60"
       >
-        <option value="">Manual / sem usuario vinculado</option>
+        <option value="">Manual / sem usuário vinculado</option>
         {options.map((entry) => (
           <option key={entry.userId} value={entry.userId}>
             {entry.name} - {entry.turma || "Sem turma"}
@@ -55,7 +55,7 @@ export function PaymentRecipientSelect({
       {loading ? (
         <div className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] text-zinc-500">
           <Loader2 size={14} className="animate-spin" />
-          Carregando usuarios aprovados da tenant...
+          Carregando usuários aprovados da tenant...
         </div>
       ) : selectedRecipient ? (
         <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-black/30 p-3">

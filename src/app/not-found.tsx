@@ -40,9 +40,9 @@ export default function NotFound() {
       </div>
 
       <h1 className="text-brand font-black text-6xl mb-2 tracking-tighter">404</h1>
-      <h2 className="text-white font-bold text-xl uppercase tracking-widest mb-4">Pagina nao encontrada</h2>
+      <h2 className="text-white font-bold text-xl uppercase tracking-widest mb-4">Página não encontrada</h2>
       <p className="text-zinc-400 text-sm font-medium italic max-w-xs mx-auto mb-10 leading-relaxed">
-        Nao encontramos a rota solicitada no tenant atual.
+        Não encontramos a rota solicitada no tenant atual.
       </p>
 
       <Link

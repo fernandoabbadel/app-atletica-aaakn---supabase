@@ -610,7 +610,7 @@ export async function upsertMiniVendorProfile(
   const userId = payload.userId.trim();
   const storeName = payload.storeName.trim().slice(0, 80);
   if (!tenantId || !userId || !storeName) {
-    throw new Error("Preencha tenant, usuario e nome da loja.");
+    throw new Error("Preencha tenant, usuário e nome da loja.");
   }
 
   const existing = await fetchCurrentMiniVendorProfile({
@@ -688,7 +688,7 @@ export async function upsertMiniVendorProfile(
 
   const normalized = normalizeMiniVendorProfile(asObject(data));
   if (!normalized) {
-    throw new Error("Nao foi possivel salvar a loja mini vendor.");
+    throw new Error("Não foi possível salvar a loja mini vendor.");
   }
 
   if (normalized.status === "approved") {
@@ -717,7 +717,7 @@ export async function setMiniVendorStatus(payload: {
 }): Promise<MiniVendorProfile> {
   const miniVendorId = payload.miniVendorId.trim();
   if (!miniVendorId) {
-    throw new Error("Mini vendor invalido.");
+    throw new Error("Mini vendor inválido.");
   }
 
   const supabase = getSupabaseClient();
@@ -734,7 +734,7 @@ export async function setMiniVendorStatus(payload: {
 
   const current = normalizeMiniVendorProfile(asObject(currentRow));
   if (!current) {
-    throw new Error("Mini vendor nao encontrado.");
+    throw new Error("Mini vendor não encontrado.");
   }
 
   const nextStatus = normalizeMiniVendorStatus(payload.status);
@@ -758,7 +758,7 @@ export async function setMiniVendorStatus(payload: {
 
   const normalized = normalizeMiniVendorProfile(asObject(data));
   if (!normalized) {
-    throw new Error("Nao foi possivel atualizar o mini vendor.");
+    throw new Error("Não foi possível atualizar o mini vendor.");
   }
 
   if (normalized.status === "approved") {
@@ -796,7 +796,7 @@ export async function setMiniVendorCategoryVisibility(payload: {
 }): Promise<MiniVendorProfile> {
   const miniVendorId = payload.miniVendorId.trim();
   if (!miniVendorId) {
-    throw new Error("Mini vendor invalido.");
+    throw new Error("Mini vendor inválido.");
   }
 
   const current = await fetchMiniVendorProfileById({
@@ -805,7 +805,7 @@ export async function setMiniVendorCategoryVisibility(payload: {
     forceRefresh: true,
   });
   if (!current) {
-    throw new Error("Mini vendor nao encontrado.");
+    throw new Error("Mini vendor não encontrado.");
   }
 
   const supabase = getSupabaseClient();
@@ -823,7 +823,7 @@ export async function setMiniVendorCategoryVisibility(payload: {
 
   const normalized = normalizeMiniVendorProfile(asObject(data));
   if (!normalized) {
-    throw new Error("Nao foi possivel atualizar a categoria do mini vendor.");
+    throw new Error("Não foi possível atualizar a categoria do mini vendor.");
   }
 
   if (normalized.status === "approved") {

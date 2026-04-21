@@ -69,14 +69,14 @@ const PAGE_COPY: Record<
 > = {
   pending: {
     title: "Pedidos Pendentes",
-    subtitle: "Aprove ou rejeite comprovantes sem carregar o historico ja confirmado.",
+    subtitle: "Aprove ou rejeite comprovantes sem carregar o histórico já confirmado.",
     status: "pendente",
     emptyText: "Sem pedidos pendentes.",
     badgeClass: "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
   },
   approved: {
     title: "Pedidos Aprovados",
-    subtitle: "Historico dos comprovantes confirmados com edicao rapida de status.",
+    subtitle: "Histórico dos comprovantes confirmados com edição rápida de status.",
     status: "approved",
     emptyText: "Nenhum pedido aprovado ainda.",
     badgeClass: "border-cyan-500/30 bg-cyan-500/10 text-cyan-300",
@@ -87,10 +87,10 @@ const formatCurrency = (value: number): string => `R$ ${value.toFixed(2)}`;
 
 const formatDateTime = (value?: string): string => {
   const isoValue = String(value || "").trim();
-  if (!isoValue) return "Nao informado";
+  if (!isoValue) return "Não informado";
 
   const parsed = new Date(isoValue);
-  if (Number.isNaN(parsed.getTime())) return "Nao informado";
+  if (Number.isNaN(parsed.getTime())) return "Não informado";
 
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
@@ -355,7 +355,7 @@ export function AdminStoreOrdersStatusPage({
       await approveStoreOrder({
         orderId: row.id,
         userId: String(row.userId || ""),
-        userName: String(row.userName || "Usuario"),
+        userName: String(row.userName || "Usuário"),
         productId: String(row.productId || ""),
         productName: String(row.productName || "Produto"),
         price: Number(row.total || row.price || 0),
@@ -399,7 +399,7 @@ export function AdminStoreOrdersStatusPage({
 
   const resolveApproverLabel = (row: OrderRow): string => {
     const approvedBy = String(row.approvedBy || "").trim();
-    if (!approvedBy) return "Nao informado";
+    if (!approvedBy) return "Não informado";
     if (approvedBy === "admin") return "Admin";
     return approverNames[approvedBy] || compactUserId(approvedBy);
   };
@@ -407,11 +407,11 @@ export function AdminStoreOrdersStatusPage({
   const resolveReceiverLabel = (row: OrderRow): string => {
     const paymentConfig = normalizePaymentConfig(row.payment_config);
     const recipient = paymentConfig?.recipient;
-    if (!recipient) return "Nao informado";
+    if (!recipient) return "Não informado";
     return [recipient.name, recipient.turma, recipient.phone]
       .map((entry) => String(entry || "").trim())
       .filter(Boolean)
-      .join(" - ") || "Nao informado";
+      .join(" - ") || "Não informado";
   };
   const groupedRows = useMemo(() => {
     if (normalizedCategory) {
@@ -500,7 +500,7 @@ export function AdminStoreOrdersStatusPage({
                   Categorias
                 </p>
                 <p className="mt-1 text-sm font-bold text-white">
-                  Cada botao abre a pagina paginada da categoria.
+                  Cada botão abre a página paginada da categoria.
                 </p>
               </div>
               {normalizedCategory && (
@@ -556,7 +556,7 @@ export function AdminStoreOrdersStatusPage({
                       </p>
                       <p className="mt-1 text-sm font-bold text-white">{group.category}</p>
                       <p className="mt-1 text-[11px] text-zinc-500">
-                        {group.rows.length} pedido{group.rows.length === 1 ? "" : "s"} nesta pagina.
+                        {group.rows.length} pedido{group.rows.length === 1 ? "" : "s"} nesta página.
                       </p>
                     </div>
 
@@ -604,7 +604,7 @@ export function AdminStoreOrdersStatusPage({
                       </span>
                     </div>
                     <p className="mt-1 text-[11px] text-zinc-400">
-                      Comprador: {row.userName || "Usuario"}
+                      Comprador: {row.userName || "Usuário"}
                     </p>
                     <p className="mt-1 text-[11px] text-zinc-500">
                       Quantidade: {Math.max(1, Number(row.quantidade || row.itens || 1) || 1)}
@@ -630,7 +630,7 @@ export function AdminStoreOrdersStatusPage({
                         </div>
                         <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
                           <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                            Data da aprovacao
+                            Data da aprovação
                           </p>
                           <p className="mt-1 font-bold text-white">
                             {formatDateTime(row.updatedAt || row.createdAt)}
@@ -680,7 +680,7 @@ export function AdminStoreOrdersStatusPage({
                           className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
                         >
                           <Pencil size={12} />
-                          {isEditing ? "Fechar edicao" : "Editar aprovacao"}
+                          {isEditing ? "Fechar edição" : "Editar aprovação"}
                         </button>
 
                         {isEditing && (
@@ -748,7 +748,7 @@ export function AdminStoreOrdersStatusPage({
 
         {(page > 1 || hasMore) && (
           <div className="flex items-center justify-between pt-2 text-xs font-bold uppercase text-zinc-500">
-            <span>Pagina {page}</span>
+            <span>Página {page}</span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -764,7 +764,7 @@ export function AdminStoreOrdersStatusPage({
                 disabled={!hasMore}
                 className="rounded border border-zinc-700 px-3 py-1 disabled:opacity-40"
               >
-                Proxima
+                Próxima
               </button>
             </div>
           </div>

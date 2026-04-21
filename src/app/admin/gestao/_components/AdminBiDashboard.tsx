@@ -827,7 +827,7 @@ function EventsBi({ data }: { data: LoadedData }) {
       tone: "bg-violet-500/15 text-violet-300",
     },
     {
-      label: "Ticket medio",
+      label: "Ticket médio",
       value: formatCurrency(analytics.quantity ? analytics.revenue / analytics.quantity : 0),
       hint: "valor por ingresso",
       icon: <BarChart3 size={18} />,
@@ -836,16 +836,16 @@ function EventsBi({ data }: { data: LoadedData }) {
   ];
 
   return (
-    <DashboardShell title="Gestao de Eventos" subtitle="Vendas, lotes, aprovadores e scan de entrada" mode="eventos">
+    <DashboardShell title="Gestão de Eventos" subtitle="Vendas, lotes, aprovadores e scan de entrada" mode="eventos">
       <Filters value={eventId} onChange={setEventId} allLabel="Todos os eventos" options={eventOptions} />
       <KpiGrid items={kpis} />
       <div className="grid gap-4 xl:grid-cols-2">
         <ChartPanel title="Turmas por quantidade e valor"><BarsDual data={analytics.byClass} /></ChartPanel>
         <ChartPanel title="Lotes mais vendidos"><PieMetric data={analytics.byLote} /></ChartPanel>
         <ChartPanel title="Dias da semana"><Trend data={analytics.byWeekday} valueKey="value" /></ChartPanel>
-        <ChartPanel title="Periodo do dia"><BarsDual data={analytics.byPeriod} /></ChartPanel>
+        <ChartPanel title="Período do dia"><BarsDual data={analytics.byPeriod} /></ChartPanel>
         <ChartPanel title="Comprovantes por aprovador"><Bars data={analytics.byApprover} dataKey="quantity" /></ChartPanel>
-        <ChartPanel title="Scaneamento por horario"><LineMetric data={analytics.byScanHour} /></ChartPanel>
+        <ChartPanel title="Scaneamento por horário"><LineMetric data={analytics.byScanHour} /></ChartPanel>
       </div>
     </DashboardShell>
   );
@@ -998,16 +998,16 @@ function TrainingsBi({ data }: { data: LoadedData }) {
   ];
 
   return (
-    <DashboardShell title="Gestao de Treinos" subtitle="Participacao por turma, usuario, modalidade e horario" mode="treinos">
+    <DashboardShell title="Gestão de Treinos" subtitle="Participação por turma, usuário, modalidade e horário" mode="treinos">
       <Filters value={modalidade} onChange={setModalidade} allLabel="Todas as modalidades" options={options} />
       <KpiGrid items={kpis} />
       <div className="grid gap-4 xl:grid-cols-2">
         <ChartPanel title="Turmas mais presentes"><Bars data={analytics.byClass} /></ChartPanel>
-        <ChartPanel title="Usuarios que mais participam"><Bars data={analytics.byUser} /></ChartPanel>
-        <ChartPanel title="Modalidades: presencas x sessoes"><BarsDual data={analytics.byModalidade} /></ChartPanel>
-        <ChartPanel title="Dias com mais adesao"><PieMetric data={analytics.byWeekday} /></ChartPanel>
-        <ChartPanel title="Horarios com mais presenca"><Trend data={analytics.byHour} /></ChartPanel>
-        <ChartPanel title="Presenca por treinador"><Bars data={analytics.byCoach} /></ChartPanel>
+        <ChartPanel title="Usuários que mais participam"><Bars data={analytics.byUser} /></ChartPanel>
+        <ChartPanel title="Modalidades: presenças x sessões"><BarsDual data={analytics.byModalidade} /></ChartPanel>
+        <ChartPanel title="Dias com mais adesão"><PieMetric data={analytics.byWeekday} /></ChartPanel>
+        <ChartPanel title="Horários com mais presença"><Trend data={analytics.byHour} /></ChartPanel>
+        <ChartPanel title="Presença por treinador"><Bars data={analytics.byCoach} /></ChartPanel>
       </div>
     </DashboardShell>
   );
@@ -1106,7 +1106,7 @@ function ProductsBi({ data }: { data: LoadedData }) {
       addMetric(byLote, asString(product?.lote, "Sem lote"), qtd, value);
       addMetric(byWeekday, rowDateWeekday(order.createdAt), qtd, value);
       addMetric(byClass, turma, qtd, value);
-      addMetric(byUser, asString(order.userName, "Usuario"), qtd, value);
+      addMetric(byUser, asString(order.userName, "Usuário"), qtd, value);
       addMetric(vendors, sellerLabel, qtd, value);
     });
 
@@ -1166,14 +1166,14 @@ function ProductsBi({ data }: { data: LoadedData }) {
   ];
 
   return (
-    <DashboardShell title="Gestao de Produtos" subtitle="Vendas, lotes, turmas, compradores e likes" mode="produtos">
+    <DashboardShell title="Gestão de Produtos" subtitle="Vendas, lotes, turmas, compradores e likes" mode="produtos">
       <Filters value={productId} onChange={setProductId} allLabel="Todos os produtos" options={productOptions} />
       <KpiGrid items={kpis} />
       <div className="grid gap-4 xl:grid-cols-2">
         <ChartPanel title="Lotes por quantidade e valor"><BarsDual data={analytics.byLote} /></ChartPanel>
         <ChartPanel title="Dias da semana"><Trend data={analytics.byWeekday} valueKey="value" /></ChartPanel>
         <ChartPanel title="Turmas por consumo"><BarsDual data={analytics.byClass} /></ChartPanel>
-        <ChartPanel title="Usuarios que mais gastaram"><Bars data={analytics.byUser} dataKey="value" /></ChartPanel>
+        <ChartPanel title="Usuários que mais gastaram"><Bars data={analytics.byUser} dataKey="value" /></ChartPanel>
         <ChartPanel title="Likes e cliques por produto"><BarsDual data={analytics.likes} /></ChartPanel>
         <ChartPanel title="Tenant x mini vendors"><PieMetric data={analytics.vendors} /></ChartPanel>
       </div>
@@ -1270,7 +1270,7 @@ function DashboardShell({
 }
 
 const modeTitle = (mode: DashboardMode): string =>
-  mode === "eventos" ? "Gestao de Eventos" : mode === "treinos" ? "Gestao de Treinos" : "Gestao de Produtos";
+  mode === "eventos" ? "Gestão de Eventos" : mode === "treinos" ? "Gestão de Treinos" : "Gestão de Produtos";
 
 export default function AdminBiDashboard({ mode }: { mode: DashboardMode }) {
   const { tenantId } = useTenantTheme();

@@ -61,7 +61,7 @@ export default function AdminDenunciasGymPage() {
           </Link>
           <div>
             <h1 className="text-xl font-black uppercase tracking-tight">Gym</h1>
-            <p className="text-[11px] text-zinc-500 font-bold">Denuncias do modulo de treino e check-in</p>
+            <p className="text-[11px] text-zinc-500 font-bold">Denúncias do módulo de treino e check-in</p>
           </div>
         </div>
       </header>
@@ -94,7 +94,7 @@ export default function AdminDenunciasGymPage() {
                     href={`/admin/usuarios/${row.reporterId}`}
                     className="text-emerald-400 hover:underline"
                   >
-                    Usuario
+                    Usuário
                   </Link>
                 ) : null}
               </div>
@@ -120,7 +120,7 @@ export default function AdminDenunciasGymPage() {
                 disabled={page >= totalPages}
                 className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40"
               >
-                Proxima
+                Próxima
               </button>
             </div>
           </div>

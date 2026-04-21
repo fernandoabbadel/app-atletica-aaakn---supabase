@@ -20,15 +20,15 @@ interface ToastContextData {
 const ToastContext = createContext<ToastContextData>({} as ToastContextData);
 
 const TITLES: Record<ToastType, string[]> = {
-  success: ["Tudo certo", "Sucesso", "Concluido", "Atualizado", "Fechado"],
+  success: ["Tudo certo", "Sucesso", "Concluído", "Atualizado", "Fechado"],
   error: [
     "Algo deu errado",
-    "Nao consegui concluir",
-    "Falha na acao",
+    "Não consegui concluir",
+    "Falha na ação",
     "Precisamos tentar de novo",
-    "Erro na operacao",
+    "Erro na operação",
   ],
-  info: ["Aviso rapido", "Atualizacao", "Importante", "Info do sistema", "Resumo"],
+  info: ["Aviso rápido", "Atualização", "Importante", "Info do sistema", "Resumo"],
 };
 
 function getRandomTitle(type: ToastType): string {

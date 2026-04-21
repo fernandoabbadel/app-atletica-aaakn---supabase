@@ -127,7 +127,7 @@ const SocioGrowthBanner = ({ tier, closeMenu, router, tenantSlug }: BannerProps)
             <div className="relative p-3 flex items-center justify-between z-10">
                 <div className="flex items-center gap-3">
                     <div className="p-1.5 rounded-full bg-yellow-500/20 border border-yellow-500/50"><Crown size={16} className="text-yellow-400" /></div>
-                    <div className="text-left"><h4 className="text-xs font-black italic uppercase text-white">VER PLANOS</h4><p className="text-[9px] font-medium text-zinc-300">Confira niveis e beneficios</p></div>
+                    <div className="text-left"><h4 className="text-xs font-black italic uppercase text-white">VER PLANOS</h4><p className="text-[9px] font-medium text-zinc-300">Confira níveis e benefícios</p></div>
                 </div>
                 <ChevronRight size={16} className="text-yellow-500/50 group-hover:text-yellow-400 transition-colors" />
             </div>
@@ -482,7 +482,7 @@ export default function BottomNavbar() {
 
   const sidebarItemsInfoBase: NavItemProps[] = [
       { id: 'ligas', label: 'Area das Ligas', icon: <Users size={18} />, path: '/ligas_usc', moduleKey: 'ligas' },
-      { id: 'avaliacao', label: 'Avaliacao Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true, moduleKey: 'avaliacao' },
+      { id: 'avaliacao', label: 'Avaliação Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true, moduleKey: 'avaliacao' },
       { id: 'conquistas', label: 'Conquistas', icon: <Medal size={18} />, path: '/conquistas', isComingSoon: true, moduleKey: 'conquistas' },
       { id: 'fidelidade', label: 'Fidelidade', icon: <Star size={18} />, path: '/fidelidade', isComingSoon: true, moduleKey: 'fidelidade' },
       { id: 'guia', label: 'Guia', icon: <HelpCircle size={18} />, path: '/guia', moduleKey: 'guia' },
@@ -553,7 +553,7 @@ export default function BottomNavbar() {
             <div className="absolute top-[72px] left-0 w-full h-[calc(100%-72px)] bg-zinc-950 z-20 overflow-y-auto animate-in slide-in-from-top-2 border-t border-zinc-800">
                 <div className="p-4 space-y-3">
                     <div className="flex justify-between items-center mb-2">
-                        <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Notificacoes</h3>
+                        <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Notificações</h3>
                         <button onClick={() => setShowNotifications(false)} className="text-[10px] text-brand font-bold">Fechar</button>
                     </div>
                     {notifications.length === 0 && <p className="text-center text-xs text-zinc-600 py-4">Tudo limpo por aqui.</p>}

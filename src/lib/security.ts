@@ -88,7 +88,7 @@ export const Security = {
       if (userError) throw userError;
 
       if (!userRow) {
-        return { allowed: false, reason: "Usuario nao encontrado." };
+        return { allowed: false, reason: "Usuário não encontrado." };
       }
 
       const persistedLastPost = readLastPostTimestamp(userRow.extra);
@@ -120,7 +120,7 @@ export const Security = {
       return { allowed: true };
     } catch (error: unknown) {
       if (isPermissionError(error)) {
-        return { allowed: false, reason: "Sem permissao para essa acao agora." };
+        return { allowed: false, reason: "Sem permissão para essa ação agora." };
       }
       throw error;
     }
@@ -161,13 +161,13 @@ export const Security = {
         lastCheckIn.getMonth() === today.getMonth() &&
         lastCheckIn.getFullYear() === today.getFullYear()
       ) {
-        return { allowed: false, reason: "Voce ja treinou hoje! O descanso tambem faz parte do treino." };
+        return { allowed: false, reason: "Você já treinou hoje! O descanso também faz parte do treino." };
       }
 
       return { allowed: true };
     } catch (error: unknown) {
       if (isPermissionError(error)) {
-        return { allowed: false, reason: "Sem permissao para validar check-in." };
+        return { allowed: false, reason: "Sem permissão para validar check-in." };
       }
       throw error;
     }

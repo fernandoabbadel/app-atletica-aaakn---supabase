@@ -25,8 +25,8 @@ import {
 
 const GROUP_LABELS = {
   base: "Base",
-  conteudo: "Conteudo",
-  atleta: "Area do Atleta",
+  conteudo: "Conteúdo",
+  atleta: "Área do Atleta",
   info: "Central de Info",
 } as const;
 
@@ -185,7 +185,7 @@ export default function AdminDashboardModulesPage() {
           <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
             Perfil do master ativo para esta tenant:{" "}
             <span className="font-black uppercase text-white">{activeProfile.name}</span>.
-            Itens ocultos pelo perfil nao aparecem aqui e continuam bloqueados para os usuarios.
+            Itens ocultos pelo perfil não aparecem aqui e continuam bloqueados para os usuários.
           </div>
         )}
 

@@ -57,7 +57,7 @@ import {
 } from "@/lib/tenantAdminSidebarService";
 
 interface SidebarItem {
-  group: "Base" | "Comercial" | "Conteudo" | "Esportes" | "Governanca" | "Plataforma";
+  group: "Base" | "Comercial" | "Conteúdo" | "Esportes" | "Governança" | "Plataforma";
   name: string;
   path: string;
   icon: React.ReactNode;
@@ -69,9 +69,9 @@ interface SidebarItem {
 const SIDEBAR_GROUP_ORDER: Array<SidebarItem["group"]> = [
   "Base",
   "Comercial",
-  "Conteudo",
+  "Conteúdo",
   "Esportes",
-  "Governanca",
+  "Governança",
   "Plataforma",
 ];
 
@@ -186,26 +186,26 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const sidebarItems: SidebarItem[] = [
     { group: "Base", name: "Album da Galera", path: "/admin/album", icon: <Camera size={18} /> },
-    { group: "Base", name: "Atletica", path: "/admin/atletica", icon: <Building2 size={18} /> },
+    { group: "Base", name: "Atlética", path: "/admin/atletica", icon: <Building2 size={18} /> },
     { group: "Esportes", name: "Arena Games", path: "/admin/games", icon: <Gamepad2 size={18} /> },
     { group: "Base", name: "Turma", path: "/admin/turma", icon: <Users size={18} /> },
     { group: "Base", name: "Carteirinha", path: "/admin/carteirinha", icon: <CreditCard size={18} /> },
-    { group: "Comercial", name: "Configuracoes", path: "/admin/configuracoes", icon: <Settings size={18} /> },
-    { group: "Conteudo", name: "Comunidade", path: "/admin/comunidade", icon: <MessageSquare size={18} /> },
-    { group: "Conteudo", name: "Conquistas", path: "/admin/conquistas", icon: <Trophy size={18} /> },
+    { group: "Comercial", name: "Configurações", path: "/admin/configuracoes", icon: <Settings size={18} /> },
+    { group: "Conteúdo", name: "Comunidade", path: "/admin/comunidade", icon: <MessageSquare size={18} /> },
+    { group: "Conteúdo", name: "Conquistas", path: "/admin/conquistas", icon: <Trophy size={18} /> },
     { group: "Base", name: "Dashboard", path: "/admin", icon: <LayoutDashboard size={18} /> },
     { group: "Base", name: "Dashboard Modulos", path: "/admin/dashboard-modulos", icon: <PanelLeftOpen size={18} /> },
-    { group: "Governanca", name: "Denuncias", path: "/admin/denuncias", icon: <ShieldAlert size={18} /> },
-    { group: "Conteudo", name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
+    { group: "Governança", name: "Denúncias", path: "/admin/denuncias", icon: <ShieldAlert size={18} /> },
+    { group: "Conteúdo", name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
     { group: "Comercial", name: "BI Eventos", path: "/admin/gestao/eventos", icon: <BarChart3 size={18} /> },
     { group: "Esportes", name: "BI Treinos", path: "/admin/gestao/treinos", icon: <BarChart3 size={18} /> },
     { group: "Comercial", name: "BI Produtos", path: "/admin/gestao/produtos", icon: <BarChart3 size={18} /> },
-    { group: "Conteudo", name: "Apadrinhamento", path: "/admin/apadrinhamento", icon: <HeartHandshake size={18} /> },
+    { group: "Conteúdo", name: "Apadrinhamento", path: "/admin/apadrinhamento", icon: <HeartHandshake size={18} /> },
     { group: "Comercial", name: "Fidelidade", path: "/admin/fidelidade", icon: <Star size={18} /> },
     { group: "Base", name: "Guia do App", path: "/admin/guia", icon: <BookOpen size={18} /> },
     { group: "Esportes", name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },
-    { group: "Conteudo", name: "Historico", path: "/admin/historico", icon: <History size={18} /> },
-    { group: "Conteudo", name: "Ligas", path: "/admin/ligas", icon: <Users size={18} /> },
+    { group: "Conteúdo", name: "Histórico", path: "/admin/historico", icon: <History size={18} /> },
+    { group: "Conteúdo", name: "Ligas", path: "/admin/ligas", icon: <Users size={18} /> },
     {
       group: "Plataforma",
       name: "Painel Master",
@@ -214,14 +214,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       platformOnly: true,
     },
     { group: "Comercial", name: "Landing", path: "/admin/landing", icon: <Rocket size={18} /> },
-    { group: "Plataforma", name: "Lancamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
+    { group: "Plataforma", name: "Lançamento", path: "/admin/lancamento", icon: <Rocket size={18} /> },
     { group: "Comercial", name: "Loja", path: "/admin/loja", icon: <ShoppingBag size={18} /> },
     { group: "Comercial", name: "Mini Vendor Admin", path: "/admin/mini-vendors", icon: <Store size={18} /> },
     { group: "Comercial", name: "Parceiros", path: "/admin/parceiros", icon: <Megaphone size={18} /> },
     { group: "Comercial", name: "Scanner", path: "/admin/scanner", icon: <ScanBarcode size={18} /> },
     { group: "Comercial", name: "Scan Eventos", path: "/admin/scan-eventos", icon: <QrCode size={18} /> },
-    { group: "Governanca", name: "Logs", path: "/admin/logs", icon: <FileText size={18} /> },
-    { group: "Governanca", name: "Permissoes", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
+    { group: "Governança", name: "Logs", path: "/admin/logs", icon: <FileText size={18} /> },
+    { group: "Governança", name: "Permissões", path: "/admin/permissoes", icon: <Lock size={18} />, isDanger: true },
     {
       group: "Comercial",
       name: "Planos",
@@ -230,7 +230,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     },
     { group: "Esportes", name: "BoardRound", path: "/admin/boardround", icon: <Dice5 size={18} /> },
     { group: "Esportes", name: "Treinos", path: "/admin/treinos", icon: <BarChart3 size={18} /> },
-    { group: "Base", name: "Usuarios", path: "/admin/usuarios", icon: <Users size={18} /> },
+    { group: "Base", name: "Usuários", path: "/admin/usuarios", icon: <Users size={18} /> },
   ];
 
   const activeSidebarItems = sidebarItems.filter(
@@ -371,7 +371,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           {isOverrideActive && !isSidebarCollapsed && (
             <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-amber-300">
-              Contexto: {tenantName || "Atletica selecionada"}
+              Contexto: {tenantName || "Atlética selecionada"}
             </div>
           )}
 

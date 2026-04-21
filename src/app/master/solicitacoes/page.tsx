@@ -119,7 +119,7 @@ export default function MasterSolicitacoesPage() {
               className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-[11px] font-black uppercase text-white hover:bg-emerald-500"
             >
               <Plus size={14} />
-              Criar Atletica
+              Criar Atlética
             </Link>
             <button
               onClick={() => void loadRows("refresh")}
@@ -139,10 +139,10 @@ export default function MasterSolicitacoesPage() {
             Fluxo Direto do Master
           </p>
           <h2 className="mt-2 text-lg font-black uppercase text-white">
-            O master da plataforma pode criar e operar mais de uma atletica
+            O master da plataforma pode criar e operar mais de uma atlética
           </h2>
           <p className="mt-2 text-sm text-emerald-50/80">
-            Use o botao acima para abrir o cadastro direto da nova atletica sem passar pela
+            Use o botão acima para abrir o cadastro direto da nova atlética sem passar pela
             fila publica de solicitacoes.
           </p>
         </section>

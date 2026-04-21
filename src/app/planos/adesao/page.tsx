@@ -151,10 +151,10 @@ export default function AdesaoPage() {
 
       window.open(whatsappUrl, "_blank");
       setStep(3);
-      addToast("Solicitacao iniciada!", "success");
+      addToast("Solicitação iniciada!", "success");
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao iniciar solicitacao.", "error");
+      addToast("Erro ao iniciar solicitação.", "error");
     } finally {
       setLoading(false);
     }
@@ -180,9 +180,9 @@ export default function AdesaoPage() {
           <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
             <Clock size={40} className="text-yellow-500" />
           </div>
-          <h2 className="text-xl font-black text-white uppercase mb-2">Solicitacao em analise</h2>
+          <h2 className="text-xl font-black text-white uppercase mb-2">Solicitação em análise</h2>
           <p className="text-zinc-400 text-sm mb-6">
-            Voce ja tem um pedido pendente. Aguarde a aprovacao antes de solicitar outro plano.
+            Você já tem um pedido pendente. Aguarde a aprovação antes de solicitar outro plano.
           </p>
           <Link
             href={planosHref}
@@ -198,7 +198,7 @@ export default function AdesaoPage() {
   if (!plano) {
     return (
       <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center">
-        Plano nao encontrado.
+        Plano não encontrado.
       </div>
     );
   }
@@ -317,7 +317,7 @@ export default function AdesaoPage() {
                 )}
               </button>
               <p className="text-[10px] text-zinc-600 max-w-xs mx-auto leading-relaxed">
-                Ao clicar, voce vai para o WhatsApp da atletica. Envie o comprovante por la para liberarmos seu acesso.
+                Ao clicar, você vai para o WhatsApp da atlética. Envie o comprovante por lá para liberarmos seu acesso.
               </p>
             </div>
           </div>
@@ -342,7 +342,7 @@ export default function AdesaoPage() {
               </p>
               <div className="flex items-center gap-2 text-yellow-500 font-bold text-xs uppercase tracking-wide bg-yellow-500/10 p-2 rounded border border-yellow-500/20">
                 <Clock size={14} />
-                Em analise
+                Em análise
               </div>
             </div>
 

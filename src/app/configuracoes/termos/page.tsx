@@ -172,7 +172,7 @@ export default function TermosLegaisPage() {
               </div>
               <div>
                 <h2 className="text-xl font-black uppercase leading-none">{activeDoc.title}</h2>
-                <p className="text-[10px] text-zinc-500 font-bold mt-1 uppercase">Fonte: {tenantName?.trim() || "Atletica"} (Oficial)</p>
+                <p className="text-[10px] text-zinc-500 font-bold mt-1 uppercase">Fonte: {tenantName?.trim() || "Atlética"} (Oficial)</p>
               </div>
             </div>
 

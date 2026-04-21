@@ -34,7 +34,7 @@ export const resolveTenantBrandLabel = (
   const name = cleanString(tenantName);
   if (name) return name;
 
-  return "Atletica";
+  return "Atlética";
 };
 
 export interface TenantFinanceFallback {
@@ -57,7 +57,7 @@ export const buildTenantFinanceFallback = (options?: {
   tenantName?: string | null;
 }): TenantFinanceFallback => ({
   chave: "financeiro@atletica.com.br",
-  banco: "Banco da Atletica",
+  banco: "Banco da Atlética",
   titular: resolveTenantBrandLabel(options?.tenantSigla, options?.tenantName),
   whatsapp: "",
 });
@@ -107,11 +107,11 @@ export const buildProductReceiptWhatsappMessage = (options: {
   recipientName?: string | null;
   recipientTurma?: string | null;
 }): string => {
-  const organizerLabel = cleanString(options.organizerLabel) || "Atletica";
+  const organizerLabel = cleanString(options.organizerLabel) || "Atlética";
   const productName = cleanString(options.productName).replace(/[.!?]+$/g, "") || "produto";
   const buyerName = cleanString(options.buyerName) || "Aluno";
   const buyerTurma = cleanString(options.buyerTurma) || "Sem turma";
-  const buyerPhone = cleanString(options.buyerPhone) || "Nao informado";
+  const buyerPhone = cleanString(options.buyerPhone) || "Não informado";
   const quantity =
     typeof options.quantity === "number"
       ? String(Math.max(1, Math.floor(options.quantity)))
@@ -121,7 +121,7 @@ export const buildProductReceiptWhatsappMessage = (options: {
     typeof options.totalValue === "number"
       ? options.totalValue.toFixed(2)
       : cleanString(String(options.totalValue ?? "")) || "0.00";
-  const orderCode = cleanString(options.orderCode) || "Nao informado";
+  const orderCode = cleanString(options.orderCode) || "Não informado";
 
   return [
     `Fala, equipe *${organizerLabel}*! Quero finalizar a compra do produto ${productName}.`,
@@ -169,13 +169,13 @@ export const buildEventReceiptWhatsappMessage = (options: {
     ) || "evento";
   const buyerName = cleanString(options.buyerName) || "Aluno";
   const buyerTurma = cleanString(options.buyerTurma) || "Sem turma";
-  const buyerPhone = cleanString(options.buyerPhone) || "Nao informado";
+  const buyerPhone = cleanString(options.buyerPhone) || "Não informado";
   const ticketLabel = cleanString(options.ticketLabel) || "1x Ingresso";
   const totalValue =
     typeof options.totalValue === "number"
       ? options.totalValue.toFixed(2)
       : cleanString(String(options.totalValue ?? "")) || "0.00";
-  const orderCode = cleanString(options.orderCode) || "Nao informado";
+  const orderCode = cleanString(options.orderCode) || "Não informado";
 
   return [
     `Fala, equipe *${organizerLabel}*! Quero garantir meu lugar no evento ${eventTitle}.`,

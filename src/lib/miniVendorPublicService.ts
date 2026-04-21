@@ -471,7 +471,7 @@ async function toggleMiniVendorSocialRow(options: {
   const miniVendorId = options.miniVendorId.trim();
   const viewerUid = options.viewer.uid.trim();
   if (!tenantId || !miniVendorId || !viewerUid) {
-    throw new Error("Mini vendor invalido.");
+    throw new Error("Mini vendor inválido.");
   }
 
   const profile = await fetchMiniVendorProfileById({
@@ -483,7 +483,7 @@ async function toggleMiniVendorSocialRow(options: {
     throw new Error("Mini vendor indisponivel no momento.");
   }
   if (profile.userId === viewerUid) {
-    throw new Error("Voce nao pode interagir com a propria lojinha.");
+    throw new Error("Você não pode interagir com a própria lojinha.");
   }
 
   const supabase = getSupabaseClient();
@@ -539,8 +539,8 @@ async function toggleMiniVendorSocialRow(options: {
       title: options.table === "mini_vendor_followers" ? "Novo Seguidor na Loja" : "Nova Curtida na Loja",
       message:
         options.table === "mini_vendor_followers"
-          ? `${options.viewer.nome.trim() || "Um usuario"} comecou a seguir sua lojinha.`
-          : `${options.viewer.nome.trim() || "Um usuario"} curtiu sua lojinha.`,
+          ? `${options.viewer.nome.trim() || "Um usuário"} começou a seguir sua lojinha.`
+          : `${options.viewer.nome.trim() || "Um usuário"} curtiu sua lojinha.`,
       link: `/perfil/mini-vendor/${miniVendorId}`,
       read: false,
       type: "social",

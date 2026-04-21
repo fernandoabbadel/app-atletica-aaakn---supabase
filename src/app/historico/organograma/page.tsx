@@ -22,7 +22,7 @@ type OrganogramDisplayMember = OrganogramMemberRecord & {
 };
 
 const INITIAL_CONFIG: OrganogramConfig = {
-  tituloPagina: "Organograma da Atletica",
+  tituloPagina: "Organograma da Atlética",
   subtituloPagina: "Carregando liderancas...",
   membros: [],
 };
@@ -158,7 +158,7 @@ export default function OrganogramaPage() {
               Organograma ainda vazio
             </p>
             <p className="mt-2 text-sm text-zinc-500">
-              A diretoria pode montar esta pagina no painel administrativo.
+              A diretoria pode montar esta página no painel administrativo.
             </p>
           </div>
         ) : (

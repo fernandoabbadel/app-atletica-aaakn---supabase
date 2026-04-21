@@ -278,11 +278,11 @@ export function LeaguePublicDetailClient({
   const handleSubmitMemberRequest = async () => {
     if (!user?.uid || !league || submittingMemberRequest) return;
     if (isOfficialMember) {
-      addToast("Voce ja faz parte desta liga.", "info");
+      addToast("Você já faz parte desta liga.", "info");
       return;
     }
     if (currentMemberRequest) {
-      addToast("Sua solicitacao ja esta pendente de analise.", "info");
+      addToast("Sua solicitação já está pendente de análise.", "info");
       return;
     }
 
@@ -307,7 +307,7 @@ export function LeaguePublicDetailClient({
           : current
       );
       setRequestRole(resolveLeagueRoleLabel(createdRequest.requestedRole));
-      addToast("Solicitacao enviada para a gestao da liga.", "success");
+      addToast("Solicitação enviada para a gestão da liga.", "success");
       void logActivity(
         user.uid,
         user.nome || "Atleta",
@@ -320,7 +320,7 @@ export function LeaguePublicDetailClient({
       const message =
         error instanceof Error && error.message
           ? error.message
-          : "Erro ao enviar solicitacao para a liga.";
+          : "Erro ao enviar solicitação para a liga.";
       addToast(message, "error");
     } finally {
       setSubmittingMemberRequest(false);
@@ -433,8 +433,8 @@ export function LeaguePublicDetailClient({
                     {isOfficialMember
                       ? "Seu perfil ja esta na equipe oficial desta liga."
                       : currentMemberRequest
-                        ? `Solicitacao enviada como ${resolveLeagueRoleLabel(currentMemberRequest.requestedRole)}. A diretoria pode aprovar e ajustar o cargo na gestao da liga.`
-                        : "Escolha o cargo desejado e envie sua solicitacao para a diretoria analisar."}
+                        ? `Solicitação enviada como ${resolveLeagueRoleLabel(currentMemberRequest.requestedRole)}. A diretoria pode aprovar e ajustar o cargo na gestão da liga.`
+                        : "Escolha o cargo desejado e envie sua solicitação para a diretoria analisar."}
                   </p>
                 </div>
 
@@ -459,9 +459,9 @@ export function LeaguePublicDetailClient({
                   >
                     {submittingMemberRequest ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
                     {isOfficialMember
-                      ? "Voce ja esta na liga"
+                      ? "Você já está na liga"
                       : currentMemberRequest
-                        ? "Solicitacao pendente"
+                        ? "Solicitação pendente"
                         : user
                           ? "Solicitar entrada"
                           : "Entre para solicitar"}
@@ -529,7 +529,7 @@ export function LeaguePublicDetailClient({
                   <div key={`${entry}-${index}`} className="rounded-[1.5rem] border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm font-semibold leading-6 text-cyan-50">
                     {entry}
                   </div>
-                )) : <p className="rounded-[1.5rem] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-zinc-500">A liga ainda nao publicou a visao geral.</p>}
+                )) : <p className="rounded-[1.5rem] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-zinc-500">A liga ainda não publicou a visão geral.</p>}
               </div>
               <Link href={eventsFeedHref} className="mt-5 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20">Ver eventos publicados</Link>
             </article>

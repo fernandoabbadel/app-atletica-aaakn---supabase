@@ -78,12 +78,12 @@ const getAuthScope = async (request: NextRequest): Promise<AuthScope> => {
   const authHeader = request.headers.get("authorization") || "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!accessToken) {
-    throw new Error("Nao autenticado.");
+    throw new Error("Não autenticado.");
   }
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
   if (authError || !authData.user) {
-    throw new Error("Sessao invalida.");
+    throw new Error("Sessão inválida.");
   }
 
   const { data: userRow, error: userError } = await supabaseAdmin
@@ -106,7 +106,7 @@ const getAuthScope = async (request: NextRequest): Promise<AuthScope> => {
   const canManageTenant = isPlatformMaster || MANAGER_TENANT_ROLES.has(tenantRole);
 
   if (!userId) {
-    throw new Error("Perfil do usuario invalido.");
+    throw new Error("Perfil do usuário inválido.");
   }
 
   return {
@@ -152,15 +152,15 @@ export async function POST(request: NextRequest) {
     const nextMembers = normalizeMembers(body?.members);
 
     if (!leagueId) {
-      return NextResponse.json({ error: "Liga invalida." }, { status: 400 });
+      return NextResponse.json({ error: "Liga inválida." }, { status: 400 });
     }
 
     if (!scope.isPlatformMaster) {
       if (!scope.canManageTenant || scope.tenantStatus !== "approved" || !scope.userTenantId) {
-        return NextResponse.json({ error: "Sem permissao para gerenciar esta liga." }, { status: 403 });
+        return NextResponse.json({ error: "Sem permissão para gerenciar esta liga." }, { status: 403 });
       }
       if (requestedTenantId && requestedTenantId !== scope.userTenantId) {
-        return NextResponse.json({ error: "Tenant informado nao corresponde ao seu perfil." }, { status: 403 });
+        return NextResponse.json({ error: "Tenant informado não corresponde ao seu perfil." }, { status: 403 });
       }
     }
 
@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
 
     const rawLeague = asObject(leagueRow);
     if (!rawLeague) {
-      return NextResponse.json({ error: "Liga nao encontrada." }, { status: 404 });
+      return NextResponse.json({ error: "Liga não encontrada." }, { status: 404 });
     }
 
     const leagueTenantId = asString(rawLeague.tenant_id).trim();
@@ -185,7 +185,7 @@ export async function POST(request: NextRequest) {
 
     if (!effectiveTenantId) {
       return NextResponse.json(
-        { error: "Nao foi possivel determinar o tenant da liga." },
+        { error: "Não foi possível determinar o tenant da liga." },
         { status: 400 }
       );
     }
@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
 
     if (leagueTenantId && leagueTenantId !== effectiveTenantId) {
       return NextResponse.json(
-        { error: "O tenant informado nao confere com a liga selecionada." },
+        { error: "O tenant informado não confere com a liga selecionada." },
         { status: 403 }
       );
     }
@@ -274,7 +274,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error:
-              "Alguns membros selecionados nao pertencem ao tenant ativo ou ainda nao foram aprovados.",
+              "Alguns membros selecionados não pertencem ao tenant ativo ou ainda não foram aprovados.",
             invalidUserIds: invalidMembers,
           },
           { status: 400 }

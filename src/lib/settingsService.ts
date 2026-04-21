@@ -699,7 +699,7 @@ export async function toggleAccountStatus(payload: {
 }): Promise<{ nextStatus: "ativo" | "paused"; nextRole: string }> {
   const uid = payload.uid.trim();
   if (!uid) {
-    throw new Error("Usuario invalido para alteracao de status.");
+    throw new Error("Usuário inválido para alteração de status.");
   }
 
   const isActive = payload.currentStatus === "ativo";
@@ -738,7 +738,7 @@ export async function softDeleteAccount(payload: {
 }): Promise<void> {
   const uid = payload.uid.trim();
   if (!uid) {
-    throw new Error("Usuario invalido para exclusao.");
+    throw new Error("Usuário inválido para exclusão.");
   }
 
   const requestPayload = {
@@ -751,7 +751,7 @@ export async function softDeleteAccount(payload: {
     requestPayload,
     async () => {
       await updateUsersWithFallback(uid, {
-        nome: "Usuario Excluido",
+        nome: "Usuário Excluído",
         email: `deleted_${uid}@usc.invalid`,
         foto: requestPayload.photoUrl || "https://github.com/shadcn.png",
         status: "deleted",

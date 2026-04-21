@@ -113,7 +113,7 @@ export default function AdminEventosEncerradosPage() {
             </Link>
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
-                Arquivo Historico
+                Arquivo Histórico
               </p>
               <h1 className="text-lg font-black uppercase tracking-tight">
                 Eventos Encerrados
@@ -167,7 +167,7 @@ export default function AdminEventosEncerradosPage() {
                   <th className="px-4 py-3">Tipo</th>
                   <th className="px-4 py-3">Local</th>
                   <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Acoes</th>
+                  <th className="px-4 py-3 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>

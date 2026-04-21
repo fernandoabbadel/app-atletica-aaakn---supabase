@@ -85,10 +85,10 @@ export default function AdminLogsPage() {
       setHasMore(result.hasMore);
     } catch (error: unknown) {
       if (isPermissionError(error)) {
-        addToast("Sem permissao para acessar os logs.", "error");
+      addToast("Sem permissão para acessar os logs.", "error");
       } else {
         console.error(error);
-        addToast("Nao foi possivel carregar os logs agora.", "error");
+      addToast("Não foi possível carregar os logs agora.", "error");
       }
       setLogs([]);
       setCursor(null);
@@ -116,7 +116,7 @@ export default function AdminLogsPage() {
       setHasMore(result.hasMore);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Nao foi possivel carregar mais logs.", "error");
+      addToast("Não foi possível carregar mais logs.", "error");
     } finally {
       setLoadingMore(false);
     }
@@ -195,7 +195,7 @@ export default function AdminLogsPage() {
             />
             <input
               type="text"
-              placeholder="Buscar por usuario, acao ou detalhe..."
+              placeholder="Buscar por usuário, ação ou detalhe..."
               className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white focus:border-emerald-500 outline-none transition"
               value={busca}
               onChange={(event) => setBusca(event.target.value)}

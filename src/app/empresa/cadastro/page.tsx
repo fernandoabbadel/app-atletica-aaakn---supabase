@@ -206,7 +206,7 @@ export default function CompanyRegisterPage() {
                     <div className="absolute inset-0 bg-emerald-500/30 blur-xl rounded-full group-hover:bg-emerald-500/50 transition duration-500"></div>
                     <Image 
                         src={tenantLogoUrl || "/logo.png"} 
-                        alt={tenantName ? `Logo ${tenantName}` : "Logo da atletica"} 
+                        alt={tenantName ? `Logo ${tenantName}` : "Logo da atlética"} 
                         fill
                         sizes="96px"
                         className="object-contain relative z-10 drop-shadow-2xl transition transform group-hover:scale-105" 

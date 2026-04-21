@@ -27,7 +27,7 @@ const menuItems = [
   },
   {
     href: "/admin/parceiros/historico",
-    title: "Historico",
+    title: "Histórico",
     description: "Scans validados 20 em 20",
     icon: History,
     color: "text-purple-400 border-purple-500/30 bg-purple-500/10",

@@ -77,6 +77,20 @@ const normalizeLotes = (value: unknown): NormalizedLote[] => {
     .filter((entry): entry is NormalizedLote => Boolean(entry && entry.nome));
 };
 
+const normalizeLeaguePaymentConfig = (
+  raw: Record<string, unknown>
+): CommercePaymentConfig | null => {
+  const source = normalizePaymentConfig(raw.paymentConfig ?? raw.payment_config);
+  return normalizePaymentConfig({
+    chave: asString(source?.chave).trim() || asString(raw.pixChave).trim(),
+    banco: asString(source?.banco).trim() || asString(raw.pixBanco).trim(),
+    titular: asString(source?.titular).trim() || asString(raw.pixTitular).trim(),
+    whatsapp:
+      asString(source?.whatsapp).trim() ||
+      asString(raw.contatoComprovante).trim(),
+  });
+};
+
 const normalizeEvents = (value: unknown, leagueLogoUrl: string): NormalizedLeagueEvent[] => {
   if (!Array.isArray(value)) return [];
 
@@ -89,28 +103,14 @@ const normalizeEvents = (value: unknown, leagueLogoUrl: string): NormalizedLeagu
 
     const titulo = asString(raw.titulo).trim().slice(0, 120);
     if (!titulo) {
-      throw new LeagueAdminApiError("Todos os eventos da liga precisam de titulo.", 400);
+      throw new LeagueAdminApiError("Todos os eventos da liga precisam de título.", 400);
     }
 
     const globalEventId = asString(raw.globalEventId).trim() || randomUUID();
     if (seen.has(globalEventId)) continue;
     seen.add(globalEventId);
 
-    const normalizedPaymentConfig =
-      normalizePaymentConfig(raw.paymentConfig ?? raw.payment_config) ||
-      normalizePaymentConfig({
-        chave: raw.pixChave,
-        banco: raw.pixBanco,
-        titular: raw.pixTitular,
-        whatsapp: raw.contatoComprovante,
-        recipient: {
-          userId: raw.recipientUserId,
-          name: raw.recipientUserName,
-          turma: raw.recipientUserTurma,
-          avatarUrl: raw.recipientUserAvatar,
-          phone: raw.contatoComprovante,
-        },
-      });
+    const normalizedPaymentConfig = normalizeLeaguePaymentConfig(raw);
     const normalizedWhatsapp =
       asString(normalizedPaymentConfig?.whatsapp).trim().slice(0, 32) ||
       asString(raw.contatoComprovante).trim().slice(0, 32);
@@ -141,26 +141,10 @@ const normalizeEvents = (value: unknown, leagueLogoUrl: string): NormalizedLeagu
         asString(normalizedPaymentConfig?.titular).trim().slice(0, 140) ||
         asString(raw.pixTitular).trim().slice(0, 140),
       contatoComprovante: normalizedWhatsapp,
-      recipientUserId: asString(
-        raw.recipientUserId || normalizedPaymentConfig?.recipient?.userId
-      )
-        .trim()
-        .slice(0, 120),
-      recipientUserName: asString(
-        raw.recipientUserName || normalizedPaymentConfig?.recipient?.name
-      )
-        .trim()
-        .slice(0, 120),
-      recipientUserTurma: asString(
-        raw.recipientUserTurma || normalizedPaymentConfig?.recipient?.turma
-      )
-        .trim()
-        .slice(0, 80),
-      recipientUserAvatar: asString(
-        raw.recipientUserAvatar || normalizedPaymentConfig?.recipient?.avatarUrl
-      )
-        .trim()
-        .slice(0, 600),
+      recipientUserId: "",
+      recipientUserName: "",
+      recipientUserTurma: "",
+      recipientUserAvatar: "",
       paymentConfig: normalizedPaymentConfig,
     });
   }
@@ -210,7 +194,7 @@ const insertPollWithSchemaFallback = async (
     mutablePayload = nextPayload;
   }
 
-  throw new LeagueAdminApiError("Nao foi possivel criar a enquete do evento.", 400);
+  throw new LeagueAdminApiError("Não foi possível criar a enquete do evento.", 400);
 };
 
 const writeEventWithSchemaFallback = async (payload: {
@@ -240,7 +224,7 @@ const writeEventWithSchemaFallback = async (payload: {
     mutablePayload = nextPayload;
   }
 
-  throw new LeagueAdminApiError("Nao foi possivel sincronizar o evento da liga.", 400);
+  throw new LeagueAdminApiError("Não foi possível sincronizar o evento da liga.", 400);
 };
 
 export async function POST(request: NextRequest) {

@@ -104,7 +104,7 @@ const fetchTenantFromPublicApi = async (
   if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error(
-      `Falha ao carregar tenant publico (${response.status}) para slug ${tenantSlug}.`
+      `Falha ao carregar tenant público (${response.status}) para slug ${tenantSlug}.`
     );
   }
 

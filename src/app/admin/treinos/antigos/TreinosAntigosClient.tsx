@@ -182,7 +182,7 @@ export default function TreinosAntigosClient({ fixedCategory = "" }: Props) {
             </Link>
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
-                Arquivo Historico
+                Arquivo Histórico
               </p>
               <h1 className="text-lg font-black uppercase tracking-tight">
                 {currentCategoryLabel
@@ -273,7 +273,7 @@ export default function TreinosAntigosClient({ fixedCategory = "" }: Props) {
                     <th className="px-4 py-3">Responsavel</th>
                     <th className="px-4 py-3">Confirmados</th>
                     <th className="px-4 py-3">Presentes</th>
-                    <th className="px-4 py-3 text-right">Acao</th>
+                    <th className="px-4 py-3 text-right">Ação</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -354,7 +354,7 @@ export default function TreinosAntigosClient({ fixedCategory = "" }: Props) {
                     : "border border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500"
                 }`}
               >
-                Proxima pagina
+                Próxima página
               </Link>
             </div>
           </div>

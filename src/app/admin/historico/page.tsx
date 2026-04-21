@@ -145,7 +145,7 @@ export default function AdminHistoricoPage() {
 
   // --- 🦈 FUNÇÃO DE RESGATE (SEED) ---
   const handleSeedDatabase = async () => {
-      if(!confirm("⚠️ Aten??o!\nIsso vai adicionar os 6 eventos OFICIAIS de 2025 ao banco de dados.\n\nCertifique-se que as fotos estão na pasta public/historico.\n\nDeseja confirmar?")) return;
+      if(!confirm("⚠️ Atenção!\nIsso vai adicionar os 6 eventos OFICIAIS de 2025 ao banco de dados.\n\nCertifique-se que as fotos estão na pasta public/historico.\n\nDeseja confirmar?")) return;
       
       setIsSaving(true);
       try {

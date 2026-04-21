@@ -176,7 +176,7 @@ export default function AdminDenunciasBanidosPage() {
                       setResponseById((prev) => ({ ...prev, [row.id]: event.target.value }))
                     }
                     className="w-full resize-none rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand"
-                    placeholder="Escreva a resposta para o usuario..."
+                      placeholder="Escreva a resposta para o usuário..."
                   />
                 </label>
 
@@ -230,7 +230,7 @@ export default function AdminDenunciasBanidosPage() {
                 disabled={page >= totalPages}
                 className="rounded border border-zinc-700 px-3 py-1 disabled:opacity-40"
               >
-                Proxima
+                Próxima
               </button>
             </div>
           </div>

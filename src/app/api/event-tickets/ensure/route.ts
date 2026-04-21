@@ -23,18 +23,18 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("authorization") || "";
     const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!accessToken) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
     }
 
     const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
     if (authError || !authData.user) {
-      return NextResponse.json({ error: "Sessao invalida." }, { status: 401 });
+      return NextResponse.json({ error: "Sessão inválida." }, { status: 401 });
     }
 
     const body = asObject(await request.json());
     const orderId = asString(body?.orderId);
     if (!orderId) {
-      return NextResponse.json({ error: "Pedido invalido." }, { status: 400 });
+      return NextResponse.json({ error: "Pedido inválido." }, { status: 400 });
     }
 
     const { data: profileRow, error: profileError } = await supabaseAdmin
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     const order = asObject(orderRow);
     if (!order) {
-      return NextResponse.json({ error: "Pedido nao encontrado." }, { status: 404 });
+      return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 });
     }
 
     const orderUserId = asString(order.userId);
@@ -75,13 +75,13 @@ export async function POST(request: NextRequest) {
     const isOwner = requesterId && requesterId === orderUserId;
     const isTenantManager = canManageTenant && requesterTenantId && requesterTenantId === orderTenantId;
     if (!isOwner && !isTenantManager && requesterRole !== "master") {
-      return NextResponse.json({ error: "Sem permissao para este pedido." }, { status: 403 });
+      return NextResponse.json({ error: "Sem permissão para este pedido." }, { status: 403 });
     }
 
     const normalizedStatus = asString(order.status).toLowerCase();
     if (normalizedStatus !== "aprovado" && normalizedStatus !== "approved") {
       return NextResponse.json(
-        { error: "O ingresso so fica disponivel depois da aprovacao do pagamento." },
+        { error: "O ingresso só fica disponível depois da aprovação do pagamento." },
         { status: 400 }
       );
     }

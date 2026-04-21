@@ -442,7 +442,7 @@ async function syncPlanVisualSnapshotsForUser(payload: {
 
   const results = await Promise.allSettled(tasks);
   if (results.some((result) => result.status === "rejected")) {
-    console.warn("Falha parcial ao sincronizar snapshots de plano do usuario.", {
+    console.warn("Falha parcial ao sincronizar snapshots de plano do usuário.", {
       userId,
       results,
     });
@@ -520,8 +520,8 @@ const DEFAULT_BANNER_CONFIG: BannerConfigRecord = {
 
 const DEFAULT_FINANCE_CONFIG: FinanceConfigRecord = {
   chave: "financeiro@atletica.com.br",
-  banco: "Banco da Atletica",
-  titular: "Atletica",
+  banco: "Banco da Atlética",
+  titular: "Atlética",
 };
 
 const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
@@ -532,7 +532,7 @@ const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
       preco: "0,00",
       precoVal: 0,
       parcelamento: "Acesso gratuito",
-      descricao: "Entrada no ecossistema da atletica",
+      descricao: "Entrada no ecossistema da atlética",
       cor: "zinc",
       icon: "ghost",
       destaque: false,
@@ -598,14 +598,14 @@ const DEFAULT_PLAN_CATALOG: readonly DefaultPlanSeedEntry[] = [
       preco: "59,90",
       precoVal: 59.9,
       parcelamento: "ou 12x de R$ 5,99",
-      descricao: "Maximo nivel de beneficios",
+      descricao: "Máximo nível de benefícios",
       cor: "yellow",
       icon: "crown",
       destaque: true,
       beneficios: [
         "Prioridade maxima no ecossistema",
         "Maior desconto na loja",
-        "Beneficios VIP em acoes especiais",
+        "Benefícios VIP em ações especiais",
       ],
       xpMultiplier: 1.5,
       nivelPrioridade: 4,
@@ -1354,7 +1354,7 @@ export async function createPlanRequest(payload: {
   };
 
   if (!requestPayload.userId || !requestPayload.planoId) {
-    throw new Error("Dados invalidos para criar solicitacao.");
+    throw new Error("Dados inválidos para criar solicitação.");
   }
 
   const result = await callWithFallback<typeof requestPayload, { id: string }>(
@@ -1627,7 +1627,7 @@ export async function approvePlanRequest(payload: {
   };
 
   if (!requestPayload.requestId || !requestPayload.userId) {
-    throw new Error("Solicitacao invalida para aprovacao.");
+    throw new Error("Solicitação inválida para aprovação.");
   }
 
   const result = await callWithFallback<

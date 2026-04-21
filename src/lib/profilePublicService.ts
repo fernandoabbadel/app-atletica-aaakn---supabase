@@ -1291,7 +1291,7 @@ export async function toggleFollowProfile(payload: {
       scopedTenantId
     );
     if (!usersBelongToTenant) {
-      throw new Error("Nao e permitido seguir usuarios de outra tenant.");
+      throw new Error("Não é permitido seguir usuários de outro tenant.");
     }
   }
 
@@ -1497,7 +1497,7 @@ async function completeToggleFollowProfile(payload: {
   if (targetUserRes.error) throwSupabaseError(targetUserRes.error);
   if (viewerUserRes.error) throwSupabaseError(viewerUserRes.error);
   if (scopedTenantId && (!targetUserRes.data || !viewerUserRes.data)) {
-    throw new Error("Nao e permitido seguir usuarios de outra tenant.");
+    throw new Error("Não é permitido seguir usuários de outro tenant.");
   }
 
   const targetStats = asObject(targetUserRes.data?.stats) ?? {};

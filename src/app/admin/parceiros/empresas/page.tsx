@@ -337,7 +337,7 @@ export default function AdminParceirosEmpresasPage() {
           <div>
             <h1 className="text-xl font-black uppercase tracking-tight">Empresas Parceiras</h1>
             <p className="text-[11px] text-zinc-500 font-bold">
-              Lista paginada (20 por leitura). Nao carrega tudo de uma vez.
+              Lista paginada (20 por leitura). Não carrega tudo de uma vez.
             </p>
           </div>
         </div>
@@ -401,7 +401,7 @@ export default function AdminParceirosEmpresasPage() {
                   <th className="p-4">Plano</th>
                   <th className="p-4">Status</th>
                   <th className="p-4">Scans</th>
-                  <th className="p-4 text-right">Acoes</th>
+                  <th className="p-4 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800 text-zinc-200">
@@ -444,7 +444,7 @@ export default function AdminParceirosEmpresasPage() {
                             }
                             target="_blank"
                             className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700"
-                            title="Abrir pagina da empresa"
+                            title="Abrir página da empresa"
                           >
                             <ExternalLink size={15} />
                           </Link>
@@ -505,7 +505,7 @@ export default function AdminParceirosEmpresasPage() {
                   <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                     {createMode
                       ? "Cadastro completo da empresa parceira"
-                      : "Campos de cadastro, pagina publica e painel da empresa"}
+                      : "Campos de cadastro, página pública e painel da empresa"}
                   </p>
                 </div>
                 <button
@@ -651,7 +651,7 @@ export default function AdminParceirosEmpresasPage() {
                   <input maxLength={PHONE_MAX_LENGTH} inputMode="numeric" value={String(editForm.telefone || "")} onChange={(event) => handleEditChange("telefone", normalizePhoneInput(event.target.value))} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
                 </label>
                 <label className="space-y-1 md:col-span-2">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Descricao</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Descrição</span>
                   <textarea value={String(editForm.descricao || "")} onChange={(event) => handleEditChange("descricao", event.target.value)} rows={3} className="w-full resize-none rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
                 </label>
                 <label className="space-y-1">
@@ -675,7 +675,7 @@ export default function AdminParceirosEmpresasPage() {
                   <input value={String(editForm.site || "")} onChange={(event) => handleEditChange("site", event.target.value)} className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-brand" />
                 </label>
                 <div className="rounded-xl border border-zinc-800 bg-black/30 px-4 py-3 text-[11px] text-zinc-500 md:col-span-2">
-                  Logo e capa agora sao enviados pelo botao de upload acima para evitar erro manual de URL.
+                  Logo e capa agora são enviados pelo botão de upload acima para evitar erro manual de URL.
                 </div>
               </div>
 

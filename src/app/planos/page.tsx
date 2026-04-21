@@ -83,7 +83,7 @@ export default function PlanosPage() {
         setPlanos(data);
       } catch (error: unknown) {
         console.error(error);
-        addToast("Nao foi possivel carregar os planos agora.", "error");
+        addToast("Não foi possível carregar os planos agora.", "error");
       } finally {
         if (mounted) {
           setLoading(false);

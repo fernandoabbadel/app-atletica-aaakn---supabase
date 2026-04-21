@@ -398,7 +398,7 @@ export default function PerfilPublicoPage() {
           ) {
             addToast("Follow indisponivel no backend. Publique as Functions.", "error");
           } else if (code.includes("permission-denied")) {
-            addToast("Sem permissao para seguir esse perfil.", "error");
+            addToast("Sem permissão para seguir esse perfil.", "error");
           } else {
             addToast("Erro ao seguir.", "error");
           }
@@ -575,7 +575,7 @@ export default function PerfilPublicoPage() {
     menteeLabel: "Afilhado/Afilhada",
     inviteMentorLabel: "Adicionar como meu padrinho/madrinha",
     inviteMenteeLabel: "Adicionar como meu afilhado/afilhada",
-    requestHelpText: "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atletica.",
+    requestHelpText: "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atlética.",
   };
 
   return (
@@ -658,7 +658,7 @@ export default function PerfilPublicoPage() {
                               type="button"
                               onClick={() => setShowRelationshipMenu((prev) => !prev)}
                               className="rounded-full border border-zinc-700 bg-zinc-900 p-2 text-zinc-300 transition hover:border-zinc-500 hover:text-white"
-                              title="Mais acoes"
+                              title="Mais ações"
                             >
                               <MoreHorizontal size={16} />
                             </button>
@@ -921,11 +921,11 @@ export default function PerfilPublicoPage() {
                         ) : miniVendorHiddenByOwner ? (
                             <div className="rounded-3xl border border-dashed border-zinc-800 bg-zinc-900/40 p-6 text-center text-sm text-zinc-400">
                                 {isOwnProfile
-                                  ? "Sua Mini Vendor esta oculta nesta aba enquanto o perfil publico da loja estiver desligado."
+                                  ? "Sua Mini Vendor está oculta nesta aba enquanto o perfil público da loja estiver desligado."
                                   : "Essa Mini Vendor esta oculta neste perfil no momento."}
                             </div>
                         ) : (
-                            <div className="text-center text-zinc-600 text-xs py-4">Esse perfil ainda nao criou Mini Vendor publico.</div>
+                            <div className="text-center text-zinc-600 text-xs py-4">Esse perfil ainda não criou Mini Vendor público.</div>
                         )
                     )}
                 </div>

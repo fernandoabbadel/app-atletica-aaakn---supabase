@@ -362,7 +362,7 @@ export default function AlbumTurmaPage() {
 
       const targetId = extractTargetUidFromQr(rawScanned);
       if (!targetId) {
-        addToast("QR invalido. Tente um QR de usuario.", "error");
+        addToast("QR inválido. Tente um QR de usuário.", "error");
         return;
       }
 
@@ -373,7 +373,7 @@ export default function AlbumTurmaPage() {
         await stopScanner();
 
         if (targetId === user.uid) {
-          addToast("Voce nao pode se escanear.", "info");
+        addToast("Você não pode se escanear.", "info");
           return;
         }
         if (meuAlbum.includes(targetId)) {
@@ -393,7 +393,7 @@ export default function AlbumTurmaPage() {
         });
 
         if (result.status === "invalid-target") {
-          addToast("Codigo invalido ou usuario nao encontrado.", "error");
+      addToast("Código inválido ou usuário não encontrado.", "error");
           return;
         }
         if (result.status === "duplicate") {
@@ -414,7 +414,7 @@ export default function AlbumTurmaPage() {
         ) {
           addToast("Figurinha repetida.", "info");
         } else if (isPermissionError(error)) {
-          addToast("Sem permissao para registrar captura. Revise as politicas do Supabase.", "error");
+      addToast("Sem permissão para registrar captura. Revise as políticas do Supabase.", "error");
         } else {
           addToast("Erro ao registrar captura.", "error");
         }
@@ -496,11 +496,11 @@ export default function AlbumTurmaPage() {
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "";
         if (message.includes("insecure-context")) {
-          addToast("Para abrir a camera use HTTPS (ou localhost).", "error");
+        addToast("Para abrir a câmera use HTTPS (ou localhost).", "error");
         } else if (message.includes("camera-not-found")) {
-          addToast("Nenhuma camera encontrada no dispositivo.", "error");
+        addToast("Nenhuma câmera encontrada no dispositivo.", "error");
         } else {
-          addToast("Erro ao abrir camera.", "error");
+        addToast("Erro ao abrir câmera.", "error");
         }
         await stopScanner();
         setShowScanner(false);
@@ -791,7 +791,7 @@ export default function AlbumTurmaPage() {
 
         {usuarios.length === 0 && (
           <div className="text-center text-zinc-600 font-bold uppercase py-10">
-            Ninguem dessa turma ainda.
+            Ninguém dessa turma ainda.
           </div>
         )}
 
@@ -882,7 +882,7 @@ export default function AlbumTurmaPage() {
               <QRCodeSVG value={user?.uid || ""} size={220} />
             </div>
             <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest bg-emerald-500/10 py-2 rounded-xl border border-emerald-500/20 break-all px-2">
-              ID: {user?.uid || "usuario-nao-autenticado"}
+              ID: {user?.uid || "usuário-não-autenticado"}
             </p>
           </div>
         </div>

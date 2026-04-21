@@ -226,7 +226,7 @@ export default function AdminPlanosEditarPage() {
           </Link>
           <div>
             <h1 className="text-xl font-black uppercase tracking-tight">Editar</h1>
-            <p className="text-[11px] text-zinc-500 font-bold">Catalogo de planos</p>
+            <p className="text-[11px] text-zinc-500 font-bold">Catálogo de planos</p>
           </div>
         </div>
       </header>
@@ -430,7 +430,7 @@ export default function AdminPlanosEditarPage() {
               </div>
 
               <div className="space-y-1">
-                <label className={labelClass}>Descricao</label>
+                <label className={labelClass}>Descrição</label>
                 <textarea
                   className={`${fieldClass} min-h-[80px]`}
                   value={form.descricao}

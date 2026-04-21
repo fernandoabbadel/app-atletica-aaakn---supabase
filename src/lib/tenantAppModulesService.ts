@@ -75,7 +75,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "dashboard",
     "Dashboard",
-    "Controla a entrada principal do app da atletica.",
+    "Controla a entrada principal do app da atlética.",
     ["dashboard", "route"],
     "/dashboard",
     "base",
@@ -92,8 +92,8 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "perfil_mini_vendor",
-    "Perfil Publico Mini Vendor",
-    "Controla o perfil publico das lojinhas mini vendor.",
+    "Perfil Público Mini Vendor",
+    "Controla o perfil público das lojinhas mini vendor.",
     ["route"],
     "/perfil/mini-vendor",
     "base",
@@ -111,8 +111,8 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "configuracoes",
-    "Configuracoes",
-    "Central de configuracoes do usuario, seguranca e pedidos.",
+    "Configurações",
+    "Central de configurações do usuário, segurança e pedidos.",
     ["settings", "route"],
     "/configuracoes",
     "base",
@@ -120,8 +120,8 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "configuracoes_lider_turma",
-    "Configuracoes - Lider de Turma",
-    "Acesso aos ajustes de lider de turma.",
+    "Configurações - Líder de Turma",
+    "Acesso aos ajustes de líder de turma.",
     ["settings", "route"],
     "/configuracoes/lider-turma",
     "base",
@@ -130,8 +130,8 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "seguranca",
-    "Configuracoes - Seguranca",
-    "Acesso aos ajustes de seguranca da conta.",
+    "Configurações - Segurança",
+    "Acesso aos ajustes de segurança da conta.",
     ["settings", "route"],
     "/configuracoes/seguranca",
     "base",
@@ -140,7 +140,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "suporte",
-    "Configuracoes - Suporte",
+    "Configurações - Suporte",
     "Acesso aos canais de suporte.",
     ["settings", "route"],
     "/configuracoes/suporte",
@@ -150,7 +150,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "termos",
-    "Configuracoes - Termos",
+    "Configurações - Termos",
     "Acesso aos termos e documentos do app.",
     ["settings", "route"],
     "/configuracoes/termos",
@@ -160,8 +160,8 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   ),
   moduleItem(
     "pedidos",
-    "Configuracoes - Pedidos",
-    "Historico consolidado de pedidos do usuario.",
+    "Configurações - Pedidos",
+    "Histórico consolidado de pedidos do usuário.",
     ["settings", "route"],
     "/configuracoes/pedidos",
     "base",
@@ -191,7 +191,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "pedidos_planos",
     "Pedidos - Planos",
-    "Pedidos e adesoes de planos.",
+    "Pedidos e adesões de planos.",
     ["settings", "route"],
     "/configuracoes/pedidos/planos",
     "base",
@@ -201,7 +201,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "mini_vendor",
     "Mini Vendor",
-    "Libera o hub da lojinha, seus produtos e pedidos na area de configuracoes.",
+    "Libera o hub da lojinha, seus produtos e pedidos na área de configurações.",
     ["settings"],
     "/configuracoes/mini-vendor",
     "base",
@@ -210,7 +210,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "mini_vendor_editar",
     "Mini Vendor - Editar Loja",
-    "Edicao da loja mini vendor.",
+    "Edição da loja mini vendor.",
     ["settings", "route"],
     "/configuracoes/mini-vendor/editar",
     "base",
@@ -325,7 +325,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "empresa",
     "Painel Empresa",
-    "Painel publico e historico dos parceiros.",
+    "Painel público e histórico dos parceiros.",
     ["route"],
     "/empresa",
     "conteudo",
@@ -373,7 +373,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "gym_rats",
     "Gym / Check-in",
-    "Controla o acesso ao modulo gym e check-in da atletica.",
+    "Controla o acesso ao módulo gym e check-in da atlética.",
     ["sidebar", "route"],
     "/gym",
     "atleta",
@@ -382,7 +382,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "gym_checkin",
     "Gym - Check-in",
-    "Tela de check-in do modulo gym.",
+    "Tela de check-in do módulo gym.",
     ["route"],
     "/gym/checkin",
     "atleta",
@@ -392,7 +392,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "gym_checkin_details",
     "Gym - Check-in Details",
-    "Detalhes do check-in do modulo gym.",
+    "Detalhes do check-in do módulo gym.",
     ["route"],
     "/gym/checkin/details",
     "atleta",
@@ -420,7 +420,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "ligas",
     "Ligas USC",
-    "Exibe a area principal das ligas no dashboard e no menu.",
+    "Exibe a área principal das ligas no dashboard e no menu.",
     ["dashboard", "sidebar"],
     "/ligas_usc",
     "info",
@@ -429,7 +429,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "ligas_gerenciar",
     "Ligas - Gerenciar",
-    "Tela de gestao interna das ligas e do quiz.",
+    "Tela de gestão interna das ligas e do quiz.",
     ["route"],
     "/ligas",
     "info",
@@ -439,7 +439,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "planos",
     "Planos",
-    "Catalogo de planos e assinaturas do tenant.",
+    "Catálogo de planos e assinaturas do tenant.",
     ["sidebar", "route"],
     "/planos",
     "info",
@@ -485,7 +485,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "guia",
     "Guia",
-    "Controla o atalho do guia do app na central de informacoes.",
+    "Controla o atalho do guia do app na central de informações.",
     ["sidebar", "route"],
     "/guia",
     "info",
@@ -494,7 +494,7 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
   moduleItem(
     "historico",
     "Nossa Historia",
-    "Controla o acesso ao historico institucional da atletica.",
+    "Controla o acesso ao histórico institucional da atlética.",
     ["sidebar", "route"],
     "/historico",
     "info",
@@ -616,7 +616,7 @@ export async function saveTenantAppModulesConfig(
 ): Promise<void> {
   const cleanTenantId = resolveModulesTenantId(options.tenantId);
   if (!cleanTenantId) {
-    throw new Error("Tenant invalida para salvar configuracao de modulos.");
+    throw new Error("Tenant inválida para salvar configuração de módulos.");
   }
 
   const normalizedModules = normalizeModules(config.modules);

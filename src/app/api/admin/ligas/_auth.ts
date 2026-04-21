@@ -88,12 +88,12 @@ export const getLeagueAdminAuthScope = async (
   const authHeader = request.headers.get("authorization") || "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!accessToken) {
-    throw new LeagueAdminApiError("Nao autenticado.", 401);
+    throw new LeagueAdminApiError("Não autenticado.", 401);
   }
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
   if (authError || !authData.user) {
-    throw new LeagueAdminApiError("Sessao invalida.", 401);
+    throw new LeagueAdminApiError("Sessão inválida.", 401);
   }
 
   const { data: userRow, error: userError } = await supabaseAdmin
@@ -116,7 +116,7 @@ export const getLeagueAdminAuthScope = async (
   const canManageTenant = isPlatformMaster || MANAGER_TENANT_ROLES.has(tenantRole);
 
   if (!userId) {
-    throw new LeagueAdminApiError("Perfil do usuario invalido.", 400);
+    throw new LeagueAdminApiError("Perfil do usuário inválido.", 400);
   }
 
   return {
@@ -137,12 +137,12 @@ const validateRequestedTenantId = (
   if (scope.isPlatformMaster) return;
 
   if (!scope.canManageTenant || scope.tenantStatus !== "approved" || !scope.userTenantId) {
-    throw new LeagueAdminApiError("Sem permissao para gerenciar este tenant.", 403);
+    throw new LeagueAdminApiError("Sem permissão para gerenciar este tenant.", 403);
   }
 
   if (requestedTenantId && requestedTenantId !== scope.userTenantId) {
     throw new LeagueAdminApiError(
-      "Tenant informado nao corresponde ao seu perfil.",
+      "Tenant informado não corresponde ao seu perfil.",
       403
     );
   }
@@ -163,7 +163,7 @@ export const resolveLeagueTenantContext = async <TRow extends Record<string, unk
 }> => {
   const leagueId = payload.leagueId.trim();
   if (!leagueId) {
-    throw new LeagueAdminApiError("Liga invalida.", 400);
+    throw new LeagueAdminApiError("Liga inválida.", 400);
   }
 
   const requestedTenantId = (payload.requestedTenantId || "").trim();
@@ -182,7 +182,7 @@ export const resolveLeagueTenantContext = async <TRow extends Record<string, unk
 
   const leagueRow = asObject(leagueRowRaw) as TRow | null;
   if (!leagueRow) {
-    throw new LeagueAdminApiError("Liga nao encontrada.", 404);
+    throw new LeagueAdminApiError("Liga não encontrada.", 404);
   }
 
   const leagueTenantId = asString(leagueRow.tenant_id).trim();
@@ -190,7 +190,7 @@ export const resolveLeagueTenantContext = async <TRow extends Record<string, unk
 
   if (!effectiveTenantId) {
     throw new LeagueAdminApiError(
-      "Nao foi possivel determinar o tenant da liga.",
+      "Não foi possível determinar o tenant da liga.",
       400
     );
   }
@@ -201,7 +201,7 @@ export const resolveLeagueTenantContext = async <TRow extends Record<string, unk
 
   if (leagueTenantId && leagueTenantId !== effectiveTenantId) {
     throw new LeagueAdminApiError(
-      "O tenant informado nao confere com a liga selecionada.",
+      "O tenant informado não confere com a liga selecionada.",
       403
     );
   }
@@ -229,7 +229,7 @@ export const resolveEventTenantContext = async <TRow extends Record<string, unkn
 }> => {
   const eventId = payload.eventId.trim();
   if (!eventId) {
-    throw new LeagueAdminApiError("Evento invalido.", 400);
+    throw new LeagueAdminApiError("Evento inválido.", 400);
   }
 
   const requestedTenantId = (payload.requestedTenantId || "").trim();
@@ -248,7 +248,7 @@ export const resolveEventTenantContext = async <TRow extends Record<string, unkn
 
   const eventRow = asObject(eventRowRaw) as TRow | null;
   if (!eventRow) {
-    throw new LeagueAdminApiError("Evento nao encontrado.", 404);
+    throw new LeagueAdminApiError("Evento não encontrado.", 404);
   }
 
   const eventTenantId = asString(eventRow.tenant_id).trim();
@@ -256,7 +256,7 @@ export const resolveEventTenantContext = async <TRow extends Record<string, unkn
 
   if (!effectiveTenantId) {
     throw new LeagueAdminApiError(
-      "Nao foi possivel determinar o tenant do evento.",
+      "Não foi possível determinar o tenant do evento.",
       400
     );
   }
@@ -267,7 +267,7 @@ export const resolveEventTenantContext = async <TRow extends Record<string, unkn
 
   if (eventTenantId && eventTenantId !== effectiveTenantId) {
     throw new LeagueAdminApiError(
-      "O tenant informado nao confere com o evento selecionado.",
+      "O tenant informado não confere com o evento selecionado.",
       403
     );
   }

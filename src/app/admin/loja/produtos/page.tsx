@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 
-import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
+import { PaymentRecipientCheckboxList } from "@/components/PaymentRecipientCheckboxList";
 import { PaymentReceiversManager } from "@/components/PaymentReceiversManager";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -32,7 +32,7 @@ import { fetchPlanCatalog, type PlanRecord } from "@/lib/plansPublicService";
 import { logActivity } from "@/lib/logger";
 import {
   fetchTenantPaymentRecipients,
-  findTenantPaymentRecipient,
+  filterTenantPaymentRecipientsByIds,
   type TenantPaymentRecipientOption,
 } from "@/lib/paymentRecipients";
 import {
@@ -76,6 +76,7 @@ type PaymentFormState = {
   recipientUserName: string;
   recipientUserTurma: string;
   recipientUserAvatar: string;
+  recipientUserIds: string[];
 };
 
 type ProductRow = {
@@ -102,6 +103,7 @@ type ProductRow = {
   plan_prices?: Array<{ planId?: string; planName?: string; price?: number }>;
   plan_visibility?: Array<{ planId?: string; planName?: string; visible?: boolean }>;
   payment_config?: CommercePaymentConfig | null;
+  seller_type?: string;
 };
 
 type CategoryRow = {
@@ -110,6 +112,7 @@ type CategoryRow = {
   cover_img?: string;
   button_color?: string;
   logo_url?: string;
+  seller_type?: string;
 };
 
 type VariantForm = {
@@ -180,6 +183,7 @@ const EMPTY_FORM: ProductForm = {
     recipientUserName: "",
     recipientUserTurma: "",
     recipientUserAvatar: "",
+    recipientUserIds: [],
   },
 };
 
@@ -217,6 +221,33 @@ const joinTextLines = (value: unknown): string => {
   }
   return "";
 };
+
+const getPaymentRecipientIdsFromConfig = (
+  paymentConfig?: CommercePaymentConfig | null
+): string[] => {
+  const rows =
+    paymentConfig?.recipients?.length
+      ? paymentConfig.recipients
+      : paymentConfig?.recipient
+        ? [paymentConfig.recipient]
+        : [];
+
+  return Array.from(
+    new Set(
+      rows
+        .map((entry) => String(entry.userId || "").trim())
+        .filter((entry) => entry.length > 0)
+    )
+  );
+};
+
+const toCommerceRecipientSnapshot = (recipient: TenantPaymentRecipientOption) => ({
+  userId: recipient.userId,
+  name: recipient.name,
+  turma: recipient.turma,
+  avatarUrl: recipient.avatarUrl,
+  phone: recipient.phone,
+});
 
 const buildPlanScopeRows = (
   plans: PlanRecord[],
@@ -312,7 +343,7 @@ export default function AdminLojaProdutosPage() {
 
     const run = async () => {
       try {
-        const recipients = await fetchTenantPaymentRecipients(cleanTenantId);
+        const recipients = await fetchTenantPaymentRecipients(cleanTenantId, "products");
         if (mounted) setPaymentRecipients(recipients);
       } catch (error: unknown) {
         console.error(error);
@@ -374,6 +405,7 @@ export default function AdminLojaProdutosPage() {
         forceRefresh,
         tenantId: activeTenantId || undefined,
         category: normalizedCategory,
+        sellerType: "tenant",
       });
       setRows(products as ProductRow[]);
     } finally {
@@ -389,6 +421,7 @@ export default function AdminLojaProdutosPage() {
         forceRefresh,
         tenantId: activeTenantId || undefined,
         active: false,
+        sellerType: "tenant",
       });
       setInactiveRows(products as ProductRow[]);
     } finally {
@@ -404,7 +437,11 @@ export default function AdminLojaProdutosPage() {
       reviewsLimit: 1,
       forceRefresh,
     });
-    setCategories(bundle.categorias as CategoryRow[]);
+    setCategories(
+      (bundle.categorias as CategoryRow[]).filter(
+        (row) => !row.seller_type || row.seller_type === "tenant"
+      )
+    );
   }, []);
 
   const loadPlans = useCallback(async (forceRefresh = true) => {
@@ -456,6 +493,7 @@ export default function AdminLojaProdutosPage() {
           forceRefresh: false,
           tenantId: activeTenantId || undefined,
           category: selectedCategory,
+          sellerType: "tenant",
         });
         if (mounted) {
           setRows(products as ProductRow[]);
@@ -490,6 +528,7 @@ export default function AdminLojaProdutosPage() {
           forceRefresh: false,
           tenantId: activeTenantId || undefined,
           active: false,
+          sellerType: "tenant",
         });
         if (mounted) {
           setInactiveRows(products as ProductRow[]);
@@ -613,26 +652,10 @@ export default function AdminLojaProdutosPage() {
         recipientUserName: row.payment_config?.recipient?.name || "",
         recipientUserTurma: row.payment_config?.recipient?.turma || "",
         recipientUserAvatar: row.payment_config?.recipient?.avatarUrl || "",
+        recipientUserIds: getPaymentRecipientIdsFromConfig(row.payment_config),
       },
     });
     setIsProductOpen(true);
-  };
-
-  const handleSelectPaymentRecipient = (recipientUserId: string) => {
-    const recipient = findTenantPaymentRecipient(paymentRecipients, recipientUserId);
-    setForm((prev) => ({
-      ...prev,
-      payment: {
-        ...prev.payment,
-        recipientUserId: recipient?.userId || "",
-        recipientUserName: recipient?.name || "",
-        recipientUserTurma: recipient?.turma || "",
-        recipientUserAvatar: recipient?.avatarUrl || "",
-        whatsapp: recipient?.phone
-          ? normalizePhoneToBrE164(recipient.phone)
-          : prev.payment.whatsapp,
-      },
-    }));
   };
 
   useEffect(() => {
@@ -772,7 +795,7 @@ export default function AdminLojaProdutosPage() {
     const precoAntigo = form.precoAntigo.trim() ? parseMoney(form.precoAntigo) : 0;
 
     if (!nome) return void addToast("Nome do produto obrigatorio.", "error");
-    if (!Number.isFinite(preco) || preco < 0) return void addToast("Preco invalido.", "error");
+    if (!Number.isFinite(preco) || preco < 0) return void addToast("Preço inválido.", "error");
 
     const variants = variantsEnabled
       ? form.variantes
@@ -818,10 +841,14 @@ export default function AdminLojaProdutosPage() {
       .filter((line) => line.length > 0)
       .join("\n");
 
+    const selectedPaymentRecipients = filterTenantPaymentRecipientsByIds(
+      paymentRecipients,
+      form.payment.recipientUserIds
+    );
+    const primaryPaymentRecipient = selectedPaymentRecipients[0] || null;
     const hasPaymentConfig =
       form.payment.enabled ||
-      paymentRecipients.length > 0 ||
-      form.payment.recipientUserId.trim().length > 0 ||
+      selectedPaymentRecipients.length > 0 ||
       form.payment.whatsapp.trim().length > 0;
 
     const payload: Record<string, unknown> = {
@@ -855,23 +882,19 @@ export default function AdminLojaProdutosPage() {
             banco: form.payment.enabled ? form.payment.banco.trim() : "",
             titular: form.payment.enabled ? form.payment.titular.trim() : "",
             whatsapp: form.payment.whatsapp.trim(),
-            ...(form.payment.recipientUserId
+            ...(primaryPaymentRecipient
               ? {
-                  recipient: {
-                    userId: form.payment.recipientUserId.trim(),
-                    name: form.payment.recipientUserName.trim(),
-                    turma: form.payment.recipientUserTurma.trim(),
-                    avatarUrl: form.payment.recipientUserAvatar.trim(),
-                    phone: form.payment.whatsapp.trim(),
-                  },
+                  recipient: toCommerceRecipientSnapshot(primaryPaymentRecipient),
                 }
               : {}),
-            ...(paymentRecipients.length > 0 ? { recipients: paymentRecipients } : {}),
+            ...(selectedPaymentRecipients.length > 0
+              ? { recipients: selectedPaymentRecipients.map(toCommerceRecipientSnapshot) }
+              : {}),
           }
         : null,
       seller_type: "tenant",
       seller_id: activeTenantId || "",
-      seller_name: tenantName || tenantSigla || "Atletica",
+      seller_name: tenantName || tenantSigla || "Atlética",
       seller_logo_url: tenantLogoUrl || "/logo.png",
       updatedAt: new Date().toISOString(),
     };
@@ -1093,7 +1116,7 @@ export default function AdminLojaProdutosPage() {
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">
                 {isInactiveOnlyPage
-                  ? "historico completo para reativacao sem perder dados"
+                  ? "histórico completo para reativação sem perder dados"
                   : "criacao completa + categorias + variacoes"}
               </p>
             </div>
@@ -1108,7 +1131,7 @@ export default function AdminLojaProdutosPage() {
               }`}
             >
               <Power size={14} />
-              {isInactiveOnlyPage ? "Pagina Atual" : "Ver Desativados"}
+              {isInactiveOnlyPage ? "Página Atual" : "Ver Desativados"}
             </Link>
             <Link href={categoryManagerHref} className="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[11px] font-black uppercase text-blue-300 hover:bg-blue-500/20"><Tags size={14} /> Categorias</Link>
             <button
@@ -1117,7 +1140,7 @@ export default function AdminLojaProdutosPage() {
               className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
             >
               <UserPlus size={14} />
-              Adicionar recebedores
+              Recebedores produtos
             </button>
             <button onClick={openCreateProduct} className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20"><Plus size={14} /> Novo Produto</button>
           </div>
@@ -1128,7 +1151,7 @@ export default function AdminLojaProdutosPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Link href={pendingOrdersHref} className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4 hover:bg-yellow-500/10 transition">
             <div className="inline-flex items-center gap-2 text-xs font-black uppercase text-yellow-300"><ShoppingBag size={14} /> Pedidos Pendentes</div>
-            <p className="mt-1 text-[11px] text-zinc-400">Aprovacao manual continua ativa.</p>
+            <p className="mt-1 text-[11px] text-zinc-400">Aprovação manual continua ativa.</p>
           </Link>
           <Link href={reviewHref} className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 hover:bg-emerald-500/10 transition">
             <div className="inline-flex items-center gap-2 text-xs font-black uppercase text-emerald-300"><MessageSquare size={14} /> Reviews</div>
@@ -1140,13 +1163,13 @@ export default function AdminLojaProdutosPage() {
           <section className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4 space-y-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-sm font-black uppercase text-white">Historico dos Produtos Desativados</h2>
+                <h2 className="text-sm font-black uppercase text-white">Histórico dos Produtos Desativados</h2>
                 <p className="text-[11px] text-zinc-500">
                   Imagem, categoria, lote, variacoes e preco continuam salvos aqui para reativacao segura.
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-black/30 px-3 py-2">
-                <p className="text-[10px] font-black uppercase text-zinc-500">Itens no historico</p>
+                <p className="text-[10px] font-black uppercase text-zinc-500">Itens no histórico</p>
                 <p className="text-sm font-black text-white">
                   {loading || loadingInactiveProducts
                     ? "Carregando..."
@@ -1164,7 +1187,7 @@ export default function AdminLojaProdutosPage() {
               <div>
                 <h2 className="text-sm font-black uppercase text-white">Produtos por Categoria</h2>
                 <p className="text-[11px] text-zinc-500">
-                  Abra so a categoria que voce quer revisar para nao puxar todos os produtos de uma vez.
+                  Abra só a categoria que você quer revisar para não puxar todos os produtos de uma vez.
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-black/30 px-3 py-2">
@@ -1303,8 +1326,8 @@ export default function AdminLojaProdutosPage() {
                 </select>
                 <button onClick={() => setIsCategoryOpen(true)} className="px-3 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20"><Tags size={14} /></button>
               </div>
-              <input value={form.preco} onChange={(e) => setForm((prev) => ({ ...prev, preco: e.target.value }))} placeholder="Preco" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
-              <input value={form.precoAntigo} onChange={(e) => setForm((prev) => ({ ...prev, precoAntigo: e.target.value }))} placeholder="Preco antigo (promo)" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
+              <input value={form.preco} onChange={(e) => setForm((prev) => ({ ...prev, preco: e.target.value }))} placeholder="Preço" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
+              <input value={form.precoAntigo} onChange={(e) => setForm((prev) => ({ ...prev, precoAntigo: e.target.value }))} placeholder="Preço antigo (promo)" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
               <input value={form.estoque} onChange={(e) => setForm((prev) => ({ ...prev, estoque: e.target.value.replace(/[^\d]/g, "") }))} disabled={variantsEnabled} placeholder="Estoque total (sem variacoes)" inputMode="numeric" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
               <input value={form.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(e) => setForm((prev) => ({ ...prev, lote: e.target.value.slice(0, PRODUCT_LOTE_MAX_LENGTH) }))} placeholder="Lote / promocao" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
@@ -1324,7 +1347,7 @@ export default function AdminLojaProdutosPage() {
                   <p className="text-[11px] text-zinc-400 break-all">{form.img}</p>
                 </div>
               )}
-              <textarea value={form.descricao} maxLength={PRODUCT_DESCRIPTION_MAX_LENGTH} onChange={(e) => setForm((prev) => ({ ...prev, descricao: e.target.value.slice(0, PRODUCT_DESCRIPTION_MAX_LENGTH) }))} rows={3} placeholder="Descricao" className="md:col-span-2 rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 resize-y" />
+              <textarea value={form.descricao} maxLength={PRODUCT_DESCRIPTION_MAX_LENGTH} onChange={(e) => setForm((prev) => ({ ...prev, descricao: e.target.value.slice(0, PRODUCT_DESCRIPTION_MAX_LENGTH) }))} rows={3} placeholder="Descrição" className="md:col-span-2 rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 resize-y" />
             </div>
 
             <div className="rounded-xl border border-zinc-800 bg-black/20 p-4 space-y-3">
@@ -1364,7 +1387,7 @@ export default function AdminLojaProdutosPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-black uppercase text-white">Pagamento do Produto</p>
-                  <p className="text-[11px] text-zinc-500">Se desligado, usa automaticamente os dados da atletica.</p>
+                  <p className="text-[11px] text-zinc-500">Se desligado, usa automaticamente os dados da atlética.</p>
                 </div>
                 <label className="inline-flex items-center gap-2 text-[11px] font-bold text-zinc-400">
                   <input
@@ -1436,16 +1459,6 @@ export default function AdminLojaProdutosPage() {
                   disabled={!form.payment.enabled}
                   className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
                 />
-                <PaymentRecipientSelect
-                  id="admin-store-product-payment-recipient"
-                  name="admin_store_product_payment_recipient"
-                  label="Usuarios que podem receber."
-                  options={paymentRecipients}
-                  selectedUserId={form.payment.recipientUserId}
-                  loading={loadingPaymentRecipients}
-                  disabled={loadingPaymentRecipients}
-                  onChange={handleSelectPaymentRecipient}
-                />
                 <input
                   id="admin-store-product-payment-whatsapp"
                   name="admin_store_product_payment_whatsapp"
@@ -1465,6 +1478,23 @@ export default function AdminLojaProdutosPage() {
                   disabled={!form.payment.enabled}
                   className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
                 />
+                <div className="md:col-span-2">
+                  <PaymentRecipientCheckboxList
+                    id="admin-store-product-payment-recipients"
+                    label="Liberar comprovantes do produto"
+                    helperText="Marque quem pode receber o comprovante deste produto."
+                    emptyText="Nenhum recebedor de produto cadastrado."
+                    options={paymentRecipients}
+                    selectedUserIds={form.payment.recipientUserIds}
+                    loading={loadingPaymentRecipients}
+                    onChange={(recipientUserIds) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        payment: { ...prev.payment, recipientUserIds },
+                      }))
+                    }
+                  />
+                </div>
               </div>
             </div>
 
@@ -1561,7 +1591,7 @@ export default function AdminLojaProdutosPage() {
             <div className="w-full max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-black uppercase text-white">Preco e Visibilidade por Plano</h3>
+                  <h3 className="text-sm font-black uppercase text-white">Preço e Visibilidade por Plano</h3>
                   <p className="text-[11px] text-zinc-500">
                     So preencha quem tiver preco especial. Em branco, o plano usa o preco geral do produto.
                   </p>
@@ -1595,7 +1625,7 @@ export default function AdminLojaProdutosPage() {
                           ),
                         }))
                       }
-                      placeholder={`Preco especial para ${entry.planName}`}
+                      placeholder={`Preço especial para ${entry.planName}`}
                       inputMode="decimal"
                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
                     />
@@ -1742,9 +1772,9 @@ export default function AdminLojaProdutosPage() {
           <section className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-sm font-black uppercase text-white">Produtos Desativados em Pagina Separada</h2>
+                <h2 className="text-sm font-black uppercase text-white">Produtos Desativados em Página Separada</h2>
                 <p className="text-[11px] text-zinc-500">
-                  O historico agora fica fora do catalogo principal para evitar perda de contexto e manter a operacao mais limpa.
+                  O histórico agora fica fora do catálogo principal para evitar perda de contexto e manter a operação mais limpa.
                 </p>
               </div>
               <Link
@@ -1752,7 +1782,7 @@ export default function AdminLojaProdutosPage() {
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] font-black uppercase text-red-300 hover:bg-red-500/20"
               >
                 <Power size={14} />
-                Abrir Historico
+                Abrir Histórico
               </Link>
             </div>
           </section>
@@ -1767,8 +1797,12 @@ export default function AdminLojaProdutosPage() {
       </main>
       <PaymentReceiversManager
         tenantId={activeTenantId}
+        scope="products"
         open={showReceiversManager}
         recipients={paymentRecipients}
+        title="Recebedores de produtos"
+        description="Lista usada somente pelos produtos da loja da tenant."
+        savedMessage="Recebedores de produtos atualizados."
         onClose={() => setShowReceiversManager(false)}
         onSaved={setPaymentRecipients}
       />

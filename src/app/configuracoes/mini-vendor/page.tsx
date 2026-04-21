@@ -39,7 +39,7 @@ export default function MiniVendorSettingsPage() {
       {
         title: "Editar dados da empresa",
         description:
-          "Abre uma pagina propria para nome, descricao, logo, capa e dados de contato da loja.",
+          "Abre uma página própria para nome, descrição, logo, capa e dados de contato da loja.",
         href: tenantSlug
           ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/editar")
           : "/configuracoes/mini-vendor/editar",
@@ -61,7 +61,7 @@ export default function MiniVendorSettingsPage() {
       {
         title: "Pedidos pendentes",
         description:
-          "Mostra somente a fila que ainda precisa de aprovacao, sem misturar com o historico.",
+          "Mostra somente a fila que ainda precisa de aprovação, sem misturar com o histórico.",
         href: tenantSlug
           ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-pendentes")
           : "/configuracoes/mini-vendor/pedidos-pendentes",
@@ -72,7 +72,7 @@ export default function MiniVendorSettingsPage() {
       {
         title: "Pedidos aprovados",
         description:
-          "Historico separado para conferir somente os pagamentos que ja foram confirmados.",
+          "Histórico separado para conferir somente os pagamentos que já foram confirmados.",
         href: tenantSlug
           ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/pedidos-aprovados")
           : "/configuracoes/mini-vendor/pedidos-aprovados",
@@ -118,12 +118,12 @@ export default function MiniVendorSettingsPage() {
   return (
     <MiniVendorShell
       title="Mini Vendor"
-      subtitle="Abra cada area em pagina propria para gastar menos consultas e manter o cadastro organizado."
+      subtitle="Abra cada área em página própria para gastar menos consultas e manter o cadastro organizado."
       backPath="/configuracoes"
     >
       {!canUseArea ? (
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
-          Entre em uma atletica valida para usar a area mini vendor.
+          Entre em uma atlética válida para usar a área mini vendor.
         </section>
       ) : loading ? (
         <section className="flex min-h-[240px] items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -186,7 +186,7 @@ export default function MiniVendorSettingsPage() {
                     href={item.href}
                     className="mt-6 inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-black/30 px-4 py-3 text-xs font-black uppercase text-white hover:border-zinc-500 hover:bg-black/50"
                   >
-                    Abrir pagina
+                    Abrir página
                     <ChevronRight size={14} />
                   </Link>
                 </article>
@@ -196,7 +196,7 @@ export default function MiniVendorSettingsPage() {
 
           {!profile ? (
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm text-zinc-400">
-              Nenhum cadastro encontrado ainda. Comece pela pagina de edicao da empresa.
+              Nenhum cadastro encontrado ainda. Comece pela página de edição da empresa.
             </section>
           ) : (
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">

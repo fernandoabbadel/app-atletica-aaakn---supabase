@@ -391,10 +391,10 @@ const buildBannedAppealRecord = (
 
   return {
     id,
-    autor: asString(obj.userName, "Usuario Desconhecido"),
+    autor: asString(obj.userName, "Usuário Desconhecido"),
     alvo: "Administracao",
     categoria: "banidos",
-    motivo: "Solicitacao de Desbloqueio",
+    motivo: "Solicitação de Desbloqueio",
     descricao: asString(obj.message).slice(0, 5_000),
     data: createdAtMs ? new Date(createdAtMs).toLocaleString("pt-BR") : toDateLabel(obj.createdAt),
     createdAtMs,
@@ -415,7 +415,7 @@ const buildSupportRecord = (id: string, raw: unknown): AdminReportRecord | null 
 
   return {
     id,
-    autor: asString(obj.userName, "Usuario"),
+    autor: asString(obj.userName, "Usuário"),
     alvo: "Suporte do app",
     categoria: "suporte",
     motivo: subject || `Chamado (${supportCategoryLabel(category)})`,
@@ -450,8 +450,8 @@ const buildCommunityModerationRecord = (
   return {
     id,
     categoria: "comunidade",
-    autor: asString(obj.reporterName, "Usuario"),
-    mensagem: mensagem || "Conteudo denunciado na comunidade.",
+    autor: asString(obj.reporterName, "Usuário"),
+    mensagem: mensagem || "Conteúdo denunciado na comunidade.",
     status: normalizeModerationStatus(obj.status),
     data: createdAtMs ? new Date(createdAtMs).toLocaleString("pt-BR") : "Data desconhecida",
     createdAtMs,
@@ -495,7 +495,7 @@ const buildGymModerationRecord = (
   return {
     id,
     categoria: "gym",
-    autor: asString(obj.userName, "Usuario"),
+    autor: asString(obj.userName, "Usuário"),
     mensagem: `${subject}${message ? ` - ${message}` : ""}`.slice(0, 5_000),
     status: normalizeModerationStatus(obj.status),
     data: createdAtMs ? new Date(createdAtMs).toLocaleString("pt-BR") : "Data desconhecida",
@@ -780,12 +780,12 @@ export async function submitSupportRequest(payload: {
 }): Promise<{ id: string }> {
   const userId = payload.userId.trim();
   if (!userId) {
-    throw new Error("Usuario invalido para abrir chamado.");
+    throw new Error("Usuário inválido para abrir chamado.");
   }
 
   const requestPayload = {
     userId,
-    userName: payload.userName.trim().slice(0, 80) || "Usuario",
+    userName: payload.userName.trim().slice(0, 80) || "Usuário",
     userEmail: payload.userEmail?.trim().slice(0, 120) || "",
     category: normalizeSupportCategory(payload.category),
     subject: payload.subject.trim().slice(0, 50),

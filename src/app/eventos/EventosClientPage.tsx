@@ -170,7 +170,7 @@ function EventClassRanking({ event }: { event: Evento }) {
         </div>
       )}
       <div className="flex flex-col">
-        <span className="text-[9px] font-bold text-zinc-400 uppercase">Presenca</span>
+        <span className="text-[9px] font-bold text-zinc-400 uppercase">Presença</span>
         <span className="text-xs font-black text-emerald-400">+{totalConfirmados} confirmados</span>
       </div>
     </div>
@@ -294,7 +294,7 @@ function EventCard({
       console.error(error);
       setLiked(previousLiked);
       setLikesCount(previousCount);
-      onLikeError("Nao foi possivel atualizar a curtida agora.");
+      onLikeError("Não foi possível atualizar a curtida agora.");
     }
   };
 

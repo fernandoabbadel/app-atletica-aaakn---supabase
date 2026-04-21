@@ -63,9 +63,9 @@ const DEFAULT_SHARKROUND_CONFIG: SharkroundAppConfig = {
   rules: [
     "Objetivo: dominar as ligas e acumular moedas.",
     "Evolucao: Terreno -> Clinica -> Hospital -> Ministerio.",
-    "Cada jogador pode rolar o dado ate 5 vezes por dia.",
+    "Cada jogador pode rolar o dado até 5 vezes por dia.",
     "Ao completar uma volta no tabuleiro, recebe bonus de moedas.",
-    "Na DP de Anatomia, saia pagando fianca ou com ajuda de amigos.",
+    "Na DP de Anatomia, saia pagando fiança ou com ajuda de amigos.",
     "Acertou pergunta: conquista/evolui casa. Errou: perde rodada.",
   ],
 };
@@ -411,7 +411,7 @@ async function saveConfigWithClient(
     delete mutablePayload[safeRemovableKey];
   }
 
-  throw new Error("Falha ao salvar configuracao do BoardRound.");
+  throw new Error("Falha ao salvar configuração do BoardRound.");
 }
 
 export async function fetchSharkroundAppConfig(options?: {

@@ -153,10 +153,10 @@ export default function MiniVendorPublicProfilePage() {
             }
           : previous
       );
-      addToast(result.isFollowing ? "Agora voce segue essa lojinha." : "Voce deixou de seguir essa lojinha.", result.isFollowing ? "success" : "info");
+      addToast(result.isFollowing ? "Agora você segue essa lojinha." : "Você deixou de seguir essa lojinha.", result.isFollowing ? "success" : "info");
     } catch (error: unknown) {
       console.error(error);
-      addToast(error instanceof Error ? error.message : "Nao foi possivel seguir agora.", "error");
+      addToast(error instanceof Error ? error.message : "Não foi possível seguir agora.", "error");
     } finally {
       setTogglingFollow(false);
     }
@@ -191,7 +191,7 @@ export default function MiniVendorPublicProfilePage() {
       addToast(result.isLiked ? "Lojinha curtida." : "Curtida removida.", result.isLiked ? "success" : "info");
     } catch (error: unknown) {
       console.error(error);
-      addToast(error instanceof Error ? error.message : "Nao foi possivel curtir agora.", "error");
+      addToast(error instanceof Error ? error.message : "Não foi possível curtir agora.", "error");
     } finally {
       setTogglingLike(false);
     }
@@ -204,7 +204,7 @@ export default function MiniVendorPublicProfilePage() {
       addToast("Link da lojinha copiado.", "success");
     } catch (error: unknown) {
       console.error(error);
-      addToast("Nao foi possivel copiar o link agora.", "error");
+      addToast("Não foi possível copiar o link agora.", "error");
     }
   };
 
@@ -223,7 +223,7 @@ export default function MiniVendorPublicProfilePage() {
           <Store size={32} className="mx-auto text-zinc-500" />
           <h1 className="mt-4 text-xl font-black uppercase">Mini vendor indisponivel</h1>
           <p className="mt-2 text-sm text-zinc-400">
-            Essa lojinha nao esta publica ou ainda nao foi aprovada.
+            Essa lojinha não está pública ou ainda não foi aprovada.
           </p>
           <button
             onClick={() => router.back()}
@@ -273,14 +273,14 @@ export default function MiniVendorPublicProfilePage() {
 
               <div className="mt-4 text-center">
                 <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-400">
-                  Mini vendor publico
+                  Mini vendor público
                 </p>
                 <h1 className="mt-2 flex items-center justify-center gap-2 text-3xl font-black uppercase italic tracking-tight">
                   {profile.storeName}
                   <Store size={18} className="text-blue-400" />
                 </h1>
                 <p className="mt-2 max-w-xl text-sm text-zinc-400">
-                  {profile.description || "Lojinha aprovada dentro da store oficial da atletica."}
+                  {profile.description || "Lojinha aprovada dentro da store oficial da atlética."}
                 </p>
               </div>
 
@@ -450,7 +450,7 @@ export default function MiniVendorPublicProfilePage() {
 
               {bundle.products.length === 0 ? (
                 <div className="mt-4 rounded-2xl border border-zinc-800 bg-black/20 p-6 text-sm text-zinc-400">
-                  Nenhum produto publico dessa lojinha ainda.
+                  Nenhum produto público dessa lojinha ainda.
                 </div>
               ) : (
                 <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -99,7 +99,7 @@ export default function AdminUsuariosPage() {
         setNextCursor(page.nextCursor);
       } catch (error: unknown) {
         if (!isPermissionError(error)) { console.error(error); }
-        addToast("Erro ao carregar usuarios.", "error");
+        addToast("Erro ao carregar usuários.", "error");
       } finally {
         if (reset) setLoading(false);
         else setLoadingMore(false);
@@ -154,8 +154,8 @@ export default function AdminUsuariosPage() {
       );
       addToast(
         nextStatus === "bloqueado"
-          ? "Usuario bloqueado."
-          : "Usuario desbloqueado.",
+          ? "Usuário bloqueado."
+          : "Usuário desbloqueado.",
         "success"
       );
     } catch (error: unknown) {
@@ -166,17 +166,17 @@ export default function AdminUsuariosPage() {
 
   const handleDelete = async (userId: string) => {
     const confirmed = window.confirm(
-      "Confirmar exclusao permanente deste usuario?"
+      "Confirmar exclusão permanente deste usuário?"
     );
     if (!confirmed) return;
 
     try {
       await deleteAdminUser(userId, { tenantId: activeTenantId || undefined });
       setRows((prev) => prev.filter((row) => row.id !== userId));
-      addToast("Usuario removido.", "success");
+      addToast("Usuário removido.", "success");
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao remover usuario.", "error");
+      addToast("Erro ao remover usuário.", "error");
     }
   };
 
@@ -214,7 +214,7 @@ export default function AdminUsuariosPage() {
         );
       } else {
         addToast(
-          `Recontagem concluida: ${totalUpdated} usuarios ajustados (${totalScanned} verificados).`,
+          `Recontagem concluída: ${totalUpdated} usuários ajustados (${totalScanned} verificados).`,
           "success"
         );
       }
@@ -243,7 +243,7 @@ export default function AdminUsuariosPage() {
             </Link>
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight">
-                Admin Usuarios
+                Admin Usuários
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">
                 Paginacao 20 em 20 para reduzir leituras
@@ -291,7 +291,7 @@ export default function AdminUsuariosPage() {
               onClick={() => void handleRecountFollows()}
               disabled={recountingFollows}
               className="px-3 py-2 rounded-lg text-[11px] font-black uppercase border transition bg-zinc-900 text-cyan-300 border-cyan-700/40 hover:bg-zinc-800 disabled:opacity-60 inline-flex items-center gap-2"
-              title="Recontar seguidores e seguindo dos usuarios"
+              title="Recontar seguidores e seguindo dos usuários"
             >
               {recountingFollows ? (
                 <Loader2 size={14} className="animate-spin" />
@@ -317,7 +317,7 @@ export default function AdminUsuariosPage() {
                     ? "bg-white text-black border-white"
                     : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white"
                 }`}
-                title={`Filtrar usuarios por plano ${option.label}`}
+                title={`Filtrar usuários por plano ${option.label}`}
               >
                 {option.label}
               </button>
@@ -330,11 +330,11 @@ export default function AdminUsuariosPage() {
             <table className="w-full text-left text-xs whitespace-nowrap">
               <thead className="bg-black/40 text-zinc-500 uppercase font-black">
                 <tr>
-                  <th className="p-4">Usuario</th>
+                  <th className="p-4">Usuário</th>
                   <th className="p-4">Turma</th>
                   <th className="p-4">Plano</th>
                   <th className="p-4">Status</th>
-                  <th className="p-4 text-right">Acoes</th>
+                  <th className="p-4 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800 text-zinc-200">
@@ -347,7 +347,7 @@ export default function AdminUsuariosPage() {
                 ) : visibleRows.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-10 text-center text-zinc-500">
-                      Nenhum usuario encontrado.
+                      Nenhum usuário encontrado.
                     </td>
                   </tr>
                 ) : (
@@ -374,8 +374,8 @@ export default function AdminUsuariosPage() {
                           <Link
                             href={tenantSlug ? withTenantSlug(tenantSlug, `/admin/usuarios/${row.id}`) : `/admin/usuarios/${row.id}`}
                             className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700"
-                            title="Editar usuario"
-                            aria-label={`Editar usuario ${row.nome}`}
+                            title="Editar usuário"
+                            aria-label={`Editar usuário ${row.nome}`}
                           >
                             <Pencil size={15} />
                           </Link>
@@ -393,8 +393,8 @@ export default function AdminUsuariosPage() {
                             }
                             aria-label={
                               row.status === "bloqueado"
-                                ? `Desbloquear usuario ${row.nome}`
-                                : `Bloquear usuario ${row.nome}`
+                                ? `Desbloquear usuário ${row.nome}`
+                                : `Bloquear usuário ${row.nome}`
                             }
                           >
                             {row.status === "bloqueado" ? (
@@ -407,7 +407,7 @@ export default function AdminUsuariosPage() {
                             onClick={() => void handleDelete(row.id)}
                             className="p-2 rounded-lg bg-red-900/20 text-red-300 border border-red-700/40"
                             title="Excluir"
-                            aria-label={`Excluir usuario ${row.nome}`}
+                            aria-label={`Excluir usuário ${row.nome}`}
                           >
                             <Trash2 size={15} />
                           </button>

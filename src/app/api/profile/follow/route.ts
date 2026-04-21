@@ -78,12 +78,12 @@ const userSummary = (row: UserRow, fallback: Record<string, unknown>) => ({
 export async function POST(request: Request) {
   const accessToken = getBearerToken(request);
   if (!accessToken) {
-    return jsonError("Sessao ausente para seguir perfil.", 401);
+    return jsonError("Sessão ausente para seguir perfil.", 401);
   }
 
   const body = asObject(await request.json().catch(() => null));
   if (!body) {
-    return jsonError("Payload invalido.", 400);
+    return jsonError("Payload inválido.", 400);
   }
 
   const viewerUid = cleanText(body.viewerUid);
@@ -94,18 +94,18 @@ export async function POST(request: Request) {
   const targetData = asObject(body.targetData) ?? {};
 
   if (!viewerUid || !targetUid || viewerUid === targetUid) {
-    return jsonError("Relacao de follow invalida.", 400);
+    return jsonError("Relação de follow inválida.", 400);
   }
 
   try {
     const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
     const authUid = cleanText(authData.user?.id);
     if (authError || !authUid) {
-      return jsonError("Sessao invalida para seguir perfil.", 401);
+      return jsonError("Sessão inválida para seguir perfil.", 401);
     }
 
     if (authUid !== viewerUid) {
-      return jsonError("Sem permissao para seguir por outro usuario.", 403);
+      return jsonError("Sem permissão para seguir por outro usuário.", 403);
     }
 
     const [viewerUserRes, targetUserRes] = await Promise.all([
@@ -124,7 +124,7 @@ export async function POST(request: Request) {
     if (viewerUserRes.error) throw viewerUserRes.error;
     if (targetUserRes.error) throw targetUserRes.error;
     if (!viewerUserRes.data || !targetUserRes.data) {
-      return jsonError("Usuario nao encontrado para follow.", 404);
+      return jsonError("Usuário não encontrado para follow.", 404);
     }
 
     const viewerRow = viewerUserRes.data as UserRow;
@@ -136,7 +136,7 @@ export async function POST(request: Request) {
       (cleanText(viewerRow.tenant_id) !== effectiveTenantId ||
         cleanText(targetRow.tenant_id) !== effectiveTenantId)
     ) {
-      return jsonError("Nao e permitido seguir usuarios de outra atletica.", 403);
+      return jsonError("Não é permitido seguir usuários de outra atlética.", 403);
     }
 
     const viewer = userSummary(viewerRow, viewerData);
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
       const notificationPayload = {
         userId: targetUid,
         title: "Novo Seguidor!",
-        message: `${viewer.nome} comecou a te seguir.`,
+        message: `${viewer.nome} começou a te seguir.`,
         link: `/perfil/${viewerUid}`,
         read: false,
         type: "social",

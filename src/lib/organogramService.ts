@@ -90,7 +90,7 @@ export interface OrganogramConfig {
 }
 
 const DEFAULT_ORGANOGRAM_CONFIG: OrganogramConfig = {
-  tituloPagina: "Organograma da Atletica",
+  tituloPagina: "Organograma da Atlética",
   subtituloPagina: "Presidencia, vice-presidencia e diretorias em um painel vivo.",
   membros: [],
 };

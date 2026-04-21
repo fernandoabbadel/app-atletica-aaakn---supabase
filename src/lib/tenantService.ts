@@ -331,7 +331,7 @@ const parseTenant = (row: unknown): TenantSummary | null => {
 
   return {
     id,
-    nome: asString(raw.nome, "Atletica").trim() || "Atletica",
+    nome: asString(raw.nome, "Atlética").trim() || "Atlética",
     sigla: asString(raw.sigla, "ATL").trim() || "ATL",
     slug: asString(raw.slug).trim(),
     faculdade: asString(raw.faculdade).trim(),
@@ -790,7 +790,7 @@ export async function fetchManageableTenants(options?: {
 
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError) {
-    throw new Error(authError.message || "Falha ao identificar usuario autenticado.");
+    throw new Error(authError.message || "Falha ao identificar usuário autenticado.");
   }
 
   const userId = asString(authData.user?.id).trim();
@@ -982,7 +982,7 @@ export async function createTenantWithMaster(
     return data[0].trim();
   }
 
-  throw new Error("Tenant criado, mas o banco nao retornou o identificador.");
+  throw new Error("Tenant criado, mas o banco não retornou o identificador.");
 }
 
 export async function submitTenantOnboardingRequest(
@@ -1028,7 +1028,7 @@ export async function submitTenantOnboardingRequest(
   if (Array.isArray(data) && typeof data[0] === "string" && data[0].trim()) {
     return data[0].trim();
   }
-  throw new Error("Solicitacao criada, mas o banco nao retornou o id.");
+  throw new Error("Solicitação criada, mas o banco não retornou o id.");
 }
 
 export async function fetchMyTenantOnboardingRequests(options?: {
@@ -1038,7 +1038,7 @@ export async function fetchMyTenantOnboardingRequests(options?: {
   const supabase = getSupabaseClient();
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError) {
-    throw new Error(authError.message || "Falha ao identificar usuario autenticado.");
+    throw new Error(authError.message || "Falha ao identificar usuário autenticado.");
   }
 
   const userId = asString(authData.user?.id).trim();
@@ -1155,7 +1155,7 @@ export async function fetchTenantOnboardingRequests(options?: {
 
 export async function approveTenantOnboardingRequest(requestId: string): Promise<string> {
   const cleanRequestId = requestId.trim();
-  if (!cleanRequestId) throw new Error("Solicitacao invalida.");
+  if (!cleanRequestId) throw new Error("Solicitação inválida.");
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.rpc("tenant_approve_onboarding_request", {
@@ -1167,7 +1167,7 @@ export async function approveTenantOnboardingRequest(requestId: string): Promise
   if (Array.isArray(data) && typeof data[0] === "string" && data[0].trim()) {
     return data[0].trim();
   }
-  throw new Error("Solicitacao aprovada, mas o banco nao retornou o tenant.");
+  throw new Error("Solicitação aprovada, mas o banco não retornou o tenant.");
 }
 
 export async function rejectTenantOnboardingRequest(payload: {
@@ -1175,7 +1175,7 @@ export async function rejectTenantOnboardingRequest(payload: {
   reason?: string;
 }): Promise<void> {
   const cleanRequestId = payload.requestId.trim();
-  if (!cleanRequestId) throw new Error("Solicitacao invalida.");
+  if (!cleanRequestId) throw new Error("Solicitação inválida.");
 
   const supabase = getSupabaseClient();
   const { error } = await supabase.rpc("tenant_reject_onboarding_request", {
@@ -1363,7 +1363,7 @@ export async function requestMoreMemberInvites(payload: {
 }): Promise<TenantInviteQuotaState> {
   const tenantId = payload.tenantId.trim();
   if (!tenantId) {
-    throw new Error("Tenant invalido para pedir mais convites.");
+    throw new Error("Tenant inválido para pedir mais convites.");
   }
 
   const supabase = getSupabaseClient();
@@ -1392,18 +1392,18 @@ export async function requestMoreMemberInvites(payload: {
   const role = asString(userData?.role, "user").trim().toLowerCase();
 
   if (!userTenantId || userTenantId !== tenantId || tenantStatus !== "approved") {
-    throw new Error("Seu perfil nao pode pedir mais convites neste tenant.");
+    throw new Error("Seu perfil não pode pedir mais convites neste tenant.");
   }
 
   if (accountStatus === "banned" || accountStatus === "bloqueado" || role === "guest") {
-    throw new Error("Seu perfil nao pode pedir mais convites no momento.");
+    throw new Error("Seu perfil não pode pedir mais convites no momento.");
   }
 
   const currentExtra = userData?.extra;
   const currentQuota = resolveTenantInviteQuotaState(currentExtra, tenantId);
   if (!currentQuota.canRequestMore) {
     if (currentQuota.status === "pending") {
-      throw new Error("Seu pedido ja foi feito. Os 5 convites extras liberam em ate 1 hora.");
+      throw new Error("Seu pedido já foi feito. Os 5 convites extras liberam em até 1 hora.");
     }
     throw new Error("Seu bonus de 5 convites extras ja foi liberado para hoje.");
   }
@@ -1427,7 +1427,7 @@ export async function revokeTenantInvite(payload: {
   const inviteId = payload.inviteId.trim();
   const currentUserId = asString(payload.currentUserId).trim();
   if (!tenantId || !inviteId) {
-    throw new Error("Convite invalido para revogar.");
+    throw new Error("Convite inválido para revogar.");
   }
 
   const supabase = getSupabaseClient();
@@ -1472,7 +1472,7 @@ export async function createTenantInvite(payload: {
   requiresApproval?: boolean;
 }): Promise<TenantInvite> {
   const cleanTenantId = payload.tenantId.trim();
-  if (!cleanTenantId) throw new Error("Tenant invalido para criar convite.");
+  if (!cleanTenantId) throw new Error("Tenant inválido para criar convite.");
 
   const roleToAssign: TenantInviteRole = "user";
   const roleToAssignForRpc = toLegacyTenantRole(roleToAssign);
@@ -1519,7 +1519,7 @@ export async function createTenantInvite(payload: {
   }
 
   const token = asString(rawResult?.token).trim();
-  if (!token) throw new Error("Convite criado, mas token nao retornado.");
+  if (!token) throw new Error("Convite criado, mas token não retornado.");
 
   return {
     id: inviteId || `tmp-${Date.now()}`,
@@ -1545,7 +1545,7 @@ export async function createMemberInvite(payload: {
   expiresInHours?: number;
 }): Promise<TenantInvite> {
   const cleanTenantId = payload.tenantId.trim();
-  if (!cleanTenantId) throw new Error("Tenant invalido para criar convite.");
+  if (!cleanTenantId) throw new Error("Tenant inválido para criar convite.");
 
   const maxUses = 1;
   const expiresInHours = Math.max(
@@ -1583,11 +1583,11 @@ export async function createMemberInvite(payload: {
     if (Math.max(0, count ?? 0) >= quota.totalLimit) {
       if (quota.status === "pending") {
         throw new Error(
-          "Voce ja usou sua cota atual. Os 5 convites extras liberam em ate 1 hora."
+          "Você já usou sua cota atual. Os 5 convites extras liberam em até 1 hora."
         );
       }
       throw new Error(
-        `Voce ja gerou ${quota.totalLimit} convites hoje. Use o pedido de mais convites para liberar novos links.`
+        `Você já gerou ${quota.totalLimit} convites hoje. Use o pedido de mais convites para liberar novos links.`
       );
     }
   }
@@ -1640,7 +1640,7 @@ export async function createMemberInvite(payload: {
   const token = asString(rawResult?.token).trim();
   const expiresAt = asString(rawResult?.expires_at).trim();
 
-  if (!token) throw new Error("Convite criado, mas token nao retornado.");
+  if (!token) throw new Error("Convite criado, mas token não retornado.");
 
   return {
     id: inviteId || `tmp-${Date.now()}`,
@@ -1773,7 +1773,7 @@ export async function approveTenantJoinRequest(payload: {
   approvedRole?: TenantInviteRole;
 }): Promise<void> {
   const requestId = payload.requestId.trim();
-  if (!requestId) throw new Error("Solicitacao invalida.");
+  if (!requestId) throw new Error("Solicitação inválida.");
 
   const approvedRole = payload.approvedRole ?? "user";
   const supabase = getSupabaseClient();
@@ -1816,7 +1816,7 @@ export async function rejectTenantJoinRequest(payload: {
   reason?: string;
 }): Promise<void> {
   const requestId = payload.requestId.trim();
-  if (!requestId) throw new Error("Solicitacao invalida.");
+  if (!requestId) throw new Error("Solicitação inválida.");
 
   const supabase = getSupabaseClient();
   const { error } = await supabase.rpc("tenant_reject_join_request", {
@@ -1828,7 +1828,7 @@ export async function rejectTenantJoinRequest(payload: {
 
 export async function requestJoinWithInvite(token: string): Promise<string> {
   const cleanToken = token.trim();
-  if (!cleanToken) throw new Error("Token de convite invalido.");
+  if (!cleanToken) throw new Error("Token de convite inválido.");
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.rpc("tenant_request_join_with_invite", {
@@ -1840,7 +1840,7 @@ export async function requestJoinWithInvite(token: string): Promise<string> {
   if (Array.isArray(data) && typeof data[0] === "string" && data[0].trim()) {
     return data[0].trim();
   }
-  throw new Error("Solicitacao criada, mas o banco nao retornou o id.");
+  throw new Error("Solicitação criada, mas o banco não retornou o id.");
 }
 
 export async function fetchInviteResolvedContext(
@@ -1878,7 +1878,7 @@ export async function fetchInviteResolvedContext(
 
 export async function requestJoinManual(tenantId: string): Promise<string> {
   const cleanTenantId = tenantId.trim();
-  if (!cleanTenantId) throw new Error("Tenant invalido.");
+  if (!cleanTenantId) throw new Error("Tenant inválido.");
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.rpc("tenant_request_join_manual", {
@@ -1890,7 +1890,7 @@ export async function requestJoinManual(tenantId: string): Promise<string> {
   if (Array.isArray(data) && typeof data[0] === "string" && data[0].trim()) {
     return data[0].trim();
   }
-  throw new Error("Solicitacao criada, mas o banco nao retornou o id.");
+  throw new Error("Solicitação criada, mas o banco não retornou o id.");
 }
 
 export async function fetchPendingMembershipStatusForCurrentUser(): Promise<{
@@ -1901,7 +1901,7 @@ export async function fetchPendingMembershipStatusForCurrentUser(): Promise<{
   const supabase = getSupabaseClient();
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError) {
-    throw new Error(authError.message || "Falha ao identificar usuario autenticado.");
+    throw new Error(authError.message || "Falha ao identificar usuário autenticado.");
   }
 
   const userId = asString(authData.user?.id).trim();
@@ -1969,11 +1969,11 @@ export async function updateTenantStatus(payload: {
   status: "active" | "inactive" | "blocked";
 }): Promise<void> {
   const tenantId = payload.tenantId.trim();
-  if (!tenantId) throw new Error("Tenant invalido.");
+  if (!tenantId) throw new Error("Tenant inválido.");
 
   const status = payload.status;
   if (status !== "active" && status !== "inactive" && status !== "blocked") {
-    throw new Error("Status de tenant invalido.");
+    throw new Error("Status de tenant inválido.");
   }
 
   const supabase = getSupabaseClient();
@@ -2003,7 +2003,7 @@ export async function updateTenantProfile(payload: {
   status?: "active" | "inactive" | "blocked";
 }): Promise<void> {
   const tenantId = payload.tenantId.trim();
-  if (!tenantId) throw new Error("Tenant invalido.");
+  if (!tenantId) throw new Error("Tenant inválido.");
 
   const patch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
@@ -2252,9 +2252,9 @@ export async function uploadTenantLogo(payload: {
   file: File;
 }): Promise<string> {
   const tenantId = payload.tenantId.trim();
-  if (!tenantId) throw new Error("Tenant invalido para upload da logo.");
+  if (!tenantId) throw new Error("Tenant inválido para upload da logo.");
   if (!(payload.file instanceof File)) {
-    throw new Error("Arquivo de logo invalido.");
+    throw new Error("Arquivo de logo inválido.");
   }
 
   const { url, error } = await uploadImage(payload.file, `tenants/${tenantId}/branding`, {
@@ -2283,7 +2283,7 @@ export async function uploadTenantDraftLogo(payload: {
   scope?: "master" | "onboarding";
 }): Promise<string> {
   if (!(payload.file instanceof File)) {
-    throw new Error("Arquivo de logo invalido.");
+    throw new Error("Arquivo de logo inválido.");
   }
 
   const draftScope = payload.scope === "master" ? "master" : "onboarding";

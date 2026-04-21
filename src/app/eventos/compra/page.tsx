@@ -69,15 +69,34 @@ function CompraContent() {
   const [fetching, setFetching] = useState(true);
   const financeFallback = buildTenantFinanceFallback({ tenantSigla, tenantName });
   const eventosHref = tenantSlug ? withTenantSlug(tenantSlug, "/eventos") : "/eventos";
+  const isLeagueEvent = React.useMemo(
+      () =>
+          String(evento?.categoria || "").trim().toLowerCase() === "liga" ||
+          String(evento?.tipo || "").trim().toLowerCase() === "liga",
+      [evento?.categoria, evento?.tipo]
+  );
+  const effectivePixData = React.useMemo<PixData>(
+      () =>
+          isLeagueEvent
+              ? {
+                    chave: pixData.chave,
+                    banco: pixData.banco,
+                    titular: pixData.titular,
+                    ...(pixData.whatsapp ? { whatsapp: pixData.whatsapp } : {}),
+                    ...(pixData.ticketEntries ? { ticketEntries: pixData.ticketEntries } : {}),
+                }
+              : pixData,
+      [isLeagueEvent, pixData]
+  );
   const recipientOptions = React.useMemo(
       () =>
-          Array.isArray(pixData.recipients)
-              ? pixData.recipients.map((recipient, index) => ({
+          Array.isArray(effectivePixData.recipients)
+              ? effectivePixData.recipients.map((recipient, index) => ({
                     key: buildPaymentRecipientKey(recipient, index),
                     recipient,
                 }))
               : [],
-      [pixData.recipients]
+      [effectivePixData.recipients]
   );
   const selectedRecipient = React.useMemo(() => {
       if (recipientOptions.length === 0) return null;
@@ -93,10 +112,10 @@ function CompraContent() {
               ? {
                     ...pixData,
                     recipient: selectedRecipient,
-                    whatsapp: selectedRecipient.phone || pixData.whatsapp,
+                    whatsapp: selectedRecipient.phone || effectivePixData.whatsapp,
                 }
-              : pixData,
-      [pixData, selectedRecipient]
+              : effectivePixData,
+      [effectivePixData, pixData, selectedRecipient]
   );
   const checkoutRecipient = React.useMemo(
       () =>
@@ -117,12 +136,12 @@ function CompraContent() {
       }
       setSelectedRecipientKey((current) => {
           if (current && recipientOptions.some((entry) => entry.key === current)) return current;
-          const configuredKey = pixData.recipient
-              ? recipientOptions.find((entry) => entry.recipient.userId === pixData.recipient?.userId)?.key
+          const configuredKey = effectivePixData.recipient
+              ? recipientOptions.find((entry) => entry.recipient.userId === effectivePixData.recipient?.userId)?.key
               : "";
           return configuredKey || recipientOptions[0]?.key || "";
       });
-  }, [pixData.recipient, recipientOptions]);
+  }, [effectivePixData.recipient, recipientOptions]);
 
     useEffect(() => {
       const loadData = async () => {
@@ -194,11 +213,11 @@ function CompraContent() {
           // 2. Gerar Link do WhatsApp
           const adminPhone = keepDigits(checkoutPaymentConfig.whatsapp || financeFallback.whatsapp);
           if (!adminPhone) {
-              throw new Error("WhatsApp do evento nao configurado.");
+              throw new Error("WhatsApp do evento não configurado.");
           }
 
           const buyerName = user.nome || "Aluno";
-          const buyerPhone = user.telefone || "Nao informado";
+          const buyerPhone = user.telefone || "Não informado";
           const buyerTurma = user.turma || "Sem turma";
           const message = buildEventReceiptWhatsappMessage({
               tenantSigla,
@@ -241,7 +260,7 @@ function CompraContent() {
   };
 
   if (fetching) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-emerald-500"><Loader2 className="animate-spin"/></div>;
-  if (!evento || !lote) return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center">Lote ou evento invalido.</div>;
+  if (!evento || !lote) return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center">Lote ou evento inválido.</div>;
 
   const valorTotalDisplay = (parseFloat(lote.preco.replace(',', '.')) * quantidade).toFixed(2).replace('.', ',');
 

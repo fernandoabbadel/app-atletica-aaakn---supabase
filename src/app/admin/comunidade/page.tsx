@@ -235,10 +235,10 @@ export default function AdminComunidadePage() {
         tenantId: activeTenantId || undefined,
       });
       setConfig(nextConfig);
-      addToast("Configuracoes da comunidade salvas!", "success");
+      addToast("Configurações da comunidade salvas!", "success");
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao salvar configuracoes.", "error");
+      addToast("Erro ao salvar configurações.", "error");
     }
   };
 
@@ -301,7 +301,7 @@ export default function AdminComunidadePage() {
       (item) => item.toLowerCase() === cleanName.toLowerCase()
     );
     if (alreadyExists) {
-      addToast("Essa categoria ja existe.", "info");
+      addToast("Essa categoria já existe.", "info");
       return;
     }
 
@@ -485,7 +485,7 @@ export default function AdminComunidadePage() {
                   <div className="space-y-4">
                     <div>
                       <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-500">
-                        Titulo da pagina
+                        Título da página
                       </label>
                       <input
                         type="text"
@@ -569,7 +569,7 @@ export default function AdminComunidadePage() {
 
                     <div className="mt-4 space-y-3 rounded-2xl border border-zinc-800 bg-black p-4">
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-bold text-white">Categorias dinamicas</p>
+                        <p className="text-sm font-bold text-white">Categorias dinâmicas</p>
                         <span className="text-[10px] uppercase text-zinc-500">
                           {config.categorias.length} categorias
                         </span>
@@ -651,7 +651,7 @@ export default function AdminComunidadePage() {
                       {config.titulo || "Comunidade"}
                     </h4>
                     <p className="mt-2 text-xs font-bold uppercase tracking-widest text-zinc-400">
-                      {config.subtitulo || "Espaco oficial da atletica"}
+                      {config.subtitulo || "Espaço oficial da atlética"}
                     </p>
                   </div>
                 </div>
@@ -680,14 +680,14 @@ export default function AdminComunidadePage() {
                           <div className="relative h-12 w-12 overflow-hidden rounded-full border border-zinc-700">
                             <Image
                               src={post.avatar || "https://github.com/shadcn.png"}
-                              alt={post.userName || "Usuario"}
+                              alt={post.userName || "Usuário"}
                               fill
                               sizes="48px"
                               className="object-cover"
                             />
                           </div>
                           <div>
-                            <p className="font-bold text-white">{post.userName || "Usuario"}</p>
+                            <p className="font-bold text-white">{post.userName || "Usuário"}</p>
                             <p className="text-[11px] text-zinc-500">
                               {post.handle || "@sem-handle"} • {formatDateTime(post.createdAt)}
                             </p>
@@ -781,7 +781,7 @@ export default function AdminComunidadePage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-6 flex justify-between border-b border-zinc-800 pb-4">
-              <h3 className="text-lg font-black uppercase text-white">Historico de conversa</h3>
+              <h3 className="text-lg font-black uppercase text-white">Histórico de conversa</h3>
               <button
                 onClick={() => setViewCommentsId(null)}
                 className="text-zinc-500 transition hover:text-white"

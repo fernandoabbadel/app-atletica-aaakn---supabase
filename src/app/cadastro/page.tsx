@@ -109,7 +109,7 @@ const normalizeInviteJoinFailureMessage = (message: string): string => {
     normalized.includes("inativo") ||
     normalized.includes("revogado")
   ) {
-    return "Esse convite nao esta mais disponivel. Peca um link novo.";
+    return "Esse convite não está mais disponível. Peça um link novo.";
   }
   return message.trim();
 };
@@ -243,7 +243,7 @@ export default function CadastroPage() {
     effectiveTenantSigla ||
     (effectiveTenantSlug ? effectiveTenantSlug.toUpperCase() : "") ||
     effectiveTenantId ||
-    "a atletica do convite";
+    "a atlética do convite";
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false); 
   const [loadingTurmas, setLoadingTurmas] = useState(true);
@@ -587,7 +587,7 @@ export default function CadastroPage() {
         console.error("Erro ao carregar turmas da tenant:", loadError);
         if (!mounted) return;
         setTurmas(snapshot);
-        setTurmasLoadError("Nao foi possivel carregar as turmas desta atletica.");
+        setTurmasLoadError("Não foi possível carregar as turmas desta atlética.");
       } finally {
         if (mounted) {
           setLoadingTurmas(false);
@@ -619,7 +619,7 @@ export default function CadastroPage() {
       setImageLoading(true);
       try {
           if (!user?.uid) {
-              addToast("Usuario invalido para upload.", "error");
+              addToast("Usuário inválido para upload.", "error");
               return;
           }
           const downloadURL = await uploadProfileImage({
@@ -668,11 +668,11 @@ export default function CadastroPage() {
     setError("");
 
     if (hasInviteToken && inviteContextLoading) {
-      failValidation("Ainda estou validando a atletica desse convite. Tente novamente em alguns segundos.");
+      failValidation("Ainda estou validando a atlética desse convite. Tente novamente em alguns segundos.");
       return;
     }
     if (hasInviteToken && !inviteResolvedContext) {
-      failValidation("Nao consegui identificar a atletica desse convite. Abra novamente o link original.");
+      failValidation("Não consegui identificar a atlética desse convite. Abra novamente o link original.");
       return;
     }
     if (!formData.nome.trim()) {
@@ -839,13 +839,13 @@ export default function CadastroPage() {
           return;
         }
       } catch {
-        // Nao bloqueia fluxo principal se esta consulta falhar.
+        // Não bloqueia fluxo principal se esta consulta falhar.
       }
 
       if (hasInviteToken) {
         const inviteFlowMessage =
           inviteJoinFailedMessage ||
-          `Ficha salva, mas ainda nao consegui confirmar sua entrada em ${inviteTenantLabel}. Tente novamente com o mesmo convite.`;
+          `Ficha salva, mas ainda não consegui confirmar sua entrada em ${inviteTenantLabel}. Tente novamente com o mesmo convite.`;
         setError(inviteFlowMessage);
         addToast(inviteFlowMessage, "info");
         return;
@@ -854,9 +854,9 @@ export default function CadastroPage() {
       if (isGuestRole) {
         if (!effectiveTenantId) {
           setError(
-            inviteJoinFailedMessage || "Escolha uma atletica antes de concluir o cadastro."
+            inviteJoinFailedMessage || "Escolha uma atlética antes de concluir o cadastro."
           );
-          addToast("Escolha a atletica correta para concluir a entrada.", "info");
+          addToast("Escolha a atlética correta para concluir a entrada.", "info");
           return;
         }
 
@@ -876,7 +876,7 @@ export default function CadastroPage() {
               clearStoredInviteToken();
               addToast(
                 inviteJoinFailedMessage
-                  ? `Convite ignorado. Cadastro enviado para aprovacao de ${inviteTenantLabel}.`
+                  ? `Convite ignorado. Cadastro enviado para aprovação de ${inviteTenantLabel}.`
                   : `Cadastro concluido. ${inviteTenantLabel} vai analisar seu acesso.`,
                 "info"
               );
@@ -904,7 +904,11 @@ export default function CadastroPage() {
           }
         } catch (manualJoinError: unknown) {
           const manualMessage = extractErrorMessage(manualJoinError);
-          if (manualMessage.toLowerCase().includes("cadastro publico")) {
+          const normalizedManualMessage = manualMessage
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "");
+          if (normalizedManualMessage.includes("cadastro publico")) {
             setError(`${inviteTenantLabel} exige convite para novos cadastros.`);
             addToast(`${inviteTenantLabel} exige convite para novos cadastros.`, "info");
           } else {
@@ -916,9 +920,9 @@ export default function CadastroPage() {
 
         setError(
           inviteJoinFailedMessage ||
-            "Ficha salva, mas ainda nao consegui vincular voce a uma atletica."
+            "Ficha salva, mas ainda não consegui vincular você a uma atlética."
         );
-        addToast("Ficha salva, mas ainda nao consegui concluir o vinculo com a atletica.", "info");
+        addToast("Ficha salva, mas ainda não consegui concluir o vínculo com a atlética.", "info");
         return;
       }
 
@@ -941,9 +945,9 @@ export default function CadastroPage() {
         errLog === "{}" ? "empty-object error (provavel RLS/policy em public.users)" : errLog;
       console.error(`Erro ao salvar cadastro: ${safeErrLog}`);
       if (isPermissionError(err)) {
-        setError("Sem permissao para salvar. Ajuste as policies (RLS) da tabela users no Supabase.");
+        setError("Sem permissão para salvar. Ajuste as policies (RLS) da tabela users no Supabase.");
       } else if (err instanceof Error && err.message.includes("public.users")) {
-        setError("Usuario ainda nao encontrado em public.users. Verifique insert/RLS da tabela users.");
+        setError("Usuário ainda não encontrado em public.users. Verifique insert/RLS da tabela users.");
       } else if (typeof err === "object" && err !== null && Object.getOwnPropertyNames(err).length === 0) {
         setError("Falha ao salvar no banco (erro vazio {}). Geralmente e policy/RLS da tabela users.");
       } else {
@@ -1055,9 +1059,9 @@ export default function CadastroPage() {
                         <input
                           type="text"
                           className="input-field pl-14 cursor-not-allowed bg-zinc-950 text-cyan-100"
-                          value={inviteContextLoading ? "Validando atletica do convite..." : inviteTenantLabel}
+                          value={inviteContextLoading ? "Validando atlética do convite..." : inviteTenantLabel}
                           readOnly
-                          title="Atletica travada pelo convite."
+                          title="Atlética travada pelo convite."
                         />
                         <div className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600">
                             <Lock size={14}/>
@@ -1081,7 +1085,7 @@ export default function CadastroPage() {
                     ) : (
                     <div className="relative group opacity-60">
                         <User className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                        <input type="text" placeholder="Nome Completo" className="input-field pl-14 cursor-not-allowed bg-zinc-950" value={formData.nome} readOnly title="Nome oficial nao pode ser alterado aqui." />
+                        <input type="text" placeholder="Nome Completo" className="input-field pl-14 cursor-not-allowed bg-zinc-950" value={formData.nome} readOnly title="Nome oficial não pode ser alterado aqui." />
                         <div className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600">
                             <Lock size={14}/> 
                         </div>
@@ -1271,7 +1275,7 @@ export default function CadastroPage() {
                         {loadingTurmas ? (
                             <div className="rounded-2xl border border-zinc-800 bg-black/40 px-4 py-6 text-sm font-semibold text-zinc-400 flex items-center gap-3">
                                 <Loader2 className="animate-spin text-emerald-500" size={18} />
-                                Carregando turmas da sua atletica...
+                                Carregando turmas da sua atlética...
                             </div>
                         ) : null}
                         {!loadingTurmas && turmasLoadError ? (
@@ -1318,7 +1322,7 @@ export default function CadastroPage() {
                     <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1">Bio</label>
                     <div className="relative group">
                         <FileText className="absolute left-4 top-4 text-zinc-500" size={18} />
-                        <textarea placeholder="Conte algo sobre voce..." className="input-field pl-14 h-24 py-3 resize-none" value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} maxLength={100} />
+                        <textarea placeholder="Conte algo sobre você..." className="input-field pl-14 h-24 py-3 resize-none" value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} maxLength={100} />
                         <span className="absolute right-4 bottom-2 text-[10px] text-zinc-700 font-bold">{formData.bio.length}/100</span>
                     </div>
                 </div>

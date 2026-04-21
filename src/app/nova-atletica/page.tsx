@@ -165,11 +165,11 @@ export default function NovaAtleticaPage() {
 
   const handleSubmit = async () => {
     if (hasExistingTenantMembership) {
-      addToast("Seu usuario ja esta vinculado a uma atletica. Nao e permitido criar outra.", "error");
+      addToast("Seu usuário já está vinculado a uma atlética. Não é permitido criar outra.", "error");
       return;
     }
     if (!nome.trim()) {
-      addToast("Informe o nome da atletica.", "error");
+      addToast("Informe o nome da atlética.", "error");
       return;
     }
     if (!sigla.trim()) {
@@ -181,11 +181,11 @@ export default function NovaAtleticaPage() {
       return;
     }
     if (!contatoEmail.trim()) {
-      addToast("Informe o email de contato da atletica.", "error");
+      addToast("Informe o email de contato da atlética.", "error");
       return;
     }
     if (!contatoTelefone.trim()) {
-      addToast("Informe o telefone de contato da atletica.", "error");
+      addToast("Informe o telefone de contato da atlética.", "error");
       return;
     }
 
@@ -213,10 +213,10 @@ export default function NovaAtleticaPage() {
       }
 
       await submitTenantOnboardingRequest(payload);
-      addToast("Solicitacao enviada. Agora aguarde aprovacao do master da plataforma.", "success");
+      addToast("Solicitação enviada. Agora aguarde aprovação do master da plataforma.", "success");
       await loadRequests("refresh");
     } catch (error: unknown) {
-      addToast(`Erro ao enviar solicitacao: ${extractErrorMessage(error)}`, "error");
+      addToast(`Erro ao enviar solicitação: ${extractErrorMessage(error)}`, "error");
     } finally {
       setSubmitting(false);
     }
@@ -244,12 +244,12 @@ export default function NovaAtleticaPage() {
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight inline-flex items-center gap-2">
                 <Building2 size={18} className="text-brand-accent" />
-                {isPlatformMasterUser ? "Criar Atletica" : "Onboarding de Atletica"}
+                {isPlatformMasterUser ? "Criar Atlética" : "Onboarding de Atlética"}
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold uppercase">
                 {isPlatformMasterUser
                   ? "Fluxo direto do master da plataforma"
-                  : "Cadastro inicial para criacao de tenant"}
+                  : "Cadastro inicial para criação de tenant"}
               </p>
             </div>
           </div>
@@ -269,10 +269,10 @@ export default function NovaAtleticaPage() {
         {hasExistingTenantMembership && (
           <section className="rounded-2xl border border-brand bg-brand-primary/10 p-5">
             <p className="text-sm text-brand-accent font-bold">
-              Seu usuario ja esta vinculado a uma atletica e nao pode criar outra pelo fluxo publico.
+              Seu usuário já está vinculado a uma atlética e não pode criar outra pelo fluxo público.
             </p>
             <p className="mt-2 text-xs text-zinc-300">
-              Status atual do vinculo: {existingMembershipStatus || "aprovado"}.
+              Status atual do vínculo: {existingMembershipStatus || "aprovado"}.
             </p>
           </section>
         )}
@@ -280,10 +280,10 @@ export default function NovaAtleticaPage() {
         {isPlatformMasterUser && (
           <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-5">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200">
-              Permissao Elevada
+              Permissão Elevada
             </p>
             <p className="mt-2 text-sm font-bold text-white">
-              Como master da plataforma, voce pode criar mais de uma atletica e manter vinculo
+              Como master da plataforma, você pode criar mais de uma atlética e manter vínculo
               administrativo com varias delas.
             </p>
           </section>
@@ -292,12 +292,12 @@ export default function NovaAtleticaPage() {
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div>
             <h2 className="text-sm font-black uppercase text-brand-accent">
-              {isPlatformMasterUser ? "Nova Atletica" : "Nova Solicitacao"}
+              {isPlatformMasterUser ? "Nova Atlética" : "Nova Solicitação"}
             </h2>
             <p className="text-[11px] text-zinc-500 font-bold">
               {isPlatformMasterUser
-                ? "Esse fluxo cria a atletica direto no tenant e adiciona ao seu painel master."
-                : "A criacao do tenant passa por aprovacao inicial do master da plataforma."}
+                ? "Esse fluxo cria a atlética direto no tenant e adiciona ao seu painel master."
+                : "A criação do tenant passa por aprovação inicial do master da plataforma."}
             </p>
           </div>
 
@@ -305,7 +305,7 @@ export default function NovaAtleticaPage() {
             <input
               value={nome}
               onChange={(event) => setNome(event.target.value)}
-              placeholder="Nome da atletica"
+              placeholder="Nome da atlética"
               className="brand-input px-3 py-2"
             />
             <input
@@ -337,7 +337,7 @@ export default function NovaAtleticaPage() {
               onChange={(event) => setArea(event.target.value)}
               className="brand-input px-3 py-2"
             >
-              <option value="">Selecione a area</option>
+              <option value="">Selecione a área</option>
               {TENANT_AREA_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -364,12 +364,12 @@ export default function NovaAtleticaPage() {
               className="brand-input px-3 py-2"
             />
             <div className="md:col-span-2 rounded-2xl border border-zinc-800 bg-black/30 p-4">
-              <p className="text-[11px] font-black uppercase text-zinc-400">Logo da atletica</p>
+              <p className="text-[11px] font-black uppercase text-zinc-400">Logo da atlética</p>
               <div className="mt-3 flex flex-wrap items-center gap-4">
                 <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950">
                   <Image
                     src={logoUrl || "/logo.png"}
-                    alt={`Logo ${sigla || nome || "atletica"}`}
+                    alt={`Logo ${sigla || nome || "atlética"}`}
                     fill
                     sizes="80px"
                     className="object-cover"
@@ -449,8 +449,8 @@ export default function NovaAtleticaPage() {
                 </div>
               </div>
               <p className="text-[11px] text-zinc-500">
-                A bolinha e os botoes abaixo mudam na hora para ajudar a escolher a cor da atletica
-                antes de enviar a solicitacao.
+                A bolinha e os botões abaixo mudam na hora para ajudar a escolher a cor da atlética
+                antes de enviar a solicitação.
               </p>
             </div>
           </div>
@@ -471,8 +471,8 @@ export default function NovaAtleticaPage() {
               : hasExistingTenantMembership
                 ? "Criacao bloqueada"
               : isPlatformMasterUser
-                ? "Criar Atletica Agora"
-                : "Enviar Solicitacao"}
+                ? "Criar Atlética Agora"
+                : "Enviar Solicitação"}
           </button>
         </section>
 
@@ -480,7 +480,7 @@ export default function NovaAtleticaPage() {
           <div className="flex items-center gap-2">
             <Clock3 size={16} className="text-amber-300" />
             <h2 className="text-sm font-black uppercase text-amber-300">
-              Historico de Solicitacoes
+              Histórico de Solicitações
             </h2>
           </div>
 
@@ -519,14 +519,14 @@ export default function NovaAtleticaPage() {
           {requests.length === 0 && (
             <p className="text-sm text-zinc-400">
               {isPlatformMasterUser
-                ? "Nenhuma solicitacao pendente criada por este usuario."
-                : "Nenhuma solicitacao encontrada para seu usuario."}
+                ? "Nenhuma solicitação pendente criada por este usuário."
+                : "Nenhuma solicitação encontrada para seu usuário."}
             </p>
           )}
 
           {latestRequest?.status === "pending" && (
             <p className="text-[11px] text-brand-accent font-bold uppercase">
-              Existe solicitacao pendente. Aguarde aprovacao inicial.
+              Existe solicitação pendente. Aguarde aprovação inicial.
             </p>
           )}
         </section>

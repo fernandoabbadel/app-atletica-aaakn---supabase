@@ -254,7 +254,7 @@ const normalizePost = (raw: unknown): DashboardPost | null => {
   return {
     id,
     userId: asString(data.userId),
-    userName: asString(data.userName, "Usuario"),
+    userName: asString(data.userName, "Usuário"),
     avatar: asString(data.avatar),
     createdAt: data.createdAt ?? null,
     texto: asString(data.texto),

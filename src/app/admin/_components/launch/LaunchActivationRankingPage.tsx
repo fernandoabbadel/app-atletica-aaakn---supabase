@@ -126,7 +126,7 @@ export function LaunchActivationRankingPage({
       scope={scope}
       tenantSlug={tenantSlug}
       title="Ranking de Convites Ativados"
-      subtitle="usuarios cujos links mais viraram cadastro realizado"
+      subtitle="usuários cujos links mais viraram cadastro realizado"
       refreshing={workspaceRefreshing || pageRefreshing}
       onRefresh={() => void handleRefresh()}
     >
@@ -158,7 +158,7 @@ export function LaunchActivationRankingPage({
 
       <LaunchTenantSelectorCard
         workspace={workspace}
-        helperText="Aqui aparece quem trouxe mais cadastros reais para a atletica selecionada."
+          helperText="Aqui aparece quem trouxe mais cadastros reais para a atlética selecionada."
       />
 
       <section className="grid gap-4 lg:grid-cols-3">
@@ -171,13 +171,13 @@ export function LaunchActivationRankingPage({
         <LaunchRingMetric
           label="Cadastros pendentes"
           value={pendingTotal}
-          helper="ainda aguardando aprovacao"
+          helper="ainda aguardando aprovação"
           accentClassName="border-amber-500/40 bg-amber-500/10 text-amber-200"
         />
         <LaunchRingMetric
           label="Top users"
           value={ranking.length}
-          helper="usuarios com convites ativados"
+          helper="usuários com convites ativados"
           accentClassName="border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
         />
       </section>
@@ -235,7 +235,7 @@ export function LaunchActivationRankingPage({
 
           {ranking.length === 0 && (
             <p className="text-sm text-zinc-400">
-              Ainda nao existem convites ativados para montar o ranking.
+              Ainda não existem convites ativados para montar o ranking.
             </p>
           )}
         </div>
@@ -284,7 +284,7 @@ export function LaunchActivationRankingPage({
                     Convidou
                   </p>
                   <p className="mt-2 text-xs font-black text-cyan-200">
-                    {entry.inviterName || entry.inviterEmail || "Sem usuario"}
+                    {entry.inviterName || entry.inviterEmail || "Sem usuário"}
                   </p>
                 </div>
                 <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
@@ -317,7 +317,7 @@ export function LaunchActivationRankingPage({
 
           {activationEntries.length === 0 && (
             <p className="text-sm text-zinc-400">
-              Ainda nao existem ativações para montar a lista detalhada.
+              Ainda não existem ativações para montar a lista detalhada.
             </p>
           )}
         </div>

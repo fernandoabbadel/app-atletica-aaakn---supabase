@@ -70,7 +70,7 @@ export const validateImageFile = (
 
   if (!file) return "Nenhum arquivo selecionado.";
   if (!allowedTypes.includes(file.type)) {
-    return "Formato invalido. Use JPG, PNG ou WEBP.";
+    return "Formato inválido. Use JPG, PNG ou WEBP.";
   }
   if (file.size > maxBytes) {
     if (maxBytes < 1024 * 1024) {
@@ -206,7 +206,7 @@ const validateImageDimensions = async (
   const maxPixels = options?.maxPixels ?? MAX_UPLOAD_IMAGE_PIXELS;
 
   if (!file.type.startsWith("image/")) {
-    return "Formato invalido. Use JPG, PNG ou WEBP.";
+    return "Formato inválido. Use JPG, PNG ou WEBP.";
   }
 
   try {
@@ -220,7 +220,7 @@ const validateImageDimensions = async (
     }
     return null;
   } catch {
-    return "Nao foi possivel processar a imagem.";
+    return "Não foi possível processar a imagem.";
   }
 };
 

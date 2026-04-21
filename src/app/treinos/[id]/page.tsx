@@ -112,7 +112,7 @@ export default function TreinoDetalhesPage() {
               ]);
 
               if (!treinoDoc) {
-                  addToast("Treino nao encontrado.", "error");
+                  addToast("Treino não encontrado.", "error");
                   router.push(tenantSlug ? withTenantSlug(tenantSlug, "/treinos") : "/treinos");
                   return;
               }
@@ -372,14 +372,14 @@ export default function TreinoDetalhesPage() {
             type="button"
             onClick={() => {
                 if (!user?.uid) {
-                    addToast("Faca login para abrir seu QR de presenca.", "info");
+                    addToast("Faça login para abrir seu QR de presença.", "info");
                     return;
                 }
                 setShowPresenceQr(true);
             }}
             className="w-full rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-4 text-sm font-black uppercase tracking-widest text-emerald-300 transition hover:bg-emerald-500/15 flex items-center justify-center gap-2"
         >
-            <QrCode size={20} /> Abrir QR de presenca
+            <QrCode size={20} /> Abrir QR de presença
         </button>
 
         {/* 2. RESPONSÁVEL & DESCRIÇÃO */}

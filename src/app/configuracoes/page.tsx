@@ -137,7 +137,7 @@ export default function SettingsPage() {
       setInviteCopied(true);
       addToast("Link copiado para compartilhar.", "success");
     } catch {
-      addToast("Nao consegui copiar. O link ficou visivel na tela.", "info");
+      addToast("Não consegui copiar. O link ficou visível na tela.", "info");
     }
   };
 
@@ -332,7 +332,7 @@ export default function SettingsPage() {
 
   const handleCreateInvite = async () => {
     if (!canGenerateInvite) {
-      addToast("Seu perfil ainda nao pode gerar convite nesta atletica.", "error");
+      addToast("Seu perfil ainda não pode gerar convite nesta atlética.", "error");
       return;
     }
 
@@ -454,7 +454,7 @@ export default function SettingsPage() {
                     Convite de Amigos
                   </p>
                   <h3 className="mt-1 text-lg font-black uppercase tracking-tight text-white">
-                    Traga mais gente para {tenantName || "sua atletica"}
+                    Traga mais gente para {tenantName || "sua atlética"}
                   </h3>
                   <p className="mt-1 text-xs text-amber-100/75">
                     Gera 1 link dourado, com 1 uso e validade de 72h. O cadastro continua entrando como
@@ -512,7 +512,7 @@ export default function SettingsPage() {
                 <h3 className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest px-2">Minha Conta</h3>
                 <div className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800">
                     <MenuItem href={perfilHref} icon={<FileText size={18} />} label="Dados Pessoais" desc="Atualizar cadastro" />
-                    <MenuItem href={planosHref} icon={<Crown size={18} />} label="Planos da Atletica" desc="Ver niveis e beneficios" />
+                    <MenuItem href={planosHref} icon={<Crown size={18} />} label="Planos da Atlética" desc="Ver níveis e benefícios" />
                     <MenuItem href={convitesHref} icon={<UserPlus size={18} />} label="Meus Convites" desc="Tabela completa dos links gerados" />
                     <MenuItem href={apadrinhamentoHref} icon={<HeartHandshake size={18} />} label={mentorshipHubTitle} desc="Aceitar convites e ver seu vinculo" />
                     {showMiniVendorMenu ? (
@@ -575,7 +575,7 @@ export default function SettingsPage() {
                 {actionLoading ? <Loader2 className="animate-spin" size={16}/> : <><Trash2 size={16} /> Excluir Permanentemente</>}
             </button>
             
-            <p className="text-center text-[10px] text-zinc-700 font-mono pt-4">{tenantName?.trim() || "Atletica"} • ID: {user?.uid?.slice(0,8).toUpperCase()}</p>
+            <p className="text-center text-[10px] text-zinc-700 font-mono pt-4">{tenantName?.trim() || "Atlética"} • ID: {user?.uid?.slice(0,8).toUpperCase()}</p>
         </div>
 
       </main>

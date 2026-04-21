@@ -134,7 +134,7 @@ const buildTenantFallbackBrand = (tenantSlug: string): PublicLandingBrand => {
   return {
     sigla: normalizedSlug || "TENANT",
     nome: normalizedSlug || "TENANT",
-    subtitle: "Landing oficial da atletica.",
+    subtitle: "Landing oficial da atlética.",
     logoUrl: PLATFORM_LOGO_URL,
   };
 };
@@ -194,7 +194,7 @@ const mapTenantEntryToBrand = (
   brand: {
     sigla: tenant.sigla || tenant.slug.toUpperCase() || "TENANT",
     nome: tenant.nome || tenant.sigla || tenant.slug.toUpperCase() || "TENANT",
-    subtitle: tenant.curso || tenant.faculdade || "Landing oficial da atletica.",
+    subtitle: tenant.curso || tenant.faculdade || "Landing oficial da atlética.",
     logoUrl: tenant.logoUrl || PLATFORM_LOGO_URL,
   },
   version:

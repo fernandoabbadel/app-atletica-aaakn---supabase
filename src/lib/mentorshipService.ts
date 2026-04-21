@@ -80,7 +80,7 @@ const DEFAULT_MENTORSHIP_LABELS: MentorshipLabelsConfig = {
   inviteMentorLabel: "Adicionar como meu padrinho/madrinha",
   inviteMenteeLabel: "Adicionar como meu afilhado/afilhada",
   requestHelpText:
-    "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atletica.",
+    "Cada perfil pode ter 1 padrinho/madrinha e 1 afilhado/afilhada por atlética.",
 };
 
 const MENTORSHIP_LABEL_SPLIT_REGEX = /[\\/|]/;
@@ -444,7 +444,7 @@ export async function saveMentorshipLabels(
   options: { tenantId: string }
 ): Promise<MentorshipLabelsConfig> {
   const tenantId = options.tenantId.trim();
-  if (!tenantId) throw new Error("Tenant invalido para salvar configuracao.");
+  if (!tenantId) throw new Error("Tenant inválido para salvar configuração.");
 
   const next = normalizeLabels(payload);
   const supabase = getSupabaseClient();
@@ -621,7 +621,7 @@ export async function sendMentorshipInvite(payload: {
     throw new Error("Dados invalidos para enviar convite de apadrinhamento.");
   }
   if (currentUserId === targetUserId) {
-    throw new Error("Voce nao pode se relacionar consigo mesmo.");
+    throw new Error("Você não pode se relacionar consigo mesmo.");
   }
 
   const mentorUserId = payload.mode === "mentor" ? targetUserId : currentUserId;
@@ -700,18 +700,18 @@ export async function respondToMentorshipInvite(payload: {
   const relationshipId = payload.relationshipId.trim();
   const currentUserId = payload.currentUserId.trim();
   if (!tenantId || !relationshipId || !currentUserId) {
-    throw new Error("Convite de apadrinhamento invalido.");
+    throw new Error("Convite de apadrinhamento inválido.");
   }
 
   const row = await fetchRelationshipById(tenantId, relationshipId);
   if (!row) {
-    throw new Error("Convite nao encontrado.");
+    throw new Error("Convite não encontrado.");
   }
 
   const isParticipant =
     row.mentorUserId === currentUserId || row.menteeUserId === currentUserId;
   if (!isParticipant) {
-    throw new Error("Sem permissao para responder esse convite.");
+    throw new Error("Sem permissão para responder esse convite.");
   }
 
   if (payload.action === "remove") {
@@ -804,12 +804,12 @@ export async function updateMentorshipRoleLabel(payload: {
   const currentUserId = payload.currentUserId.trim();
   const requestedRoleLabel = payload.roleLabel.trim();
   if (!tenantId || !relationshipId || !currentUserId || !requestedRoleLabel) {
-    throw new Error("Rotulo de apadrinhamento invalido.");
+    throw new Error("Rótulo de apadrinhamento inválido.");
   }
 
   const row = await fetchRelationshipById(tenantId, relationshipId);
   if (!row) {
-    throw new Error("Vinculo nao encontrado.");
+    throw new Error("Vínculo não encontrado.");
   }
   if (row.status !== "accepted") {
     throw new Error("So da para editar o rotulo de um vinculo ativo.");
@@ -818,13 +818,13 @@ export async function updateMentorshipRoleLabel(payload: {
   const isParticipant =
     row.mentorUserId === currentUserId || row.menteeUserId === currentUserId;
   if (!isParticipant) {
-    throw new Error("Sem permissao para editar esse rotulo.");
+    throw new Error("Sem permissão para editar esse rótulo.");
   }
 
   const editableRoleSide: MentorshipRoleSide =
     row.mentorUserId === currentUserId ? "mentor" : "mentee";
   if (payload.roleSide !== editableRoleSide) {
-    throw new Error("Voce so pode editar o seu proprio rotulo.");
+    throw new Error("Você só pode editar o seu próprio rótulo.");
   }
 
   const labels = await fetchMentorshipLabels({ tenantId });

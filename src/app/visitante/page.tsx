@@ -173,7 +173,7 @@ export default function VisitantePage() {
             cache: "no-store",
           });
           if (!response.ok) {
-            throw new Error(`Falha ao carregar atleticas: ${response.status}`);
+            throw new Error(`Falha ao carregar atléticas: ${response.status}`);
           }
           rows = (await response.json()) as TenantSummary[];
         } catch (error: unknown) {
@@ -197,7 +197,7 @@ export default function VisitantePage() {
         const message =
           error instanceof Error && error.message
             ? error.message
-            : "Nao foi possivel carregar as atleticas agora.";
+            : "Não foi possível carregar as atléticas agora.";
         setErrorMessage(message);
       } finally {
         if (mounted) {
@@ -270,7 +270,7 @@ export default function VisitantePage() {
               </p>
               <h1 className="mt-1 inline-flex items-center gap-2 text-xl font-black uppercase tracking-tight text-white">
                 <Compass size={18} style={{ color: spotlightPalette.accent }} />
-                Escolha sua atletica
+                Escolha sua atlética
               </h1>
             </div>
           </div>
@@ -288,7 +288,7 @@ export default function VisitantePage() {
               }}
             >
               <Building2 size={15} style={{ color: spotlightPalette.accent }} />
-              Criar atletica
+              Criar atlética
             </Link>
 
             {!isAnonymousVisitor && user && (
@@ -297,7 +297,7 @@ export default function VisitantePage() {
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-[11px] font-black uppercase tracking-[0.16em] text-zinc-100 transition hover:bg-white/10"
               >
                 <Building2 size={15} style={{ color: spotlightPalette.accent }} />
-                Minha area
+                Minha área
               </Link>
             )}
           </div>
@@ -349,7 +349,7 @@ export default function VisitantePage() {
               }}
             >
               <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
-                Atleticas ativas
+                Atléticas ativas
               </p>
               <div className="mt-4 flex items-end justify-between gap-4">
                 <div>
@@ -435,7 +435,7 @@ export default function VisitantePage() {
 
                   <div className="min-w-0">
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
-                      Atletica
+                      Atlética
                     </p>
                     <p className="truncate text-sm font-black uppercase text-white md:text-base">
                       {selectedTenant ? selectedTenant.nome : "Abrir seletor"}
@@ -548,7 +548,7 @@ export default function VisitantePage() {
 
                     {searchedTenants.length === 0 && (
                       <li className="px-4 py-8 text-center text-sm text-zinc-500">
-                        Nenhuma atletica encontrada.
+                        Nenhuma atlética encontrada.
                       </li>
                     )}
                   </ul>
@@ -566,7 +566,7 @@ export default function VisitantePage() {
                 style={{ background: spotlightPalette.accent }}
               />
               <span className="text-[11px] font-black uppercase tracking-[0.22em] text-zinc-300">
-                Abra a pagina certa
+                Abra a página certa
               </span>
             </div>
 
@@ -582,7 +582,7 @@ export default function VisitantePage() {
               }}
             >
               <Sparkles size={13} style={{ color: spotlightPalette.accent }} />
-              Criar minha atletica com login
+              Criar minha atlética com login
             </Link>
           </div>
         )}
@@ -721,7 +721,7 @@ export default function VisitantePage() {
                         Faculdade
                       </p>
                       <p className="mt-1 truncate text-sm font-semibold text-white">
-                        {tenant.faculdade || "Nao informada"}
+                        {tenant.faculdade || "Não informada"}
                       </p>
                     </div>
 
@@ -736,7 +736,7 @@ export default function VisitantePage() {
                         Curso
                       </p>
                       <p className="mt-1 truncate text-sm font-semibold text-white">
-                        {tenant.curso || "Nao informado"}
+                        {tenant.curso || "Não informado"}
                       </p>
                     </div>
 
@@ -751,7 +751,7 @@ export default function VisitantePage() {
                         Cidade
                       </p>
                       <p className="mt-1 truncate text-sm font-semibold text-white">
-                        {tenant.cidade || "Nao informada"}
+                        {tenant.cidade || "Não informada"}
                         {tenant.area ? ` - ${tenant.area}` : ""}
                       </p>
                     </div>
@@ -767,7 +767,7 @@ export default function VisitantePage() {
                         boxShadow: `0 18px 40px ${glowColor(palette.rgb, 0.28)}`,
                       }}
                     >
-                      Abrir pagina
+                      Abrir página
                       <ExternalLink size={14} />
                     </Link>
                   </div>
@@ -780,7 +780,7 @@ export default function VisitantePage() {
           <div className="mt-10 rounded-[30px] border border-white/8 bg-white/[0.04] p-10 text-center backdrop-blur-2xl">
             <Compass size={42} className="mx-auto text-zinc-600" />
             <h3 className="mt-4 text-xl font-black uppercase text-white">
-              Nenhuma atletica encontrada
+              Nenhuma atlética encontrada
             </h3>
             <p className="mt-3 text-sm text-zinc-500">
               Ajuste a busca para tentar outro nome.

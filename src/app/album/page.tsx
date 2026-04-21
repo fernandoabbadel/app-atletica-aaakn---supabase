@@ -107,7 +107,7 @@ export default function AlbumTurmasPage() {
   const title = uiConfig?.titulo?.trim() || "Album da Galera";
   const subtitle =
     uiConfig?.subtitulo?.trim() ||
-    "Escolha a turma para abrir somente o que voce precisa";
+    "Escolha a turma para abrir somente o que você precisa";
   const heroHeadline = "Escolha a turma e domine o album";
   const shouldShowSubtitle =
     subtitle.trim().toLowerCase() !== heroHeadline.trim().toLowerCase();
@@ -253,7 +253,7 @@ export default function AlbumTurmasPage() {
               <QrCode size={18} />
             </div>
             <p className="mt-3 text-xs font-black uppercase text-white">Meu QR</p>
-            <p className="text-[11px] text-zinc-400">Mostra seu codigo para ser capturado.</p>
+            <p className="text-[11px] text-zinc-400">Mostra seu código para ser capturado.</p>
           </button>
 
           <Link
@@ -389,7 +389,7 @@ export default function AlbumTurmasPage() {
               <QRCodeSVG value={user?.uid || ""} size={210} />
             </div>
             <p className="mt-4 text-[10px] text-zinc-500 font-bold uppercase break-all">
-              {user?.uid || "Usuario nao autenticado"}
+              {user?.uid || "Usuário não autenticado"}
             </p>
           </div>
         </div>

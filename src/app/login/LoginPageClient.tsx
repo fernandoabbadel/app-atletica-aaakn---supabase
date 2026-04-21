@@ -374,7 +374,7 @@ export default function LoginPageClient() {
         </div>
 
         <p className="text-center text-zinc-600 text-[10px] mt-6">
-          Ao entrar, voce concorda com nossos{" "}
+          Ao entrar, você concorda com nossos{" "}
           <button type="button" className="text-brand-accent hover:underline">
             Termos
           </button>{" "}

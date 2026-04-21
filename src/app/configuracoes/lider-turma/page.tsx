@@ -97,14 +97,14 @@ export default function ConfiguracoesLiderTurmaPage() {
       await reviewTurmaLeaderPendingRequest({ requestId, action, reason });
       await loadData("refresh");
       addToast(
-        action === "approve" ? "Solicitacao aprovada." : "Solicitacao rejeitada.",
+        action === "approve" ? "Solicitação aprovada." : "Solicitação rejeitada.",
         "success"
       );
     } catch (error: unknown) {
       const message =
         error instanceof Error && error.message
           ? error.message
-          : "Erro ao revisar solicitacao.";
+          : "Erro ao revisar solicitação.";
       addToast(message, "error");
     } finally {
       setProcessingRequestId("");
@@ -162,8 +162,8 @@ export default function ConfiguracoesLiderTurmaPage() {
           </h2>
           <p className="mt-1 text-[11px] font-medium text-zinc-500">
             {canManageAll
-              ? "Voce enxerga todas as solicitacoes do tenant."
-              : "Voce so pode revisar usuarios da sua propria turma."}
+              ? "Você enxerga todas as solicitações do tenant."
+              : "Você só pode revisar usuários da sua própria turma."}
           </p>
 
           <div className="mt-4 space-y-3">
@@ -218,7 +218,7 @@ export default function ConfiguracoesLiderTurmaPage() {
 
             {requests.length === 0 && (
               <p className="text-sm text-zinc-400">
-                Nenhuma solicitacao pendente para a sua faixa de lideranca.
+                Nenhuma solicitação pendente para a sua faixa de liderança.
               </p>
             )}
           </div>

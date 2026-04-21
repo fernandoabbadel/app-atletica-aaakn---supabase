@@ -134,7 +134,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
         setOnboardingRequests(onboardingRows);
       } catch (error: unknown) {
         addToast(
-          `Erro ao carregar resumo do lancamento: ${extractErrorMessage(error)}`,
+          `Erro ao carregar resumo do lançamento: ${extractErrorMessage(error)}`,
           "error"
         );
       } finally {
@@ -175,7 +175,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
 
   const handleCreateInvite = async () => {
     if (!selectedTenant) {
-      addToast("Selecione uma atletica para gerar convite.", "error");
+      addToast("Selecione uma atlética para gerar convite.", "error");
       return;
     }
 
@@ -201,15 +201,15 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
     if (!latestInviteLink.trim()) return;
     try {
       await navigator.clipboard.writeText(latestInviteLink);
-      addToast("Link copiado para a area de transferencia.", "success");
+      addToast("Link copiado para a área de transferência.", "success");
     } catch {
-      addToast("Nao foi possivel copiar automaticamente.", "error");
+      addToast("Não foi possível copiar automaticamente.", "error");
     }
   };
 
   const handleToggleSignupMode = async () => {
     if (!selectedTenant) {
-      addToast("Selecione uma atletica para alterar a estrategia de entrada.", "error");
+      addToast("Selecione uma atlética para alterar a estratégia de entrada.", "error");
       return;
     }
     try {
@@ -223,13 +223,13 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
       await refreshWorkspace();
       addToast(
         nextValue
-          ? "Cadastro sem convite liberado para esta atletica."
-          : "Entrada por convite ativada para esta atletica.",
+          ? "Cadastro sem convite liberado para esta atlética."
+          : "Entrada por convite ativada para esta atlética.",
         "success"
       );
     } catch (error: unknown) {
       addToast(
-        `Erro ao atualizar estrategia de entrada: ${extractErrorMessage(error)}`,
+        `Erro ao atualizar estratégia de entrada: ${extractErrorMessage(error)}`,
         "error"
       );
     } finally {
@@ -240,17 +240,17 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
   if (authLoading || workspaceLoading || pageLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#050505] text-sm font-black uppercase text-white">
-        Carregando modulo de lancamento...
+        Carregando módulo de lançamento...
       </div>
     );
   }
 
   if (!canAccess) return null;
 
-  const statusValue = publicSignupEnabled ? "Cadastro publico liberado" : "Somente por convite";
+  const statusValue = publicSignupEnabled ? "Cadastro público liberado" : "Somente por convite";
   const statusHelper = publicSignupEnabled
-    ? "Qualquer usuario pode pedir entrada sem convite. A aprovacao do admin continua valendo."
-    : "Novos usuarios so entram no fluxo da atletica quando recebem um convite.";
+    ? "Qualquer usuário pode pedir entrada sem convite. A aprovação do admin continua valendo."
+    : "Novos usuários só entram no fluxo da atlética quando recebem um convite.";
 
   return (
     <LaunchPageShell
@@ -259,8 +259,8 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
       title={isMasterScope ? "Lancamento Master" : "Projeto de Lancamento"}
       subtitle={
         isMasterScope
-          ? "painel global do dono do app, separado do admin da atletica"
-          : "convites e aprovacoes da atletica no painel admin"
+          ? "painel global do dono do app, separado do admin da atlética"
+          : "convites e aprovações da atlética no painel admin"
       }
       refreshing={workspaceRefreshing || pageRefreshing}
       onRefresh={() => void handleRefresh()}
@@ -294,7 +294,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
       <LaunchTenantSelectorCard
         workspace={workspace}
         selectable={scope === "master" && workspace.tenants.length > 1}
-        helperText={`Dados carregados para o ${getLaunchAudienceLabel(scope)} e filtrados pela atletica ativa.`}
+        helperText={`Dados carregados para o ${getLaunchAudienceLabel(scope)} e filtrados pela atlética ativa.`}
         statusTitle="Modo de entrada"
         statusValue={statusValue}
         statusHelper={statusHelper}
@@ -341,7 +341,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
             <div className="mt-3 inline-flex items-center gap-2 text-[11px] font-bold text-zinc-300">
               <ShieldCheck size={14} />
               {savingSignupMode
-                ? "Salvando estrategia..."
+                ? "Salvando estratégia..."
                 : publicSignupEnabled
                   ? "Clique para voltar ao modo por convite."
                   : "Clique para liberar cadastro sem convite."}
@@ -355,7 +355,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
           <div>
             <h2 className="text-sm font-black uppercase text-cyan-400">Gerar Link de Convite</h2>
             <p className="mt-1 text-[11px] font-bold uppercase text-zinc-500">
-              A role final agora e sempre user. Ninguem gera link para outras roles.
+              A role final agora é sempre user. Ninguém gera link para outras roles.
             </p>
           </div>
 
@@ -399,7 +399,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
               onChange={(event) => setInviteRequiresApproval(event.target.checked)}
               className="accent-emerald-500"
             />
-            Exige aprovacao manual
+            Exige aprovação manual
           </label>
 
           <button
@@ -498,7 +498,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
                 </div>
               ))}
               {invites.length === 0 && (
-                <p className="text-sm text-zinc-400">Nenhum convite criado para esta atletica.</p>
+                <p className="text-sm text-zinc-400">Nenhum convite criado para esta atlética.</p>
               )}
             </div>
           </div>
@@ -511,21 +511,21 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
             <div>
               <h2 className="text-sm font-black uppercase text-amber-300">Solicitacoes pendentes</h2>
               <p className="mt-1 text-[11px] font-medium text-zinc-500">
-                Ultimas entradas aguardando decisao na atletica.
+                Últimas entradas aguardando decisão na atlética.
               </p>
             </div>
             <Link
               href={`${launchBasePath}/pendentes`}
               className="text-[11px] font-black uppercase text-amber-200 hover:text-white"
             >
-              abrir pagina
+              abrir página
             </Link>
           </div>
           <div className="mt-4 space-y-3">
             {pendingRequests.slice(0, 4).map((request) => (
               <div key={request.id} className="rounded-xl border border-zinc-800 bg-black/40 p-3">
                 <p className="text-sm font-black text-white">
-                  {request.requesterName || request.requesterEmail || "Usuario sem nome"}
+                  {request.requesterName || request.requesterEmail || "Usuário sem nome"}
                 </p>
                 <p className="mt-1 text-[11px] text-zinc-500">
                   {request.requesterEmail || "Sem email"} • {request.requesterTurma || "Sem turma"}
@@ -533,7 +533,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
               </div>
             ))}
             {pendingRequests.length === 0 && (
-              <p className="text-sm text-zinc-400">Nenhuma solicitacao pendente para esta atletica.</p>
+              <p className="text-sm text-zinc-400">Nenhuma solicitação pendente para esta atlética.</p>
             )}
           </div>
         </div>
@@ -543,14 +543,14 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
             <div>
               <h2 className="text-sm font-black uppercase text-cyan-300">Ranking de convites</h2>
               <p className="mt-1 text-[11px] font-medium text-zinc-500">
-                Quem mais gerou links na atletica.
+                Quem mais gerou links na atlética.
               </p>
             </div>
             <Link
               href={`${launchBasePath}/convites`}
               className="text-[11px] font-black uppercase text-cyan-200 hover:text-white"
             >
-              abrir pagina
+              abrir página
             </Link>
           </div>
           <div className="mt-4 space-y-3">
@@ -570,7 +570,7 @@ export function LaunchDashboardPage({ scope }: LaunchDashboardPageProps) {
               </div>
             ))}
             {generationRanking.length === 0 && (
-              <p className="text-sm text-zinc-400">Ainda nao existem links suficientes para ranking.</p>
+              <p className="text-sm text-zinc-400">Ainda não existem links suficientes para ranking.</p>
             )}
           </div>
         </div>

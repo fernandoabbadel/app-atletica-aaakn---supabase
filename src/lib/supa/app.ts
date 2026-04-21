@@ -23,7 +23,7 @@ export function getApps(): AppInstance[] {
 
 export function getApp(): AppInstance {
   if (!appSingleton) {
-    throw new Error("App ainda nao inicializado.");
+    throw new Error("App ainda não inicializado.");
   }
   return appSingleton;
 }

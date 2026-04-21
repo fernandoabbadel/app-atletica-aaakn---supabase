@@ -159,7 +159,7 @@ export function useLaunchWorkspace(scope: LaunchScope): LaunchWorkspaceState {
         setSelectedTenantId(nextTenantId);
         return nextTenantId;
       } catch (error: unknown) {
-        addToast(`Erro ao carregar tenants do lancamento: ${extractErrorMessage(error)}`, "error");
+        addToast(`Erro ao carregar tenants do lançamento: ${extractErrorMessage(error)}`, "error");
         setTenants([]);
         setSelectedTenantId("");
         return "";
@@ -298,7 +298,7 @@ export function LaunchTenantSelectorCard({
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
         <div>
           <label className="text-[11px] font-bold uppercase text-zinc-400">
-            Atletica selecionada
+            Atlética selecionada
           </label>
           {shouldRenderSelect ? (
             <select
@@ -316,7 +316,7 @@ export function LaunchTenantSelectorCard({
             <div className="mt-1 rounded-xl border border-zinc-700 bg-black px-3 py-2 text-sm font-black uppercase text-white">
               {workspace.selectedTenant
                 ? `${workspace.selectedTenant.sigla} - ${workspace.selectedTenant.nome}`
-                : "Sem atletica"}
+    : "Sem atlética"}
             </div>
           )}
           <p className="mt-2 text-[11px] font-medium text-zinc-500">{helperText}</p>
@@ -327,10 +327,10 @@ export function LaunchTenantSelectorCard({
             {statusTitle || "Status"}
           </p>
           <p className="mt-2 text-sm font-black uppercase text-white">
-            {statusValue || workspace.selectedTenant?.status || "Sem atletica"}
+            {statusValue || workspace.selectedTenant?.status || "Sem atlética"}
           </p>
           <p className="mt-1 text-[11px] text-zinc-500">
-            {statusHelper || workspace.selectedTenant?.curso || "Curso nao informado"}
+            {statusHelper || workspace.selectedTenant?.curso || "Curso não informado"}
           </p>
           {statusAction ? <div className="mt-4">{statusAction}</div> : null}
         </div>
@@ -338,7 +338,7 @@ export function LaunchTenantSelectorCard({
 
       {workspace.tenants.length === 0 && (
         <p className="mt-4 text-sm text-zinc-400">
-          Nenhuma atletica disponivel para o seu acesso neste modulo.
+          Nenhuma atlética disponível para o seu acesso neste módulo.
         </p>
       )}
     </section>

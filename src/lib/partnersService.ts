@@ -235,7 +235,7 @@ const resolvePartnersTenantId = (tenantId?: string | null): string =>
 const requirePartnersTenantId = (tenantId?: string | null): string => {
   const scopedTenantId = resolvePartnersTenantId(tenantId);
   if (!scopedTenantId) {
-    throw new Error("Tenant ativo nao identificado para parceiros.");
+    throw new Error("Tenant ativo não identificado para parceiros.");
   }
   return scopedTenantId;
 };

@@ -208,7 +208,7 @@ const normalizeReward = (id: string, raw: unknown): FidelityReward | null => {
 
   return {
     id,
-    title: asString(data.title, "Premio").trim().slice(0, 120),
+    title: asString(data.title, "Prêmio").trim().slice(0, 120),
     cost: Math.max(0, asNumber(data.cost, 0)),
     stock: Math.max(0, asNumber(data.stock, 0)),
     image: asString(data.image).trim().slice(0, 400) || undefined,
@@ -632,12 +632,12 @@ export async function createFidelityReward(payload: {
 }, options?: { tenantId?: string | null }): Promise<{ id: string }> {
   const tenantId = resolveFidelityTenantId(options?.tenantId);
   const safePayload = {
-    title: payload.title.trim().slice(0, 120) || "Premio",
+    title: payload.title.trim().slice(0, 120) || "Prêmio",
     cost: Math.max(0, Number.isFinite(payload.cost) ? payload.cost : 0),
     stock: Math.max(0, Number.isFinite(payload.stock) ? payload.stock : 0),
     image:
       payload.image?.trim().slice(0, 400) ||
-      "https://placehold.co/400x400/000/FFF?text=Premio",
+      "https://placehold.co/400x400/000/FFF?text=Pr%C3%AAmio",
     active: true,
   };
 
@@ -716,7 +716,7 @@ export async function deleteFidelityReward(
       ((rewardLookup.data as unknown as Record<string, unknown> | null) ?? {}).tenant_id
     ).trim();
     if (tenantId && rewardTenantId && rewardTenantId !== tenantId) {
-      throw new Error("Premio fora do tenant ativo.");
+      throw new Error("Prêmio fora do tenant ativo.");
     }
 
     let request = supabase.from("store_rewards").delete().eq("id", cleanId);
@@ -749,13 +749,13 @@ export async function requestFidelityRedemption(payload: {
 }): Promise<void> {
   const userId = payload.userId.trim();
   if (!userId) {
-    throw new Error("Usuario invalido para resgate.");
+    throw new Error("Usuário inválido para resgate.");
   }
   const tenantId = resolveFidelityTenantId(payload.tenantId);
 
   const rewardId = payload.reward.id.trim();
   if (!rewardId) {
-    throw new Error("Premio invalido para resgate.");
+    throw new Error("Prêmio inválido para resgate.");
   }
 
   const requestPayload = {
@@ -784,11 +784,11 @@ export async function requestFidelityRedemption(payload: {
       }
       const { data: rewardData, error: rewardError } = rewardResponse;
       if (rewardError) throwSupabaseError(rewardError);
-      if (!rewardData) throw new Error("Premio nao encontrado.");
+      if (!rewardData) throw new Error("Prêmio não encontrado.");
 
       const rewardTenantId = asString((rewardData as Record<string, unknown>).tenant_id).trim();
       if (tenantId && rewardTenantId && rewardTenantId !== tenantId) {
-        throw new Error("Premio fora do tenant ativo.");
+        throw new Error("Prêmio fora do tenant ativo.");
       }
 
       const stock = Math.max(0, asNumber((rewardData as Record<string, unknown>).stock, 0));
@@ -860,7 +860,7 @@ export async function requestFidelityRedemption(payload: {
         userId,
         ...(tenantId ? { tenant_id: tenantId } : {}),
         title: "Resgate registrado",
-        message: `Seu pedido de ${requestPayload.rewardTitle} foi enviado para a atletica.`,
+        message: `Seu pedido de ${requestPayload.rewardTitle} foi enviado para a atlética.`,
         link: "/fidelidade",
         read: false,
         type: "fidelity_redemption",

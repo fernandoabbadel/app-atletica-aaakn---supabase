@@ -444,7 +444,7 @@ export async function fetchAchievementsLogs(options?: {
 
       return {
         id: asString(raw.id),
-        userName: asString(raw.userName, "Usuario"),
+        userName: asString(raw.userName, "Usuário"),
         achievementTitle: asString(raw.achievementTitle, "Conquista"),
         timestamp: raw.timestamp,
       } satisfies AchievementLogRecord;
@@ -707,7 +707,7 @@ export async function syncUserAchievementState(payload: {
       .filter((item) => !existingAchievementIds.has(item.id))
       .map((item) => ({
         userId,
-        userName: asString(userRow.nome, payload.userName || "Usuario"),
+        userName: asString(userRow.nome, payload.userName || "Usuário"),
         achievementId: item.id,
         achievementTitle: item.titulo,
         xp: item.xp,

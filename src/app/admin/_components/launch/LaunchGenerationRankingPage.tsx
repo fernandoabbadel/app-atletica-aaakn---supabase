@@ -123,7 +123,7 @@ export function LaunchGenerationRankingPage({
       scope={scope}
       tenantSlug={tenantSlug}
       title="Ranking de Links Gerados"
-      subtitle="usuarios que mais criaram convites no tenant"
+      subtitle="usuários que mais criaram convites no tenant"
       refreshing={workspaceRefreshing || pageRefreshing}
       onRefresh={() => void handleRefresh()}
     >
@@ -155,7 +155,7 @@ export function LaunchGenerationRankingPage({
 
       <LaunchTenantSelectorCard
         workspace={workspace}
-        helperText="O ranking contabiliza quem gerou mais links para a atletica selecionada."
+          helperText="O ranking contabiliza quem gerou mais links para a atlética selecionada."
       />
 
       <section className="grid gap-4 lg:grid-cols-3">
@@ -168,7 +168,7 @@ export function LaunchGenerationRankingPage({
         <LaunchRingMetric
           label="Top users"
           value={ranking.length}
-          helper="usuarios que entraram no ranking"
+          helper="usuários que entraram no ranking"
           accentClassName="border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
         />
         <LaunchRingMetric
@@ -238,7 +238,7 @@ export function LaunchGenerationRankingPage({
 
           {ranking.length === 0 && (
             <p className="text-sm text-zinc-400">
-              Ainda nao existem convites gerados para montar o ranking.
+              Ainda não existem convites gerados para montar o ranking.
             </p>
           )}
         </div>

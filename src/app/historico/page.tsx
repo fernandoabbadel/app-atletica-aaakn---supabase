@@ -156,7 +156,7 @@ export default function HistoricoPage() {
           <div className="absolute inset-0 z-0">
             <Image
               src={config.fotoCapa}
-              alt="Capa da pagina de historico"
+              alt="Capa da página de histórico"
               fill
               sizes="100vw"
               className="object-cover opacity-40 transition duration-1000 group-hover:scale-105"

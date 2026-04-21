@@ -11,7 +11,7 @@ const FRASES_OBRA = [
   "Estamos ampliando o tanque dos tubaroes.",
   "Preparando novas funcionalidades para a plataforma.",
   "Codando forte para liberar essa rota.",
-  "Montando algo gigante para sua atletica.",
+  "Montando algo gigante para sua atlética.",
   "Segura mais um pouco que vem novidade.",
 ];
 

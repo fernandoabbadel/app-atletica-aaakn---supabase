@@ -8,13 +8,18 @@ import { useToast } from "@/context/ToastContext";
 import {
   fetchTenantPaymentReceiverDirectory,
   saveTenantPaymentRecipients,
+  type TenantPaymentRecipientScope,
   type TenantPaymentRecipientOption,
 } from "@/lib/paymentRecipients";
 
 interface PaymentReceiversManagerProps {
   tenantId: string;
+  scope?: TenantPaymentRecipientScope;
   open: boolean;
   recipients: TenantPaymentRecipientOption[];
+  title?: string;
+  description?: string;
+  savedMessage?: string;
   onClose: () => void;
   onSaved: (recipients: TenantPaymentRecipientOption[]) => void;
 }
@@ -28,8 +33,12 @@ const normalizeSearch = (value: string): string =>
 
 export function PaymentReceiversManager({
   tenantId,
+  scope = "tenant",
   open,
   recipients,
+  title = "Adicionar recebedores",
+  description = "Somente estes usuarios aparecem nas listas de comprovante.",
+  savedMessage = "Recebedores atualizados.",
   onClose,
   onSaved,
 }: PaymentReceiversManagerProps) {
@@ -59,7 +68,7 @@ export function PaymentReceiversManager({
         console.error(error);
         if (mounted) {
           setDirectory([]);
-          addToast("Erro ao carregar usuarios da tenant.", "error");
+          addToast("Erro ao carregar usuários da tenant.", "error");
         }
       } finally {
         if (mounted) setLoading(false);
@@ -100,14 +109,14 @@ export function PaymentReceiversManager({
 
   const handleSave = async () => {
     if (!tenantId.trim()) {
-      addToast("Tenant nao identificado.", "error");
+      addToast("Tenant não identificado.", "error");
       return;
     }
     try {
       setSaving(true);
-      const saved = await saveTenantPaymentRecipients(tenantId, draft);
+      const saved = await saveTenantPaymentRecipients(tenantId, draft, scope);
       onSaved(saved);
-      addToast("Recebedores atualizados.", "success");
+      addToast(savedMessage, "success");
       onClose();
     } catch (error: unknown) {
       console.error(error);
@@ -125,10 +134,10 @@ export function PaymentReceiversManager({
         <div className="flex items-center justify-between gap-3 border-b border-zinc-800 bg-black/40 p-5">
           <div>
             <h2 className="text-sm font-black uppercase tracking-wide">
-              Adicionar recebedores
+              {title}
             </h2>
             <p className="mt-1 text-[11px] text-zinc-500">
-              Somente estes usuarios aparecem nas listas de comprovante.
+              {description}
             </p>
           </div>
           <button
@@ -144,7 +153,7 @@ export function PaymentReceiversManager({
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
-                Usuarios que podem receber.
+                Usuários que podem receber.
               </p>
               <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-black text-emerald-300">
                 {draft.length}
@@ -192,7 +201,7 @@ export function PaymentReceiversManager({
 
           <section className="space-y-3">
             <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-              Buscar usuarios aprovados
+              Buscar usuários aprovados
             </label>
             <div className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-black/40 px-3 py-2">
               <Search size={14} className="text-zinc-500" />
@@ -212,7 +221,7 @@ export function PaymentReceiversManager({
                 </div>
               ) : filteredDirectory.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-800 bg-black/20 p-4 text-sm text-zinc-500">
-                  Nenhum usuario disponivel para adicionar.
+                  Nenhum usuário disponível para adicionar.
                 </div>
               ) : (
                 filteredDirectory.map((entry) => (

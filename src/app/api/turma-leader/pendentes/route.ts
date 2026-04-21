@@ -37,7 +37,7 @@ const getAuthScope = async (request: NextRequest): Promise<AuthScope> => {
   const authHeader = request.headers.get("authorization") || "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!accessToken) {
-    throw new Error("Nao autenticado.");
+    throw new Error("Não autenticado.");
   }
 
   const {
@@ -46,7 +46,7 @@ const getAuthScope = async (request: NextRequest): Promise<AuthScope> => {
   } = await supabaseAdmin.auth.getUser(accessToken);
 
   if (authError || !authData.user) {
-    throw new Error("Sessao invalida.");
+    throw new Error("Sessão inválida.");
   }
 
   const { data: userRow, error: userError } = await supabaseAdmin
@@ -71,15 +71,15 @@ const getAuthScope = async (request: NextRequest): Promise<AuthScope> => {
   const canManageAll = userRole === "master" || MANAGER_TENANT_ROLES.has(tenantRole);
 
   if (!userId || !tenantId || tenantStatus !== "approved") {
-    throw new Error("Seu perfil nao pode revisar solicitacoes neste tenant.");
+    throw new Error("Seu perfil não pode revisar solicitações neste tenant.");
   }
 
   if (!canManageAll && !isTurmaLeader) {
-    throw new Error("Sem permissao para revisar pendencias.");
+    throw new Error("Sem permissão para revisar pendências.");
   }
 
   if (!canManageAll && !turma) {
-    throw new Error("Seu perfil de lider precisa ter turma definida.");
+    throw new Error("Seu perfil de líder precisa ter turma definida.");
   }
 
   return {
@@ -103,7 +103,7 @@ const fetchRequesterMap = async (requesterIds: string[]) => {
     .select("uid,nome,email,turma,foto")
     .in("uid", cleanIds);
 
-  if (error) throw new Error(error.message || "Falha ao carregar usuarios.");
+  if (error) throw new Error(error.message || "Falha ao carregar usuários.");
 
   return new Map(
     (Array.isArray(data) ? data : [])
@@ -200,7 +200,7 @@ export async function GET(request: NextRequest) {
     const message =
       error instanceof Error && error.message
         ? error.message
-        : "Erro ao carregar pendencias.";
+        : "Erro ao carregar pendências.";
     return NextResponse.json({ error: message }, { status: 403 });
   }
 }
@@ -214,7 +214,7 @@ export async function POST(request: NextRequest) {
     const reason = asString(body?.reason).trim();
 
     if (!requestId || (action !== "approve" && action !== "reject")) {
-      return NextResponse.json({ error: "Payload invalido." }, { status: 400 });
+      return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
     }
 
     const { data: requestRow, error: requestError } = await supabaseAdmin
@@ -228,7 +228,7 @@ export async function POST(request: NextRequest) {
 
     const rawRequest = asObject(requestRow);
     if (!rawRequest) {
-      return NextResponse.json({ error: "Solicitacao nao encontrada." }, { status: 404 });
+      return NextResponse.json({ error: "Solicitação não encontrada." }, { status: 404 });
     }
 
     const requestTenantId = asString(rawRequest.tenant_id).trim();
@@ -236,10 +236,10 @@ export async function POST(request: NextRequest) {
     const requestStatus = asString(rawRequest.status).trim().toLowerCase();
 
     if (requestTenantId !== scope.tenantId) {
-      return NextResponse.json({ error: "Solicitacao fora do seu tenant." }, { status: 403 });
+      return NextResponse.json({ error: "Solicitação fora do seu tenant." }, { status: 403 });
     }
     if (requestStatus !== "pending") {
-      return NextResponse.json({ error: "Solicitacao ja revisada." }, { status: 400 });
+      return NextResponse.json({ error: "Solicitação já revisada." }, { status: 400 });
     }
 
     if (!scope.canManageAll) {
@@ -254,7 +254,7 @@ export async function POST(request: NextRequest) {
       const requesterTurma = asString(asObject(requesterRow)?.turma).trim();
       if (!requesterTurma || requesterTurma !== scope.turma) {
         return NextResponse.json(
-          { error: "Essa solicitacao nao pertence a sua turma." },
+          { error: "Essa solicitação não pertence à sua turma." },
           { status: 403 }
         );
       }
@@ -284,7 +284,7 @@ export async function POST(request: NextRequest) {
     const message =
       error instanceof Error && error.message
         ? error.message
-        : "Erro ao revisar pendencia.";
+        : "Erro ao revisar pendência.";
     return NextResponse.json({ error: message }, { status: 403 });
   }
 }

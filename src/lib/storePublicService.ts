@@ -1055,6 +1055,15 @@ export async function createStoreOrder(payload: {
           }
         : null,
     });
+  const scopedPaymentConfig =
+    seller?.type && seller.type !== "tenant" && effectivePaymentConfig
+      ? normalizePaymentConfig({
+          chave: effectivePaymentConfig.chave,
+          banco: effectivePaymentConfig.banco,
+          titular: effectivePaymentConfig.titular,
+          whatsapp: effectivePaymentConfig.whatsapp,
+        })
+      : effectivePaymentConfig;
 
   const nonRemovableColumns = new Set([
     "userId",
@@ -1066,8 +1075,8 @@ export async function createStoreOrder(payload: {
   ]);
 
   let mutableInsertPayload = { ...baseInsertPayload };
-  if (effectivePaymentConfig) {
-    mutableInsertPayload.payment_config = effectivePaymentConfig;
+  if (scopedPaymentConfig) {
+    mutableInsertPayload.payment_config = scopedPaymentConfig;
   }
   if (seller) {
     mutableInsertPayload.seller_type = seller.type;
@@ -1112,13 +1121,13 @@ export async function createStoreOrder(payload: {
   }
 
   if (!createdOrderId) {
-    throw new Error("Nao foi possivel registrar o pedido.");
+    throw new Error("Não foi possível registrar o pedido.");
   }
 
   await supabase.from("notifications").insert({
     userId: requestPayload.userId,
     title: "Compra em Analise",
-    message: `Seu pedido de ${requestPayload.productName} foi enviado para aprovacao.`,
+    message: `Seu pedido de ${requestPayload.productName} foi enviado para aprovação.`,
     link: `/loja/${requestPayload.productId}`,
     read: false,
     type: "order",

@@ -23,7 +23,7 @@ import {
 const DEFAULT_GLOBAL: AlbumUiConfig = {
   capa: "/capa_t8.jpg",
   titulo: "Album da Galera",
-  subtitulo: "Escolha a turma para abrir somente o que voce precisa",
+  subtitulo: "Escolha a turma para abrir somente o que você precisa",
 };
 
 const DEFAULT_TURMA = (turma: TurmaConfig): AlbumCmsData => ({
@@ -88,7 +88,7 @@ export default function AdminAlbumCustomizacaoPage() {
           turmasConfig.some((turma) => turma.id === prev) ? prev : fallbackSelected
         );
       } catch {
-        if (mounted) addToast("Erro ao carregar customizacao do album.", "error");
+        if (mounted) addToast("Erro ao carregar customização do álbum.", "error");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -117,9 +117,9 @@ export default function AdminAlbumCustomizacaoPage() {
       await saveAlbumUiConfig(globalConfig, {
         tenantId: activeTenantId || undefined,
       });
-      addToast("Customizacao da pagina /album salva.", "success");
+      addToast("Customização da página /album salva.", "success");
     } catch {
-      addToast("Erro ao salvar customizacao da home do album.", "error");
+      addToast("Erro ao salvar customização da home do álbum.", "error");
     } finally {
       setSavingGlobal(false);
     }
@@ -131,9 +131,9 @@ export default function AdminAlbumCustomizacaoPage() {
       await saveAlbumConfig(selectedTurmaData.id, turmaConfig, {
         tenantId: activeTenantId || undefined,
       });
-      addToast(`Customizacao da turma ${selectedTurmaData.id} salva.`, "success");
+      addToast(`Customização da turma ${selectedTurmaData.id} salva.`, "success");
     } catch {
-      addToast("Erro ao salvar customizacao da turma.", "error");
+      addToast("Erro ao salvar customização da turma.", "error");
     } finally {
       setSavingTurma(false);
     }
@@ -142,7 +142,7 @@ export default function AdminAlbumCustomizacaoPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center text-sm font-black uppercase">
-        Carregando customizacao...
+        Carregando customização...
       </div>
     );
   }
@@ -158,9 +158,9 @@ export default function AdminAlbumCustomizacaoPage() {
             <ArrowLeft size={18} className="text-zinc-300" />
           </Link>
           <div>
-            <h1 className="text-xl font-black uppercase tracking-tight">Customizacao Album</h1>
+            <h1 className="text-xl font-black uppercase tracking-tight">Customização Álbum</h1>
             <p className="text-[11px] text-zinc-500 font-bold">
-              Capa, titulo e subtitulo da pagina /album e /album/[turma]
+              Capa, título e subtítulo da página /album e /album/[turma]
             </p>
           </div>
         </div>
@@ -168,7 +168,7 @@ export default function AdminAlbumCustomizacaoPage() {
 
       <main className="px-6 py-6 max-w-4xl mx-auto space-y-6">
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-          <h2 className="text-sm font-black uppercase text-emerald-400">Pagina /album (global)</h2>
+          <h2 className="text-sm font-black uppercase text-emerald-400">Página /album (global)</h2>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="text-[11px] text-zinc-400 font-bold uppercase">Titulo</label>
@@ -207,12 +207,12 @@ export default function AdminAlbumCustomizacaoPage() {
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-xs font-black uppercase inline-flex items-center gap-2"
           >
             <Save size={14} />
-            {savingGlobal ? "Salvando..." : "Salvar pagina /album"}
+            {savingGlobal ? "Salvando..." : "Salvar página /album"}
           </button>
         </section>
 
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-          <h2 className="text-sm font-black uppercase text-cyan-400">Pagina /album/[turma]</h2>
+          <h2 className="text-sm font-black uppercase text-cyan-400">Página /album/[turma]</h2>
           <div className="flex flex-wrap gap-2">
             {turmas.map((turma) => (
               <button

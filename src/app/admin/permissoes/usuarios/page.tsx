@@ -114,12 +114,12 @@ export default function AdminPermissoesUsuariosPage() {
         setNextCursor(page.nextCursor);
       } catch (error: unknown) {
         if (isPermissionError(error)) {
-          addToast("Sem permissao para listar usuarios.", "error");
+          addToast("Sem permissão para listar usuários.", "error");
           router.push("/sem-permissao");
           return;
         }
         console.error(error);
-        addToast("Erro ao carregar usuarios.", "error");
+        addToast("Erro ao carregar usuários.", "error");
       } finally {
         if (reset) setLoading(false);
         else setLoadingMore(false);
@@ -184,13 +184,13 @@ export default function AdminPermissoesUsuariosPage() {
         adminName,
         "UPDATE",
         "Permissoes - Cargos",
-        `Alterou cargo do usuario ${targetUserId} para ${role}`
+        `Alterou cargo do usuário ${targetUserId} para ${role}`
       );
 
       addToast(`Cargo atualizado para ${role.toUpperCase()}.`, "success");
     } catch (error: unknown) {
       if (isPermissionError(error)) {
-        addToast("Sem permissao para alterar cargo.", "error");
+        addToast("Sem permissão para alterar cargo.", "error");
         return;
       }
       console.error(error);
@@ -216,7 +216,7 @@ export default function AdminPermissoesUsuariosPage() {
 
       addToast(
         nextValue
-          ? "Usuario marcado como lider de turma."
+          ? "Usuário marcado como líder de turma."
           : "Lideranca de turma removida.",
         "success"
       );
@@ -257,7 +257,7 @@ export default function AdminPermissoesUsuariosPage() {
                 <Shield className="text-cyan-400" size={18} /> Cargos de Acesso
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">
-                {tenantSigla || tenantName || "Tenant atual"} • paginacao 20 em 20
+                {tenantSigla || tenantName || "Tenant atual"} • paginação 20 em 20
               </p>
             </div>
           </div>
@@ -276,7 +276,7 @@ export default function AdminPermissoesUsuariosPage() {
           <Search className="text-zinc-500" size={18} />
           <input
             type="text"
-            placeholder="Buscar usuario por nome, email, turma ou matricula..."
+            placeholder="Buscar usuário por nome, email, turma ou matrícula..."
             className="bg-transparent outline-none text-sm text-white w-full placeholder:text-zinc-600"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
@@ -306,7 +306,7 @@ export default function AdminPermissoesUsuariosPage() {
                   </p>
                   <p className="text-xs text-zinc-500">{entry.email || "sem email"}</p>
                   <p className="text-[11px] text-zinc-500 mt-1">
-                    Turma: {entry.turma || "---"} - Matricula: {entry.matricula || "---"}
+                    Turma: {entry.turma || "---"} - Matrícula: {entry.matricula || "---"}
                   </p>
                 </div>
 
@@ -353,7 +353,7 @@ export default function AdminPermissoesUsuariosPage() {
             ))
           ) : (
             <div className="text-center py-12 text-zinc-500 bg-zinc-900/40 border border-zinc-800 rounded-xl">
-              Nenhum usuario encontrado.
+              Nenhum usuário encontrado.
             </div>
           )}
         </section>

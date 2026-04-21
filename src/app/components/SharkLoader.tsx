@@ -8,10 +8,10 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 
 const FRASES = [
   "Preparando o ambiente.",
-  "Carregando os dados da pagina.",
+  "Carregando os dados da página.",
   "Validando seu acesso atual.",
-  "Aplicando a identidade da atletica.",
-  "Sincronizando informacoes recentes.",
+  "Aplicando a identidade da atlética.",
+  "Sincronizando informações recentes.",
   "Quase tudo pronto por aqui.",
 ];
 

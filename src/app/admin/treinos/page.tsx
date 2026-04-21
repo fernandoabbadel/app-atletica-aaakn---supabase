@@ -274,7 +274,7 @@ export default function AdminTreinosPage() {
           if (!isPermissionError(error)) {
             console.error(error);
           }
-          addToast("Erro ao carregar usuarios.", "error");
+          addToast("Erro ao carregar usuários.", "error");
       }
   }, [activeTenantId, addToast]);
 
@@ -669,7 +669,7 @@ export default function AdminTreinosPage() {
     if (!modalidade || !dia) return addToast("Dados incompletos!", "error");
     if (!activeTenantId) return addToast("O tenant ainda esta carregando. Tente novamente em instantes.", "error");
     if (dia > maxTreinoCreateDate) {
-        return addToast("Treinos so podem ser cadastrados com ate 2 meses de antecedencia.", "error");
+        return addToast("Treinos só podem ser cadastrados com até 2 meses de antecedência.", "error");
     }
 
     const diaObj = new Date(`${dia}T12:00:00`);
@@ -763,7 +763,7 @@ export default function AdminTreinosPage() {
           await loadExpandedData(expandedRow, true);
       } catch (error: unknown) {
           console.error(error);
-          addToast("Erro ao atualizar presenca.", "error");
+          addToast("Erro ao atualizar presença.", "error");
       }
   };
 
@@ -1006,7 +1006,7 @@ export default function AdminTreinosPage() {
                                                 <td className="p-4 text-center"><button onClick={() => handleToggleStatusTreino(treino)} className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${treino.status === 'ativo' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>{treino.status}</button></td>
                                                 <td className="p-4 text-right">
                                                     <div className="flex items-center justify-end gap-2">
-                                                        <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/admin/treinos/lista/${treino.id}`) : `/admin/treinos/lista/${treino.id}`} className="p-2 rounded-lg transition bg-zinc-800 text-zinc-400 hover:text-white" title="Abrir lista de presenca">
+                                                        <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/admin/treinos/lista/${treino.id}`) : `/admin/treinos/lista/${treino.id}`} className="p-2 rounded-lg transition bg-zinc-800 text-zinc-400 hover:text-white" title="Abrir lista de presença">
                                                             <ChevronDown size={16}/>
                                                         </Link>
                                                         <button onClick={() => handleOpenEdit(treino)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white"><Edit size={16}/></button>
@@ -1216,7 +1216,7 @@ export default function AdminTreinosPage() {
                         <label className="space-y-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
                             Frequencia
                             <select className="w-full rounded-lg border border-zinc-700 bg-zinc-950 p-2 text-xs text-white outline-none" value={repeatMode} onChange={(event) => setRepeatMode(event.target.value as "none" | "weekly" | "daily")}>
-                                <option value="none">Nao repetir</option>
+                                <option value="none">Não repetir</option>
                                 <option value="weekly">Semanal</option>
                                 <option value="daily">Diaria</option>
                             </select>
@@ -1291,7 +1291,7 @@ export default function AdminTreinosPage() {
                       <h2 className="font-bold text-white text-lg">Editar Categorias</h2>
                       <button onClick={() => setShowEditarModalidades(false)} className="text-zinc-400 hover:text-white"><X size={20}/></button>
                   </div>
-                  <p className="text-xs text-zinc-500">As alteracoes de imagem e cor ficam em rascunho ate voce clicar em salvar categoria.</p>
+                  <p className="text-xs text-zinc-500">As alterações de imagem e cor ficam em rascunho até você clicar em salvar categoria.</p>
                   <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar">
                       {modalidades.map((modalidade) => {
                           const key = toModalidadeKey(modalidade);

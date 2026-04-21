@@ -80,7 +80,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Erro ao montar profile bundle publico:", error);
     return NextResponse.json(
-      { error: "Falha ao carregar perfil publico." },
+      { error: "Falha ao carregar perfil público." },
       {
         status: 500,
         headers: {

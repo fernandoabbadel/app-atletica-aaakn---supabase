@@ -103,6 +103,6 @@ export async function reviewTurmaLeaderPendingRequest(payload: {
 
   const responsePayload = (await response.json()) as { error?: string };
   if (!response.ok) {
-    throw new Error(asString(responsePayload.error, "Erro ao revisar solicitacao."));
+    throw new Error(asString(responsePayload.error, "Erro ao revisar solicitação."));
   }
 }

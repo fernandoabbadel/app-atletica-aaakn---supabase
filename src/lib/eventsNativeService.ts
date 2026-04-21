@@ -1159,6 +1159,7 @@ export async function upsertAdminEvent(payload: {
   delete rawData.recipientUserName;
   delete rawData.recipientUserTurma;
   delete rawData.recipientUserAvatar;
+  delete rawData.recipientUserIds;
   delete rawData.id;
 
   const lotes = Array.isArray(rawData.lotes)
@@ -1330,7 +1331,7 @@ export async function createAdminEventPoll(payload: {
   const scopedTenantId = resolveEventsTenantId(payload.tenantId);
   const event = await selectEventById(eventId, scopedTenantId || undefined);
   if (!event) {
-    throw new Error("Evento fora da atletica ativa.");
+    throw new Error("Evento fora da atlética ativa.");
   }
 
   const supabase = getSupabaseClient();
@@ -1424,7 +1425,7 @@ export async function toggleEventLike(payload: {
     });
     const scopedTenantId = interactionScope.tenantId;
     if (!interactionScope.eventRow) {
-      throw new Error("Evento nao encontrado.");
+      throw new Error("Evento não encontrado.");
     }
     let existingQuery = supabase
       .from("eventos_likes")
@@ -1812,7 +1813,7 @@ export async function voteEventPollOption(payload: {
   }
   const { data: pollRow, error: selectError } = await selectQuery.maybeSingle();
   if (selectError) throwSupabaseError(selectError);
-  if (!pollRow) throw new Error("Enquete nao existe");
+  if (!pollRow) throw new Error("Enquete não existe");
 
   const options = Array.isArray(pollRow.options) ? [...pollRow.options] : [];
   const index = payload.optionIndex;
@@ -1882,7 +1883,7 @@ export async function voteEventPollOption(payload: {
     }
     const { data: legacyPollRow, error: legacySelectError } = await legacyPollQuery.maybeSingle();
     if (legacySelectError) throwSupabaseError(legacySelectError);
-    if (!legacyPollRow) throw new Error("Enquete nao existe");
+    if (!legacyPollRow) throw new Error("Enquete não existe");
 
     const legacyOptions = Array.isArray(legacyPollRow.options) ? [...legacyPollRow.options] : [];
     const legacyUserVotesMap = asObject(legacyPollRow.userVotes) ?? {};
@@ -1975,7 +1976,7 @@ export async function addEventPollOption(payload: {
     Boolean(asString(payload.autoVoteUserId).trim()) && creatorId.length > 0;
 
   if (isUserGeneratedOption && row.allowUserOptions === false) {
-    throw new Error("Essa enquete nao aceita novas respostas.");
+    throw new Error("Essa enquete não aceita novas respostas.");
   }
   if (currentOptions.length >= EVENT_POLL_OPTION_MAX_COUNT) {
     throw new Error(`Cada enquete aceita no maximo ${EVENT_POLL_OPTION_MAX_COUNT} respostas.`);
@@ -1991,7 +1992,7 @@ export async function addEventPollOption(payload: {
     isUserGeneratedOption &&
     currentOptions.some((entry) => asString(entry.creatorId).trim() === creatorId)
   ) {
-    throw new Error("Cada usuario pode sugerir no maximo uma nova resposta por enquete.");
+    throw new Error("Cada usuário pode sugerir no máximo uma nova resposta por enquete.");
   }
 
   let updateQuery = supabase

@@ -4,14 +4,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { 
-  Lock, ArrowRight, ArrowLeft, Upload, Plus, Trash2, Save, LogOut, 
+  Lock, ArrowRight, Upload, Plus, Trash2, Save, LogOut, 
   Image as ImageIcon, Layout, Edit3, Bell, 
   Calendar, UserPlus, Search, X, Users, ShoppingBag,
   Loader2, MessageCircle, LayoutGrid, MoveVertical, Wallet
 } from 'lucide-react';
 import Image from "next/image";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
-import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
+import {
+  LeagueAdminQuickNav,
+  type LeagueAdminQuickNavKey,
+} from "./_components/LeagueAdminQuickNav";
 import { useToast } from "../../context/ToastContext";
 import { ClientCache } from "@/lib/clientCache";
 import type { CommercePaymentConfig } from "@/lib/commerceCatalog";
@@ -21,11 +24,6 @@ import {
   EVENT_POLL_OPTION_MAX_COUNT,
   EVENT_POLL_QUESTION_MAX_CHARS,
 } from "@/lib/eventsNativeService";
-import {
-  fetchTenantPaymentRecipients,
-  findTenantPaymentRecipient,
-  type TenantPaymentRecipientOption,
-} from "@/lib/paymentRecipients";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -531,8 +529,6 @@ export default function LigasAdminPageContent({
   const isLoggingOutRef = useRef(false);
   const [uploadingLeagueAsset, setUploadingLeagueAsset] = useState(false);
   const [uploadingEventImg, setUploadingEventImg] = useState(false);
-  const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
-  const [loadingPaymentRecipients, setLoadingPaymentRecipients] = useState(false);
   const [novoLote, setNovoLote] = useState<NovoLoteDraft>(createEmptyLoteDraft());
 
   // --- 🦈 MODAL DE GESTÃO DE ENQUETES (NOVO) ---
@@ -544,34 +540,6 @@ export default function LigasAdminPageContent({
   useEffect(() => {
       setActiveTab(lockedTab || routeTab);
   }, [lockedTab, routeTab]);
-
-  useEffect(() => {
-      const cleanTenantId = tenantScopeId.trim();
-      if (!cleanTenantId) {
-          setPaymentRecipients([]);
-          setLoadingPaymentRecipients(false);
-          return;
-      }
-
-      let mounted = true;
-      setLoadingPaymentRecipients(true);
-      const run = async () => {
-          try {
-              const recipients = await fetchTenantPaymentRecipients(cleanTenantId);
-              if (mounted) setPaymentRecipients(recipients);
-          } catch (error: unknown) {
-              console.error("Erro ao carregar responsaveis de comprovante da liga:", error);
-              if (mounted) setPaymentRecipients([]);
-          } finally {
-              if (mounted) setLoadingPaymentRecipients(false);
-          }
-      };
-
-      void run();
-      return () => {
-          mounted = false;
-      };
-  }, [tenantScopeId]);
 
   useEffect(() => {
       const preferredLeagueId = routeLeagueId || readSessionStorageValue(lastSelectedStorageKey);
@@ -1150,8 +1118,8 @@ export default function LigasAdminPageContent({
       });
       addToast(
           existingIndex >= 0
-              ? "Solicitacao aceita e cargo atualizado no rascunho."
-              : "Solicitacao aceita e membro adicionado ao rascunho.",
+              ? "Solicitação aceita e cargo atualizado no rascunho."
+              : "Solicitação aceita e membro adicionado ao rascunho.",
           "success"
       );
   };
@@ -1162,7 +1130,7 @@ export default function LigasAdminPageContent({
           ...ligaData,
           memberRequests: (ligaData.memberRequests || []).filter((entry) => entry.id !== requestId),
       });
-      addToast("Solicitacao removida do rascunho da liga.", "info");
+      addToast("Solicitação removida do rascunho da liga.", "info");
   };
 
   // --- GESTÃO DE EVENTOS ---
@@ -1213,20 +1181,6 @@ export default function LigasAdminPageContent({
       }));
   };
 
-  const handleSelectEventPaymentRecipient = (recipientUserId: string) => {
-      const recipient = findTenantPaymentRecipient(paymentRecipients, recipientUserId);
-      setCurrentEvent((prev) => ({
-          ...normalizeEditableLeagueEvent(prev),
-          recipientUserId: recipient?.userId || "",
-          recipientUserName: recipient?.name || "",
-          recipientUserTurma: recipient?.turma || "",
-          recipientUserAvatar: recipient?.avatarUrl || "",
-          contatoComprovante: recipient?.phone
-              ? normalizePhoneToBrE164(recipient.phone)
-              : String(prev?.contatoComprovante || ""),
-      }));
-  };
-
   const saveEventLocal = async () => {
       if (!ligaData || !currentEvent.titulo) return addToast("Título obrigatório!", "error");
       const novosEventos = [...(ligaData.eventos || [])];
@@ -1237,13 +1191,12 @@ export default function LigasAdminPageContent({
       ) {
           return addToast("Informe um WhatsApp valido para comprovante.", "error");
       }
-      const selectedRecipient = findTenantPaymentRecipient(
-          paymentRecipients,
-          String(currentEvent.recipientUserId || "").trim()
-      );
       const normalizedWhatsapp = normalizePhoneToBrE164(
           String(currentEvent.contatoComprovante || "").trim()
       ).slice(0, PHONE_MAX_LENGTH);
+      if (!normalizedWhatsapp) {
+          return addToast("Informe um WhatsApp para comprovante da liga.", "error");
+      }
       const paymentConfig =
           String(currentEvent.pixChave || "").trim() ||
           String(currentEvent.pixBanco || "").trim() ||
@@ -1254,17 +1207,6 @@ export default function LigasAdminPageContent({
                     banco: String(currentEvent.pixBanco || "").trim(),
                     titular: String(currentEvent.pixTitular || "").trim(),
                     ...(normalizedWhatsapp ? { whatsapp: normalizedWhatsapp } : {}),
-                    ...(selectedRecipient
-                        ? {
-                              recipient: {
-                                  userId: selectedRecipient.userId,
-                                  name: selectedRecipient.name,
-                                  turma: selectedRecipient.turma,
-                                  avatarUrl: selectedRecipient.avatarUrl,
-                                  phone: normalizedWhatsapp || selectedRecipient.phone,
-                              },
-                          }
-                        : {}),
                 }
               : null;
       const eventoSalvo = {
@@ -1281,10 +1223,10 @@ export default function LigasAdminPageContent({
           pixBanco: String(currentEvent.pixBanco || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
           pixTitular: String(currentEvent.pixTitular || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
           contatoComprovante: normalizedWhatsapp,
-          recipientUserId: selectedRecipient?.userId || "",
-          recipientUserName: selectedRecipient?.name || "",
-          recipientUserTurma: selectedRecipient?.turma || "",
-          recipientUserAvatar: selectedRecipient?.avatarUrl || "",
+          recipientUserId: "",
+          recipientUserName: "",
+          recipientUserTurma: "",
+          recipientUserAvatar: "",
           paymentConfig,
           pollQuestion: String(currentEvent.pollQuestion || "").trim().slice(0, EVENT_POLL_QUESTION_MAX_CHARS),
           lotes: (Array.isArray(currentEvent.lotes) ? currentEvent.lotes : [])
@@ -1479,11 +1421,11 @@ export default function LigasAdminPageContent({
           return;
       }
       if (currentPassword !== ligaData.senha) {
-          addToast("A senha atual informada nao confere.", "error");
+          addToast("A senha atual informada não confere.", "error");
           return;
       }
       if (nextPassword !== confirmPassword) {
-          addToast("A confirmacao da nova senha nao confere.", "error");
+          addToast("A confirmação da nova senha não confere.", "error");
           return;
       }
       if (nextPassword.length < 4) {
@@ -1636,10 +1578,6 @@ export default function LigasAdminPageContent({
   // --- RENDERIZAÇÃO ---
   const tenantPath = (path: string) =>
       tenantSlug ? withTenantSlug(tenantSlug, path) : path;
-  const navigateToLeagueHome = () => {
-      const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
-      router.replace(tenantPath(buildLeaguePanelHomePath(scopedLeagueId)));
-  };
   const navigateToSection = (tab: LigaAdminTab) => {
       const nextTab = tab;
       setActiveTab(nextTab);
@@ -1649,6 +1587,25 @@ export default function LigasAdminPageContent({
   const navigateToLeagueStore = () => {
       const scopedLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
       router.push(tenantPath(buildLeagueStorePath(scopedLeagueId)));
+  };
+  const quickNavLeagueId = routeLeagueId || ligaData?.id || selectedLigaId;
+  const quickNavActive: LeagueAdminQuickNavKey =
+      pageVariant === "hub"
+          ? "home"
+          : activeTab === "shark"
+          ? "board"
+          : activeTab === "events"
+          ? "events"
+          : activeTab === "members"
+          ? "members"
+          : "visual";
+  const quickNavHref = {
+      home: tenantPath(buildLeaguePanelHomePath(quickNavLeagueId)),
+      information: tenantPath(buildLeagueSectionPath("visual", quickNavLeagueId)),
+      members: tenantPath(buildLeagueSectionPath("members", quickNavLeagueId)),
+      events: tenantPath(buildLeagueSectionPath("events", quickNavLeagueId)),
+      store: tenantPath(buildLeagueStorePath(quickNavLeagueId)),
+      board: tenantPath(buildLeagueSectionPath("shark", quickNavLeagueId)),
   };
   const openEventPresenceList = (eventId: string) => {
       const cleanEventId = eventId.trim();
@@ -1675,10 +1632,6 @@ export default function LigasAdminPageContent({
           : activeTab === "shark"
           ? "SALVAR BOARD ROUND"
           : "SALVAR INFORMACOES";
-  const visibleTabs: LigaAdminTab[] = lockedTab
-      ? [lockedTab]
-      : ['visual', 'members', 'events', 'shark'];
-
   if (!isLoggedIn) return (
       <div className="min-h-screen bg-black flex items-center justify-center p-4 font-sans text-white">
           <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 p-8 rounded-3xl shadow-2xl space-y-4">
@@ -1716,23 +1669,33 @@ export default function LigasAdminPageContent({
                           <h1 className="text-xl font-black uppercase flex items-center gap-2">
                               <Layout className="text-blue-500" /> {ligaData.nome}
                           </h1>
-                          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Painel de Gestao</p>
+                          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Painel de Gestão</p>
                       </div>
                       <button onClick={handleLeaguePanelLogout} className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition">
                           <LogOut size={18} />
                       </button>
                   </div>
 
+                  <LeagueAdminQuickNav
+                      active={quickNavActive}
+                      homeHref={quickNavHref.home}
+                      informationHref={quickNavHref.information}
+                      membersHref={quickNavHref.members}
+                      eventsHref={quickNavHref.events}
+                      storeHref={quickNavHref.store}
+                      boardHref={quickNavHref.board}
+                  />
+
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Acesso rapido</p>
-                      <h2 className="mt-2 text-2xl font-black text-white">Escolha a area que voce quer editar</h2>
+                      <h2 className="mt-2 text-2xl font-black text-white">Escolha a área que você quer editar</h2>
                       <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-                          Cada botao abre somente a pagina da secao escolhida, sem misturar as outras areas do painel.
+                          Cada botão abre somente a página da seção escolhida, sem misturar as outras áreas do painel.
                       </p>
                       <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                           <button onClick={() => navigateToSection("visual")} className="rounded-2xl border border-zinc-800 bg-black/40 p-5 text-left transition hover:border-emerald-500/30 hover:bg-zinc-900">
                               <Layout className="text-emerald-400" size={20} />
-                              <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Informacoes</p>
+                              <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-zinc-500">Informações</p>
                               <p className="mt-2 text-lg font-black text-white">Editar dados da liga</p>
                           </button>
                           <button onClick={() => navigateToSection("members")} className="rounded-2xl border border-zinc-800 bg-black/40 p-5 text-left transition hover:border-emerald-500/30 hover:bg-zinc-900">
@@ -1778,28 +1741,27 @@ export default function LigasAdminPageContent({
                 </button>
             </div>
 
-            {lockedTab ? (
-                <button
-                    type="button"
-                    onClick={navigateToLeagueHome}
-                    className="inline-flex w-fit items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-xs font-black uppercase text-zinc-300 transition hover:border-emerald-500/40 hover:text-white"
-                >
-                    <ArrowLeft size={16}/>
-                    Voltar para a home da liga
-                </button>
-            ) : null}
+            <LeagueAdminQuickNav
+                active={quickNavActive}
+                homeHref={quickNavHref.home}
+                informationHref={quickNavHref.information}
+                membersHref={quickNavHref.members}
+                eventsHref={quickNavHref.events}
+                storeHref={quickNavHref.store}
+                boardHref={quickNavHref.board}
+            />
 
-            <div className={`grid grid-cols-1 gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-2 ${visibleTabs.length > 1 ? 'md:grid-cols-4' : ''}`}>
-                <button onClick={() => navigateToSection('visual')} className={`${!visibleTabs.includes('visual') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'visual' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+            <div className="hidden">
+                <button onClick={() => navigateToSection('visual')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'visual' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
                     Informações
                 </button>
-                <button onClick={() => navigateToSection('members')} className={`${!visibleTabs.includes('members') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'members' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                <button onClick={() => navigateToSection('members')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'members' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
                     Membros
                 </button>
-                <button onClick={() => navigateToSection('events')} className={`${!visibleTabs.includes('events') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'events' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                <button onClick={() => navigateToSection('events')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'events' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
                     Eventos
                 </button>
-                <button onClick={() => navigateToSection('shark')} className={`${!visibleTabs.includes('shark') ? 'hidden ' : ''}rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
+                <button onClick={() => navigateToSection('shark')} className={`rounded-xl px-4 py-3 text-left text-xs font-bold uppercase transition ${activeTab === 'shark' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:bg-zinc-800/50'}`}>
                     Board Round
                 </button>
             </div>
@@ -1808,7 +1770,7 @@ export default function LigasAdminPageContent({
           {/* 1. VISUAL */}
           {activeTab === 'visual' && ligaData && (
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl space-y-6">
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="hidden gap-3 md:grid-cols-3">
                       <button type="button" onClick={() => navigateToSection("members")} className="rounded-xl border border-zinc-800 bg-black/30 p-4 text-left transition hover:border-cyan-500/30 hover:bg-cyan-500/10">
                           <Users className="text-cyan-300" size={18} />
                           <p className="mt-3 text-xs font-black uppercase text-white">Membros</p>
@@ -1979,7 +1941,7 @@ export default function LigasAdminPageContent({
                           </div>
                       ) : (
                           <div className="mt-4 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/70 p-6 text-center text-xs text-zinc-500">
-                              Nenhuma solicitacao pendente nesta liga.
+                              Nenhuma solicitação pendente nesta liga.
                           </div>
                       )}
                   </div>
@@ -2084,7 +2046,7 @@ export default function LigasAdminPageContent({
           {activeTab === 'events' && ligaData && (
               <div className="space-y-6">
                   <div className="flex justify-between items-center bg-zinc-900 p-4 rounded-xl border border-zinc-800">
-                      <div><h3 className="text-sm font-bold uppercase text-white">Eventos da Liga</h3><p className="text-[10px] text-zinc-500">Ao salvar no modal, o evento ja sincroniza com a agenda publica e com a pagina de eventos.</p></div>
+                      <div><h3 className="text-sm font-bold uppercase text-white">Eventos da Liga</h3><p className="text-[10px] text-zinc-500">Ao salvar no modal, o evento já sincroniza com a agenda pública e com a página de eventos.</p></div>
                       <button onClick={() => handleOpenEventModal(null)} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition"><Calendar size={14}/> Criar Evento</button>
                   </div>
                   <div className="space-y-3">
@@ -2115,7 +2077,7 @@ export default function LigasAdminPageContent({
                                       <div className="flex gap-2 mt-2">
                                           <button onClick={() => handleOpenEventModal(idx)} className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1"><Edit3 size={10}/> Editar Evento</button>
                                           {ev.globalEventId && (
-                                              <button onClick={() => openEventPresenceList(ev.globalEventId || "")} className="text-[10px] text-cyan-400 hover:underline flex items-center gap-1"><Users size={10}/> Lista Presenca</button>
+                                              <button onClick={() => openEventPresenceList(ev.globalEventId || "")} className="text-[10px] text-cyan-400 hover:underline flex items-center gap-1"><Users size={10}/> Lista Presença</button>
                                           )}
                                           {ev.globalEventId && (
                                               <button onClick={() => setPollModal(ev.globalEventId || null)} className="text-[10px] text-purple-400 hover:underline flex items-center gap-1"><MessageCircle size={10}/> Gerenciar Enquetes</button>
@@ -2457,15 +2419,10 @@ export default function LigasAdminPageContent({
                               <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.pixBanco || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pixBanco: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH) })} />
                               <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.pixTitular || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pixTitular: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH) })} />
                           </div>
-                          <PaymentRecipientSelect
-                              id="league-event-payment-recipient"
-                              name="league_event_payment_recipient"
-                              label="Usuarios que podem receber."
-                              options={paymentRecipients}
-                              selectedUserId={String(currentEvent.recipientUserId || "")}
-                              loading={loadingPaymentRecipients}
-                              onChange={handleSelectEventPaymentRecipient}
-                          />
+                          <div className="rounded-xl border border-zinc-800 bg-black/30 px-3 py-2.5 text-[11px] text-zinc-500">
+                              <p className="font-black uppercase tracking-[0.18em] text-zinc-400">Comprovante da liga</p>
+                              <p className="mt-1">Informe o WhatsApp da própria liga ou do responsável deste evento.</p>
+                          </div>
                           <input type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={currentEvent.contatoComprovante || ""} onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), contatoComprovante: normalizePhoneToBrE164(e.target.value) })} />
                       </div>
 
@@ -2492,8 +2449,8 @@ export default function LigasAdminPageContent({
                       </div>
                       
                       <div>
-                          <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Descricao Completa</label>
-                          <textarea maxLength={EVENT_DESCRIPTION_MAX_LENGTH} className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" placeholder="Detalhes, regras e informacoes principais..." value={currentEvent.descricao || ""} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), descricao: e.target.value.slice(0, EVENT_DESCRIPTION_MAX_LENGTH) })} />
+                          <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Descrição Completa</label>
+                          <textarea maxLength={EVENT_DESCRIPTION_MAX_LENGTH} className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24 resize-none focus:border-emerald-500 outline-none" placeholder="Detalhes, regras e informações principais..." value={currentEvent.descricao || ""} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), descricao: e.target.value.slice(0, EVENT_DESCRIPTION_MAX_LENGTH) })} />
                       </div>
 
                       <div className="bg-purple-900/10 border border-purple-500/20 p-4 rounded-xl">
@@ -2512,7 +2469,7 @@ export default function LigasAdminPageContent({
                           <label className="text-xs text-zinc-500 font-bold uppercase mb-3 block border-b border-zinc-800 pb-2">Configurar Lotes</label>
                           <div className="grid grid-cols-2 gap-2 mb-2">
                               <input type="text" maxLength={EVENT_LOTE_NAME_MAX_LENGTH} placeholder="Nome (ex: Lote 1)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.nome} onChange={e => setNovoLote({ ...novoLote, nome: e.target.value.slice(0, EVENT_LOTE_NAME_MAX_LENGTH) })} />
-                              <input type="text" placeholder="Preco (R$)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.preco} onChange={e => setNovoLote({ ...novoLote, preco: e.target.value })} />
+                              <input type="text" placeholder="Preço (R$)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.preco} onChange={e => setNovoLote({ ...novoLote, preco: e.target.value })} />
                           </div>
                           <button onClick={handleAddLoteToCurrentEvent} className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold text-xs uppercase hover:bg-emerald-500">Adicionar Lote</button>
                           <div className="space-y-1 mt-2 max-h-24 overflow-y-auto custom-scrollbar">

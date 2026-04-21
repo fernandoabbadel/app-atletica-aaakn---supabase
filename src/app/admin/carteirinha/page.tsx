@@ -61,7 +61,7 @@ export default function AdminCarteirinhaPage() {
         console.error("Erro ao carregar config:", error);
         if (!mounted) return;
         setTurmas(getDefaultTurmas());
-        addToast("Erro ao carregar configuracoes.", "error");
+        addToast("Erro ao carregar configurações.", "error");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -81,7 +81,7 @@ export default function AdminCarteirinhaPage() {
       });
       const url = resolveCarteirinhaBackgroundUrl(assetRef);
       if (!url) {
-        throw new Error("Upload concluido, mas nao foi possivel resolver a imagem.");
+        throw new Error("Upload concluído, mas não foi possível resolver a imagem.");
       }
 
       setConfig((prev) => ({
@@ -113,7 +113,7 @@ export default function AdminCarteirinhaPage() {
     setSaving(true);
     try {
       await saveCarteirinhaConfig(config, { tenantId: activeTenantId || undefined });
-      addToast("Configuracoes salvas!", "success");
+      addToast("Configurações salvas!", "success");
     } catch (error: unknown) {
       console.error("Erro ao salvar:", error);
       addToast("Erro ao salvar.", "error");

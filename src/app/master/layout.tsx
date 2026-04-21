@@ -121,7 +121,7 @@ export default function MasterLayout({
     { name: "Perfis do Admin", path: "/master/permissoes/perfis-admin", icon: <PanelLeft size={18} /> },
     { name: "Solicitacoes", path: "/master/solicitacoes", icon: <CreditCard size={18} /> },
     {
-      name: "Painel da Atletica",
+      name: "Painel da Atlética",
       path: tenantAdminPath,
       icon: <Waypoints size={18} />,
       disabled: tenantAdminPath.length === 0,
@@ -191,7 +191,7 @@ export default function MasterLayout({
                 Contexto atual
               </p>
               <p className="mt-2 text-xs font-bold text-white">
-                {isOverrideActive ? tenantName || "Atletica selecionada" : "Plataforma USC"}
+                {isOverrideActive ? tenantName || "Atlética selecionada" : "Plataforma USC"}
               </p>
               <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
                 {isOverrideActive ? "navegando com contexto forcado" : "modo global ativo"}
@@ -219,7 +219,7 @@ export default function MasterLayout({
                   return (
                     <div
                       key={itemKey}
-                      title="Selecione uma atletica no topo antes de abrir o painel admin."
+                      title="Selecione uma atlética no topo antes de abrir o painel admin."
                       className={itemClassName}
                     >
                       {item.icon}

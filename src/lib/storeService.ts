@@ -645,11 +645,13 @@ export async function fetchStoreProducts(options?: {
   tenantId?: string | null;
   category?: string | null;
   active?: boolean | null;
+  sellerType?: "tenant" | "mini_vendor" | "league" | null;
 }): Promise<Row[]> {
   const maxResults = boundedLimit(options?.maxResults ?? 80, MAX_PRODUCTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const scopedTenantId = resolveStoreTenantId(options?.tenantId);
   const category = asString(options?.category).trim();
+  const sellerType = options?.sellerType ? normalizeStoreSellerType(options.sellerType) : "";
   const productFilters: Array<{ field: string; value: unknown }> = [];
   if (category) {
     productFilters.push({ field: "categoria", value: category });
@@ -657,9 +659,12 @@ export async function fetchStoreProducts(options?: {
   if (typeof options?.active === "boolean") {
     productFilters.push({ field: "active", value: options.active });
   }
+  if (sellerType) {
+    productFilters.push({ field: "seller_type", value: sellerType });
+  }
   const cacheKey = `${scopedTenantId || "all"}:${maxResults}:${category || "all"}:${
     typeof options?.active === "boolean" ? String(options.active) : "all"
-  }`;
+  }:${sellerType || "all"}`;
 
   if (!forceRefresh) {
     const cached = getCache(productsFeedCache, cacheKey);
@@ -860,7 +865,7 @@ export async function createStoreOrder(payload: {
       const { error: notificationError } = await supabase.from("notifications").insert({
         userId: requestPayload.userId,
         title: "Compra em Analise",
-        message: `Seu pedido de ${requestPayload.productName} foi enviado para aprovacao.`,
+        message: `Seu pedido de ${requestPayload.productName} foi enviado para aprovação.`,
         link: `/loja/${requestPayload.productId}`,
         read: false,
         type: "order",
@@ -1063,14 +1068,14 @@ export async function approveStoreOrder(payload: {
             }
           }
         } catch (userError: unknown) {
-          console.warn("Loja: pedido aprovado, mas falhou ao atualizar XP/Selos do usuario.", userError);
+          console.warn("Loja: pedido aprovado, mas falhou ao atualizar XP/Selos do usuário.", userError);
         }
 
         try {
           const { error: notificationError } = await supabase.from("notifications").insert({
             userId: payload.userId,
             title: "Pagamento Aprovado!",
-            message: `Sua compra de ${payload.productName} foi confirmada. Voce ganhou ${xpGain} XP!`,
+            message: `Sua compra de ${payload.productName} foi confirmada. Você ganhou ${xpGain} XP!`,
             read: false,
             type: "order_approved",
             createdAt: nowIso,

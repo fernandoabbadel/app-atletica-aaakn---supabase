@@ -505,7 +505,7 @@ export default function LojaClientPage({
       title: filtroCategoria === "Todos" ? `Lojinha ${brandLabel}` : filtroCategoria,
       description:
         filtroCategoria === "Todos"
-          ? "Produtos da atletica e lojinhas aprovadas em um unico lugar."
+          ? "Produtos da atlética e lojinhas aprovadas em um único lugar."
           : `Explore ${filtroCategoria.toLowerCase()} com a capa da categoria em destaque no topo.`,
     };
   }, [
@@ -570,7 +570,7 @@ export default function LojaClientPage({
               <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500"/>
               <input 
                   type="text" 
-                  placeholder="O que voce procura?" 
+                  placeholder="O que você procura?" 
                   className="w-full rounded-xl border border-zinc-800 bg-zinc-900 py-3 pl-12 pr-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-emerald-500"
                   value={busca}
                   onChange={e => setBusca(e.target.value)}
@@ -676,7 +676,7 @@ export default function LojaClientPage({
                     const sellerLogo = prod.seller?.logoUrl || tenantLogoUrl || "/logo.png";
                     const sellerName = prod.seller?.name || brandLabel;
                     const sellerKindLabel =
-                      prod.seller?.type === "league" ? "Loja da liga" : "Loja da atletica";
+                      prod.seller?.type === "league" ? "Loja da liga" : "Loja da atlética";
                     const isDisabledSale = status !== "ativo";
                     const productHref = tenantSlug ? withTenantSlug(tenantSlug, `/loja/${prod.id}`) : `/loja/${prod.id}`;
                     const sellerHref =

@@ -285,7 +285,7 @@ export default function LandingEditorShell({
           {saving ? "Salvando..." : (
             <>
               <Save size={18} />
-              Publicar Alteracoes
+              Publicar Alterações
             </>
           )}
         </button>
@@ -305,7 +305,7 @@ export default function LandingEditorShell({
         </div>
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-            {isPlatform ? "Marca oficial da plataforma" : "Marca oficial da atletica"}
+            {isPlatform ? "Marca oficial da plataforma" : "Marca oficial da atlética"}
           </p>
           <h2 className="mt-1 flex items-center gap-2 text-xl font-black text-white">
             <Building2 size={18} className="text-cyan-400" />
@@ -712,7 +712,7 @@ export default function LandingEditorShell({
                   </h2>
                   <p className="mt-1 text-xs text-zinc-500">
                     Apenas parceiros com status ativo aparecem na landing por padrao. Os
-                    demais precisam ser ativados no modulo de parceiros antes de entrar na
+                    demais precisam ser ativados no módulo de parceiros antes de entrar na
                     vitrine oficial.
                   </p>
                 </div>
@@ -736,7 +736,7 @@ export default function LandingEditorShell({
                       ? isVisible
                         ? "Exibindo agora"
                         : "Oculto agora"
-                      : "Nao elegivel";
+                      : "Não elegível";
 
                     return (
                       <div
@@ -766,7 +766,7 @@ export default function LandingEditorShell({
                                 ? isVisible
                                   ? "Visivel na landing oficial."
                                   : "Oculto na landing oficial."
-                                : "Parceiro inativo no modulo de parceiros. Nao aparece na landing."}
+                                : "Parceiro inativo no módulo de parceiros. Não aparece na landing."}
                             </p>
                           </div>
                         </div>
@@ -813,7 +813,7 @@ export default function LandingEditorShell({
                               <Eye size={14} />
                             )}
                             {!isActivePartner
-                              ? "Ative no modulo Parceiros"
+                              ? "Ative no módulo Parceiros"
                               : isVisible
                                 ? "Ocultar da landing"
                                 : "Mostrar na landing"}

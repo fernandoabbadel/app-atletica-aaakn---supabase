@@ -96,7 +96,7 @@ export default function AdminDenunciasComunidadePage() {
                       href={`/admin/usuarios/${row.reporterId}`}
                       className="text-emerald-400 hover:underline"
                     >
-                      Usuario
+                      Usuário
                     </Link>
                   ) : null}
                 </div>
@@ -123,7 +123,7 @@ export default function AdminDenunciasComunidadePage() {
                 disabled={page >= totalPages}
                 className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40"
               >
-                Proxima
+                Próxima
               </button>
             </div>
           </div>

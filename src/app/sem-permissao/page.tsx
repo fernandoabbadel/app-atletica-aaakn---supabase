@@ -7,14 +7,14 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const FRASES = [
-  "Seu perfil atual nao tem acesso a esta area.",
-  "Essa pagina exige uma permissao diferente.",
-  "O contexto atual nao libera esse modulo.",
+  "Seu perfil atual não tem acesso a esta área.",
+  "Essa página exige uma permissão diferente.",
+  "O contexto atual não libera esse módulo.",
   "Acesso restrito para o perfil em uso.",
-  "Voce chegou numa area reservada do app.",
-  "Esse conteudo nao esta disponivel para o seu acesso.",
-  "Sua conta nao tem permissao para abrir esta pagina.",
-  "Tente voltar ao painel principal da atletica.",
+  "Você chegou numa área reservada do app.",
+  "Esse conteúdo não está disponível para o seu acesso.",
+  "Sua conta não tem permissão para abrir esta página.",
+  "Tente voltar ao painel principal da atlética.",
 ];
 
 export default function SemPermissao() {

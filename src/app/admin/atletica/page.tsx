@@ -85,7 +85,7 @@ const PALETTE_OPTIONS: Array<{ value: TenantPaletteKey; label: string }> = [
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message;
-  return "Nao foi possivel salvar a atletica.";
+  return "Não foi possível salvar a atlética.";
 };
 
 export default function AdminAtleticaPage() {
@@ -128,7 +128,7 @@ export default function AdminAtleticaPage() {
         ]);
         if (!mounted) return;
         if (!tenant) {
-          addToast("Atletica nao encontrada.", "error");
+          addToast("Atlética não encontrada.", "error");
           return;
         }
 
@@ -199,11 +199,11 @@ export default function AdminAtleticaPage() {
   const handleSave = async () => {
     if (!tenantId) return;
     if (form.contatoEmail.trim() && !isValidEmail(form.contatoEmail)) {
-      addToast("Informe um email de contato valido.", "error");
+      addToast("Informe um email de contato válido.", "error");
       return;
     }
     if (form.contatoTelefone.trim() && !hasValidPhoneLength(form.contatoTelefone)) {
-      addToast("Informe um telefone valido com DDI e somente numeros.", "error");
+      addToast("Informe um telefone válido com DDI e somente números.", "error");
       return;
     }
 
@@ -247,12 +247,12 @@ export default function AdminAtleticaPage() {
             }),
           ]);
         } catch (refreshError: unknown) {
-          console.warn("Falha ao atualizar cache publico da atletica.", refreshError);
+          console.warn("Falha ao atualizar cache público da atlética.", refreshError);
         }
       }
 
       refreshTenantTheme();
-      addToast("Dados da atletica atualizados.", "success");
+      addToast("Dados da atlética atualizados.", "success");
     } catch (error: unknown) {
       addToast(extractErrorMessage(error), "error");
     } finally {
@@ -271,7 +271,7 @@ export default function AdminAtleticaPage() {
       return;
     }
     if (financeiroForm.whatsapp.trim() && !hasValidPhoneLength(financeiroForm.whatsapp)) {
-      addToast("Informe um WhatsApp valido para comprovante.", "error");
+      addToast("Informe um WhatsApp válido para comprovante.", "error");
       return;
     }
 
@@ -286,7 +286,7 @@ export default function AdminAtleticaPage() {
         },
         { tenantId }
       );
-      addToast("Financeiro da atletica atualizado.", "success");
+      addToast("Financeiro da atlética atualizado.", "success");
     } catch (error: unknown) {
       addToast(extractErrorMessage(error), "error");
     } finally {
@@ -317,10 +317,10 @@ export default function AdminAtleticaPage() {
               Voltar ao admin
             </Link>
             <p className="mt-4 text-[10px] font-black uppercase tracking-[0.28em] text-emerald-200">
-              Dados da atletica
+              Dados da atlética
             </p>
             <h1 className="mt-2 flex items-center gap-3 text-3xl font-black uppercase tracking-tight text-white">
-              <Building2 className="text-emerald-300" /> {form.sigla || form.nome || "Atletica"}
+              <Building2 className="text-emerald-300" /> {form.sigla || form.nome || "Atlética"}
             </h1>
           </div>
         </div>
@@ -403,7 +403,7 @@ export default function AdminAtleticaPage() {
                   className="mt-2 brand-input"
                 >
                   <option value="" className="bg-zinc-950 text-white">
-                    Selecione a area
+                    Selecione a área
                   </option>
                   {TENANT_AREA_OPTIONS.map((option) => (
                     <option
@@ -432,14 +432,14 @@ export default function AdminAtleticaPage() {
           <div className="space-y-4">
             <div>
               <label className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                Logo da atletica
+                Logo da atlética
               </label>
               <div className="mt-2 flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-black/35 p-4">
                 <div className="flex items-center gap-4">
                   <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950">
                     <Image
                       src={form.logoUrl || "/logo.png"}
-                      alt={`Logo ${form.sigla || form.nome || "atletica"}`}
+                      alt={`Logo ${form.sigla || form.nome || "atlética"}`}
                       fill
                       sizes="80px"
                       className="object-cover"
@@ -553,10 +553,10 @@ export default function AdminAtleticaPage() {
                 />
                 <div>
                   <span className="block text-sm font-bold text-zinc-200">
-                    Exibir na pagina visitante
+                    Exibir na página visitante
                   </span>
                   <span className="text-[11px] text-zinc-500">
-                    Desmarcado: a atletica sai da vitrine, mas o link direto continua funcionando.
+                    Desmarcado: a atlética sai da vitrine, mas o link direto continua funcionando.
                   </span>
                 </div>
               </label>
@@ -568,7 +568,7 @@ export default function AdminAtleticaPage() {
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-xs font-black uppercase tracking-[0.16em] text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {saving ? "Salvando atletica..." : "Salvar atletica"}
+              {saving ? "Salvando atlética..." : "Salvar atlética"}
             </button>
           </div>
         </div>
@@ -581,7 +581,7 @@ export default function AdminAtleticaPage() {
               Financeiro
             </p>
             <h2 className="mt-2 text-xl font-black uppercase text-white">
-              Pix e Comprovante da Atletica
+              Pix e Comprovante da Atlética
             </h2>
             <p className="mt-1 text-sm text-zinc-400">
               Esse bloco vira o padrao para loja e eventos, mas cada produto ou evento pode sobrescrever.

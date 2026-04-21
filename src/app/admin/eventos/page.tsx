@@ -6,12 +6,12 @@ import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, 
   Image as ImageIcon, X, Tag, Users, 
   CheckCircle, Download, BarChart3, Lock, MoveVertical,
-  Star, MessageCircle, Check, RotateCcw, Loader2, Wallet
+  Star, MessageCircle, Check, RotateCcw, Loader2, Wallet, UserPlus
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image"; 
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
-import { PaymentRecipientSelect } from "@/components/PaymentRecipientSelect";
+import { PaymentRecipientCheckboxList } from "@/components/PaymentRecipientCheckboxList";
 import { PaymentReceiversManager } from "@/components/PaymentReceiversManager";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
@@ -45,7 +45,7 @@ import {
 import { normalizePaymentConfig, type CommercePaymentConfig } from "@/lib/commerceCatalog";
 import {
   fetchTenantPaymentRecipients,
-  findTenantPaymentRecipient,
+  filterTenantPaymentRecipientsByIds,
   type TenantPaymentRecipientOption,
 } from "@/lib/paymentRecipients";
 import { fetchPlanCatalog, type PlanRecord } from "../../../lib/plansPublicService";
@@ -144,6 +144,7 @@ interface Evento {
   recipientUserName?: string;
   recipientUserTurma?: string;
   recipientUserAvatar?: string;
+  recipientUserIds?: string[];
   paymentConfig?: CommercePaymentConfig | null;
 }
 
@@ -183,6 +184,33 @@ const resolvePaymentRecipientLabel = (value: unknown): string => {
       .filter(Boolean)
       .join(" - ");
 };
+
+const getPaymentRecipientIdsFromConfig = (
+  paymentConfig?: CommercePaymentConfig | null
+): string[] => {
+    const rows =
+      paymentConfig?.recipients?.length
+        ? paymentConfig.recipients
+        : paymentConfig?.recipient
+          ? [paymentConfig.recipient]
+          : [];
+
+    return Array.from(
+      new Set(
+        rows
+          .map((entry) => String(entry.userId || "").trim())
+          .filter((entry) => entry.length > 0)
+      )
+    );
+};
+
+const toCommerceRecipientSnapshot = (recipient: TenantPaymentRecipientOption) => ({
+    userId: recipient.userId,
+    name: recipient.name,
+    turma: recipient.turma,
+    avatarUrl: recipient.avatarUrl,
+    phone: recipient.phone,
+});
 
 const buildLotePlanPrices = (
   plans: PlanRecord[],
@@ -228,6 +256,9 @@ export default function AdminEventosPage() {
   const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [planCatalog, setPlanCatalog] = useState<PlanRecord[]>([]);
+  const [eventPaymentRecipients, setEventPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
+  const [loadingEventPaymentRecipients, setLoadingEventPaymentRecipients] = useState(false);
+  const [showEventReceiversManager, setShowEventReceiversManager] = useState(false);
   
   // Modais e Estados
   const [showModal, setShowModal] = useState(false);
@@ -243,48 +274,17 @@ export default function AdminEventosPage() {
   const [uploading, setUploading] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
-  const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
-  const [loadingPaymentRecipients, setLoadingPaymentRecipients] = useState(false);
-  const [showReceiversManager, setShowReceiversManager] = useState(false);
 
   const [novoEvento, setNovoEvento] = useState<Partial<Evento>>({
     titulo: "", data: "", hora: "", local: "", tipo: "Festa", destaque: "", mapsUrl: "", imagem: "", descricao: "", lotes: [],
     imagePositionY: 50,
     // 🦈 Inicialização dos novos campos
-    pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", recipientUserId: "", recipientUserName: "", recipientUserTurma: "", recipientUserAvatar: "", paymentConfig: null
+    pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", recipientUserId: "", recipientUserName: "", recipientUserTurma: "", recipientUserAvatar: "", recipientUserIds: [], paymentConfig: null
   });
   const [novoLote, setNovoLote] = useState<{ nome: string; preco: string; status: StatusLote }>({ nome: "", preco: "", status: "ativo" });
   
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
   const [pollDraftOptions, setPollDraftOptions] = useState<string[]>(["", ""]);
-
-  useEffect(() => {
-      const cleanTenantId = activeTenantId.trim();
-      if (!cleanTenantId) {
-          setPaymentRecipients([]);
-          setLoadingPaymentRecipients(false);
-          return;
-      }
-
-      let mounted = true;
-      setLoadingPaymentRecipients(true);
-      const run = async () => {
-          try {
-              const recipients = await fetchTenantPaymentRecipients(cleanTenantId);
-              if (mounted) setPaymentRecipients(recipients);
-          } catch (error: unknown) {
-              console.error(error);
-              if (mounted) setPaymentRecipients([]);
-          } finally {
-              if (mounted) setLoadingPaymentRecipients(false);
-          }
-      };
-
-      void run();
-      return () => {
-          mounted = false;
-      };
-  }, [activeTenantId]);
 
   const mapEventRow = (raw: Record<string, unknown>): Evento => ({
       id: String(raw.id || ""),
@@ -337,10 +337,10 @@ export default function AdminEventosPage() {
         typeof (raw.payment_config as CommercePaymentConfig | null | undefined)?.recipient?.avatarUrl === "string"
           ? (raw.payment_config as CommercePaymentConfig).recipient?.avatarUrl || ""
           : "",
-      paymentConfig:
-        raw.payment_config && typeof raw.payment_config === "object"
-          ? (raw.payment_config as Evento["paymentConfig"])
-          : null,
+      recipientUserIds: getPaymentRecipientIdsFromConfig(
+        normalizePaymentConfig(raw.payment_config)
+      ),
+      paymentConfig: normalizePaymentConfig(raw.payment_config),
   });
 
   const loadEventos = useCallback(async (forceRefresh = true) => {
@@ -474,6 +474,35 @@ export default function AdminEventosPage() {
   }, [loadEventos, loadPlanCatalog]);
 
   useEffect(() => {
+      const cleanTenantId = activeTenantId.trim();
+      if (!cleanTenantId) {
+          setEventPaymentRecipients([]);
+          setLoadingEventPaymentRecipients(false);
+          return;
+      }
+
+      let mounted = true;
+      setLoadingEventPaymentRecipients(true);
+
+      const run = async () => {
+          try {
+              const recipients = await fetchTenantPaymentRecipients(cleanTenantId, "events");
+              if (mounted) setEventPaymentRecipients(recipients);
+          } catch (error: unknown) {
+              console.error(error);
+              if (mounted) setEventPaymentRecipients([]);
+          } finally {
+              if (mounted) setLoadingEventPaymentRecipients(false);
+          }
+      };
+
+      void run();
+      return () => {
+          mounted = false;
+      };
+  }, [activeTenantId]);
+
+  useEffect(() => {
       if (planCatalog.length === 0) return;
 
       setNovoEvento((prev) => {
@@ -556,7 +585,7 @@ export default function AdminEventosPage() {
   const handleOpenCreate = () => {
       setNovoEvento({ 
           titulo: "", data: "", hora: "", local: "", tipo: "Festa", destaque: "", mapsUrl: "", imagem: "", descricao: "", lotes: [], imagePositionY: 50,
-          pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", recipientUserId: "", recipientUserName: "", recipientUserTurma: "", recipientUserAvatar: "", paymentConfig: null
+          pixChave: "", pixBanco: "", pixTitular: "", contatoComprovante: "", saleStatus: "ativo", recipientUserId: "", recipientUserName: "", recipientUserTurma: "", recipientUserAvatar: "", recipientUserIds: [], paymentConfig: null
       });
       setEditingId(null);
       setIsEditing(false);
@@ -581,6 +610,7 @@ export default function AdminEventosPage() {
           recipientUserName: evento.recipientUserName || "",
           recipientUserTurma: evento.recipientUserTurma || "",
           recipientUserAvatar: evento.recipientUserAvatar || "",
+          recipientUserIds: evento.recipientUserIds || getPaymentRecipientIdsFromConfig(evento.paymentConfig),
           paymentConfig: evento.paymentConfig || null,
       });
       if (!isValidDate || !isValidTime) addToast("Formato de data antigo. Por favor, atualize.", "info");
@@ -597,20 +627,6 @@ export default function AdminEventosPage() {
       handleOpenEdit(targetEvent);
   }, [eventos, handleOpenEdit, searchParams, showModal]);
 
-  const handleSelectEventPaymentRecipient = (recipientUserId: string) => {
-      const recipient = findTenantPaymentRecipient(paymentRecipients, recipientUserId);
-      setNovoEvento((prev) => ({
-          ...prev,
-          recipientUserId: recipient?.userId || "",
-          recipientUserName: recipient?.name || "",
-          recipientUserTurma: recipient?.turma || "",
-          recipientUserAvatar: recipient?.avatarUrl || "",
-          contatoComprovante: recipient?.phone
-              ? normalizePhoneToBrE164(recipient.phone)
-              : String(prev.contatoComprovante || ""),
-      }));
-  };
-
   const handleSave = async () => {
     if (!novoEvento.titulo?.trim()) return addToast("Titulo obrigatorio!", "error");
     if (!novoEvento.data || !novoEvento.hora) return addToast("Data e hora obrigatorios!", "error");
@@ -620,6 +636,18 @@ export default function AdminEventosPage() {
     ) {
       return addToast("Informe um WhatsApp valido para o comprovante.", "error");
     }
+
+    const selectedPaymentRecipients = filterTenantPaymentRecipientsByIds(
+      eventPaymentRecipients,
+      novoEvento.recipientUserIds || []
+    );
+    const primaryPaymentRecipient = selectedPaymentRecipients[0] || null;
+    const hasPaymentConfig =
+      Boolean(novoEvento.pixChave) ||
+      Boolean(novoEvento.pixBanco) ||
+      Boolean(novoEvento.pixTitular) ||
+      Boolean(novoEvento.contatoComprovante) ||
+      selectedPaymentRecipients.length > 0;
 
     const eventoPayload: Record<string, unknown> = {
         ...novoEvento,
@@ -644,29 +672,18 @@ export default function AdminEventosPage() {
         })),
         status: novoEvento.status || "ativo",
         sale_status: novoEvento.saleStatus || "ativo",
-        payment_config:
-          novoEvento.pixChave ||
-          novoEvento.pixBanco ||
-          novoEvento.pixTitular ||
-          novoEvento.contatoComprovante ||
-          paymentRecipients.length > 0
+        payment_config: hasPaymentConfig
             ? {
                 chave: String(novoEvento.pixChave || "").trim(),
                 banco: String(novoEvento.pixBanco || "").trim(),
                 titular: String(novoEvento.pixTitular || "").trim(),
                 whatsapp: normalizePhoneToBrE164(String(novoEvento.contatoComprovante || "").trim()),
-                ...(String(novoEvento.recipientUserId || "").trim()
-                  ? {
-                      recipient: {
-                        userId: String(novoEvento.recipientUserId || "").trim(),
-                        name: String(novoEvento.recipientUserName || "").trim(),
-                        turma: String(novoEvento.recipientUserTurma || "").trim(),
-                    avatarUrl: String(novoEvento.recipientUserAvatar || "").trim(),
-                    phone: normalizePhoneToBrE164(String(novoEvento.contatoComprovante || "").trim()),
-                  },
-                }
-              : {}),
-              ...(paymentRecipients.length > 0 ? { recipients: paymentRecipients } : {}),
+                ...(primaryPaymentRecipient
+                  ? { recipient: toCommerceRecipientSnapshot(primaryPaymentRecipient) }
+                  : {}),
+                ...(selectedPaymentRecipients.length > 0
+                  ? { recipients: selectedPaymentRecipients.map(toCommerceRecipientSnapshot) }
+                  : {}),
             }
           : null,
         updatedAt: new Date().toISOString(),
@@ -1020,11 +1037,13 @@ export default function AdminEventosPage() {
           </Link>
           <button
             type="button"
-            onClick={() => setShowReceiversManager(true)}
-            className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-cyan-300 transition hover:bg-cyan-500/20"
+            onClick={() => setShowEventReceiversManager(true)}
+            className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-purple-300 transition hover:bg-purple-500/20"
           >
-            <Users size={14} />
-            Adicionar recebedores
+            <span className="inline-flex items-center gap-2">
+              <UserPlus size={14} />
+              Recebedores eventos
+            </span>
           </button>
           <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
             <Plus size={16} /> Novo Evento
@@ -1107,14 +1126,6 @@ export default function AdminEventosPage() {
         </div>
       </main>
 
-      <PaymentReceiversManager
-        tenantId={activeTenantId}
-        open={showReceiversManager}
-        recipients={paymentRecipients}
-        onClose={() => setShowReceiversManager(false)}
-        onSaved={setPaymentRecipients}
-      />
-
       {/* MODAL GESTÃO LISTA (MANTIDO IGUAL AO ANTERIOR) */}
       {showGestaoModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={(e) => e.stopPropagation()}>
@@ -1191,7 +1202,7 @@ export default function AdminEventosPage() {
                           <input type="text" maxLength={EVENT_POLL_QUESTION_MAX_CHARS} placeholder="Pergunta..." className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm text-white mb-3" value={novaEnquete.question} onChange={e => setNovaEnquete({...novaEnquete, question: e.target.value.slice(0, EVENT_POLL_QUESTION_MAX_CHARS)})} />
                           <div className="mb-3 flex items-center gap-2">
                               <input type="checkbox" id="adminAllowPollOptions" checked={novaEnquete.allowUserOptions} onChange={e => setNovaEnquete({...novaEnquete, allowUserOptions: e.target.checked})} className="accent-purple-500"/>
-                              <label htmlFor="adminAllowPollOptions" className="text-xs text-zinc-400">Permitir que usuarios adicionem respostas</label>
+                              <label htmlFor="adminAllowPollOptions" className="text-xs text-zinc-400">Permitir que usuários adicionem respostas</label>
                           </div>
                           <div className="space-y-2 mb-3">
                               {pollDraftOptions.map((option, index) => (
@@ -1313,16 +1324,23 @@ export default function AdminEventosPage() {
                         <input id="admin-event-pix-bank" name="admin_event_pix_bank" type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixBanco} onChange={e => setNovoEvento({...novoEvento, pixBanco: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                         <input id="admin-event-pix-holder" name="admin_event_pix_holder" type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome Titular" className="bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.pixTitular} onChange={e => setNovoEvento({...novoEvento, pixTitular: e.target.value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH)})} />
                     </div>
-                    <PaymentRecipientSelect
-                        id="admin-event-payment-recipient"
-                        name="admin_event_payment_recipient"
-                        label="Usuarios que podem receber."
-                        options={paymentRecipients}
-                        selectedUserId={String(novoEvento.recipientUserId || "")}
-                        loading={loadingPaymentRecipients}
-                        onChange={handleSelectEventPaymentRecipient}
-                    />
+                    <div className="rounded-xl border border-zinc-800 bg-black/30 px-3 py-2.5 text-[11px] text-zinc-500">
+                        <p className="font-black uppercase tracking-[0.18em] text-zinc-400">Comprovante</p>
+                        <p className="mt-1">Informe o WhatsApp responsavel por este evento.</p>
+                    </div>
                     <input id="admin-event-payment-whatsapp" name="admin_event_payment_whatsapp" type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="Telefone/WhatsApp para Comprovante" className="w-full bg-black border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoEvento.contatoComprovante} onChange={e => setNovoEvento({...novoEvento, contatoComprovante: normalizePhoneToBrE164(e.target.value)})} />
+                    <PaymentRecipientCheckboxList
+                        id="admin-event-payment-recipients"
+                        label="Liberar comprovantes do evento"
+                        helperText="Marque quem pode receber o comprovante deste evento."
+                        emptyText="Nenhum recebedor de evento cadastrado."
+                        options={eventPaymentRecipients}
+                        selectedUserIds={novoEvento.recipientUserIds || []}
+                        loading={loadingEventPaymentRecipients}
+                        onChange={(recipientUserIds) =>
+                            setNovoEvento((prev) => ({ ...prev, recipientUserIds }))
+                        }
+                    />
                 </div>
                 
                 {/* Gestão de Lotes */}
@@ -1428,6 +1446,18 @@ export default function AdminEventosPage() {
           </div>
         </div>
       )}
+
+      <PaymentReceiversManager
+        tenantId={activeTenantId}
+        scope="events"
+        open={showEventReceiversManager}
+        recipients={eventPaymentRecipients}
+        title="Recebedores de eventos"
+        description="Lista usada somente pelos comprovantes de eventos."
+        savedMessage="Recebedores de eventos atualizados."
+        onClose={() => setShowEventReceiversManager(false)}
+        onSaved={setEventPaymentRecipients}
+      />
     </div>
   );
 }

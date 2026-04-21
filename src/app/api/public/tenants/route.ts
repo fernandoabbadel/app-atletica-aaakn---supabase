@@ -102,7 +102,7 @@ export async function GET(request: Request) {
         })());
 
       if (!tenant) {
-        const payload = { error: "Atletica nao encontrada." };
+        const payload = { error: "Atlética não encontrada." };
         QueryMonitor.recordQuery({
           endpoint: TENANTS_ENDPOINT,
           method: "GET",
@@ -167,7 +167,7 @@ export async function GET(request: Request) {
     });
   } catch (error: unknown) {
     console.error("Falha ao carregar diretorio publico de atleticas:", error);
-    const payload = { error: "Falha ao carregar as atleticas publicas." };
+    const payload = { error: "Falha ao carregar as atléticas públicas." };
     QueryMonitor.recordQuery({
       endpoint: TENANTS_ENDPOINT,
       method: "GET",

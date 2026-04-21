@@ -189,7 +189,7 @@ const formatCurrencyValue = (value: string): string =>
 
 const formatPedidoDateTime = (value?: DateLike | null): string => {
   const date = value?.toDate?.();
-  if (!date || Number.isNaN(date.getTime())) return "Nao informado";
+  if (!date || Number.isNaN(date.getTime())) return "Não informado";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeStyle: "short",
@@ -467,6 +467,9 @@ export default function DetalhesEventoPage() {
               pedido.payment_config && typeof pedido.payment_config === "object"
                   ? pedido.payment_config
                   : null;
+          const isLeagueEvent =
+              String(evento?.categoria || "").trim().toLowerCase() === "liga" ||
+              String(evento?.tipo || "").trim().toLowerCase() === "liga";
           return {
               chave:
                   String(paymentConfig?.chave || evento?.pixChave || globalFinanceiro?.chave || "").trim(),
@@ -481,7 +484,9 @@ export default function DetalhesEventoPage() {
                       contatoFinanceiro ||
                       ""
                   ).trim(),
-              ...(paymentConfig?.recipient ? { recipient: paymentConfig.recipient } : {}),
+              ...(!isLeagueEvent && paymentConfig?.recipient
+                  ? { recipient: paymentConfig.recipient }
+                  : {}),
               ...(Array.isArray(paymentConfig?.ticketEntries)
                   ? { ticketEntries: paymentConfig.ticketEntries }
                   : {}),
@@ -495,14 +500,14 @@ export default function DetalhesEventoPage() {
           try {
               const payment = resolvePedidoPaymentConfig(pedido);
               if (!payment.chave) {
-                  addToast("Chave PIX nao configurada para este evento.", "error");
+                  addToast("Chave PIX não configurada para este evento.", "error");
                   return;
               }
               await navigator.clipboard.writeText(payment.chave || "");
               addToast("Chave PIX copiada!", "success");
           } catch (error: unknown) {
               console.error(error);
-              addToast("Nao foi possivel copiar a chave PIX.", "error");
+              addToast("Não foi possível copiar a chave PIX.", "error");
           }
       },
       [addToast, resolvePedidoPaymentConfig]
@@ -514,12 +519,12 @@ export default function DetalhesEventoPage() {
           const payment = resolvePedidoPaymentConfig(pedido);
           const adminPhone = keepDigits(payment.whatsapp || "");
           if (!adminPhone) {
-              addToast("WhatsApp financeiro nao configurado para este evento.", "error");
+              addToast("WhatsApp financeiro não configurado para este evento.", "error");
               return;
           }
 
           const buyerName = user?.nome || "Aluno";
-          const buyerPhone = user?.telefone || "Nao informado";
+          const buyerPhone = user?.telefone || "Não informado";
           const buyerTurma = user?.turma || "Sem turma";
           const total = formatCurrencyValue(pedido.valorTotal);
           const recipient = resolveReceiptContactProfile({
@@ -676,7 +681,7 @@ export default function DetalhesEventoPage() {
 
       const current = enquetes.find((poll) => poll.id === pollId);
       if (current && Array.isArray(current.options) && current.options.length >= EVENT_POLL_OPTION_MAX_COUNT) {
-          addToast(`Cada enquete aceita no maximo ${EVENT_POLL_OPTION_MAX_COUNT} respostas.`, "error");
+          addToast(`Cada enquete aceita no máximo ${EVENT_POLL_OPTION_MAX_COUNT} respostas.`, "error");
           return;
       }
 
@@ -693,7 +698,7 @@ export default function DetalhesEventoPage() {
           current?.options?.some((option) => option.creatorId === user.uid)
       );
       if (userAlreadyCreatedOption) {
-          addToast("Cada usuario pode sugerir no maximo uma nova resposta por enquete.", "info");
+          addToast("Cada usuário pode sugerir no máximo uma nova resposta por enquete.", "info");
           return;
       }
 
@@ -810,7 +815,7 @@ export default function DetalhesEventoPage() {
               await navigator.clipboard.writeText(shareUrl);
               addToast("Link copiado!", "success");
           } catch {
-              addToast("Nao foi possivel compartilhar agora.", "error");
+              addToast("Não foi possível compartilhar agora.", "error");
           }
       }
   };
@@ -834,7 +839,7 @@ export default function DetalhesEventoPage() {
   }, [rsvps]);
 
   if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500 w-10 h-10"/></div>;
-  if (!evento) return <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center gap-4"><XCircle size={40} className="text-red-500"/> <p>Evento nao encontrado.</p> <Link href={tenantPath("/eventos")} className="text-emerald-500 underline">Voltar</Link></div>;
+  if (!evento) return <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center gap-4"><XCircle size={40} className="text-red-500"/> <p>Evento não encontrado.</p> <Link href={tenantPath("/eventos")} className="text-emerald-500 underline">Voltar</Link></div>;
   const eventoSaleStatus = evento.saleStatus || evento.sale_status || "ativo";
   const firstActiveLote = evento.lotes?.find((lote) => lote.status === "ativo");
 
@@ -1092,7 +1097,7 @@ export default function DetalhesEventoPage() {
                                 <button onClick={() => handleCreatePollOption(currentPoll.id)} className="text-[10px] bg-purple-500/10 text-purple-400 px-2 rounded uppercase font-bold hover:bg-purple-500 hover:text-white transition">Add</button>
                             </div>
                             <p className="text-[8px] text-zinc-600 mt-1 italic text-center">
-                                * Cada usuario pode sugerir 1 resposta nova e a enquete aceita ate {EVENT_POLL_OPTION_MAX_COUNT} respostas. ({newPollOption.length}/{EVENT_POLL_OPTION_MAX_CHARS})
+                                * Cada usuário pode sugerir 1 resposta nova e a enquete aceita até {EVENT_POLL_OPTION_MAX_COUNT} respostas. ({newPollOption.length}/{EVENT_POLL_OPTION_MAX_CHARS})
                             </p>
                         </>
                     ) : (
@@ -1252,7 +1257,7 @@ export default function DetalhesEventoPage() {
                                     <div className="flex items-center gap-2">
                                         <Wallet size={14} className="text-emerald-400" />
                                         <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                                            Informacoes do PIX
+                                            Informações do PIX
                                         </p>
                                     </div>
 
@@ -1374,7 +1379,7 @@ export default function DetalhesEventoPage() {
 
             {pendingPedidos.length === 0 && historyPedidos.length === 0 && (
                 <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-500">
-                    Voce ainda nao fez pedidos deste evento.
+                    Você ainda não fez pedidos deste evento.
                 </div>
             )}
         </section>
@@ -1423,7 +1428,7 @@ export default function DetalhesEventoPage() {
                       {modalUsers.length === 0 && (
                           <div className="flex flex-col items-center justify-center py-12 text-zinc-600 gap-2">
                               <Users size={32} className="opacity-20"/>
-                              <p className="text-xs">Ninguem nesta lista ainda.</p>
+                              <p className="text-xs">Ninguém nesta lista ainda.</p>
                           </div>
                       )}
                   </div>

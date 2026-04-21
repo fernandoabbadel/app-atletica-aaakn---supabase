@@ -430,7 +430,7 @@ export async function addTurmaConfig(payload: {
   logo?: string;
 }, options?: { tenantId?: string }): Promise<TurmaConfig[]> {
   const turmaId = normalizeTurmaId(payload.id);
-  if (!turmaId) throw new Error("Codigo de turma invalido. Use formato T9, T10...");
+  if (!turmaId) throw new Error("Código de turma inválido. Use formato T9, T10...");
 
   const current = await fetchTurmasConfig({ forceRefresh: true, tenantId: options?.tenantId });
   if (current.some((turma) => turma.id === turmaId)) {
@@ -460,12 +460,12 @@ export async function updateTurmaConfig(payload: {
   hidden?: boolean;
 }, options?: { tenantId?: string }): Promise<TurmaConfig[]> {
   const turmaId = normalizeTurmaId(payload.id);
-  if (!turmaId) throw new Error("Codigo de turma invalido.");
+  if (!turmaId) throw new Error("Código de turma inválido.");
 
   const current = await fetchTurmasConfig({ forceRefresh: true, tenantId: options?.tenantId });
   const currentTurma = current.find((turma) => turma.id === turmaId);
   if (!currentTurma) {
-    throw new Error(`Turma ${turmaId} nao encontrada.`);
+    throw new Error(`Turma ${turmaId} não encontrada.`);
   }
 
   const next = current.map((turma) =>
@@ -490,12 +490,12 @@ export async function toggleTurmaVisibility(
   options?: { tenantId?: string }
 ): Promise<TurmaConfig[]> {
   const turmaId = normalizeTurmaId(turmaIdRaw);
-  if (!turmaId) throw new Error("Codigo de turma invalido.");
+  if (!turmaId) throw new Error("Código de turma inválido.");
 
   const current = await fetchTurmasConfig({ forceRefresh: true, tenantId: options?.tenantId });
   const currentTurma = current.find((turma) => turma.id === turmaId);
   if (!currentTurma) {
-    throw new Error(`Turma ${turmaId} nao encontrada.`);
+    throw new Error(`Turma ${turmaId} não encontrada.`);
   }
 
   const nextHidden = typeof hidden === "boolean" ? hidden : !currentTurma.hidden;
@@ -507,11 +507,11 @@ export async function deleteTurmaConfig(
   options?: { tenantId?: string }
 ): Promise<TurmaConfig[]> {
   const turmaId = normalizeTurmaId(turmaIdRaw);
-  if (!turmaId) throw new Error("Codigo de turma invalido.");
+  if (!turmaId) throw new Error("Código de turma inválido.");
 
   const current = await fetchTurmasConfig({ forceRefresh: true, tenantId: options?.tenantId });
   if (!current.some((turma) => turma.id === turmaId)) {
-    throw new Error(`Turma ${turmaId} nao encontrada.`);
+    throw new Error(`Turma ${turmaId} não encontrada.`);
   }
 
   const next = current.filter((turma) => turma.id !== turmaId);

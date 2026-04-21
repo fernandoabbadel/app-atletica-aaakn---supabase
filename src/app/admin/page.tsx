@@ -190,7 +190,7 @@ export default function AdminDashboardPage() {
             title="Engajamento" 
             value="98.5%" 
             icon={<TrendingUp size={20} className="text-yellow-500"/>} 
-            trend="Recorde historico"
+            trend="Recorde histórico"
           />
       </div>
 

@@ -296,7 +296,7 @@ const ensureUserInTenant = async (
     .maybeSingle();
   if (error) throwSupabaseError(error);
   if (!data) {
-    throw new Error("Usuario fora do tenant ativo.");
+    throw new Error("Usuário fora do tenant ativo.");
   }
 };
 
@@ -998,7 +998,7 @@ export async function setAdminUserTurmaLeader(payload: {
       .maybeSingle();
     if (membershipError) throwSupabaseError(membershipError);
     if (!membershipData) {
-      throw new Error("Voce so pode definir lideres dentro do seu proprio tenant.");
+      throw new Error("Você só pode definir líderes dentro do seu próprio tenant.");
     }
   }
 

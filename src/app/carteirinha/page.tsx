@@ -172,7 +172,7 @@ export default function CarteirinhaPage() {
                     className="text-[9px] uppercase tracking-widest font-bold"
                     style={{ color: palette.primary }}
                   >
-                    {(tenantCourse || "Atletica").toUpperCase()}
+                    {(tenantCourse || "Atlética").toUpperCase()}
                   </p>
                 </div>
               </div>

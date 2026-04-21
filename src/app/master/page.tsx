@@ -128,9 +128,9 @@ export default function MasterPage() {
               <Building2 className="text-red-300" /> Controle Global
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-300">
-              Aqui fica o painel do dono do app. O `master` escolhe a atletica que quer inspecionar,
+              Aqui fica o painel do dono do app. O `master` escolhe a atlética que quer inspecionar,
               troca a role de visualizacao na faixa vermelha e entra no admin correto sem misturar
-              isso com o painel da propria atletica.
+              isso com o painel da própria atlética.
             </p>
           </div>
 
@@ -202,7 +202,7 @@ export default function MasterPage() {
           <div>
             <h2 className="text-lg font-black uppercase text-white">Atleticas da plataforma</h2>
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
-              escolha a atletica e entre no painel correto
+              escolha a atlética e entre no painel correto
             </p>
           </div>
           <button
@@ -244,8 +244,8 @@ export default function MasterPage() {
                     </p>
                     <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
                       {tenant.visibleInDirectory
-                        ? "Visivel na pagina visitante"
-                        : "Oculta da pagina visitante"}
+                        ? "Visível na página visitante"
+                        : "Oculta da página visitante"}
                     </p>
                   </div>
 
@@ -279,7 +279,7 @@ export default function MasterPage() {
                     href={`/master/tenants/${tenant.id}`}
                     className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-zinc-200 transition hover:bg-zinc-800"
                   >
-                    <Pencil size={14} /> Editar atletica
+                    <Pencil size={14} /> Editar atlética
                   </Link>
                   <Link
                     href={adminHref}

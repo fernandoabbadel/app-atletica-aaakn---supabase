@@ -82,7 +82,7 @@ const insertPollWithSchemaFallback = async (
     mutablePayload = nextPayload;
   }
 
-  throw new LeagueAdminApiError("Nao foi possivel criar a enquete do evento.", 400);
+  throw new LeagueAdminApiError("Não foi possível criar a enquete do evento.", 400);
 };
 
 const updatePollWithSchemaFallback = async (
@@ -112,7 +112,7 @@ const updatePollWithSchemaFallback = async (
     mutablePayload = nextPayload;
   }
 
-  throw new LeagueAdminApiError("Nao foi possivel atualizar a enquete do evento.", 400);
+  throw new LeagueAdminApiError("Não foi possível atualizar a enquete do evento.", 400);
 };
 
 const readBody = async (request: NextRequest): Promise<Record<string, unknown>> => {
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
     const options = normalizeOptions(body.options);
 
     if (!question) {
-      throw new LeagueAdminApiError("Pergunta da enquete obrigatoria.", 400);
+      throw new LeagueAdminApiError("Pergunta da enquete obrigatória.", 400);
     }
 
     const { effectiveTenantId } = await resolveEventTenantContext(request, {
@@ -173,7 +173,7 @@ export async function DELETE(request: NextRequest) {
     const requestedTenantId = asString(body.tenantId).trim();
 
     if (!eventId || !pollId) {
-      throw new LeagueAdminApiError("Enquete invalida.", 400);
+      throw new LeagueAdminApiError("Enquete inválida.", 400);
     }
 
     await resolveEventTenantContext(request, {
@@ -214,7 +214,7 @@ export async function PATCH(request: NextRequest) {
     const requestedTenantId = asString(body.tenantId).trim();
 
     if (!eventId || !pollId) {
-      throw new LeagueAdminApiError("Enquete invalida.", 400);
+      throw new LeagueAdminApiError("Enquete inválida.", 400);
     }
 
     await resolveEventTenantContext(request, {

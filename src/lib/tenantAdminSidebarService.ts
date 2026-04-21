@@ -14,7 +14,7 @@ export type TenantAdminSidebarProfileKey = string;
 
 export interface TenantAdminSidebarItemDefinition {
   key: string;
-  group: "Base" | "Comercial" | "Conteudo" | "Esportes" | "Governanca" | "Plataforma";
+  group: "Base" | "Comercial" | "Conteúdo" | "Esportes" | "Governança" | "Plataforma";
   name: string;
   path: string;
   description: string;
@@ -71,7 +71,7 @@ const setCachedValue = <T>(cache: Map<string, CacheEntry<T>>, key: string, value
 
 export const TENANT_ADMIN_SIDEBAR_GROUP_ORDER: Array<
   TenantAdminSidebarItemDefinition["group"]
-> = ["Base", "Comercial", "Conteudo", "Esportes", "Governanca", "Plataforma"];
+> = ["Base", "Comercial", "Conteúdo", "Esportes", "Governança", "Plataforma"];
 
 const sidebarItem = (
   key: string,
@@ -90,73 +90,73 @@ const sidebarItem = (
 });
 
 export const TENANT_ADMIN_SIDEBAR_ITEMS: TenantAdminSidebarItemDefinition[] = [
-  sidebarItem("atletica", "Base", "Atletica", "/admin/atletica", "Edicao dos dados principais, logo e identidade da atletica."),
-  sidebarItem("dashboard", "Base", "Dashboard", "/admin", "Entrada principal do painel da atletica."),
-  sidebarItem("dashboard_modulos", "Base", "Dashboard Modulos", "/admin/dashboard-modulos", "Controla os atalhos e modulos publicos liberados para o app da atletica."),
-  sidebarItem("album", "Base", "Album da Galera", "/admin/album", "Gestao do album, scanner e visibilidade do conteudo."),
-  sidebarItem("album_caca_calouro", "Base", "Album - Caca Calouro", "/admin/album/caca_calouro", "Etapa especial do album para caca ao calouro.", ["album"]),
-  sidebarItem("album_customizacao", "Base", "Album - Customizacao", "/admin/album/customizacao", "Customizacao visual e operacional do album.", ["album"]),
-  sidebarItem("album_pontua_calouro", "Base", "Album - Pontua Calouro", "/admin/album/pontua_calouro", "Pontuacao do album focada em calouros.", ["album"]),
-  sidebarItem("album_pontua_geral", "Base", "Album - Pontua Geral", "/admin/album/pontua_geral", "Pontuacao geral do album.", ["album"]),
-  sidebarItem("turma", "Base", "Turma", "/admin/turma", "Gestao das turmas e estrutura academica da atletica."),
+  sidebarItem("atletica", "Base", "Atlética", "/admin/atletica", "Edição dos dados principais, logo e identidade da atlética."),
+  sidebarItem("dashboard", "Base", "Dashboard", "/admin", "Entrada principal do painel da atlética."),
+  sidebarItem("dashboard_modulos", "Base", "Dashboard Módulos", "/admin/dashboard-modulos", "Controla os atalhos e módulos públicos liberados para o app da atlética."),
+  sidebarItem("album", "Base", "Álbum da Galera", "/admin/album", "Gestão do álbum, scanner e visibilidade do conteúdo."),
+  sidebarItem("album_caca_calouro", "Base", "Álbum - Caça Calouro", "/admin/album/caca_calouro", "Etapa especial do álbum para caça ao calouro.", ["album"]),
+  sidebarItem("album_customizacao", "Base", "Álbum - Customização", "/admin/album/customizacao", "Customização visual e operacional do álbum.", ["album"]),
+  sidebarItem("album_pontua_calouro", "Base", "Álbum - Pontua Calouro", "/admin/album/pontua_calouro", "Pontuação do álbum focada em calouros.", ["album"]),
+  sidebarItem("album_pontua_geral", "Base", "Álbum - Pontua Geral", "/admin/album/pontua_geral", "Pontuação geral do álbum.", ["album"]),
+  sidebarItem("turma", "Base", "Turma", "/admin/turma", "Gestão das turmas e estrutura acadêmica da atlética."),
   sidebarItem("carteirinha", "Base", "Carteirinha", "/admin/carteirinha", "Carteirinha digital e fundos por turma."),
   sidebarItem("guia", "Base", "Guia do App", "/admin/guia", "Guia de links, turismo, transporte e contatos."),
-  sidebarItem("usuarios", "Base", "Usuarios", "/admin/usuarios", "Gestao de usuarios, status e dados da base."),
-  sidebarItem("configuracoes", "Comercial", "Configuracoes", "/admin/configuracoes", "Configuracoes gerais do tenant e fluxo operacional."),
-  sidebarItem("landing", "Comercial", "Landing", "/admin/landing", "Personalizacao da landing e conteudo comercial."),
-  sidebarItem("loja", "Comercial", "Loja", "/admin/loja", "Produtos, pedidos, reviews e operacao da loja."),
-  sidebarItem("loja_categorias", "Comercial", "Loja - Categorias", "/admin/loja/categorias", "Cadastro e organizacao de categorias da loja.", ["loja"]),
-  sidebarItem("loja_pedidos_aprovados", "Comercial", "Loja - Pedidos Aprovados", "/admin/loja/pedidos-aprovados", "Historico e edicao dos pedidos aprovados da loja.", ["loja"]),
+  sidebarItem("usuarios", "Base", "Usuários", "/admin/usuarios", "Gestão de usuários, status e dados da base."),
+  sidebarItem("configuracoes", "Comercial", "Configurações", "/admin/configuracoes", "Configurações gerais do tenant e fluxo operacional."),
+  sidebarItem("landing", "Comercial", "Landing", "/admin/landing", "Personalização da landing e conteúdo comercial."),
+  sidebarItem("loja", "Comercial", "Loja", "/admin/loja", "Produtos, pedidos, reviews e operação da loja."),
+  sidebarItem("loja_categorias", "Comercial", "Loja - Categorias", "/admin/loja/categorias", "Cadastro e organização de categorias da loja.", ["loja"]),
+  sidebarItem("loja_pedidos_aprovados", "Comercial", "Loja - Pedidos Aprovados", "/admin/loja/pedidos-aprovados", "Histórico e edição dos pedidos aprovados da loja.", ["loja"]),
   sidebarItem("loja_pedidos_pendentes", "Comercial", "Loja - Pedidos Pendentes", "/admin/loja/pedidos-pendentes", "Acompanhamento de pedidos pendentes da loja.", ["loja"]),
-  sidebarItem("loja_produtos_desativados", "Comercial", "Loja - Produtos Desativados", "/admin/loja/produtos-desativados", "Historico de produtos fora do ar com reativacao.", ["loja"]),
-  sidebarItem("loja_produtos", "Comercial", "Loja - Produtos", "/admin/loja/produtos", "Gestao detalhada dos produtos da loja.", ["loja"]),
-  sidebarItem("loja_review", "Comercial", "Loja - Review", "/admin/loja/review", "Revisao e aprovacao de reviews da loja.", ["loja"]),
-  sidebarItem("mini_vendor_admin", "Comercial", "Mini Vendor Admin", "/admin/mini-vendors", "Aprovacao e acompanhamento das lojas mini vendor do tenant."),
-  sidebarItem("mini_vendor_aprovacoes", "Comercial", "Mini Vendor - Aprovacoes", "/admin/mini-vendors/aprovacoes", "Fila de aprovacao das lojas mini vendor.", ["mini_vendor_admin"]),
+  sidebarItem("loja_produtos_desativados", "Comercial", "Loja - Produtos Desativados", "/admin/loja/produtos-desativados", "Histórico de produtos fora do ar com reativação.", ["loja"]),
+  sidebarItem("loja_produtos", "Comercial", "Loja - Produtos", "/admin/loja/produtos", "Gestão detalhada dos produtos da loja.", ["loja"]),
+  sidebarItem("loja_review", "Comercial", "Loja - Review", "/admin/loja/review", "Revisão e aprovação de reviews da loja.", ["loja"]),
+  sidebarItem("mini_vendor_admin", "Comercial", "Mini Vendor Admin", "/admin/mini-vendors", "Aprovação e acompanhamento das lojas mini vendor do tenant."),
+  sidebarItem("mini_vendor_aprovacoes", "Comercial", "Mini Vendor - Aprovações", "/admin/mini-vendors/aprovacoes", "Fila de aprovação das lojas mini vendor.", ["mini_vendor_admin"]),
   sidebarItem("mini_vendor_cadastros", "Comercial", "Mini Vendor - Cadastros", "/admin/mini-vendors/cadastros", "Cadastros e auditoria dos mini vendors.", ["mini_vendor_admin"]),
-  sidebarItem("parceiros", "Comercial", "Parceiros", "/admin/parceiros", "Rede de parceiros e publicacoes comerciais."),
+  sidebarItem("parceiros", "Comercial", "Parceiros", "/admin/parceiros", "Rede de parceiros e publicações comerciais."),
   sidebarItem("parceiros_ativos", "Comercial", "Parceiros - Ativos", "/admin/parceiros/ativos", "Lista e status dos parceiros ativos.", ["parceiros"]),
   sidebarItem("parceiros_dados", "Comercial", "Parceiros - Dados", "/admin/parceiros/dados", "Dados operacionais e cadastros de parceiros.", ["parceiros"]),
   sidebarItem("parceiros_empresas", "Comercial", "Parceiros - Empresas", "/admin/parceiros/empresas", "Empresas parceiras e suas vitrines.", ["parceiros"]),
-  sidebarItem("parceiros_historico", "Comercial", "Parceiros - Historico", "/admin/parceiros/historico", "Historico comercial de parceiros.", ["parceiros"]),
+  sidebarItem("parceiros_historico", "Comercial", "Parceiros - Histórico", "/admin/parceiros/historico", "Histórico comercial de parceiros.", ["parceiros"]),
   sidebarItem("planos", "Comercial", "Planos", "/admin/planos", "Planos, assinaturas e auditoria comercial."),
   sidebarItem("planos_auditoria", "Comercial", "Planos - Auditoria", "/admin/planos/auditoria", "Auditoria dos planos comercializados.", ["planos"]),
-  sidebarItem("planos_editar", "Comercial", "Planos - Editar", "/admin/planos/editar", "Edicao da vitrine e regras dos planos.", ["planos"]),
-  sidebarItem("planos_historico", "Comercial", "Planos - Historico", "/admin/planos/historico", "Historico de vendas e movimentacoes de planos.", ["planos"]),
+  sidebarItem("planos_editar", "Comercial", "Planos - Editar", "/admin/planos/editar", "Edição da vitrine e regras dos planos.", ["planos"]),
+  sidebarItem("planos_historico", "Comercial", "Planos - Histórico", "/admin/planos/historico", "Histórico de vendas e movimentações de planos.", ["planos"]),
   sidebarItem("planos_lista_atleta", "Comercial", "Planos - Lista Atleta", "/admin/planos/lista_atleta", "Base do plano Atleta.", ["planos"]),
   sidebarItem("planos_lista_bicho_solto", "Comercial", "Planos - Lista Bicho Solto", "/admin/planos/lista_bicho_solto", "Base do plano Bicho Solto.", ["planos"]),
   sidebarItem("planos_lista_cardume_livre", "Comercial", "Planos - Lista Cardume Livre", "/admin/planos/lista_cardume_livre", "Base do plano Cardume Livre.", ["planos"]),
   sidebarItem("planos_lista_lenda", "Comercial", "Planos - Lista Lenda", "/admin/planos/lista_lenda", "Base do plano Lenda.", ["planos"]),
   sidebarItem("fidelidade", "Comercial", "Fidelidade", "/admin/fidelidade", "Clube de fidelidade e recompensas comerciais."),
-  sidebarItem("scanner", "Comercial", "Scanner", "/admin/scanner", "Scanner e operacoes presenciais do tenant."),
+  sidebarItem("scanner", "Comercial", "Scanner", "/admin/scanner", "Scanner e operações presenciais do tenant."),
   sidebarItem("scan_festas", "Comercial", "Scan Eventos", "/admin/scan-eventos", "Leitura de QR code e baixa de ingressos dos eventos do tenant."),
-  sidebarItem("comunidade", "Conteudo", "Comunidade", "/admin/comunidade", "Moderacao e configuracao da comunidade."),
-  sidebarItem("conquistas", "Conteudo", "Conquistas", "/admin/conquistas", "Conquistas, patentes e recompensas do tenant."),
-  sidebarItem("apadrinhamento", "Conteudo", "Apadrinhamento", "/admin/apadrinhamento", "Configuracao dos titulos e regras de apadrinhamento da atletica."),
-  sidebarItem("eventos", "Conteudo", "Eventos", "/admin/eventos", "Eventos, lotes, enquetes e aprovacoes."),
-  sidebarItem("eventos_encerrados", "Conteudo", "Eventos - Encerrados", "/admin/eventos/encerrados", "Consulta de eventos encerrados.", ["eventos"]),
-  sidebarItem("gestao_eventos", "Comercial", "BI Eventos", "/admin/gestao/eventos", "Analise de vendas, lotes, turmas e scan de eventos.", ["eventos"]),
-  sidebarItem("gestao_treinos", "Esportes", "BI Treinos", "/admin/gestao/treinos", "Analise de presenca, modalidade, turma e desempenho dos treinos.", ["treinos"]),
-  sidebarItem("gestao_produtos", "Comercial", "BI Produtos", "/admin/gestao/produtos", "Analise de vendas, lotes, turmas e likes dos produtos.", ["loja"]),
-  sidebarItem("historico", "Conteudo", "Historico", "/admin/historico", "Pagina historica e memoria institucional da atletica."),
-  sidebarItem("ligas", "Conteudo", "Ligas", "/admin/ligas", "Gestao das ligas academicas da tenant."),
-  sidebarItem("arena_games", "Esportes", "Arena Games", "/admin/games", "Gestao da area gamer da atletica."),
+  sidebarItem("comunidade", "Conteúdo", "Comunidade", "/admin/comunidade", "Moderação e configuração da comunidade."),
+  sidebarItem("conquistas", "Conteúdo", "Conquistas", "/admin/conquistas", "Conquistas, patentes e recompensas do tenant."),
+  sidebarItem("apadrinhamento", "Conteúdo", "Apadrinhamento", "/admin/apadrinhamento", "Configuração dos títulos e regras de apadrinhamento da atlética."),
+  sidebarItem("eventos", "Conteúdo", "Eventos", "/admin/eventos", "Eventos, lotes, enquetes e aprovações."),
+  sidebarItem("eventos_encerrados", "Conteúdo", "Eventos - Encerrados", "/admin/eventos/encerrados", "Consulta de eventos encerrados.", ["eventos"]),
+  sidebarItem("gestao_eventos", "Comercial", "BI Eventos", "/admin/gestao/eventos", "Análise de vendas, lotes, turmas e scan de eventos.", ["eventos"]),
+  sidebarItem("gestao_treinos", "Esportes", "BI Treinos", "/admin/gestao/treinos", "Análise de presença, modalidade, turma e desempenho dos treinos.", ["treinos"]),
+  sidebarItem("gestao_produtos", "Comercial", "BI Produtos", "/admin/gestao/produtos", "Análise de vendas, lotes, turmas e likes dos produtos.", ["loja"]),
+  sidebarItem("historico", "Conteúdo", "Histórico", "/admin/historico", "Página histórica e memória institucional da atlética."),
+  sidebarItem("ligas", "Conteúdo", "Ligas", "/admin/ligas", "Gestão das ligas acadêmicas da tenant."),
+  sidebarItem("arena_games", "Esportes", "Arena Games", "/admin/games", "Gestão da área gamer da atlética."),
   sidebarItem("gym", "Esportes", "Gym Champ", "/admin/gym", "Programas, ranking e painel esportivo da academia."),
-  sidebarItem("sharkround", "Esportes", "BoardRound", "/admin/boardround", "Gestao do BoardRound e sua configuracao."),
-  sidebarItem("treinos", "Esportes", "Treinos", "/admin/treinos", "Treinos, categorias e aprovacoes esportivas."),
+  sidebarItem("sharkround", "Esportes", "BoardRound", "/admin/boardround", "Gestão do BoardRound e sua configuração."),
+  sidebarItem("treinos", "Esportes", "Treinos", "/admin/treinos", "Treinos, categorias e aprovações esportivas."),
   sidebarItem("treinos_antigos", "Esportes", "Treinos - Antigos", "/admin/treinos/antigos", "Consulta de treinos antigos.", ["treinos"]),
-  sidebarItem("denuncias", "Governanca", "Denuncias", "/admin/denuncias", "Fila de denuncias e moderacao do tenant."),
-  sidebarItem("denuncias_banidos", "Governanca", "Denuncias - Banidos", "/admin/denuncias/banidos", "Acompanhamento de usuarios banidos.", ["denuncias"]),
-  sidebarItem("denuncias_comunidade", "Governanca", "Denuncias - Comunidade", "/admin/denuncias/comunidade", "Fila de denuncias vindas da comunidade.", ["denuncias"]),
-  sidebarItem("denuncias_gym", "Governanca", "Denuncias - Gym", "/admin/denuncias/gym", "Ocorrencias relacionadas ao modulo de gym.", ["denuncias"]),
-  sidebarItem("denuncias_suporte", "Governanca", "Denuncias - Suporte", "/admin/denuncias/suporte", "Chamados e escalacoes de suporte.", ["denuncias"]),
-  sidebarItem("logs", "Governanca", "Logs", "/admin/logs", "Auditoria tecnica e historico operacional."),
-  sidebarItem("permissoes", "Governanca", "Permissoes", "/admin/permissoes", "Visualizacao das permissoes e matriz por rota."),
-  sidebarItem("permissoes_usuarios", "Governanca", "Permissoes - Usuarios", "/admin/permissoes/usuarios", "Cargos e visibilidade por usuario do tenant.", ["permissoes"]),
-  sidebarItem("lancamento", "Plataforma", "Lancamento", "/admin/lancamento", "Painel de ativacao, pendencias e onboarding do tenant."),
-  sidebarItem("lancamento_ativacoes", "Plataforma", "Lancamento - Ativacoes", "/admin/lancamento/ativacoes", "Acompanhamento das ativacoes do tenant.", ["lancamento"]),
-  sidebarItem("lancamento_convites", "Plataforma", "Lancamento - Convites", "/admin/lancamento/convites", "Convites e acessos de lancamento.", ["lancamento"]),
-  sidebarItem("lancamento_pendentes", "Plataforma", "Lancamento - Pendentes", "/admin/lancamento/pendentes", "Pendencias e validacoes do lancamento.", ["lancamento"]),
+  sidebarItem("denuncias", "Governança", "Denúncias", "/admin/denuncias", "Fila de denúncias e moderação do tenant."),
+  sidebarItem("denuncias_banidos", "Governança", "Denúncias - Banidos", "/admin/denuncias/banidos", "Acompanhamento de usuários banidos.", ["denuncias"]),
+  sidebarItem("denuncias_comunidade", "Governança", "Denúncias - Comunidade", "/admin/denuncias/comunidade", "Fila de denúncias vindas da comunidade.", ["denuncias"]),
+  sidebarItem("denuncias_gym", "Governança", "Denúncias - Gym", "/admin/denuncias/gym", "Ocorrências relacionadas ao módulo de gym.", ["denuncias"]),
+  sidebarItem("denuncias_suporte", "Governança", "Denúncias - Suporte", "/admin/denuncias/suporte", "Chamados e escalações de suporte.", ["denuncias"]),
+  sidebarItem("logs", "Governança", "Logs", "/admin/logs", "Auditoria técnica e histórico operacional."),
+  sidebarItem("permissoes", "Governança", "Permissões", "/admin/permissoes", "Visualização das permissões e matriz por rota."),
+  sidebarItem("permissoes_usuarios", "Governança", "Permissões - Usuários", "/admin/permissoes/usuarios", "Cargos e visibilidade por usuário do tenant.", ["permissoes"]),
+  sidebarItem("lancamento", "Plataforma", "Lançamento", "/admin/lancamento", "Painel de ativação, pendências e onboarding do tenant."),
+  sidebarItem("lancamento_ativacoes", "Plataforma", "Lançamento - Ativações", "/admin/lancamento/ativacoes", "Acompanhamento das ativações do tenant.", ["lancamento"]),
+  sidebarItem("lancamento_convites", "Plataforma", "Lançamento - Convites", "/admin/lancamento/convites", "Convites e acessos de lançamento.", ["lancamento"]),
+  sidebarItem("lancamento_pendentes", "Plataforma", "Lançamento - Pendentes", "/admin/lancamento/pendentes", "Pendências e validações do lançamento.", ["lancamento"]),
 ];
 
 const DEFAULT_PROFILE_BY_TENANT_SLUG: Record<string, TenantAdminSidebarProfileKey> = {
@@ -170,10 +170,10 @@ const buildDefaultProfileDefinition = (
   name: key === "A" ? "Perfil A" : key === "B" ? "Perfil B" : `Perfil ${key}`,
   description:
     key === "A"
-      ? "Perfil padrao para novas atleticas."
+      ? "Perfil padrão para novas atléticas."
       : key === "B"
         ? "Perfil alternativo para tenants com outro menu admin."
-        : "Perfil personalizado para combinar menu admin e app do usuario.",
+        : "Perfil personalizado para combinar menu admin e app do usuário.",
   adminItems: {},
   appModules: {},
 });
@@ -431,7 +431,7 @@ export async function saveTenantAdminSidebarProfileAssignment(payload: {
 }): Promise<void> {
   const tenantId = asString(payload.tenantId).trim();
   if (!tenantId) {
-    throw new Error("Tenant invalido para salvar o perfil do admin.");
+    throw new Error("Tenant inválido para salvar o perfil do admin.");
   }
 
   const profileKey = normalizeProfileKey(payload.profileKey) ?? "A";

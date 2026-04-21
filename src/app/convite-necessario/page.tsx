@@ -29,7 +29,7 @@ export default function ConviteNecessarioPage() {
   }, [inviteTokenFromUrl]);
 
   const resolvedTenantSlug = tenantSlug.trim().toLowerCase();
-  const resolvedTenantName = tenantName.trim() || "sua atletica";
+  const resolvedTenantName = tenantName.trim() || "sua atlética";
   const inviteHref = useMemo(() => {
     const basePath = resolvedTenantSlug ? withTenantSlug(resolvedTenantSlug, "/cadastro") : "/cadastro";
     if (!effectiveInviteToken) return basePath;
@@ -76,8 +76,8 @@ export default function ConviteNecessarioPage() {
         </h1>
         <p className="mt-4 max-w-md text-sm leading-7 text-zinc-300">
           A entrada em <span className="font-black text-white">{resolvedTenantName}</span> esta
-          fechada para cadastro publico. Para participar do app como membro, voce precisa abrir um
-          convite ativo enviado por alguem dessa atletica.
+          fechada para cadastro público. Para participar do app como membro, você precisa abrir um
+          convite ativo enviado por alguém dessa atlética.
         </p>
 
         <div className="mt-6 w-full rounded-3xl border border-zinc-800 bg-zinc-900/80 p-5 text-left backdrop-blur">
@@ -89,7 +89,7 @@ export default function ConviteNecessarioPage() {
               </p>
               <p className="mt-2 text-sm text-zinc-300">
                 {effectiveInviteToken
-                  ? "Encontramos um convite salvo para voce. Continue pelo cadastro para concluir a entrada."
+                  ? "Encontramos um convite salvo para você. Continue pelo cadastro para concluir a entrada."
                   : "Nenhum convite ativo foi detectado nesta sessao. Abra o link recebido para continuar."}
               </p>
             </div>

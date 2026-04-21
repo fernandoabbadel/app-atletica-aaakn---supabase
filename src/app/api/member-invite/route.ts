@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   try {
     const token = request.nextUrl.searchParams.get("token")?.trim() || "";
     if (!token) {
-      return NextResponse.json({ error: "Token de convite invalido." }, { status: 400 });
+      return NextResponse.json({ error: "Token de convite inválido." }, { status: 400 });
     }
 
     const { data: inviteRow, error: inviteError } = await supabaseAdmin
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (!inviteRow) {
-      return NextResponse.json({ error: "Convite nao encontrado." }, { status: 404 });
+      return NextResponse.json({ error: "Convite não encontrado." }, { status: 404 });
     }
 
     const invite = asObject(inviteRow);
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("authorization") || "";
     const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!accessToken) {
-      return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
     }
 
     const {
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     } = await supabaseAdmin.auth.getUser(accessToken);
 
     if (authError || !authData.user) {
-      return NextResponse.json({ error: "Sessao invalida." }, { status: 401 });
+      return NextResponse.json({ error: "Sessão inválida." }, { status: 401 });
     }
 
     const body = asObject(await request.json());
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
     const expiresInHours = toPositiveInt(body?.expiresInHours, 72, 24 * 7);
 
     if (!tenantId) {
-      return NextResponse.json({ error: "Tenant invalido." }, { status: 400 });
+      return NextResponse.json({ error: "Tenant inválido." }, { status: 400 });
     }
 
     const userId = authData.user.id;
@@ -122,14 +122,14 @@ export async function POST(request: NextRequest) {
 
     if (!userTenantId || userTenantId !== tenantId || tenantStatus !== "approved") {
       return NextResponse.json(
-        { error: "Seu perfil nao pode gerar convite neste tenant." },
+        { error: "Seu perfil não pode gerar convite neste tenant." },
         { status: 403 }
       );
     }
 
     if (accountStatus === "banned" || accountStatus === "bloqueado" || role === "guest") {
       return NextResponse.json(
-        { error: "Seu perfil nao pode gerar convite no momento." },
+        { error: "Seu perfil não pode gerar convite no momento." },
         { status: 403 }
       );
     }
@@ -148,8 +148,8 @@ export async function POST(request: NextRequest) {
         {
           error:
             quota.status === "pending"
-              ? "Voce ja usou sua cota atual. Os 5 convites extras liberam em ate 1 hora."
-              : `Voce ja atingiu o limite de ${quota.totalLimit} convites hoje. Use o pedido de mais convites para liberar novos links.`,
+              ? "Você já usou sua cota atual. Os 5 convites extras liberam em até 1 hora."
+              : `Você já atingiu o limite de ${quota.totalLimit} convites hoje. Use o pedido de mais convites para liberar novos links.`,
         },
         { status: 429 }
       );

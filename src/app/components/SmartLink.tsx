@@ -152,7 +152,7 @@ export default function SmartLink({
     if (hasPermission) return;
 
     event.preventDefault();
-    addToast("Acesso bloqueado para essa area.", "error");
+    addToast("Acesso bloqueado para essa área.", "error");
   };
 
   if (!hasPermission && showLockIcon) {

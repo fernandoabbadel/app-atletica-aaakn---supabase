@@ -98,11 +98,11 @@ export default function PlatformLandingEditor() {
         }
 
         if (isPermissionError(error)) {
-          addToast("Sem permissao para carregar a configuracao da landing.", "error");
+          addToast("Sem permissão para carregar a configuração da landing.", "error");
         } else {
           const message = extractLandingEditorErrorMessage(error);
           console.error(`Erro ao carregar landing da plataforma: ${message}`);
-          addToast(`Erro ao carregar configuracoes: ${message}`, "error");
+          addToast(`Erro ao carregar configurações: ${message}`, "error");
         }
       } finally {
         if (mounted) setLoading(false);
@@ -172,7 +172,7 @@ export default function PlatformLandingEditor() {
     } catch (error: unknown) {
       storeLandingEditorDraft(config);
       if (isPermissionError(error)) {
-        addToast("Sem permissao para salvar a landing.", "error");
+        addToast("Sem permissão para salvar a landing.", "error");
       } else {
         const message = extractLandingEditorErrorMessage(error);
         console.error(`Erro ao salvar landing da plataforma: ${message}`);

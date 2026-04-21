@@ -85,7 +85,7 @@ export default function AdminParceirosHistoricoPage() {
         setNextCursor(page.nextCursor);
       } catch (error: unknown) {
         console.error(error);
-        addToast("Erro ao carregar historico.", "error");
+        addToast("Erro ao carregar histórico.", "error");
       } finally {
         if (reset) setLoading(false);
         else setLoadingMore(false);
@@ -114,7 +114,7 @@ export default function AdminParceirosHistoricoPage() {
             <ArrowLeft size={18} className="text-zinc-300" />
           </Link>
           <div>
-            <h1 className="text-xl font-black uppercase tracking-tight">Historico de Scans</h1>
+              <h1 className="text-xl font-black uppercase tracking-tight">Histórico de Scans</h1>
             <p className="text-[11px] text-zinc-500 font-bold">
               Leitura paginada de uso de cupons (20 por vez)
             </p>
@@ -130,7 +130,7 @@ export default function AdminParceirosHistoricoPage() {
                 <tr>
                   <th className="p-4">Data</th>
                   <th className="p-4">Empresa</th>
-                  <th className="p-4">Usuario</th>
+                      <th className="p-4">Usuário</th>
                   <th className="p-4">Cupom</th>
                   <th className="p-4">Valor</th>
                 </tr>

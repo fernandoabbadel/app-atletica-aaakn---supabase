@@ -11,15 +11,34 @@ export interface TenantPaymentRecipientOption {
   avatarUrl: string;
 }
 
+export type TenantPaymentRecipientScope = "tenant" | "events" | "products";
+
 const DEFAULT_AVATAR_URL = "https://github.com/shadcn.png";
-const PAYMENT_RECEIVERS_DOC_ID = "payment_receivers";
+const PAYMENT_RECEIVERS_DOC_IDS: Record<TenantPaymentRecipientScope, string> = {
+  tenant: "payment_receivers",
+  events: "event_payment_receivers",
+  products: "product_payment_receivers",
+};
 
 const resolveRecipientsTenantId = (tenantId?: string | null): string =>
   resolveStoredTenantScopeId(String(tenantId || "").trim());
 
-const buildPaymentReceiversConfigId = (tenantId: string): string =>
-  buildTenantScopedRowId(resolveRecipientsTenantId(tenantId), PAYMENT_RECEIVERS_DOC_ID) ||
-  PAYMENT_RECEIVERS_DOC_ID;
+const normalizeRecipientScope = (
+  scope?: TenantPaymentRecipientScope | null
+): TenantPaymentRecipientScope =>
+  scope === "events" || scope === "products" ? scope : "tenant";
+
+const resolvePaymentReceiversDocId = (
+  scope?: TenantPaymentRecipientScope | null
+): string => PAYMENT_RECEIVERS_DOC_IDS[normalizeRecipientScope(scope)];
+
+const buildPaymentReceiversConfigId = (
+  tenantId: string,
+  scope?: TenantPaymentRecipientScope | null
+): string => {
+  const docId = resolvePaymentReceiversDocId(scope);
+  return buildTenantScopedRowId(resolveRecipientsTenantId(tenantId), docId) || docId;
+};
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -50,7 +69,7 @@ export const normalizeTenantPaymentRecipient = (
 
   return {
     userId,
-    name: name || "Usuario",
+    name: name || "Usuário",
     turma: turma || "Sem turma",
     phone,
     avatarUrl: avatarUrl || DEFAULT_AVATAR_URL,
@@ -66,14 +85,26 @@ export const findTenantPaymentRecipient = (
   return recipients.find((entry) => entry.userId === cleanUserId) || null;
 };
 
+export const filterTenantPaymentRecipientsByIds = (
+  recipients: TenantPaymentRecipientOption[],
+  userIds: string[]
+): TenantPaymentRecipientOption[] => {
+  const selectedIds = new Set(
+    userIds.map((entry) => String(entry || "").trim()).filter(Boolean)
+  );
+  if (selectedIds.size === 0) return [];
+  return recipients.filter((entry) => selectedIds.has(entry.userId));
+};
+
 export async function fetchTenantPaymentRecipients(
-  tenantId: string
+  tenantId: string,
+  scope?: TenantPaymentRecipientScope
 ): Promise<TenantPaymentRecipientOption[]> {
   const cleanTenantId = tenantId.trim();
   if (!cleanTenantId) return [];
 
   const supabase = getSupabaseClient();
-  const configId = buildPaymentReceiversConfigId(cleanTenantId);
+  const configId = buildPaymentReceiversConfigId(cleanTenantId, scope);
   const { data, error } = await supabase
     .from("app_config")
     .select("id,data")
@@ -117,7 +148,8 @@ export async function fetchTenantPaymentReceiverDirectory(
 
 export async function saveTenantPaymentRecipients(
   tenantId: string,
-  recipients: TenantPaymentRecipientOption[]
+  recipients: TenantPaymentRecipientOption[],
+  scope?: TenantPaymentRecipientScope
 ): Promise<TenantPaymentRecipientOption[]> {
   const cleanTenantId = tenantId.trim();
   if (!cleanTenantId) return [];
@@ -134,10 +166,11 @@ export async function saveTenantPaymentRecipients(
   const scopedTenantId = resolveRecipientsTenantId(cleanTenantId);
   const { error } = await supabase.from("app_config").upsert(
     {
-      id: buildPaymentReceiversConfigId(scopedTenantId),
+      id: buildPaymentReceiversConfigId(scopedTenantId, scope),
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
       data: {
         recipients: normalized,
+        scope: normalizeRecipientScope(scope),
         updatedAt: new Date().toISOString(),
       },
       updatedAt: new Date().toISOString(),

@@ -194,7 +194,7 @@ export default function MiniVendorCompanyEditPage() {
     const cleanUserId = managedUserId.trim();
 
     if (!cleanUserId || !cleanTenantId) {
-      addToast("Abra a area da atletica antes de cadastrar a loja.", "error");
+      addToast("Abra a área da atlética antes de cadastrar a loja.", "error");
       return;
     }
     if (!vendorForm.storeName.trim()) {
@@ -242,7 +242,7 @@ export default function MiniVendorCompanyEditPage() {
       addToast(
         saved.status === "approved"
           ? "Loja mini vendor atualizada."
-          : "Cadastro salvo. A loja segue em aprovacao, mas voce ja pode continuar editando e cadastrar produtos.",
+          : "Cadastro salvo. A loja segue em aprovação, mas você já pode continuar editando e cadastrar produtos.",
         "success"
       );
     } catch (error: unknown) {
@@ -284,7 +284,7 @@ export default function MiniVendorCompanyEditPage() {
     >
       {!canUseArea ? (
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
-          Entre em uma atletica valida para usar a area mini vendor.
+          Entre em uma atlética válida para usar a área mini vendor.
         </section>
       ) : loading ? (
         <section className="flex min-h-[240px] items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -306,7 +306,7 @@ export default function MiniVendorCompanyEditPage() {
                     {vendorForm.storeName || "Sua loja mini vendor"}
                   </h2>
                   <p className="mt-2 text-[11px] font-bold uppercase tracking-wide text-emerald-400">
-                    Rascunho salvo automaticamente nesta pagina.
+                    Rascunho salvo automaticamente nesta página.
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase ${getVendorStatusClass(profile?.status)}`}>
@@ -344,8 +344,8 @@ export default function MiniVendorCompanyEditPage() {
                 {profile?.status === "rejected"
                   ? "Seu cadastro foi rejeitado. Ajuste os dados e envie novamente para nova analise."
                   : profile?.status === "disabled"
-                  ? "Sua loja foi desativada pelo admin. Ajuste os dados ou fale com a atletica."
-                  : "Depois de salvar, o cadastro segue em aprovacao do admin da atletica, mas a edicao da loja e dos produtos continua liberada."}
+                  ? "Sua loja foi desativada pelo admin. Ajuste os dados ou fale com a atlética."
+                  : "Depois de salvar, o cadastro segue em aprovação do admin da atlética, mas a edição da loja e dos produtos continua liberada."}
               </div>
             ) : null}
 
@@ -356,7 +356,7 @@ export default function MiniVendorCompanyEditPage() {
                     Visibilidade publica
                   </p>
                   <p className="mt-2 text-sm text-zinc-300">
-                    Pause a loja quando ela deixar de vender. Voce pode esconder o perfil, a
+                    Pause a loja quando ela deixar de vender. Você pode esconder o perfil, a
                     categoria e os produtos separadamente.
                   </p>
                 </div>
@@ -410,9 +410,9 @@ export default function MiniVendorCompanyEditPage() {
                       {vendorForm.profileVisible ? "Visivel" : "Oculto"}
                     </span>
                   </div>
-                  <p className="mt-4 text-sm font-black uppercase text-white">Perfil publico</p>
+                  <p className="mt-4 text-sm font-black uppercase text-white">Perfil público</p>
                   <p className="mt-2 text-xs leading-5 text-zinc-400">
-                    Controla a pagina da lojinha em `/perfil/mini-vendor`.
+                    Controla a página da lojinha em `/perfil/mini-vendor`.
                   </p>
                 </button>
 
@@ -535,7 +535,7 @@ export default function MiniVendorCompanyEditPage() {
                       }))
                     }
                     rows={4}
-                    placeholder="Descricao da loja"
+                    placeholder="Descrição da loja"
                     className="resize-y rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-blue-500 md:col-span-2"
                   />
                   <input
@@ -724,7 +724,7 @@ export default function MiniVendorCompanyEditPage() {
               className="inline-flex items-center gap-2 rounded-2xl border border-blue-500/30 bg-blue-500/10 px-5 py-3 text-xs font-black uppercase text-blue-300 shadow-2xl backdrop-blur-sm hover:bg-blue-500/20 disabled:opacity-60"
             >
               {savingVendor ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {savingVendor ? "Salvando..." : profile ? "Salvar esta pagina" : "Enviar cadastro"}
+              {savingVendor ? "Salvando..." : profile ? "Salvar esta página" : "Enviar cadastro"}
             </button>
           </div>
         </div>

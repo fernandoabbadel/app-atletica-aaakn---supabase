@@ -271,7 +271,7 @@ export default function SharkLegendsPage() {
           try {
               await updateUser({ apelido: tempName });
           } catch {
-              addToast("Nao foi possivel salvar o apelido agora.", "error");
+              addToast("Não foi possível salvar o apelido agora.", "error");
           }
       }
   };

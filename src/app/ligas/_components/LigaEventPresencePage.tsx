@@ -173,7 +173,7 @@ export function LigaEventPresencePage({
       setHasMore(page.hasMore);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao carregar lista de presenca.", "error");
+      addToast("Erro ao carregar lista de presença.", "error");
     } finally {
       setLoading(false);
     }
@@ -245,7 +245,7 @@ export function LigaEventPresencePage({
         "Lote",
         "Quantidade",
         "Valor",
-        "Data Aprovacao",
+        "Data Aprovação",
         "Aprovado Por",
       ];
 
@@ -294,7 +294,7 @@ export function LigaEventPresencePage({
             <div>
               <h1 className="flex items-center gap-2 text-xl font-black uppercase tracking-tight">
                 <Users size={18} className="text-emerald-400" />
-                Lista de Presenca
+                Lista de Presença
               </h1>
               <p className="text-[11px] font-bold text-zinc-500">{eventTitle}</p>
             </div>
@@ -320,13 +320,13 @@ export function LigaEventPresencePage({
             <table className="w-full whitespace-nowrap text-left text-xs">
               <thead className="bg-black/40 font-black uppercase text-zinc-500">
                 <tr>
-                  <th className="p-4">Usuario</th>
+                  <th className="p-4">Usuário</th>
                   <th className="p-4">Turma</th>
                   <th className="p-4">RSVP</th>
                   <th className="p-4">Pagamento</th>
                   <th className="p-4">Lote</th>
                   <th className="p-4">Valor</th>
-                  <th className="p-4">Aprovacao</th>
+                  <th className="p-4">Aprovação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800 text-zinc-200">

@@ -54,7 +54,7 @@ const getRequesterLabel = (request: TenantJoinRequest): string =>
   request.requesterName.trim() ||
   request.requesterEmail.trim() ||
   request.requesterUserId.trim() ||
-  "Usuario sem identificacao";
+  "Usuário sem identificação";
 
 const getRequesterInitial = (label: string): string => label.trim().charAt(0).toUpperCase() || "?";
 
@@ -87,7 +87,7 @@ function EmptyState() {
         Fila zerada
       </h2>
       <p className="mt-2 text-sm text-zinc-400">
-        Ninguem aguardando aprovacao neste tenant agora.
+        Ninguém aguardando aprovação neste tenant agora.
       </p>
     </div>
   );
@@ -205,9 +205,9 @@ export function LaunchPendingPage({ scope }: LaunchPendingPageProps) {
         }
       );
       await loadData(selectedTenantId, "refresh");
-      addToast("Solicitacao aprovada. Usuario liberado como user.", "success");
+      addToast("Solicitação aprovada. Usuário liberado como user.", "success");
       return;
-      addToast("Solicitacao aprovada. Usuario liberado como user.", "success");
+      addToast("Solicitação aprovada. Usuário liberado como user.", "success");
     } catch (error: unknown) {
       addToast(
         `Deu ruim no plantao! 🚨 ${extractErrorMessage(error)}`,
@@ -247,7 +247,7 @@ export function LaunchPendingPage({ scope }: LaunchPendingPageProps) {
         return next;
       });
       await loadData(selectedTenantId, "refresh");
-      addToast("Aprovacao negada e fila atualizada.", "success");
+      addToast("Aprovação negada e fila atualizada.", "success");
     } catch (error: unknown) {
       addToast(
         `Deu ruim no plantao! 🚨 ${extractErrorMessage(error)}`,
@@ -274,13 +274,13 @@ export function LaunchPendingPage({ scope }: LaunchPendingPageProps) {
       scope={scope}
       tenantSlug={tenantSlug}
       title="Pendentes"
-      subtitle="cadastros via convite aguardando aprovacao"
+      subtitle="cadastros via convite aguardando aprovação"
       refreshing={workspaceRefreshing || pageRefreshing}
       onRefresh={() => void handleRefresh()}
     >
       <LaunchTenantSelectorCard
         workspace={workspace}
-        helperText="A fila abaixo mostra quem entrou por convite e ainda depende de aprovacao manual."
+      helperText="A fila abaixo mostra quem entrou por convite e ainda depende de aprovação manual."
       />
 
       <section className="rounded-3xl border border-brand/20 bg-zinc-950/80 p-4 sm:p-5">
@@ -293,12 +293,12 @@ export function LaunchPendingPage({ scope }: LaunchPendingPageProps) {
               </p>
             </div>
             <h2 className="mt-2 text-lg font-black uppercase text-white">
-              Usuario fica como visitante ate ser aprovado
+              Usuário fica como visitante até ser aprovado
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Enquanto a aprovacao nao sai, o usuario fica travado no estado de{" "}
-              <span className="font-black uppercase text-zinc-200">aguardando aprovacao</span>.
-              A revisao pode ser feita pelo{" "}
+              Enquanto a aprovação não sai, o usuário fica travado no estado de{" "}
+              <span className="font-black uppercase text-zinc-200">aguardando aprovação</span>.
+              A revisão pode ser feita pelo{" "}
               <span className="font-black uppercase text-zinc-200">master do tenant</span>{" "}
               ou pelo{" "}
               <span className="font-black uppercase text-zinc-200">lider da turma</span>{" "}
@@ -330,7 +330,7 @@ export function LaunchPendingPage({ scope }: LaunchPendingPageProps) {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.22em] text-zinc-500">
-                Fila de aprovacao
+                Fila de aprovação
               </p>
               <h2 className="mt-1 text-lg font-black uppercase text-white">
                 Cadastros pendentes
@@ -502,7 +502,7 @@ export function LaunchPendingPage({ scope }: LaunchPendingPageProps) {
                   disabled={currentPage >= totalPages}
                   className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-sm font-black uppercase text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Proxima
+                  Próxima
                   <ChevronRight size={16} />
                 </button>
               </div>

@@ -99,7 +99,7 @@ export default function AdminUsuarioDetalhePage() {
         tenantId: activeTenantId || undefined,
       });
       if (!result) {
-        addToast("Usuario nao encontrado.", "error");
+        addToast("Usuário não encontrado.", "error");
         router.replace("/admin/usuarios");
         return;
       }
@@ -108,7 +108,7 @@ export default function AdminUsuarioDetalhePage() {
       setForm(toInitialForm(result));
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao carregar usuario.", "error");
+      addToast("Erro ao carregar usuário.", "error");
     } finally {
       setLoading(false);
     }
@@ -151,7 +151,7 @@ export default function AdminUsuarioDetalhePage() {
         };
       });
 
-      addToast("Usuario atualizado.", "success");
+      addToast("Usuário atualizado.", "success");
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
       addToast("Erro ao salvar.", "error");
@@ -177,8 +177,8 @@ export default function AdminUsuarioDetalhePage() {
       setProfile((prev) => (prev ? { ...prev, status: nextStatus } : prev));
       addToast(
         nextStatus === "bloqueado"
-          ? "Usuario bloqueado."
-          : "Usuario desbloqueado.",
+          ? "Usuário bloqueado."
+          : "Usuário desbloqueado.",
         "success"
       );
     } catch (error: unknown) {
@@ -193,18 +193,18 @@ export default function AdminUsuarioDetalhePage() {
     if (!userId) return;
 
     const confirmed = window.confirm(
-      "Confirmar exclusao permanente deste usuario?"
+      "Confirmar exclusão permanente deste usuário?"
     );
     if (!confirmed) return;
 
     setDeleting(true);
     try {
       await deleteAdminUser(userId, { tenantId: activeTenantId || undefined });
-      addToast("Usuario excluido.", "success");
+      addToast("Usuário excluído.", "success");
       router.replace("/admin/usuarios");
     } catch (error: unknown) {
       if (!isPermissionError(error)) { console.error(error); }
-      addToast("Erro ao excluir usuario.", "error");
+      addToast("Erro ao excluir usuário.", "error");
       setDeleting(false);
     }
   };
@@ -234,7 +234,7 @@ export default function AdminUsuarioDetalhePage() {
             </Link>
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
-                <User size={18} className="text-emerald-400" /> Perfil do Usuario
+                <User size={18} className="text-emerald-400" /> Perfil do Usuário
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">UID: {userId}</p>
             </div>

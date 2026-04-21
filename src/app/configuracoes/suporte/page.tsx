@@ -81,7 +81,7 @@ export default function SupportPage() {
 
   const handleSubmit = async () => {
     if (!user) {
-      addToast("Voce precisa estar logado para abrir chamado.", "error");
+      addToast("Você precisa estar logado para abrir chamado.", "error");
       return;
     }
 
@@ -164,7 +164,7 @@ export default function SupportPage() {
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               maxLength={SUBJECT_MAX_CHARS}
-              placeholder="Ex: Nao consigo finalizar meu pedido"
+              placeholder="Ex: Não consigo finalizar meu pedido"
               className="w-full bg-black border border-zinc-800 rounded-lg p-3 text-sm text-white outline-none focus:border-emerald-500 placeholder:text-zinc-600"
             />
             <p className="mt-1 text-right text-[10px] font-bold uppercase tracking-wide text-zinc-600">
@@ -213,7 +213,7 @@ export default function SupportPage() {
 
           {loadingHistory ? (
             <div className="text-xs text-zinc-500 flex items-center gap-2 py-2">
-              <Loader2 size={14} className="animate-spin" /> Carregando historico...
+              <Loader2 size={14} className="animate-spin" /> Carregando histórico...
             </div>
           ) : history.length === 0 ? (
             <div className="text-xs text-zinc-500 bg-black/40 rounded-lg border border-zinc-800 p-3 flex items-center gap-2">

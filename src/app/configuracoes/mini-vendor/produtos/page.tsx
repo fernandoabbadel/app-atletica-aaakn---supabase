@@ -107,6 +107,10 @@ export default function MiniVendorProductsPage() {
     if (!tenantId.trim() || !managedUserId) return "";
     return `mini-vendor:${tenantId}:${managedUserId}:product-draft`;
   }, [managedUserId, tenantId]);
+  const defaultProductPaymentWhatsapp = useMemo(
+    () => normalizePhoneToBrE164(profile?.pixWhatsapp || ""),
+    [profile?.pixWhatsapp]
+  );
 
   const loadProducts = useCallback(async (sellerId: string, forceRefresh = true) => {
     const rows = await fetchMiniVendorProducts({
@@ -175,8 +179,12 @@ export default function MiniVendorProductsPage() {
       ...EMPTY_PRODUCT_FORM,
       variantes: [newVariant()],
       planScopeRows: buildPlanScopeRows(plans),
+      payment: {
+        ...EMPTY_PRODUCT_FORM.payment,
+        whatsapp: defaultProductPaymentWhatsapp,
+      },
     });
-  }, []);
+  }, [defaultProductPaymentWhatsapp]);
 
   useEffect(() => {
     draftRestoredRef.current = false;
@@ -193,17 +201,23 @@ export default function MiniVendorProductsPage() {
         const plans = await ensurePlanCatalog(false);
         const restored = restoreProductFormDraft(draft, plans);
         setEditingProductId(restored.editingProductId);
-        setProductForm(restored.form);
+        setProductForm({
+          ...restored.form,
+          payment: {
+            ...restored.form.payment,
+            whatsapp: restored.form.payment.whatsapp || defaultProductPaymentWhatsapp,
+          },
+        });
         setIsProductOpen(restored.isProductOpen);
         setIsPlanModalOpen(restored.isProductOpen && restored.isPlanModalOpen);
       } catch (error: unknown) {
         console.error(error);
-        addToast("Nao foi possivel restaurar o rascunho do produto.", "error");
+        addToast("Não foi possível restaurar o rascunho do produto.", "error");
       }
     };
 
     void restoreDraft();
-  }, [addToast, ensurePlanCatalog, loading, productDraftKey]);
+  }, [addToast, defaultProductPaymentWhatsapp, ensurePlanCatalog, loading, productDraftKey]);
 
   useEffect(() => {
     if (loading || !productDraftKey) return;
@@ -232,7 +246,7 @@ export default function MiniVendorProductsPage() {
       setIsProductOpen(true);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao abrir formulario do produto.", "error");
+      addToast("Erro ao abrir formulário do produto.", "error");
     }
   };
 
@@ -244,12 +258,19 @@ export default function MiniVendorProductsPage() {
     try {
       const plans = await ensurePlanCatalog(false);
       setEditingProductId(row.id);
-      setProductForm(mapProductRowToForm(row, plans));
+      const mapped = mapProductRowToForm(row, plans);
+      setProductForm({
+        ...mapped,
+        payment: {
+          ...mapped.payment,
+          whatsapp: mapped.payment.whatsapp || defaultProductPaymentWhatsapp,
+        },
+      });
       setIsPlanModalOpen(false);
       setIsProductOpen(true);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao abrir edicao do produto.", "error");
+      addToast("Erro ao abrir edição do produto.", "error");
     }
   };
 
@@ -307,6 +328,7 @@ export default function MiniVendorProductsPage() {
     const nome = productForm.nome.trim();
     const preco = parseMoney(productForm.preco);
     const precoAntigo = productForm.precoAntigo.trim() ? parseMoney(productForm.precoAntigo) : 0;
+    const paymentWhatsapp = productForm.payment.whatsapp.trim() || defaultProductPaymentWhatsapp;
     const variants = productForm.usarVariantes
       ? productForm.variantes
           .map((variant) => ({
@@ -334,8 +356,8 @@ export default function MiniVendorProductsPage() {
     }
     if (
       productForm.payment.enabled &&
-      productForm.payment.whatsapp.trim() &&
-      !hasValidPhoneLength(productForm.payment.whatsapp)
+      paymentWhatsapp.trim() &&
+      !hasValidPhoneLength(paymentWhatsapp)
     ) {
       return void addToast("Informe um WhatsApp valido para o pagamento proprio.", "error");
     }
@@ -385,7 +407,7 @@ export default function MiniVendorProductsPage() {
               chave: productForm.payment.chave.trim(),
               banco: productForm.payment.banco.trim(),
               titular: productForm.payment.titular.trim(),
-              whatsapp: productForm.payment.whatsapp.trim(),
+              whatsapp: paymentWhatsapp,
             }
           : null,
         seller_type: "mini_vendor",
@@ -464,7 +486,7 @@ export default function MiniVendorProductsPage() {
       subtitle={
         isAdminManagingVendor
           ? "Edicao administrativa do catalogo da lojinha selecionada."
-          : "Catalogo separado do cadastro da empresa, com planos carregados somente quando o formulario abre."
+          : "Catálogo separado do cadastro da empresa, com planos carregados somente quando o formulário abre."
       }
       backPath={backPath}
       actions={
@@ -479,7 +501,7 @@ export default function MiniVendorProductsPage() {
     >
       {!canUseArea ? (
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
-          Entre em uma atletica valida para usar a area mini vendor.
+          Entre em uma atlética válida para usar a área mini vendor.
         </section>
       ) : loading ? (
         <section className="flex min-h-[240px] items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -495,7 +517,7 @@ export default function MiniVendorProductsPage() {
                 </div>
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
-                    Catalogo da Lojinha
+                    Catálogo da Lojinha
                   </p>
                   <h2 className="mt-1 text-xl font-black uppercase text-white">{storeName}</h2>
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -526,11 +548,11 @@ export default function MiniVendorProductsPage() {
               </div>
             ) : !isApproved ? (
               <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${getVendorStatusClass(profile.status)}`}>
-                Sua loja segue em aprovacao, mas voce ja pode editar esta pagina e montar os produtos. Eles so entram na vitrine oficial depois da aprovacao.
+                Sua loja segue em aprovação, mas você já pode editar esta página e montar os produtos. Eles só entram na vitrine oficial depois da aprovação.
               </div>
             ) : (
               <div className="mt-5 rounded-2xl border border-zinc-800 bg-black/20 px-4 py-4 text-sm text-zinc-400">
-                Esta tela carrega somente os produtos. Os planos aparecem apenas ao abrir o formulario.
+                Esta tela carrega somente os produtos. Os planos aparecem apenas ao abrir o formulário.
               </div>
             )}
           </section>
@@ -544,7 +566,7 @@ export default function MiniVendorProductsPage() {
                       <h3 className="text-sm font-black uppercase text-white">
                         {editingProductId ? "Editar Produto" : "Criar Produto"}
                       </h3>
-                      <p className="text-[11px] text-zinc-500">Categoria fixa da sua lojinha e rascunho salvo nesta pagina.</p>
+                      <p className="text-[11px] text-zinc-500">Categoria fixa da sua lojinha e rascunho salvo nesta página.</p>
                     </div>
                     <button type="button" onClick={closeProductForm} className="rounded-lg border border-zinc-700 bg-zinc-900 p-2 hover:bg-zinc-800">
                       <X size={14} />
@@ -569,7 +591,7 @@ export default function MiniVendorProductsPage() {
                     <div className="md:col-span-2">
                       <ImageResizeHelpLink label="Diminuir a imagem do produto no favicon.io/favicon-converter" />
                     </div>
-                    <textarea value={productForm.descricao} maxLength={PRODUCT_DESCRIPTION_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, descricao: event.target.value.slice(0, PRODUCT_DESCRIPTION_MAX_LENGTH) }))} rows={3} placeholder="Descricao" className="resize-y rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
+                    <textarea value={productForm.descricao} maxLength={PRODUCT_DESCRIPTION_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, descricao: event.target.value.slice(0, PRODUCT_DESCRIPTION_MAX_LENGTH) }))} rows={3} placeholder="Descrição" className="resize-y rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
                   </div>
 
                   <div className="grid gap-4 lg:grid-cols-2">
@@ -608,7 +630,24 @@ export default function MiniVendorProductsPage() {
 
                     <div className="space-y-3 rounded-xl border border-zinc-800 bg-black/20 p-4">
                       <label className="inline-flex items-center gap-2 text-[11px] font-bold text-zinc-400">
-                        <input type="checkbox" checked={productForm.payment.enabled} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, enabled: event.target.checked } }))} className="accent-emerald-500" />
+                        <input
+                          type="checkbox"
+                          checked={productForm.payment.enabled}
+                          onChange={(event) =>
+                            setProductForm((previous) => ({
+                              ...previous,
+                              payment: {
+                                ...previous.payment,
+                                enabled: event.target.checked,
+                                whatsapp:
+                                  event.target.checked && !previous.payment.whatsapp.trim()
+                                    ? defaultProductPaymentWhatsapp
+                                    : previous.payment.whatsapp,
+                              },
+                            }))
+                          }
+                          className="accent-emerald-500"
+                        />
                         Usar pagamento proprio
                       </label>
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -616,11 +655,9 @@ export default function MiniVendorProductsPage() {
                         <input id="mini-vendor-product-pix-bank" name="mini_vendor_product_pix_bank" value={productForm.payment.banco} maxLength={PIX_BANK_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, banco: event.target.value.slice(0, PIX_BANK_MAX_LENGTH) } }))} placeholder="Banco" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
                         <input id="mini-vendor-product-pix-holder" name="mini_vendor_product_pix_holder" value={productForm.payment.titular} maxLength={PIX_HOLDER_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, titular: event.target.value.slice(0, PIX_HOLDER_MAX_LENGTH) } }))} placeholder="Titular" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
                         <div className="rounded-xl border border-zinc-800 bg-black/30 px-3 py-2.5 text-[11px] text-zinc-500">
-                          <p className="font-black uppercase tracking-[0.18em] text-zinc-400">
-                            Recebedores
-                          </p>
+                          <p className="font-black uppercase tracking-[0.18em] text-zinc-400">Comprovante</p>
                           <p className="mt-1">
-                            Mini-vendor usa somente o proprio WhatsApp preenchido manualmente.
+                            Padrão: WhatsApp de comprovante cadastrado na lojinha. Você pode trocar por produto.
                           </p>
                         </div>
                         <input id="mini-vendor-product-payment-whatsapp" name="mini_vendor_product_payment_whatsapp" value={productForm.payment.whatsapp} maxLength={PHONE_MAX_LENGTH} inputMode="tel" onChange={(event) => setProductForm((previous) => ({ ...previous, payment: { ...previous.payment, whatsapp: normalizePhoneToBrE164(event.target.value) } }))} placeholder="WhatsApp" disabled={!productForm.payment.enabled} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />

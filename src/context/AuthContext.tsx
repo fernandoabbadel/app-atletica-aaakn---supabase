@@ -890,7 +890,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (!insertedRow) {
-          throw new Error("Falha ao criar usuario no banco.");
+          throw new Error("Falha ao criar usuário no banco.");
         }
         if (!active || currentToken !== syncToken) return;
 
@@ -901,12 +901,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAdmin(false);
         setLoading(false);
         void ensureAlbumSelfCollected(normalized.uid).catch(() => {});
-        void logActivity(normalized.uid, normalized.nome, "CREATE", "Usuarios", "Novo cadastro via Google");
+        void logActivity(normalized.uid, normalized.nome, "CREATE", "Usuários", "Novo cadastro via Google");
       } catch (error: unknown) {
         const isRetryableNetworkError = isSupabaseRetryableFetchError(error);
         if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
           console.warn(
-            "Falha na sincronizacao do usuario:",
+            "Falha na sincronização do usuário:",
             formatBackendErrorForConsole(error)
           );
         }
@@ -929,7 +929,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Fallback local apenas para erro persistente de schema/RLS sem perfil previamente validado.
-        // Em timeout de rede preservamos o ultimo perfil confirmado para nao disparar convite indevido.
+        // Em timeout de rede preservamos o último perfil confirmado para não disparar convite indevido.
         const fallbackUser = normalizeUserRow(
           {
             ...DEFAULT_USER_PROPS,
@@ -957,7 +957,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const handleAuthChange = async (authUser: SupabaseAuthUser | null): Promise<void> => {
       if (authUser && syncingAuthUidRef.current === authUser.id) {
-        // Ja existe uma sincronizacao em andamento para este usuario; evita invalidar o token e travar loading.
+        // Já existe uma sincronização em andamento para este usuário; evita invalidar o token e travar loading.
         return;
       }
 
@@ -1098,7 +1098,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .single(),
           mutableSelectColumns
         );
-        if (!recoveredRow) throw new Error("Falha ao recuperar perfil do usuario.");
+        if (!recoveredRow) throw new Error("Falha ao recuperar perfil do usuário.");
 
         const recoveredNormalized = normalizeUserRow(recoveredRow);
         writeVerifiedAuthUserSnapshot(recoveredNormalized);
@@ -1119,7 +1119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 4. MANUTENCAO LEVE + RECONCILIACAO SOB DEMANDA
   useEffect(() => {
     const runMaintenance = async () => {
-        // Guest local nao roda manutencao no banco.
+        // Guest local não roda manutenção no banco.
         if (!user || isLocalGuest || user.isAnonymous || loading) {
           return;
         }
@@ -1168,16 +1168,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             hasUpdates = true;
         }
 
-        // B. LOGIN DIÃƒÂRIO
+        // B. LOGIN DIÁRIO
         const hoje = new Date().toLocaleDateString('pt-BR');
         if (user.ultimoLoginDiario !== hoje) {
             updates["stats.loginCount"] = (currentStats.loginCount || 0) + 1;
             updates.ultimoLoginDiario = hoje;
             updates.xp = (user.xp || 0) + 10;
             hasUpdates = true;
-            // Log apenas se nÃƒÂ£o for guest (redundante, mas seguro)
+            // Log apenas se não for guest (redundante, mas seguro)
             if (!isLocalGuest) {
-                logActivity(user.uid, user.nome, "LOGIN", "Sistema", "Check-in DiÃƒÂ¡rio (+10 XP)");
+                logActivity(user.uid, user.nome, "LOGIN", "Sistema", "Check-in Diário (+10 XP)");
             }
         }
 
@@ -1231,7 +1231,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 !isNavigatorLockTimeoutError(achievementError) &&
                 !isSupabaseRetryableFetchError(achievementError)
             ) {
-                console.warn("Falha ao sincronizar snapshot de conquistas do usuario:", achievementError);
+                console.warn("Falha ao sincronizar snapshot de conquistas do usuário:", achievementError);
             }
         }
 
@@ -1266,7 +1266,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     !isNavigatorLockTimeoutError(catalogError) &&
                     !isSupabaseRetryableFetchError(catalogError)
                 ) {
-                    console.warn("Falha ao carregar catalogo visual do usuario:", catalogError);
+                    console.warn("Falha ao carregar catálogo visual do usuário:", catalogError);
                 }
             }
 
@@ -1450,7 +1450,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } catch (err: unknown) {
                 maintenanceFailed = true;
                 if (!isPermissionError(err)) {
-                    console.warn("Erro ao atualizar manutencao do usuario:", err);
+                    console.warn("Erro ao atualizar manutenção do usuário:", err);
                 }
             }
         }
@@ -1544,7 +1544,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     const guestUser: User = {
         ...DEFAULT_USER_PROPS,
-        uid: "guest_virtual_" + Date.now(), // ID ÃƒÂºnico para a sessÃƒÂ£o
+        uid: "guest_virtual_" + Date.now(), // ID único para a sessão
         nome: "Visitante USC",
         email: "visitante@usc.app",
         foto: "/logo.png",
@@ -1622,7 +1622,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateUser = async (data: Partial<User>) => {
     if (!user) return;
     
-    // Se for guest, atualiza sÃƒÂ³ localmente
+    // Se for guest, atualiza só localmente
     if (isLocalGuest) {
         const newUser = { ...user, ...data };
         setUser(newUser);
@@ -1763,7 +1763,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAdmin(hasAdminPanelAccess(normalized));
       } catch (error: unknown) {
         if (!isPermissionError(error) && !isNavigatorLockTimeoutError(error)) {
-          console.warn("Falha ao atualizar snapshot do usuario:", formatBackendErrorForConsole(error));
+          console.warn("Falha ao atualizar snapshot do usuário:", formatBackendErrorForConsole(error));
         }
       }
     };

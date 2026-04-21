@@ -189,7 +189,7 @@ export default function ConquistasPage() {
                   setTenantScopedXp(Math.max(0, user.xp || 0));
                   setCatalog(ACHIEVEMENTS_CATALOG);
                   setBadgesList(DEFAULT_BADGES);
-                  addToast("Nao foi possivel sincronizar conquistas agora.", "error");
+                  addToast("Não foi possível sincronizar conquistas agora.", "error");
               }
           }
       };

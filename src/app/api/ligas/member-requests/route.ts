@@ -72,12 +72,12 @@ const getAuthScope = async (request: NextRequest) => {
   const authHeader = request.headers.get("authorization") || "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!accessToken) {
-    throw new Error("Nao autenticado.");
+    throw new Error("Não autenticado.");
   }
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
   if (authError || !authData.user) {
-    throw new Error("Sessao invalida.");
+    throw new Error("Sessão inválida.");
   }
 
   const { data: userRow, error: userError } = await supabaseAdmin
@@ -97,11 +97,11 @@ const getAuthScope = async (request: NextRequest) => {
   const tenantStatus = asString(raw?.tenant_status).trim().toLowerCase();
 
   if (!userId) {
-    throw new Error("Perfil do usuario invalido.");
+    throw new Error("Perfil do usuário inválido.");
   }
 
   if (userRole !== "master" && (!tenantId || tenantStatus !== "approved")) {
-    throw new Error("Seu perfil ainda nao pode solicitar entrada na liga.");
+    throw new Error("Seu perfil ainda não pode solicitar entrada na liga.");
   }
 
   return {
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
       DEFAULT_LEAGUE_ROLE;
 
     if (!leagueId) {
-      return NextResponse.json({ error: "Liga invalida." }, { status: 400 });
+      return NextResponse.json({ error: "Liga inválida." }, { status: 400 });
     }
 
     const { data: leagueRowRaw, error: leagueError } = await supabaseAdmin
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
 
     const leagueRow = asObject(leagueRowRaw);
     if (!leagueRow) {
-      return NextResponse.json({ error: "Liga nao encontrada." }, { status: 404 });
+      return NextResponse.json({ error: "Liga não encontrada." }, { status: 404 });
     }
 
     const leagueTenantId = asString(leagueRow.tenant_id).trim();
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
       ])
     );
     if (currentMemberIds.includes(scope.userId)) {
-      return NextResponse.json({ error: "Voce ja faz parte desta liga." }, { status: 409 });
+      return NextResponse.json({ error: "Você já faz parte desta liga." }, { status: 409 });
     }
 
     const currentRequests = normalizeMemberRequests(currentData.memberRequests);
@@ -198,22 +198,22 @@ export async function POST(request: NextRequest) {
 
       const missingColumn = extractMissingSchemaColumn(error);
       if (!missingColumn) {
-        return NextResponse.json({ error: error.message || "Falha ao enviar solicitacao." }, { status: 400 });
+        return NextResponse.json({ error: error.message || "Falha ao enviar solicitação." }, { status: 400 });
       }
 
       const nextPayload = removeMissingColumnFromPayload(updatePayload, missingColumn);
       if (!nextPayload) {
-        return NextResponse.json({ error: error.message || "Falha ao enviar solicitacao." }, { status: 400 });
+        return NextResponse.json({ error: error.message || "Falha ao enviar solicitação." }, { status: 400 });
       }
       updatePayload = nextPayload;
     }
 
-    return NextResponse.json({ error: "Falha ao enviar solicitacao." }, { status: 400 });
+    return NextResponse.json({ error: "Falha ao enviar solicitação." }, { status: 400 });
   } catch (error: unknown) {
     const message =
       error instanceof Error && error.message
         ? error.message
-        : "Erro ao enviar solicitacao para a liga.";
+        : "Erro ao enviar solicitação para a liga.";
     return NextResponse.json({ error: message }, { status: 403 });
   }
 }

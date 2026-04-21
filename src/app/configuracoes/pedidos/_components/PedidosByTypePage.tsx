@@ -301,7 +301,7 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
           eventTitle: selectedPedido.titulo,
           buyerName: user?.nome || selectedPedido.raw?.userName || "Aluno",
           buyerTurma: user?.turma || selectedPedido.raw?.userTurma || "Sem turma",
-          buyerPhone: user?.telefone || "Nao informado",
+          buyerPhone: user?.telefone || "Não informado",
           ticketLabel: selectedPedido.subtitulo,
           totalValue: selectedPedido.valor.toFixed(2),
           orderCode: selectedPedido.id.slice(0, 8).toUpperCase(),
@@ -314,7 +314,7 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
           productName: selectedPedido.titulo,
           buyerName: user?.nome || selectedPedido.raw?.userName || "Cliente",
           buyerTurma: user?.turma || selectedPedido.raw?.userTurma || "Sem turma",
-          buyerPhone: user?.telefone || "Nao informado",
+          buyerPhone: user?.telefone || "Não informado",
           quantity:
             typeof selectedPedido.raw?.quantidade === "number"
               ? selectedPedido.raw.quantidade
@@ -556,7 +556,7 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
                           addToast("Chave PIX copiada!", "success");
                         } catch (error: unknown) {
                           console.error(error);
-                          addToast("Nao foi possivel copiar a chave PIX.", "error");
+                          addToast("Não foi possível copiar a chave PIX.", "error");
                         }
                       }}
                       className="p-2 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
@@ -582,7 +582,7 @@ export function PedidosByTypePage({ tab }: PedidosByTypePageProps) {
                 <div className="rounded-lg border border-zinc-800 bg-black/50 p-3 flex items-start gap-2">
                   <MessageCircle size={14} className="text-emerald-400 mt-0.5" />
                   <p className="text-[11px] text-zinc-400">
-                    Envie o comprovante informando o numero do pedido <span className="font-mono text-zinc-200">#{selectedPedido.id.slice(0, 8).toUpperCase()}</span>.
+                    Envie o comprovante informando o número do pedido <span className="font-mono text-zinc-200">#{selectedPedido.id.slice(0, 8).toUpperCase()}</span>.
                   </p>
                 </div>
                 {whatsappUrl && (

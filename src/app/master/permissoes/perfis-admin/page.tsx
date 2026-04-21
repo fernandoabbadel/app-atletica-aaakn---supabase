@@ -44,17 +44,17 @@ import { withTenantSlug } from "@/lib/tenantRouting";
 const GROUP_LABELS: Record<(typeof TENANT_ADMIN_SIDEBAR_GROUP_ORDER)[number], string> = {
   Base: "Base",
   Comercial: "Comercial",
-  Conteudo: "Conteudo",
+  Conteúdo: "Conteúdo",
   Esportes: "Esportes",
-  Governanca: "Governanca",
+  Governança: "Governança",
   Plataforma: "Plataforma",
 };
 
 const APP_GROUP_ORDER = ["base", "conteudo", "atleta", "info"] as const;
 const APP_GROUP_LABELS: Record<(typeof APP_GROUP_ORDER)[number], string> = {
   base: "Base",
-  conteudo: "Conteudo",
-  atleta: "Area do Atleta",
+  conteudo: "Conteúdo",
+  atleta: "Área do Atleta",
   info: "Central de Info",
 };
 
@@ -63,7 +63,7 @@ const buildCustomProfileDefinition = (
   index: number
 ): TenantAdminSidebarProfileDefinition => ({
   name: `Perfil ${index}`,
-  description: `Perfil personalizado ${key} para combinar painel admin e app do usuario.`,
+  description: `Perfil personalizado ${key} para combinar painel admin e app do usuário.`,
   adminItems: {},
   appModules: {},
 });
@@ -355,7 +355,7 @@ export default function MasterAdminSidebarProfilesPage() {
               <p className="text-xs text-zinc-400">
                 O perfil define o que a tenant pode ver no `tenant/admin` e quais modulos do app
                 podem aparecer no `tenant/admin/dashboard-modulos`. Se um item for ocultado aqui,
-                ele some da tenant, do menu do usuario e continua bloqueado por rota.
+                ele some da tenant, do menu do usuário e continua bloqueado por rota.
               </p>
             </div>
           </div>
@@ -364,7 +364,7 @@ export default function MasterAdminSidebarProfilesPage() {
         <section className="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-5">
           <div className="mb-4 flex items-center gap-2">
             <Users size={16} className="text-red-300" />
-            <h2 className="text-sm font-black uppercase text-white">Atribuicao por atletica</h2>
+            <h2 className="text-sm font-black uppercase text-white">Atribuição por atlética</h2>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -440,7 +440,7 @@ export default function MasterAdminSidebarProfilesPage() {
                   </div>
                   <p className="max-w-xl text-xs text-zinc-400">
                     Esse nome aparece na atribuicao por tenant. Os itens abaixo definem o que a
-                    atletica pode administrar no painel e no app.
+                    atlética pode administrar no painel e no app.
                   </p>
                 </div>
               </div>
@@ -499,7 +499,7 @@ export default function MasterAdminSidebarProfilesPage() {
                 <section className="rounded-2xl border border-zinc-800 bg-black/25 overflow-hidden">
                   <div className="border-b border-zinc-800 bg-black/20 px-4 py-3">
                     <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-200">
-                      App do Usuario
+                      App do Usuário
                     </p>
                   </div>
                   <div className="divide-y divide-zinc-800">

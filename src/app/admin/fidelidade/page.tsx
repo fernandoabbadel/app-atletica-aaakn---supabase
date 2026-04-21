@@ -92,7 +92,7 @@ export default function AdminFidelidadePage() {
             title: newReward.title.trim(),
             cost: Number(newReward.cost),
             stock: Number(newReward.stock || 0),
-            image: newReward.image || "https://placehold.co/400x400/000/FFF?text=Premio",
+            image: newReward.image || "https://placehold.co/400x400/000/FFF?text=Pr%C3%AAmio",
             active: true,
         };
         setRewards((prev) => [...prev, freshReward].sort((left, right) => left.cost - right.cost));
@@ -156,7 +156,7 @@ export default function AdminFidelidadePage() {
           </Link>
           <div>
             <h1 className="text-lg font-black text-white uppercase tracking-tighter flex items-center gap-2">Admin Fidelidade</h1>
-            <p className="text-[10px] text-zinc-500">Gestao do clube de fidelidade</p>
+        <p className="text-[10px] text-zinc-500">Gestão do clube de fidelidade</p>
           </div>
         </div>
         {activeTab === "premios" && (

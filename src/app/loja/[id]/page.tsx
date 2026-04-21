@@ -313,10 +313,14 @@ export default function DetalheProdutoPage() {
           typeof rawConfig?.whatsapp === "string" && rawConfig.whatsapp.trim()
             ? rawConfig.whatsapp.trim()
             : pixData.whatsapp || financeFallback.whatsapp,
-        ...(rawConfig?.recipient ? { recipient: rawConfig.recipient } : pixData.recipient ? { recipient: pixData.recipient } : {}),
-        ...(Array.isArray(rawConfig?.recipients)
+        ...(produto?.seller?.type === "tenant" && rawConfig?.recipient
+          ? { recipient: rawConfig.recipient }
+          : produto?.seller?.type === "tenant" && pixData.recipient
+          ? { recipient: pixData.recipient }
+          : {}),
+        ...(produto?.seller?.type === "tenant" && Array.isArray(rawConfig?.recipients)
           ? { recipients: rawConfig.recipients }
-          : Array.isArray(pixData.recipients)
+          : produto?.seller?.type === "tenant" && Array.isArray(pixData.recipients)
           ? { recipients: pixData.recipients }
           : {}),
         ...(Array.isArray(rawConfig?.ticketEntries)
@@ -326,12 +330,12 @@ export default function DetalheProdutoPage() {
           : {}),
       };
     },
-    [financeFallback.whatsapp, pixData]
+    [financeFallback.whatsapp, pixData, produto?.seller?.type]
   );
   const sellerLogo = produto?.seller?.logoUrl || tenantLogoUrl || "/logo.png";
   const sellerName = produto?.seller?.name || brandLabel;
   const sellerKindLabel =
-    produto?.seller?.type === "league" ? "Loja da liga" : "Loja da atletica";
+    produto?.seller?.type === "league" ? "Loja da liga" : "Loja da atlética";
   const recipientOptions = useMemo(
     () =>
       Array.isArray(pixData.recipients)
@@ -475,15 +479,20 @@ export default function DetalheProdutoPage() {
   const loadStorePixData = useCallback(async () => {
     if (loadingPixData) return;
     const productPayment = produto?.payment_config || null;
+    const canUseConfiguredRecipients = produto?.seller?.type === "tenant";
     const mergeProductPayment = (base: PixData): PixData => ({
       chave: productPayment?.chave?.trim() || base.chave,
       banco: productPayment?.banco?.trim() || base.banco,
       titular: productPayment?.titular?.trim() || base.titular,
       whatsapp: productPayment?.whatsapp?.trim() || base.whatsapp,
-      ...(productPayment?.recipient ? { recipient: productPayment.recipient } : base.recipient ? { recipient: base.recipient } : {}),
-      ...(productPayment?.recipients?.length
+      ...(canUseConfiguredRecipients && productPayment?.recipient
+        ? { recipient: productPayment.recipient }
+        : canUseConfiguredRecipients && base.recipient
+        ? { recipient: base.recipient }
+        : {}),
+      ...(canUseConfiguredRecipients && productPayment?.recipients?.length
         ? { recipients: productPayment.recipients }
-        : base.recipients?.length
+        : canUseConfiguredRecipients && base.recipients?.length
         ? { recipients: base.recipients }
         : {}),
       ...(productPayment?.ticketEntries?.length
@@ -625,7 +634,7 @@ export default function DetalheProdutoPage() {
       addToast("Chave PIX copiada!", "success");
     } catch (error: unknown) {
       console.error(error);
-      addToast("Nao foi possivel copiar a chave PIX.", "error");
+      addToast("Não foi possível copiar a chave PIX.", "error");
     }
   };
 
@@ -634,7 +643,7 @@ export default function DetalheProdutoPage() {
     const adminPhone = (checkoutPaymentConfig.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
     const buyerName = user?.nome?.trim() || "Cliente";
     const buyerTurma = user?.turma?.trim() || "Sem turma";
-    const buyerPhone = user?.telefone?.trim() || "Nao informado";
+    const buyerPhone = user?.telefone?.trim() || "Não informado";
     const message = buildProductReceiptWhatsappMessage({
       organizerLabel: sellerName,
       productName: produto.nome,
@@ -664,7 +673,7 @@ export default function DetalheProdutoPage() {
       addToast("Chave PIX copiada!", "success");
     } catch (error: unknown) {
       console.error(error);
-      addToast("Nao foi possivel copiar a chave PIX.", "error");
+      addToast("Não foi possível copiar a chave PIX.", "error");
     }
   };
 
@@ -679,7 +688,7 @@ export default function DetalheProdutoPage() {
     });
     const adminPhone = (payment.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
     if (!adminPhone) {
-      addToast("WhatsApp financeiro nao configurado para este pedido.", "error");
+      addToast("WhatsApp financeiro não configurado para este pedido.", "error");
       return;
     }
 
@@ -688,7 +697,7 @@ export default function DetalheProdutoPage() {
     const selectedColor = resolveOrderColor(order);
     const buyerName = user?.nome?.trim() || order.userName || "Cliente";
     const buyerTurma = user?.turma?.trim() || order.userTurma || "Sem turma";
-    const buyerPhone = user?.telefone?.trim() || "Nao informado";
+    const buyerPhone = user?.telefone?.trim() || "Não informado";
     const message = buildProductReceiptWhatsappMessage({
       organizerLabel: sellerName,
       productName: produto.nome,
@@ -719,7 +728,7 @@ export default function DetalheProdutoPage() {
       await refreshProductData(true);
     } catch (error: unknown) {
       console.error(error);
-      addToast("Nao foi possivel cancelar agora.", "error");
+      addToast("Não foi possível cancelar agora.", "error");
     } finally {
       setCancellingOrderId(null);
     }
@@ -736,7 +745,7 @@ export default function DetalheProdutoPage() {
   if (!produto) {
     return (
       <div className="h-screen bg-[#050505] flex items-center justify-center text-white">
-        Produto nao encontrado.
+        Produto não encontrado.
       </div>
     );
   }
@@ -967,7 +976,7 @@ export default function DetalheProdutoPage() {
                             <div className="flex items-center gap-2">
                               <Wallet size={14} className="text-emerald-400" />
                               <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                                Informacoes do PIX
+                                Informações do PIX
                               </p>
                             </div>
                             <div className="mt-3 space-y-2 text-xs">
@@ -1047,7 +1056,7 @@ export default function DetalheProdutoPage() {
 
               {pendingOrders.length === 0 && historyOrders.length === 0 && (
                 <div className="p-4 rounded-xl border border-zinc-800 text-zinc-500 text-xs">
-                  Voce ainda nao fez pedidos deste produto.
+                  Você ainda não fez pedidos deste produto.
                 </div>
               )}
             </section>

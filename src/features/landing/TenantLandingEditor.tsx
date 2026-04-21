@@ -112,13 +112,13 @@ export default function TenantLandingEditor({
         if (!mounted) return;
 
         if (!resolvedTenantId) {
-          addToast("Tenant nao encontrado para editar a landing.", "error");
+          addToast("Tenant não encontrado para editar a landing.", "error");
           router.replace(withTenantSlug(normalizedRouteTenantSlug, "/nao-encontrado"));
           return;
         }
 
         if (!requireTenantAdmin(user, resolvedTenantId)) {
-          addToast("Sem permissao para editar a landing deste tenant.", "error");
+          addToast("Sem permissão para editar a landing deste tenant.", "error");
           router.replace(withTenantSlug(normalizedRouteTenantSlug, "/sem-permissao"));
           return;
         }
@@ -195,11 +195,11 @@ export default function TenantLandingEditor({
         }
 
         if (isPermissionError(error)) {
-          addToast("Sem permissao para carregar a configuracao da landing.", "error");
+          addToast("Sem permissão para carregar a configuração da landing.", "error");
         } else {
           const message = extractLandingEditorErrorMessage(error);
           console.error(`Erro ao carregar landing do tenant: ${message}`);
-          addToast(`Erro ao carregar configuracoes: ${message}`, "error");
+          addToast(`Erro ao carregar configurações: ${message}`, "error");
         }
       } finally {
         if (mounted) setLoading(false);
@@ -239,7 +239,7 @@ export default function TenantLandingEditor({
 
   const handleSave = async () => {
     if (!routeTenantId.trim()) {
-      addToast("Tenant nao resolvido para salvar a landing.", "error");
+      addToast("Tenant não resolvido para salvar a landing.", "error");
       return;
     }
     if (config.email.trim() && !isValidEmail(config.email)) {
@@ -282,7 +282,7 @@ export default function TenantLandingEditor({
     } catch (error: unknown) {
       storeLandingEditorDraft(config, routeTenantId);
       if (isPermissionError(error)) {
-        addToast("Sem permissao para salvar a landing.", "error");
+        addToast("Sem permissão para salvar a landing.", "error");
       } else {
         const message = extractLandingEditorErrorMessage(error);
         console.error(`Erro ao salvar landing do tenant: ${message}`);
@@ -310,13 +310,13 @@ export default function TenantLandingEditor({
       brandName={
         tenantName || tenantSigla || normalizedRouteTenantSlug.toUpperCase() || "Tenant atual"
       }
-      brandDescription="Esse bloco vem do branding do tenant e nao dos campos de conteudo da landing."
+      brandDescription="Esse bloco vem do branding do tenant e não dos campos de conteúdo da landing."
       brandLogoUrl={tenantLogoUrl || "/logo.png"}
       brandLogoAlt={`Logo ${tenantSigla || tenantName || normalizedRouteTenantSlug || "Tenant"}`}
       brandLogoUnoptimized={(tenantLogoUrl || "").startsWith("http")}
       accentColor={palette.primary}
       brandManagePath={withTenantSlug(normalizedRouteTenantSlug, "/admin/atletica")}
-      brandManageLabel="Editar marca da atletica"
+      brandManageLabel="Editar marca da atlética"
       partnerRows={partnerRows}
     />
   );

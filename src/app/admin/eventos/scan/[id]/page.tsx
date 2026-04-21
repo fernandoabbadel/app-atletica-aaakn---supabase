@@ -130,12 +130,12 @@ export default function AdminEventoScanPage() {
             <table className="w-full whitespace-nowrap text-left text-xs">
               <thead className="bg-black/50 text-zinc-500 uppercase">
                 <tr>
-                  <th className="p-4">Usuario</th>
+                  <th className="p-4">Usuário</th>
                   <th className="p-4">Turma</th>
                   <th className="p-4">Pagamento</th>
                   <th className="p-4">Lote</th>
                   <th className="p-4">Check-in</th>
-                  <th className="p-4 text-right">Acao</th>
+                  <th className="p-4 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
@@ -164,10 +164,10 @@ export default function AdminEventoScanPage() {
         </section>
 
         <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs font-bold text-zinc-400">
-          <span>Pagina {page} de {totalPages} - {filteredRows.length} registros</span>
+            <span>Página {page} de {totalPages} - {filteredRows.length} registros</span>
           <div className="flex gap-2">
             <button disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-lg border border-zinc-700 px-3 py-2 disabled:opacity-40">Anterior</button>
-            <button disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="rounded-lg border border-zinc-700 px-3 py-2 disabled:opacity-40">Proxima</button>
+            <button disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="rounded-lg border border-zinc-700 px-3 py-2 disabled:opacity-40">Próxima</button>
           </div>
         </div>
       </div>

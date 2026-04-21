@@ -15,7 +15,7 @@ export default function AdminMiniVendorsPage() {
   const links = useMemo(
     () => [
       {
-        title: "Pendentes de aprovacao",
+        title: "Pendentes de aprovação",
         description:
           "Abra a fila separada para aprovar ou rejeitar novos cadastros sem misturar com a listagem geral.",
         href: tenantSlug
@@ -29,7 +29,7 @@ export default function AdminMiniVendorsPage() {
       {
         title: "Todos os mini vendors",
         description:
-          "Veja todas as lojinhas cadastradas em uma pagina propria, com status e acoes de administracao.",
+          "Veja todas as lojinhas cadastradas em uma página própria, com status e ações de administração.",
         href: tenantSlug
           ? withTenantSlug(tenantSlug, "/admin/mini-vendors/cadastros")
           : "/admin/mini-vendors/cadastros",
@@ -58,7 +58,7 @@ export default function AdminMiniVendorsPage() {
                 Mini Vendor Admin
               </h1>
               <p className="text-[11px] font-bold text-zinc-500">
-                Abra cada area em pagina propria para aprovacoes e cadastros.
+                Abra cada área em página própria para aprovações e cadastros.
               </p>
             </div>
           </div>

@@ -55,7 +55,7 @@ const PAGE_COPY: Record<
 > = {
   approvals: {
     title: "Pendentes de Aprovacao",
-    subtitle: "Cadastros aguardando revisao do admin da atletica.",
+    subtitle: "Cadastros aguardando revisão do admin da atlética.",
     accentClass: "text-yellow-300",
     emptyText: "Nenhum cadastro pendente.",
   },
@@ -247,10 +247,10 @@ export default function MiniVendorAdminDirectoryPage({
                         {row.storeName || "Loja sem nome"}
                       </p>
                       <p className="text-[11px] text-zinc-400">
-                        Usuario: {row.userId}
+                        Usuário: {row.userId}
                       </p>
                       <p className="line-clamp-2 text-[11px] text-zinc-500">
-                        {row.description || "Sem descricao."}
+                        {row.description || "Sem descrição."}
                       </p>
                     </div>
                   </div>
@@ -430,7 +430,7 @@ export default function MiniVendorAdminDirectoryPage({
                           </span>
                         </div>
                         <p className="text-[11px] text-zinc-400">
-                          Usuario: {row.userId}
+                          Usuário: {row.userId}
                         </p>
                         <p className="text-[11px] text-zinc-500">
                           PIX: {row.pixKey || "-"} | Banco: {row.pixBank || "-"}

@@ -59,11 +59,11 @@ const INITIAL_GUIA_DATA: Array<Record<string, unknown>> = [
 
   { categoria: "transporte", nome: "Circular (Intercampi)", horario: "07:10, 12:30 | 11:50, 17:50", detalhe: "Saida Terminal <-> Campus", ordem: 1 },
 
-  { categoria: "turismo", nome: "Praia Martim de Sa", descricao: "O point da galera", foto: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80", ordem: 1 },
-  { categoria: "turismo", nome: "Pedra da Freira", descricao: "Por do sol top", foto: "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=800&q=80", ordem: 2 },
+  { categoria: "turismo", nome: "Praia Martim de Sá", descricao: "O point da galera", foto: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80", ordem: 1 },
+  { categoria: "turismo", nome: "Pedra da Freira", descricao: "Pôr do sol top", foto: "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=800&q=80", ordem: 2 },
 
   { categoria: "emergencia", nome: "SAMU", numero: "192", cor: "red", ordem: 1 },
-  { categoria: "emergencia", nome: "Policia", numero: "190", cor: "red", ordem: 2 },
+  { categoria: "emergencia", nome: "Polícia", numero: "190", cor: "red", ordem: 2 },
 
   { categoria: "grupos", titulo: "Grupo Oficial dos Calouros", url: "https://chat.whatsapp.com/", ordem: 1 },
   { categoria: "grupos", titulo: "Plantao de Duvidas", url: "https://chat.whatsapp.com/", ordem: 2 },
@@ -592,7 +592,7 @@ export default function AdminGuiaPage() {
                     />
                   </div>
                   <div>
-                    <label className="label-admin">Descricao curta</label>
+                    <label className="label-admin">Descrição curta</label>
                     <textarea
                       rows={2}
                       className="input-admin"
@@ -617,7 +617,7 @@ export default function AdminGuiaPage() {
                     />
                   </div>
                   <div>
-                    <label className="label-admin">Numero de telefone</label>
+                    <label className="label-admin">Número de telefone</label>
                     <input
                       type="text"
                       className="input-admin text-2xl font-black text-white"

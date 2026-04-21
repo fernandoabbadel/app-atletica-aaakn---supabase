@@ -842,8 +842,8 @@ export default function ComunidadePage() {
           <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/50 to-transparent" />
           <div className="absolute top-4 left-4 z-20"><Link href={tenantSlug ? withTenantSlug(tenantSlug, "/dashboard") : "/dashboard"} className="p-2 bg-black/50 rounded-full text-white hover:bg-emerald-500 hover:text-black transition"><ArrowLeft size={24}/></Link></div>
           <div className="absolute bottom-4 left-6 z-20">
-              <h1 className="text-3xl font-black italic uppercase tracking-tighter">{config.titulo || "Comunidade da Atletica"}</h1>
-              <p className="text-zinc-400 text-xs font-bold uppercase tracking-widest">{config.subtitulo || "Espaco oficial da atletica"}</p>
+              <h1 className="text-3xl font-black italic uppercase tracking-tighter">{config.titulo || "Comunidade da Atlética"}</h1>
+              <p className="text-zinc-400 text-xs font-bold uppercase tracking-widest">{config.subtitulo || "Espaço oficial da atlética"}</p>
           </div>
       </div>
 

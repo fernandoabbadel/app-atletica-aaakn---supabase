@@ -56,7 +56,7 @@ const requireAlbumTenantId = (value?: string): string => {
   const scopedTenantId = cleanTenantId(value);
   if (scopedTenantId) return scopedTenantId;
 
-  throw Object.assign(new Error("Tenant do album nao resolvido."), {
+  throw Object.assign(new Error("Tenant do álbum não resolvido."), {
     code: "album/tenant-required",
   });
 };

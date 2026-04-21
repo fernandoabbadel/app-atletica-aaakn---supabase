@@ -93,7 +93,7 @@ const resolveApprovalLabel = (
   }
   if (status === "rejected") {
     return {
-      label: "Nao aprovado",
+      label: "Não aprovado",
       className: "border-red-500/30 bg-red-500/10 text-red-300",
     };
   }
@@ -186,7 +186,7 @@ export default function SettingsInvitesPage() {
     } catch (error: unknown) {
       console.error(error);
       setDashboard(EMPTY_INVITE_DASHBOARD);
-      addToast("Nao foi possivel carregar seus convites.", "error");
+      addToast("Não foi possível carregar seus convites.", "error");
     } finally {
       setLoading(false);
     }
@@ -275,7 +275,7 @@ export default function SettingsInvitesPage() {
         setCopiedInviteId((current) => (current === inviteId ? "" : current));
       }, 1800);
     } catch {
-      addToast("Nao consegui copiar o link agora.", "error");
+      addToast("Não consegui copiar o link agora.", "error");
     }
   };
 
@@ -313,7 +313,7 @@ export default function SettingsInvitesPage() {
     } catch (error: unknown) {
       console.error(error);
       addToast(
-        error instanceof Error ? error.message : "Nao consegui pedir mais convites agora.",
+        error instanceof Error ? error.message : "Não consegui pedir mais convites agora.",
         "error"
       );
     } finally {
@@ -356,11 +356,11 @@ export default function SettingsInvitesPage() {
                 Convite travado na tenant
               </p>
               <h2 className="mt-2 text-lg font-black uppercase text-white">
-                Todo link desta tela cai direto em {tenantName || "sua atletica"}
+                Todo link desta tela cai direto em {tenantName || "sua atlética"}
               </h2>
               <p className="mt-2 max-w-2xl text-sm text-amber-100/75">
                 Quem usar um convite daqui ja entra com o cadastro preso nesta tenant, sem
-                possibilidade de trocar a atletica durante esse fluxo.
+                possibilidade de trocar a atlética durante esse fluxo.
               </p>
 
               <div className="mt-4 flex flex-wrap gap-2">
@@ -432,7 +432,7 @@ export default function SettingsInvitesPage() {
                 Convites ativos
               </p>
               <p className="mt-1 text-sm text-zinc-400">
-                Convites ainda validos, sem expiracao e sem aprovacao final.
+                Convites ainda válidos, sem expiração e sem aprovação final.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -442,7 +442,7 @@ export default function SettingsInvitesPage() {
               </div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/5 bg-zinc-900 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-300">
                 <History size={12} />
-                {historyEntriesCount} no historico
+                {historyEntriesCount} no histórico
               </div>
             </div>
           </div>
@@ -472,11 +472,11 @@ export default function SettingsInvitesPage() {
                   <tr className="border-b border-zinc-800 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
                     <th className="px-4 py-3">Convite</th>
                     <th className="px-4 py-3">Expira em</th>
-                    <th className="px-4 py-3">Usuario cadastrado</th>
+                    <th className="px-4 py-3">Usuário cadastrado</th>
                     <th className="px-4 py-3">Turma</th>
                     <th className="px-4 py-3">Aprovado</th>
                     <th className="px-4 py-3">Ativo</th>
-                    <th className="px-4 py-3">Acoes</th>
+                    <th className="px-4 py-3">Ações</th>
                   </tr>
                 </thead>
                 <tbody>

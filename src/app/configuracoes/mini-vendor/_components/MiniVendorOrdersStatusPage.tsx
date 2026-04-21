@@ -54,7 +54,7 @@ const PAGE_COPY: Record<
   },
   approved: {
     title: "Pedidos Aprovados",
-    subtitle: "Historico editavel dos pedidos que ja passaram por aprovacao.",
+    subtitle: "Histórico editável dos pedidos que já passaram por aprovação.",
     statuses: ["approved", "delivered", "rejected"],
     accentClass: "border-blue-500/20 bg-blue-500/5 text-blue-300",
     emptyText: "Nenhum pedido revisado ainda.",
@@ -99,10 +99,10 @@ const getOrderStatusMeta = (
 
 const formatDateTime = (value?: string): string => {
   const isoValue = String(value || "").trim();
-  if (!isoValue) return "Nao informado";
+  if (!isoValue) return "Não informado";
 
   const parsed = new Date(isoValue);
-  if (Number.isNaN(parsed.getTime())) return "Nao informado";
+  if (Number.isNaN(parsed.getTime())) return "Não informado";
 
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
@@ -326,9 +326,9 @@ export function MiniVendorOrdersStatusPage({
 
   const resolveApproverLabel = (row: OrderRow): string => {
     const approvedBy = String(row.approvedBy || "").trim();
-    if (!approvedBy) return "Nao informado";
+    if (!approvedBy) return "Não informado";
     if (approvedBy === "admin") return "Admin";
-    if (approvedBy === user?.uid) return user.nome || "Voce";
+    if (approvedBy === user?.uid) return user.nome || "Você";
     return approverNames[approvedBy] || compactUserId(approvedBy);
   };
 
@@ -375,7 +375,7 @@ export function MiniVendorOrdersStatusPage({
       <div className="space-y-5">
         {!tenantId.trim() || !user?.uid ? (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">
-            Entre em uma atletica valida para usar a area mini vendor.
+            Entre em uma atlética válida para usar a área mini vendor.
           </section>
         ) : (
           <>
@@ -407,7 +407,7 @@ export function MiniVendorOrdersStatusPage({
                       <span
                         className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase ${pageCopy.accentClass}`}
                       >
-                        {mode === "pending" ? "Fila pendente" : "Historico aprovado"}
+                        {mode === "pending" ? "Fila pendente" : "Histórico aprovado"}
                       </span>
                     </div>
                   </div>
@@ -475,7 +475,7 @@ export function MiniVendorOrdersStatusPage({
                           </div>
                           <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
                             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                              Data da aprovacao
+                              Data da aprovação
                             </p>
                             <p className="mt-1 font-bold text-white">
                               {formatDateTime(row.updatedAt || row.createdAt)}
@@ -534,7 +534,7 @@ export function MiniVendorOrdersStatusPage({
                                 className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
                               >
                                 <Pencil size={12} />
-                                {editingId === row.id ? "Fechar edicao" : "Editar aprovacao"}
+                                {editingId === row.id ? "Fechar edição" : "Editar aprovação"}
                               </button>
                               {editingId === row.id && (
                                 <div className="grid gap-2">
@@ -608,7 +608,7 @@ export function MiniVendorOrdersStatusPage({
                       disabled={!hasMore}
                       className="rounded border border-zinc-700 px-3 py-1 disabled:opacity-40"
                     >
-                      Proxima
+                      Próxima
                     </button>
                   </div>
                 </div>

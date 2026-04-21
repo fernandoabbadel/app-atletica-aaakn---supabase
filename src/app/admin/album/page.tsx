@@ -36,7 +36,7 @@ const menuItems = [
   },
   {
     href: "/admin/album/customizacao",
-    title: "Customizacao",
+    title: "Customização",
     description: "Editar por turma e layout avancado",
     icon: Palette,
     color: "text-fuchsia-400 border-fuchsia-500/30 bg-fuchsia-500/10",
@@ -46,7 +46,7 @@ const menuItems = [
 const DEFAULT_GLOBAL: AlbumUiConfig = {
   capa: "/capa_t8.jpg",
   titulo: "Album da Galera",
-  subtitulo: "Escolha a turma para abrir somente o que voce precisa",
+  subtitulo: "Escolha a turma para abrir somente o que você precisa",
 };
 
 export default function AdminAlbumMenuPage() {
@@ -87,7 +87,7 @@ export default function AdminAlbumMenuPage() {
       });
       addToast("Capa e textos da /album atualizados.", "success");
     } catch {
-      addToast("Erro ao salvar configuracao da capa.", "error");
+      addToast("Erro ao salvar configuração da capa.", "error");
     } finally {
       setSavingConfig(false);
     }
@@ -106,7 +106,7 @@ export default function AdminAlbumMenuPage() {
           <div>
             <h1 className="text-xl font-black uppercase tracking-tight">Admin Album</h1>
             <p className="text-[11px] text-zinc-500 font-bold">
-              Integrado com a capa da pagina /album
+              Integrado com a capa da página /album
             </p>
           </div>
         </div>
@@ -117,7 +117,7 @@ export default function AdminAlbumMenuPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-black uppercase text-brand-accent">
-                Capa da Pagina /album
+                Capa da Página /album
               </h2>
               <p className="text-[11px] text-zinc-500 font-bold">
                 Edita em tempo real titulo, subtitulo e imagem da home do album.
@@ -177,7 +177,7 @@ export default function AdminAlbumMenuPage() {
           </div>
 
           <p className="text-[11px] text-zinc-500">
-            Para capa/titulo/subtitulo por turma, use o modulo `Customizacao`.
+            Para capa/título/subtítulo por turma, use o módulo `Customização`.
           </p>
         </section>
 

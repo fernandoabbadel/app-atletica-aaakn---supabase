@@ -315,7 +315,7 @@ export async function createHistoricEvent(
     if (error) throwSupabaseError(error);
 
     const id = asString((data as Record<string, unknown> | null)?.id);
-    if (!id) throw new Error("Falha ao criar evento historico.");
+    if (!id) throw new Error("Falha ao criar evento histórico.");
     return { id };
     }
   );

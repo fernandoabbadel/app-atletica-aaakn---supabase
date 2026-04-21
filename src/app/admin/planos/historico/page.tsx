@@ -82,7 +82,7 @@ export default function AdminPlanosHistoricoPage() {
   const handleApprove = async (row: PlanRequestRecord) => {
     const plan = findPlanForRequest(row);
     if (!plan) {
-      addToast("Plano nao encontrado no catalogo para aprovar este pedido.", "error");
+      addToast("Plano não encontrado no catálogo para aprovar este pedido.", "error");
       return;
     }
 
@@ -153,18 +153,18 @@ export default function AdminPlanosHistoricoPage() {
   };
 
   const handleDelete = async (row: PlanRequestRecord) => {
-    if (!confirm("Excluir esta solicitacao?")) return;
+    if (!confirm("Excluir esta solicitação?")) return;
     setBusyId(row.id);
     try {
       await deletePlanRequestAndUnlock({
         requestId: row.id,
         userId: row.userId,
       });
-      addToast("Solicitacao excluida.", "success");
+      addToast("Solicitação excluída.", "success");
       await load();
     } catch (error: unknown) {
-      console.error("Erro ao excluir solicitacao de plano:", error);
-      addToast("Erro ao excluir solicitacao.", "error");
+      console.error("Erro ao excluir solicitação de plano:", error);
+      addToast("Erro ao excluir solicitação.", "error");
     } finally {
       setBusyId(null);
     }

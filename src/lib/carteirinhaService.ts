@@ -456,7 +456,7 @@ export async function uploadCarteirinhaBackground(
   });
 
   if (!optimized.type.startsWith("image/")) {
-    throw new Error("Formato de imagem nao suportado.");
+    throw new Error("Formato de imagem não suportado.");
   }
 
   if (optimized.size > MAX_UPLOAD_FILE_BYTES) {
