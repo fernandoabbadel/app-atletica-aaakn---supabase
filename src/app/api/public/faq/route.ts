@@ -215,12 +215,12 @@ const requirePlatformMaster = async (request: NextRequest): Promise<string> => {
   const authHeader = request.headers.get("authorization") || "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!accessToken) {
-    throw new Error("Nao autenticado.");
+    throw new Error("Não autenticado.");
   }
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
   if (authError || !authData.user) {
-    throw new Error("Sessao invalida.");
+    throw new Error("Sessão inválida.");
   }
 
   const { data: userRow, error: userError } = await supabaseAdmin
@@ -255,7 +255,7 @@ export async function GET(request: NextRequest) {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error: unknown) {
-    console.warn("Falha ao carregar FAQ publico:", error);
+    console.warn("Falha ao carregar FAQ público:", error);
     return NextResponse.json(
       {
         config: DEFAULT_PLATFORM_FAQ_CONFIG,
@@ -291,13 +291,71 @@ export async function PUT(request: NextRequest) {
       error instanceof Error && error.message.trim()
         ? error.message
         : "Falha ao salvar FAQ.";
+    const lowerMessage = message.toLowerCase();
     const status =
-      message.toLowerCase().includes("autentic") || message.toLowerCase().includes("sessao")
+      lowerMessage.includes("autentic") ||
+      lowerMessage.includes("sessão") ||
+      lowerMessage.includes("sessao")
         ? 401
-        : message.toLowerCase().includes("master")
+        : lowerMessage.includes("master")
           ? 403
           : 400;
     return jsonError(message, status);
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = asObject(await request.json().catch(() => null));
+    const questionId = asString(body?.questionId).trim();
+    const reaction = asString(body?.reaction).trim().toLowerCase();
+
+    if (!questionId || (reaction !== "like" && reaction !== "dislike")) {
+      return jsonError("Reação inválida.", 400);
+    }
+
+    const payload = await resolveFaqConfig();
+    let found = false;
+    const nextConfig: PlatformFaqConfig = {
+      ...payload.config,
+      sections: payload.config.sections.map((section) => ({
+        ...section,
+        questions: section.questions.map((question) => {
+          if (question.id !== questionId) return question;
+          found = true;
+          return {
+            ...question,
+            likes: reaction === "like" ? (question.likes || 0) + 1 : question.likes || 0,
+            dislikes:
+              reaction === "dislike" ? (question.dislikes || 0) + 1 : question.dislikes || 0,
+          };
+        }),
+      })),
+    };
+
+    if (!found) {
+      return jsonError("Pergunta não encontrada.", 404);
+    }
+
+    const normalized = sanitizePlatformFaqConfig(nextConfig, payload.config);
+    await saveFaqRow(normalized);
+    revalidatePath("/faq");
+
+    return NextResponse.json(
+      {
+        config: normalized,
+        source: "official",
+      },
+      {
+        headers: { "Cache-Control": "no-store" },
+      }
+    );
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : "Falha ao registrar avaliação.";
+    return jsonError(message, 400);
   }
 }
 

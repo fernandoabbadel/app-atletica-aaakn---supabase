@@ -54,7 +54,7 @@ export async function savePlatformFaqConfig(
   const accessToken = data.session?.access_token || "";
 
   if (!accessToken) {
-    throw new Error("Sessao ausente para salvar o FAQ.");
+    throw new Error("Sessão ausente para salvar o FAQ.");
   }
 
   const response = await fetch("/api/public/faq", {
@@ -75,6 +75,29 @@ export async function savePlatformFaqConfig(
   const payload = (await response.json()) as Partial<PlatformFaqPayload>;
   return {
     config: sanitizePlatformFaqConfig(payload.config, config),
+    source: "official",
+  };
+}
+
+export async function sendPlatformFaqReaction(payload: {
+  questionId: string;
+  reaction: "like" | "dislike";
+}): Promise<PlatformFaqPayload> {
+  const response = await fetch("/api/public/faq", {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractApiError(response));
+  }
+
+  const responsePayload = (await response.json()) as Partial<PlatformFaqPayload>;
+  return {
+    config: sanitizePlatformFaqConfig(responsePayload.config, DEFAULT_PLATFORM_FAQ_CONFIG),
     source: "official",
   };
 }

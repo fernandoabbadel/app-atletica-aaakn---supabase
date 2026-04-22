@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -14,6 +15,7 @@ import {
   HelpCircle,
   LifeBuoy,
   Loader2,
+  ImageIcon,
   Plus,
   Save,
   Shield,
@@ -28,6 +30,7 @@ import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
+import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import {
   DEFAULT_PLATFORM_FAQ_CONFIG,
   sanitizePlatformFaqConfig,
@@ -42,11 +45,14 @@ import {
   savePlatformFaqConfig,
 } from "@/lib/platformFaqService";
 import { isPlatformMaster } from "@/lib/roles";
+import { uploadImage, VERSIONED_PUBLIC_ASSET_CACHE_CONTROL } from "@/lib/upload";
 
 type FaqTextField = Exclude<keyof PlatformFaqConfig, "steps" | "sections">;
 type SectionTextField = Exclude<keyof PlatformFaqSection, "questions" | "icon">;
-type QuestionTextField = Exclude<keyof PlatformFaqQuestion, "id">;
+type QuestionTextField = "question" | "answer" | "imageUrl" | "imageAlt";
 type StepTextField = Exclude<keyof PlatformFaqStep, "id">;
+
+const FAQ_PRINT_MAX_BYTES = 200 * 1024;
 
 const iconOptions: Array<{
   value: PlatformFaqIcon;
@@ -81,7 +87,11 @@ const makeId = (prefix: string): string => {
 const createQuestion = (): PlatformFaqQuestion => ({
   id: makeId("question"),
   question: "Nova pergunta",
-  answer: "Escreva uma resposta objetiva, com o caminho da tela e o que o usuario deve fazer.",
+  answer: "Escreva uma resposta objetiva, com o caminho da tela e o que o usuário deve fazer.",
+  imageUrl: "",
+  imageAlt: "",
+  likes: 0,
+  dislikes: 0,
 });
 
 const createStep = (index: number): PlatformFaqStep => ({
@@ -95,9 +105,9 @@ const createStep = (index: number): PlatformFaqStep => ({
 
 const createSection = (): PlatformFaqSection => ({
   id: makeId("section"),
-  title: "Nova secao",
-  description: "Resumo do tema desta secao.",
-  audience: "Publico alvo",
+  title: "Nova seção",
+  description: "Resumo do tema desta seção.",
+  audience: "Público-alvo",
   icon: "start",
   questions: [createQuestion()],
 });
@@ -163,13 +173,14 @@ export default function MasterFaqPage() {
     DEFAULT_PLATFORM_FAQ_CONFIG.sections[0]?.id || ""
   );
   const [dirty, setDirty] = useState(false);
+  const [uploadingQuestionImageId, setUploadingQuestionImageId] = useState("");
 
   const canAccess = isPlatformMaster(user);
 
   useEffect(() => {
     if (authLoading) return;
     if (!canAccess) {
-      addToast("Area exclusiva do master da plataforma.", "error");
+      addToast("Área exclusiva do master da plataforma.", "error");
       router.replace("/sem-permissao");
       return;
     }
@@ -186,7 +197,7 @@ export default function MasterFaqPage() {
       } catch (error: unknown) {
         if (!mounted) return;
         console.error("Falha ao carregar FAQ:", error);
-        addToast("Nao foi possivel carregar o FAQ salvo. Usando fallback local.", "error");
+        addToast("Não foi possível carregar o FAQ salvo. Usando fallback local.", "error");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -273,7 +284,7 @@ export default function MasterFaqPage() {
     const copy: PlatformFaqSection = {
       ...section,
       id: makeId("section"),
-      title: `${section.title} copia`.slice(0, 90),
+      title: `${section.title} cópia`.slice(0, 90),
       questions: section.questions.map((question) => ({
         ...question,
         id: makeId("question"),
@@ -288,7 +299,7 @@ export default function MasterFaqPage() {
 
   const removeSection = (sectionId: string) => {
     if (config.sections.length <= 1) {
-      addToast("Mantenha pelo menos uma secao no FAQ.", "error");
+      addToast("Mantenha pelo menos uma seção no FAQ.", "error");
       return;
     }
 
@@ -326,6 +337,46 @@ export default function MasterFaqPage() {
           : section
       ),
     }));
+  };
+
+  const handleQuestionImageUpload = async (
+    sectionId: string,
+    questionId: string,
+    file?: File | null
+  ) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      addToast("Envie uma imagem em JPG, PNG ou WEBP.", "error");
+      return;
+    }
+    if (file.size > FAQ_PRINT_MAX_BYTES) {
+      addToast("O print precisa ter até 200 KB. Reduza o arquivo no Squoosh antes de enviar.", "error");
+      return;
+    }
+
+    setUploadingQuestionImageId(questionId);
+    try {
+      const { url, error } = await uploadImage(file, `faq/prints/${sectionId}/${questionId}`, {
+        scopeKey: `faq:${sectionId}:${questionId}`,
+        fileName: "print",
+        upsert: true,
+        maxBytes: FAQ_PRINT_MAX_BYTES,
+        compressionMaxBytes: FAQ_PRINT_MAX_BYTES,
+        versionStrategy: "file-metadata",
+        allowOriginalOnCompressionFail: true,
+        cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+      });
+      if (!url || error) {
+        throw new Error(error || "Falha ao enviar imagem.");
+      }
+      updateQuestion(sectionId, questionId, "imageUrl", url);
+      addToast("Print enviado para a pergunta. Salve o FAQ para publicar.", "success");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Falha ao enviar imagem.";
+      addToast(message, "error");
+    } finally {
+      setUploadingQuestionImageId("");
+    }
   };
 
   const addQuestion = (sectionId: string) => {
@@ -418,7 +469,7 @@ export default function MasterFaqPage() {
               href="/faq"
               className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2.5 text-xs font-black uppercase text-zinc-200 transition hover:bg-zinc-800"
             >
-              <Eye size={14} /> Ver pagina
+              <Eye size={14} /> Ver página
             </Link>
             <button
               type="button"
@@ -427,7 +478,7 @@ export default function MasterFaqPage() {
               className="inline-flex items-center gap-2 rounded-xl border border-red-500/[0.35] bg-red-500 px-4 py-2.5 text-xs font-black uppercase text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {dirty ? "Salvar alteracoes" : "Salvar"}
+              {dirty ? "Salvar alterações" : "Salvar"}
             </button>
           </div>
         </div>
@@ -441,8 +492,8 @@ export default function MasterFaqPage() {
                 <Sparkles size={20} />
               </div>
               <div>
-                <h2 className="text-sm font-black uppercase text-white">Hero da pagina</h2>
-                <p className="text-xs text-zinc-500">Topo do /faq publico.</p>
+                <h2 className="text-sm font-black uppercase text-white">Hero da página</h2>
+                <p className="text-xs text-zinc-500">Topo do /faq público.</p>
               </div>
             </div>
 
@@ -454,7 +505,7 @@ export default function MasterFaqPage() {
                 onChange={(value) => updateRootField("eyebrow", value)}
               />
               <TextField
-                label="Titulo"
+                label="Título"
                 value={config.heroTitle}
                 maxLength={80}
                 onChange={(value) => updateRootField("heroTitle", value)}
@@ -466,7 +517,7 @@ export default function MasterFaqPage() {
                 onChange={(value) => updateRootField("heroHighlight", value)}
               />
               <TextField
-                label="Descricao"
+                label="Descrição"
                 value={config.heroDescription}
                 maxLength={420}
                 multiline
@@ -484,7 +535,7 @@ export default function MasterFaqPage() {
           <section className="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-black uppercase text-white">Passos rapidos</h2>
+                <h2 className="text-sm font-black uppercase text-white">Passos rápidos</h2>
                 <p className="text-xs text-zinc-500">Bloco Comece por aqui.</p>
               </div>
               <button
@@ -528,13 +579,13 @@ export default function MasterFaqPage() {
                       />
                     </div>
                     <TextField
-                      label="Titulo"
+                      label="Título"
                       value={step.title}
                       maxLength={80}
                       onChange={(value) => updateStep(step.id, "title", value)}
                     />
                     <TextField
-                      label="Descricao"
+                      label="Descrição"
                       value={step.description}
                       maxLength={260}
                       multiline
@@ -581,17 +632,17 @@ export default function MasterFaqPage() {
           <section className="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-5">
             <div className="mb-4">
               <h2 className="text-sm font-black uppercase text-white">Suporte final</h2>
-              <p className="text-xs text-zinc-500">Chamada no rodape do FAQ.</p>
+              <p className="text-xs text-zinc-500">Chamada no rodapé do FAQ.</p>
             </div>
             <div className="space-y-4">
               <TextField
-                label="Titulo"
+                label="Título"
                 value={config.supportTitle}
                 maxLength={100}
                 onChange={(value) => updateRootField("supportTitle", value)}
               />
               <TextField
-                label="Descricao"
+                label="Descrição"
                 value={config.supportDescription}
                 maxLength={360}
                 multiline
@@ -599,13 +650,13 @@ export default function MasterFaqPage() {
               />
               <div className="grid gap-3 sm:grid-cols-2">
                 <TextField
-                  label="Texto do botao"
+                  label="Texto do botão"
                   value={config.supportCtaLabel}
                   maxLength={50}
                   onChange={(value) => updateRootField("supportCtaLabel", value)}
                 />
                 <TextField
-                  label="Link do botao"
+                  label="Link do botão"
                   value={config.supportCtaHref}
                   maxLength={180}
                   onChange={(value) => updateRootField("supportCtaHref", value)}
@@ -625,9 +676,9 @@ export default function MasterFaqPage() {
           <div className="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-black uppercase text-white">Secoes do FAQ</h2>
+                <h2 className="text-lg font-black uppercase text-white">Seções do FAQ</h2>
                 <p className="text-xs text-zinc-500">
-                  Cada secao vira um card e uma area de perguntas no /faq.
+                  Cada seção vira um card e uma área de perguntas no /faq.
                 </p>
               </div>
               <button
@@ -635,7 +686,7 @@ export default function MasterFaqPage() {
                 onClick={addSection}
                 className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs font-black uppercase text-red-200 transition hover:bg-red-500/20"
               >
-                <Plus size={14} /> Nova secao
+                <Plus size={14} /> Nova seção
               </button>
             </div>
 
@@ -686,7 +737,7 @@ export default function MasterFaqPage() {
                   </span>
                   <div>
                     <h2 className="text-lg font-black uppercase text-white">
-                      Editando secao
+                      Editando seção
                     </h2>
                     <p className="text-xs text-zinc-500">{activeSection.id}</p>
                   </div>
@@ -711,7 +762,7 @@ export default function MasterFaqPage() {
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <TextField
-                  label="Titulo da secao"
+                  label="Título da seção"
                   value={activeSection.title}
                   maxLength={90}
                   onChange={(value) => updateSection(activeSection.id, "title", value)}
@@ -726,14 +777,14 @@ export default function MasterFaqPage() {
 
               <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_220px]">
                 <TextField
-                  label="Descricao do card"
+                  label="Descrição do card"
                   value={activeSection.description}
                   maxLength={240}
                   multiline
                   onChange={(value) => updateSection(activeSection.id, "description", value)}
                 />
                 <label className="block space-y-2">
-                  <span className="text-xs font-black uppercase text-zinc-500">Icone</span>
+                  <span className="text-xs font-black uppercase text-zinc-500">Ícone</span>
                   <select
                     value={activeSection.icon}
                     onChange={(event) =>
@@ -757,7 +808,7 @@ export default function MasterFaqPage() {
                   disabled={config.sections[0]?.id === activeSection.id}
                   className="rounded-lg border border-zinc-800 px-3 py-2 text-xs font-black uppercase text-zinc-400 disabled:opacity-40"
                 >
-                  Subir secao
+                  Subir seção
                 </button>
                 <button
                   type="button"
@@ -765,7 +816,7 @@ export default function MasterFaqPage() {
                   disabled={config.sections[config.sections.length - 1]?.id === activeSection.id}
                   className="rounded-lg border border-zinc-800 px-3 py-2 text-xs font-black uppercase text-zinc-400 disabled:opacity-40"
                 >
-                  Descer secao
+                  Descer seção
                 </button>
               </div>
 
@@ -843,6 +894,89 @@ export default function MasterFaqPage() {
                             updateQuestion(activeSection.id, question.id, "answer", value)
                           }
                         />
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-black uppercase text-white">Print de apoio</p>
+                              <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+                                Campo opcional. Use JPG, PNG ou WEBP com até 200 KB. Reduza no{" "}
+                                <ImageResizeHelpLink label="Squoosh" /> antes de enviar.
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-black px-3 py-2 text-[11px] font-black uppercase text-zinc-400">
+                              👍 {question.likes || 0}
+                              <span className="text-zinc-700">/</span>
+                              👎 {question.dislikes || 0}
+                            </div>
+                          </div>
+                          <div className="grid gap-3 lg:grid-cols-[180px_1fr]">
+                            <div className="relative flex min-h-28 items-center justify-center overflow-hidden rounded-xl border border-zinc-800 bg-black">
+                              {question.imageUrl ? (
+                                <Image
+                                  src={question.imageUrl}
+                                  alt={question.imageAlt || question.question}
+                                  fill
+                                  sizes="180px"
+                                  className="object-cover"
+                                  unoptimized
+                                />
+                              ) : (
+                                <ImageIcon size={24} className="text-zinc-700" />
+                              )}
+                            </div>
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap gap-2">
+                                <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-xs font-black uppercase text-blue-200 transition hover:bg-blue-500/20">
+                                  {uploadingQuestionImageId === question.id ? (
+                                    <Loader2 size={14} className="animate-spin" />
+                                  ) : (
+                                    <ImageIcon size={14} />
+                                  )}
+                                  Adicionar print
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    className="hidden"
+                                    disabled={uploadingQuestionImageId === question.id}
+                                    onChange={(event) => {
+                                      const file = event.target.files?.[0] ?? null;
+                                      event.target.value = "";
+                                      void handleQuestionImageUpload(activeSection.id, question.id, file);
+                                    }}
+                                  />
+                                </label>
+                                {question.imageUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateQuestion(activeSection.id, question.id, "imageUrl", "");
+                                      updateQuestion(activeSection.id, question.id, "imageAlt", "");
+                                    }}
+                                    className="rounded-xl border border-red-500/20 px-4 py-2.5 text-xs font-black uppercase text-red-300 hover:bg-red-500/10"
+                                  >
+                                    Remover imagem
+                                  </button>
+                                ) : null}
+                              </div>
+                              <TextField
+                                label="URL do print"
+                                value={question.imageUrl || ""}
+                                maxLength={600}
+                                onChange={(value) =>
+                                  updateQuestion(activeSection.id, question.id, "imageUrl", value)
+                                }
+                              />
+                              <TextField
+                                label="Texto alternativo"
+                                value={question.imageAlt || ""}
+                                maxLength={180}
+                                onChange={(value) =>
+                                  updateQuestion(activeSection.id, question.id, "imageAlt", value)
+                                }
+                              />
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}

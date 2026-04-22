@@ -370,7 +370,7 @@ const supportCategoryLabel = (category: SupportCategory): string => {
     case "bug":
       return "Bug";
     case "denuncia":
-      return "Denuncia";
+      return "Denúncia";
     case "sugestorias":
       return "Sugestões";
     case "outro":
@@ -489,7 +489,7 @@ const buildGymModerationRecord = (
   if (!isGymRelatedSupport(obj)) return null;
 
   const createdAtMs = asNumber(obj.createdAtMs, toMillis(obj.createdAt));
-  const subject = asString(obj.subject, "Denuncia Gym").trim();
+  const subject = asString(obj.subject, "Denúncia Gym").trim();
   const message = asString(obj.message).trim();
 
   return {
@@ -704,11 +704,11 @@ export async function resolveAdminReport(payload: {
           ...(tenantId ? { tenant_id: tenantId } : {}),
           title:
             payload.originCollection === "banned_appeals"
-              ? "Apelacao analisada"
+              ? "Apelação analisada"
               : "Chamado atualizado",
           message:
             payload.originCollection === "banned_appeals"
-              ? "Sua apelacao de bloqueio recebeu resposta da diretoria."
+              ? "Sua apelação de bloqueio recebeu resposta da diretoria."
               : "O suporte respondeu seu chamado.",
           link:
             payload.originCollection === "banned_appeals"
@@ -793,7 +793,7 @@ export async function submitSupportRequest(payload: {
   };
 
   if (!requestPayload.subject || !requestPayload.message) {
-    throw new Error("Assunto e mensagem sao obrigatorios.");
+    throw new Error("Assunto e mensagem são obrigatórios.");
   }
 
   const result = await callWithFallback<
@@ -821,7 +821,7 @@ export async function submitSupportRequest(payload: {
     const { error: notificationError } = await supabase.from("notifications").insert({
       userId,
       title: "Chamado recebido",
-      message: "Seu pedido de suporte foi enviado para analise.",
+      message: "Seu pedido de suporte foi enviado para análise.",
       link: "/configuracoes/suporte",
       read: false,
       type: "support",

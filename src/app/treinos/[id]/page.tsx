@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { 
   ArrowLeft, MapPin, Clock, User, Trophy, Users, CheckCircle, 
   Share2, XCircle, Calendar, Crown, Navigation, UserX, QrCode, X
@@ -23,7 +23,7 @@ import { resolveEffectiveAccessRole } from "@/lib/roles";
 import { buildTreinoPresenceQrPayload } from "@/lib/qrPayloads";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
-// --- TIPAGENS (O Escudo do Código) ---
+// Tipagens da página de treino.
 interface TreinoData {
   id: string;
   modalidade: string;
@@ -93,7 +93,7 @@ export default function TreinoDetalhesPage() {
   const [loadingAction, setLoadingAction] = useState(false);
   const [showPresenceQr, setShowPresenceQr] = useState(false);
 
-  // 1. CARREGAR DADOS (TREINO + RSVPS + CHAMADA OFICIAL)
+  // 1. Carregar dados: treino, RSVPs e chamada oficial.
   const treinoId = typeof params.id === "string" ? params.id : "";
   const userId = user?.uid ?? null;
   const userRole = resolveEffectiveAccessRole(user);
@@ -148,11 +148,11 @@ export default function TreinoDetalhesPage() {
       void loadData();
   }, [treinoId, userId, canAccessExpiredTreino, router, addToast, tenantId, tenantSlug]);
 
-  // 2. FUSÃO INTELIGENTE DAS LISTAS (RSVP + ADMIN)
+  // 2. Junta a lista de confirmação com a chamada oficial.
   const listaFinal = useMemo(() => {
       const map = new Map<string, AlunoLista>();
 
-      // Passo 1: Adiciona quem marcou "Eu Vou"
+      // Passo 1: adiciona quem confirmou presença.
       rsvps.forEach(r => {
           if (r.status === 'going') {
               map.set(r.userId, { 
@@ -165,22 +165,20 @@ export default function TreinoDetalhesPage() {
           }
       });
 
-      // Passo 2: Sobrescreve com a Lista Oficial do Admin
+      // Passo 2: sobrescreve com a lista oficial do admin.
       chamadaAdmin.forEach(c => {
           const existing = map.get(c.userId);
-          // Se já existe, atualiza status. Se não (veio do além/admin manual), cria.
-          // Para simplificar, assumimos que se o admin marcou, ele tem os dados ou pegamos do RSVP antigo se existir
+          // Se já existe, atualiza o status com a chamada oficial.
           if (existing) {
              map.set(c.userId, { ...existing, statusVisual: c.status });
           } 
-          // Nota: Se o admin marcar alguém que não deu RSVP, precisariamos buscar os dados do usuário (nome/foto)
-          // Aqui focamos na fusão simples onde o RSVP geralmente existe antes.
+          // Entradas manuais sem RSVP só entram aqui quando os dados já vierem da chamada.
       });
 
       return Array.from(map.values()).sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
   }, [rsvps, chamadaAdmin]);
 
-  // 3. CÁLCULO DO RANKING DE TURMAS
+  // 3. Cálculo do ranking de turmas.
   const rankingTurmas = useMemo(() => {
       const counts: Record<string, number> = {};
       listaFinal.forEach(aluno => {
@@ -199,9 +197,9 @@ export default function TreinoDetalhesPage() {
           }));
   }, [listaFinal]);
 
-  // 🦈 4. AÇÃO DE RSVP CORRIGIDA PARA ATUALIZAR PERFIL 🦈
+  // 4. Ação de RSVP.
   const handleRSVP = async (status: "going" | "not_going") => {
-      if (!user || !treino) return addToast("Faça login para confirmar!", "error");
+      if (!user || !treino) return addToast("Faça login para confirmar.", "error");
       if (loadingAction) return;
       setLoadingAction(true);
 
@@ -239,7 +237,7 @@ export default function TreinoDetalhesPage() {
           const me = listaRsvp.find((p) => p.userId === user.uid);
           setUserRsvp(me ? me.status : null);
 
-          addToast(status === 'going' ? "Presença confirmada! 💪" : "Inscrição removida.", "success");
+          addToast(status === 'going' ? "Presença confirmada." : "Inscrição removida.", "success");
       } catch (error) {
           console.error(error);
           addToast("Erro ao atualizar.", "error");
@@ -260,6 +258,41 @@ export default function TreinoDetalhesPage() {
       if (!treino?.local) return "#";
       return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(treino.local)}`;
   };
+
+  const handleShareTreino = useCallback(async () => {
+      if (!treino || typeof window === "undefined") return;
+
+      const url = window.location.href;
+      const title = `Treino de ${treino.modalidade} - USC`;
+      const text = [
+          `Treino de ${treino.modalidade}`,
+          treino.dia ? `Data: ${treino.dia.split("-").reverse().join("/")}` : "",
+          treino.horario ? `Horário: ${treino.horario}` : "",
+          treino.local ? `Local: ${treino.local}` : "",
+      ]
+          .filter(Boolean)
+          .join("\n");
+
+      try {
+          if (typeof navigator.share === "function") {
+              await navigator.share({ title, text, url });
+              return;
+          }
+
+          if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(url);
+              addToast("Link do treino copiado.", "success");
+              return;
+          }
+
+          addToast("Compartilhamento indisponível neste navegador.", "info");
+      } catch (error) {
+          const errorName = error instanceof DOMException ? error.name : "";
+          if (errorName === "AbortError") return;
+          console.error(error);
+          addToast("Não foi possível compartilhar o treino.", "error");
+      }
+  }, [addToast, treino]);
 
   const presenceQrPayload = useMemo(() => {
       if (!treino || !user?.uid) return "";
@@ -286,7 +319,7 @@ export default function TreinoDetalhesPage() {
       {/* --- HERO SECTION --- */}
       <div className="relative h-[65vh] w-full">
         <div className="absolute inset-0 bg-black">
-            {/* 🦈 Image Otimizado */}
+            {/* Imagem de capa do treino */}
             <Image 
                 src={treino.imagem || "https://placehold.co/800x600/111/333?text=TREINO"} 
                 alt={treino.modalidade}
@@ -300,7 +333,12 @@ export default function TreinoDetalhesPage() {
         <Link href={tenantSlug ? withTenantSlug(tenantSlug, "/treinos") : "/treinos"} className="absolute top-6 left-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 hover:bg-white hover:text-black transition">
             <ArrowLeft size={24} />
         </Link>
-        <button className="absolute top-6 right-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 hover:bg-emerald-500 transition">
+        <button
+            type="button"
+            onClick={() => void handleShareTreino()}
+            aria-label="Compartilhar treino"
+            className="absolute top-6 right-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 hover:bg-emerald-500 transition"
+        >
             <Share2 size={24} />
         </button>
 
@@ -357,14 +395,14 @@ export default function TreinoDetalhesPage() {
                 onClick={() => handleRSVP('not_going')}
                 className="flex-1 py-4 rounded-xl border border-transparent hover:border-red-500/30 hover:bg-red-500/10 text-zinc-500 hover:text-red-500 font-bold text-xs uppercase transition-all"
             >
-                <span className="flex flex-col items-center gap-1"><XCircle size={20}/> Não Vou</span>
+                <span className="flex flex-col items-center gap-1"><XCircle size={20}/> Não vou</span>
             </button>
             <button 
                 onClick={() => handleRSVP('going')}
                 disabled={loadingAction}
                 className={`flex-[2] py-4 rounded-xl font-black text-sm uppercase tracking-widest shadow-lg flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${userRsvp === 'going' ? 'bg-emerald-500 text-black shadow-emerald-500/30' : 'bg-white text-black hover:bg-zinc-200'}`}
             >
-                {loadingAction ? <span className="animate-spin">⌛</span> : userRsvp === 'going' ? <><CheckCircle size={24}/> Confirmado</> : "Confirmar Presença"}
+                {loadingAction ? <span className="animate-spin">...</span> : userRsvp === 'going' ? <><CheckCircle size={24}/> Confirmado</> : "Confirmar Presença"}
             </button>
         </div>
 
@@ -382,7 +420,7 @@ export default function TreinoDetalhesPage() {
             <QrCode size={20} /> Abrir QR de presença
         </button>
 
-        {/* 2. RESPONSÁVEL & DESCRIÇÃO */}
+        {/* 2. RESPONSÁVEL E DESCRIÇÃO */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="md:col-span-2 space-y-4">
                 <h2 className="text-sm font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">
@@ -419,7 +457,7 @@ export default function TreinoDetalhesPage() {
                     </div>
                     <div>
                         <p className="text-[10px] font-black uppercase text-zinc-500 tracking-widest mb-1">Responsável</p>
-                        <p className="text-lg font-black text-white">{treino.treinador || "Equipe responsavel"}</p>
+                        <p className="text-lg font-black text-white">{treino.treinador || "Equipe responsável"}</p>
                         <span className={`text-xs font-bold ${theme.text} mt-1 block group-hover:underline`}>Ver Perfil</span>
                     </div>
                 </div>

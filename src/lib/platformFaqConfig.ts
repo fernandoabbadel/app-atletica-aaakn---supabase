@@ -21,6 +21,10 @@ export type PlatformFaqQuestion = {
   id: string;
   question: string;
   answer: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  likes?: number;
+  dislikes?: number;
 };
 
 export type PlatformFaqSection = {
@@ -67,6 +71,12 @@ const asString = (value: unknown, fallback = ""): string =>
 const trimField = (value: unknown, maxLength: number, fallback = ""): string =>
   asString(value, fallback).trim().slice(0, maxLength);
 
+const asCount = (value: unknown): number => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.floor(parsed);
+};
+
 const FAQ_ICON_SET = new Set<PlatformFaqIcon>([
   "start",
   "profile",
@@ -88,11 +98,11 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
   heroTitle: "Tudo para usar a",
   heroHighlight: "plataforma inteira",
   heroDescription:
-    "Um guia direto para aluno, visitante, parceiro, diretoria e master entenderem como navegar pela USC, abrir os modulos certos e resolver duvidas sem depender de suporte manual.",
+    "Um guia direto para aluno, visitante, parceiro, diretoria e master entenderem como navegar pela USC, abrir os módulos certos e resolver dúvidas sem depender de suporte manual.",
   searchPlaceholder: "Buscar por eventos, carteirinha, loja, treinos, admin...",
-  supportTitle: "Ainda ficou alguma duvida?",
+  supportTitle: "Ainda ficou alguma dúvida?",
   supportDescription:
-    "Envie uma mensagem para o painel master com contexto do seu perfil, atletica e modulo. Assim a resposta chega para quem consegue resolver de verdade.",
+    "Envie uma mensagem para o painel master com contexto do seu perfil, atlética e módulo. Assim a resposta chega para quem consegue resolver de verdade.",
   supportCtaLabel: "Falar com a USC",
   supportCtaHref: "/contato-usc",
   updatedLabel: "Guia oficial da plataforma",
@@ -103,7 +113,7 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
       title: "Entre na USC",
       description:
         "Use Google para sua conta oficial ou entre como visitante quando quiser conhecer a plataforma antes de se vincular.",
-      actionLabel: "Abrir inicio",
+      actionLabel: "Abrir início",
       href: "/",
     },
     {
@@ -111,8 +121,8 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
       kicker: "02",
       title: "Escolha sua atletica",
       description:
-        "A plataforma e multi-atleticas. Quando existir uma atletica ativa, os links aparecem com o contexto dela e levam ao dashboard correto.",
-      actionLabel: "Ver atleticas",
+        "A plataforma é multiatléticas. Quando existir uma atlética ativa, os links aparecem com o contexto dela e levam ao dashboard correto.",
+      actionLabel: "Ver atléticas",
       href: "/visitante",
     },
     {
@@ -120,7 +130,7 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
       kicker: "03",
       title: "Complete seu perfil",
       description:
-        "Depois do login, preencha dados de cadastro, turma e contato para liberar carteirinha, convites e modulos internos.",
+        "Depois do login, preencha dados de cadastro, turma e contato para liberar carteirinha, convites e módulos internos.",
       actionLabel: "Meu perfil",
       href: "/cadastro",
     },
@@ -129,7 +139,7 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
       kicker: "04",
       title: "Use os modulos",
       description:
-        "Dashboard, eventos, loja, planos, treinos, ligas, parceiros e comunidade ficam conectados pela mesma identidade da atletica.",
+        "Dashboard, eventos, loja, planos, treinos, ligas, parceiros e comunidade ficam conectados pela mesma identidade da atlética.",
       actionLabel: "Abrir app",
       href: "/dashboard",
     },
@@ -138,7 +148,7 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
     {
       id: "getting_started",
       title: "Primeiros passos",
-      description: "Entrada, escolha da atletica, visitante e navegacao inicial.",
+      description: "Entrada, escolha da atlética, visitante e navegação inicial.",
       audience: "Aluno, visitante e diretoria",
       icon: "start",
       questions: [
@@ -146,19 +156,19 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
           id: "getting_started_login",
           question: "Como eu entro na plataforma USC?",
           answer:
-            "Na pagina inicial, escolha entrar com Google para usar uma conta real. Visitantes podem conhecer a vitrine publica, mas recursos como cadastro completo, carteirinha, compras, convites e administracao dependem de uma conta vinculada.",
+            "Na página inicial, escolha entrar com Google para usar uma conta real. Visitantes podem conhecer a vitrine pública, mas recursos como cadastro completo, carteirinha, compras, convites e administração dependem de uma conta vinculada.",
         },
         {
           id: "getting_started_tenant",
-          question: "O que muda quando eu estou dentro de uma atletica?",
+          question: "O que muda quando eu estou dentro de uma atlética?",
           answer:
-            "A USC funciona por contexto. Quando uma atletica esta selecionada, os modulos passam a usar a identidade, os planos, os eventos, os parceiros e as permissoes daquela atletica. Por isso links como dashboard, loja e admin podem aparecer com o slug da atletica.",
+            "A USC funciona por contexto. Quando uma atlética está selecionada, os módulos passam a usar a identidade, os planos, os eventos, os parceiros e as permissões daquela atlética. Por isso links como dashboard, loja e admin podem aparecer com o slug da atlética.",
         },
         {
           id: "getting_started_guest",
-          question: "O modo visitante serve para que?",
+          question: "O modo visitante serve para quê?",
           answer:
-            "O visitante serve para explorar a plataforma sem cadastro completo. Ele e ideal para conhecer atleticas, ver paginas publicas e entender a experiencia antes de entrar oficialmente em uma base.",
+            "O visitante serve para explorar a plataforma sem cadastro completo. Ele é ideal para conhecer atléticas, ver páginas públicas e entender a experiência antes de entrar oficialmente em uma base.",
         },
       ],
     },
@@ -173,26 +183,26 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
           id: "profile_complete",
           question: "Por que preciso completar o cadastro?",
           answer:
-            "O cadastro conecta sua conta ao perfil real usado pela atletica. Ele ajuda a validar turma, contato, nascimento, matricula e outros campos que podem ser exigidos para planos, eventos, treinos e carteirinha.",
+            "O cadastro conecta sua conta ao perfil real usado pela atlética. Ele ajuda a validar turma, contato, nascimento, matrícula e outros campos que podem ser exigidos para planos, eventos, treinos e carteirinha.",
         },
         {
           id: "profile_card_where",
           question: "Onde encontro minha carteirinha?",
           answer:
-            "Depois de estar logado e com perfil valido, acesse Carteirinha pelo app. A carteirinha usa os dados do seu perfil e a identidade da atletica para apresentar seu documento digital.",
+            "Depois de estar logado e com perfil válido, acesse Carteirinha pelo app. A carteirinha usa os dados do seu perfil e a identidade da atlética para apresentar seu documento digital.",
         },
         {
           id: "profile_public",
-          question: "O que aparece no meu perfil publico?",
+          question: "O que aparece no meu perfil público?",
           answer:
-            "O perfil publico pode mostrar foto, nome, turma, conquistas, estatisticas e informacoes que a plataforma usa para interacao social. Dados sensiveis devem ficar restritos ao cadastro e as configuracoes.",
+            "O perfil público pode mostrar foto, nome, turma, conquistas, estatísticas e informações que a plataforma usa para interação social. Dados sensíveis devem ficar restritos ao cadastro e às configurações.",
         },
       ],
     },
     {
       id: "plans_payments",
       title: "Planos e pagamentos",
-      description: "Adesao, pedidos, beneficios e acompanhamento de status.",
+      description: "Adesão, pedidos, benefícios e acompanhamento de status.",
       audience: "Aluno e diretoria",
       icon: "profile",
       questions: [
@@ -200,26 +210,26 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
           id: "plans_join",
           question: "Como entro em um plano da atletica?",
           answer:
-            "Acesse Planos, escolha a opcao disponivel e envie a solicitacao de adesao. A diretoria acompanha os pedidos no painel admin e o status volta para sua conta quando for aprovado ou revisado.",
+            "Acesse Planos, escolha a opção disponível e envie a solicitação de adesão. A diretoria acompanha os pedidos no painel admin e o status volta para sua conta quando for aprovado ou revisado.",
         },
         {
           id: "plans_pending",
           question: "Onde vejo se meu pedido foi aprovado?",
           answer:
-            "Pedidos de planos, loja e eventos aparecem em Configuracoes > Pedidos. Quando a atletica aprova uma solicitacao, a plataforma atualiza seus dados e pode liberar beneficios ligados ao plano.",
+            "Pedidos de planos, loja e eventos aparecem em Configurações > Pedidos. Quando a atlética aprova uma solicitação, a plataforma atualiza seus dados e pode liberar benefícios ligados ao plano.",
         },
         {
           id: "plans_benefits",
-          question: "Os beneficios do plano aparecem automaticamente?",
+          question: "Os benefícios do plano aparecem automaticamente?",
           answer:
-            "Sim. Quando o pedido fica aprovado, a USC tenta sincronizar plano, badge, cor, icone, prioridade e descontos no perfil. Se algo parecer incorreto, envie uma mensagem para suporte com o modulo e o plano esperado.",
+            "Sim. Quando o pedido fica aprovado, a USC tenta sincronizar plano, badge, cor, ícone, prioridade e descontos no perfil. Se algo parecer incorreto, envie uma mensagem para suporte com o módulo e o plano esperado.",
         },
       ],
     },
     {
       id: "events_tickets",
       title: "Eventos e ingressos",
-      description: "Compra, listas, QR Code, presenca e scanner.",
+      description: "Compra, listas, QR Code, presença e scanner.",
       audience: "Aluno, vendas e admin",
       icon: "events",
       questions: [
@@ -227,26 +237,26 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
           id: "events_buy",
           question: "Como compro ingresso ou entro em uma lista?",
           answer:
-            "Abra Eventos, escolha o evento, revise as informacoes e siga o fluxo de compra ou inscricao. Eventos podem ter lotes, lista, controle de presenca e regras definidas pela atletica.",
+            "Abra Eventos, escolha o evento, revise as informações e siga o fluxo de compra ou inscrição. Eventos podem ter lotes, lista, controle de presença e regras definidas pela atlética.",
         },
         {
           id: "events_ticket",
           question: "Onde fica meu ingresso?",
           answer:
-            "Ingressos emitidos aparecem no fluxo publico de ingresso e tambem nos seus pedidos. Guarde o QR Code e apresente na entrada quando a organizacao usar scanner.",
+            "Ingressos emitidos aparecem no fluxo público de ingresso e também nos seus pedidos. Guarde o QR Code e apresente na entrada quando a organização usar scanner.",
         },
         {
           id: "events_scan",
           question: "Quem pode escanear ingressos?",
           answer:
-            "Perfis com permissao de vendas, treino ou administracao podem acessar scanners conforme regras do tenant. O master da plataforma tambem consegue operar em contexto global quando necessario.",
+            "Perfis com permissão de vendas, treino ou administração podem acessar scanners conforme regras do tenant. O master da plataforma também consegue operar em contexto global quando necessário.",
         },
       ],
     },
     {
       id: "store_partners",
       title: "Loja e parceiros",
-      description: "Produtos, pedidos, mini vendors, beneficios e empresas.",
+      description: "Produtos, pedidos, mini vendors, benefícios e empresas.",
       audience: "Aluno, parceiro e admin",
       icon: "store",
       questions: [
@@ -254,53 +264,53 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
           id: "store_buy",
           question: "Como funciona a loja?",
           answer:
-            "A loja centraliza produtos da atletica, produtos de ligas e, quando ativo, mini vendors. Escolha o item, revise quantidade e informacoes e acompanhe o pedido em Configuracoes > Pedidos.",
+            "A loja centraliza produtos da atlética, produtos de ligas e, quando ativo, mini vendors. Escolha o item, revise quantidade e informações e acompanhe o pedido em Configurações > Pedidos.",
         },
         {
           id: "store_vendor",
-          question: "O que e um mini vendor?",
+          question: "O que é um mini vendor?",
           answer:
-            "Mini vendor e uma vitrine menor para vendedores internos ou parceiros autorizados. A diretoria pode aprovar, editar visibilidade, produtos e pedidos pelo painel admin.",
+            "Mini vendor é uma vitrine menor para vendedores internos ou parceiros autorizados. A diretoria pode aprovar, editar visibilidade, produtos e pedidos pelo painel admin.",
         },
         {
           id: "partners_benefits",
-          question: "Onde vejo parceiros e beneficios?",
+          question: "Onde vejo parceiros e benefícios?",
           answer:
-            "A area Parceiros mostra empresas cadastradas, categorias, historico e beneficios. Em landings de atleticas, parceiros oficiais tambem podem aparecer como vitrine publica.",
+            "A área Parceiros mostra empresas cadastradas, categorias, histórico e benefícios. Em landings de atléticas, parceiros oficiais também podem aparecer como vitrine pública.",
         },
       ],
     },
     {
       id: "training_leagues",
       title: "Treinos, ligas e comunidade",
-      description: "Presenca, modalidades, ligas USC, jogos e mural social.",
+      description: "Presença, modalidades, ligas USC, jogos e mural social.",
       audience: "Aluno, treinador e diretoria",
       icon: "training",
       questions: [
         {
           id: "training_presence",
-          question: "Como confirmo presenca em treino?",
+          question: "Como confirmo presença em treino?",
           answer:
-            "Entre em Treinos, abra o treino desejado e siga o fluxo de presenca. Treinadores e admins podem revisar listas, chamada e historico conforme a permissao recebida.",
+            "Entre em Treinos, abra o treino desejado e siga o fluxo de presença. Treinadores e admins podem revisar listas, chamada e histórico conforme a permissão recebida.",
         },
         {
           id: "league_manage",
-          question: "O que sao Ligas USC?",
+          question: "O que são Ligas USC?",
           answer:
-            "Ligas organizam modalidades, membros, eventos, loja e paginas publicas especificas. Elas ajudam a separar a operacao de cada modalidade sem perder o vinculo com a atletica.",
+            "Ligas organizam modalidades, membros, eventos, loja e páginas públicas específicas. Elas ajudam a separar a operação de cada modalidade sem perder o vínculo com a atlética.",
         },
         {
           id: "community_use",
           question: "Como uso a comunidade?",
           answer:
-            "A Comunidade concentra publicacoes, categorias e interacoes entre membros. Use com perfil real e respeite as regras da atletica, porque denuncias e moderacao chegam ao painel admin.",
+            "A Comunidade concentra publicações, categorias e interações entre membros. Use com perfil real e respeite as regras da atlética, porque denúncias e moderação chegam ao painel admin.",
         },
       ],
     },
     {
       id: "admin_panel",
       title: "Painel admin da atletica",
-      description: "Configuracao, usuarios, permissoes, conteudo e operacao diaria.",
+      description: "Configuração, usuários, permissões, conteúdo e operação diária.",
       audience: "Diretoria e gestores",
       icon: "admin",
       questions: [
@@ -308,46 +318,46 @@ export const DEFAULT_PLATFORM_FAQ_CONFIG: PlatformFaqConfig = {
           id: "admin_access",
           question: "Quem acessa o painel admin?",
           answer:
-            "Acesso admin depende da role do usuario e das regras do tenant. Em geral, master tenant, admin geral, gestor, admin de treino, treinador e vendas veem apenas os modulos liberados para sua funcao.",
+            "Acesso admin depende da role do usuário e das regras do tenant. Em geral, master tenant, admin geral, gestor, admin de treino, treinador e vendas veem apenas os módulos liberados para sua função.",
         },
         {
           id: "admin_landing",
-          question: "Como edito a landing da minha atletica?",
+          question: "Como edito a landing da minha atlética?",
           answer:
-            "No painel admin da atletica, abra Landing. A diretoria consegue ajustar chamada principal, estatisticas, contatos, depoimentos e parceiros exibidos na pagina publica.",
+            "No painel admin da atlética, abra Landing. A diretoria consegue ajustar chamada principal, estatísticas, contatos, depoimentos e parceiros exibidos na página pública.",
         },
         {
           id: "admin_permissions",
-          question: "Como controlo permissoes?",
+          question: "Como controlo permissões?",
           answer:
-            "Use as telas de permissoes e usuarios para revisar cargos e acesso. Mudancas de perfil devem ser feitas com cuidado, porque liberam modulos de gestao, vendas, treino, loja e moderacao.",
+            "Use as telas de permissões e usuários para revisar cargos e acesso. Mudanças de perfil devem ser feitas com cuidado, porque liberam módulos de gestão, vendas, treino, loja e moderação.",
         },
       ],
     },
     {
       id: "master_support",
       title: "Master USC e suporte",
-      description: "Painel global, contato, criacao de atleticas e ajuda oficial.",
+      description: "Painel global, contato, criação de atléticas e ajuda oficial.",
       audience: "Master da plataforma",
       icon: "support",
       questions: [
         {
           id: "master_diff",
-          question: "Qual a diferenca entre master da plataforma e admin da atletica?",
+          question: "Qual a diferença entre master da plataforma e admin da atlética?",
           answer:
-            "O master da plataforma cuida do ambiente USC inteiro: tenants, landing global, contatos, solicitacoes e permissoes globais. O admin da atletica cuida da operacao diaria daquele tenant.",
+            "O master da plataforma cuida do ambiente USC inteiro: tenants, landing global, contatos, solicitações e permissões globais. O admin da atlética cuida da operação diária daquele tenant.",
         },
         {
           id: "support_contact",
-          question: "Como mando uma duvida para a USC?",
+          question: "Como mando uma dúvida para a USC?",
           answer:
-            "Acesse Contato USC ou use o botao de suporte desta pagina. Explique o que tentou fazer, em qual modulo estava e qual atletica esta usando. Isso reduz idas e vindas na resposta.",
+            "Acesse Contato USC ou use o botão de suporte desta página. Explique o que tentou fazer, em qual módulo estava e qual atlética está usando. Isso reduz idas e vindas na resposta.",
         },
         {
           id: "new_tenant",
-          question: "Como cadastrar uma nova atletica?",
+          question: "Como cadastrar uma nova atlética?",
           answer:
-            "Use Cadastrar Atletica na landing global. O pedido passa pelo fluxo de onboarding, e o master da plataforma pode revisar, aprovar e configurar o tenant antes da operacao comecar.",
+            "Use Cadastrar Atlética na landing global. O pedido passa pelo fluxo de onboarding, e o master da plataforma pode revisar, aprovar e configurar o tenant antes da operação começar.",
         },
       ],
     },
@@ -379,6 +389,10 @@ const normalizeQuestion = (
     id: trimField(obj.id, 80, fallback.id) || makeId("question"),
     question: trimField(obj.question, 180, fallback.question),
     answer: trimField(obj.answer, 1600, fallback.answer),
+    imageUrl: trimField(obj.imageUrl, 600, fallback.imageUrl || "") || undefined,
+    imageAlt: trimField(obj.imageAlt, 180, fallback.imageAlt || "") || undefined,
+    likes: asCount(obj.likes ?? fallback.likes),
+    dislikes: asCount(obj.dislikes ?? fallback.dislikes),
   };
 };
 

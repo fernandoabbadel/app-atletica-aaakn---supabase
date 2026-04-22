@@ -243,6 +243,37 @@ const USER_LIST_SELECT_COLUMNS = [
 
 const TENANT_DIRECTORY_STATUSES = ["approved", "pending", "disabled"];
 
+const normalizeAdminUserSearchTerm = (value?: string | null): string =>
+  asString(value)
+    .trim()
+    .replace(/[*,()]/g, " ")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
+
+const normalizeAdminUserLetters = (letters?: string[] | null): string[] =>
+  Array.from(
+    new Set(
+      (letters ?? [])
+        .map((letter) => asString(letter).trim().toUpperCase())
+        .filter((letter) => /^[A-Z]$/.test(letter))
+    )
+  );
+
+const buildAdminUserSearchClause = (searchTerm: string): string => {
+  const term = searchTerm.replace(/[.,;]/g, " ").trim();
+  if (!term) return "";
+  const pattern = `*${term}*`;
+  return [
+    `nome.ilike.${pattern}`,
+    `email.ilike.${pattern}`,
+    `matricula.ilike.${pattern}`,
+    `turma.ilike.${pattern}`,
+  ].join(",");
+};
+
+const buildAdminUserLettersClause = (letters: string[]): string =>
+  letters.map((letter) => `nome.ilike.${letter}*`).join(",");
+
 const USER_RELATED_TABLE_SELECT_COLUMNS: Record<string, string[]> = {
   posts: ["id", "userId", "texto", "likes", "comentarios", "createdAt"],
   store_orders: ["id", "userId", "itens", "total", "status", "createdAt"],
@@ -772,12 +803,19 @@ export async function fetchAdminUsersPage(options?: {
   cursorId?: string | null;
   forceRefresh?: boolean;
   tenantId?: string | null;
+  searchTerm?: string | null;
+  letters?: string[] | null;
 }): Promise<AdminUsersPageResult> {
   const pageSize = boundedLimit(options?.pageSize ?? 20, MAX_USERS_RESULTS);
   const offset = parseOffsetCursor(options?.cursorId);
   const forceRefresh = options?.forceRefresh ?? false;
   const tenantId = options?.tenantId?.trim() || "";
-  const inflightKey = `${pageSize}:${offset}:${tenantId || "all"}`;
+  const searchTerm = normalizeAdminUserSearchTerm(options?.searchTerm);
+  const letters = searchTerm ? [] : normalizeAdminUserLetters(options?.letters);
+  const searchClause = buildAdminUserSearchClause(searchTerm);
+  const lettersClause = buildAdminUserLettersClause(letters);
+  const filterKey = searchTerm || letters.join("") || "all";
+  const inflightKey = `${pageSize}:${offset}:${tenantId || "all"}:${filterKey}`;
 
   if (forceRefresh) {
     clearAdminUsersCache();
@@ -799,13 +837,19 @@ export async function fetchAdminUsersPage(options?: {
       let pageRows: AdminUserListItem[] = [];
 
       while (selectColumns.length > 0) {
-        const request = supabase
+        let request = supabase
           .from("users")
           .select(selectColumns.join(","))
           .in("uid", candidateUserIds)
           .order("nome", { ascending: true })
           .order("uid", { ascending: true })
           .range(offset, offset + pageSize);
+
+        if (searchClause) {
+          request = request.or(searchClause);
+        } else if (lettersClause) {
+          request = request.or(lettersClause);
+        }
 
         const { data, error } = await request;
         if (!error) {
@@ -865,12 +909,18 @@ export async function fetchAdminUsersPage(options?: {
     let pageRows: AdminUserListItem[] = [];
 
     while (selectColumns.length > 0) {
-      const request = supabase
+      let request = supabase
         .from("users")
         .select(selectColumns.join(","))
         .order("nome", { ascending: true })
         .order("uid", { ascending: true })
         .range(offset, offset + pageSize);
+
+      if (searchClause) {
+        request = request.or(searchClause);
+      } else if (lettersClause) {
+        request = request.or(lettersClause);
+      }
 
       const { data, error } = await request;
       if (!error) {

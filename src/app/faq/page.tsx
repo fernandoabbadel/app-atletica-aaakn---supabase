@@ -15,9 +15,12 @@ import {
   Loader2,
   MessageCircle,
   Search,
+  Send,
   Shield,
   ShoppingBag,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Ticket,
   UserCircle,
   type LucideIcon,
@@ -30,7 +33,10 @@ import {
   type PlatformFaqIcon,
   type PlatformFaqSection,
 } from "@/lib/platformFaqConfig";
-import { fetchPlatformFaqConfig } from "@/lib/platformFaqService";
+import { fetchPlatformFaqConfig, sendPlatformFaqReaction } from "@/lib/platformFaqService";
+import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
+import { submitSupportRequest } from "@/lib/reportsService";
 
 const FAQ_THEME_STYLE = {
   "--tenant-primary": "#2563eb",
@@ -67,7 +73,11 @@ const questionMatchesQuery = (
   query: string
 ): boolean => normalizeText(`${question.question} ${question.answer}`).includes(query);
 
+const faqReactionStorageKey = (questionId: string): string => `usc_faq_reaction:${questionId}`;
+
 export default function FaqPage() {
+  const { user } = useAuth();
+  const { addToast } = useToast();
   const [config, setConfig] = useState<PlatformFaqConfig>(DEFAULT_PLATFORM_FAQ_CONFIG);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -75,6 +85,10 @@ export default function FaqPage() {
     DEFAULT_PLATFORM_FAQ_CONFIG.sections[0]?.id || ""
   );
   const [openQuestionId, setOpenQuestionId] = useState("");
+  const [doubtQuestionId, setDoubtQuestionId] = useState("");
+  const [doubtTextByQuestion, setDoubtTextByQuestion] = useState<Record<string, string>>({});
+  const [sendingDoubtQuestionId, setSendingDoubtQuestionId] = useState("");
+  const [reactingQuestionId, setReactingQuestionId] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -137,6 +151,78 @@ export default function FaqPage() {
     }
   };
 
+  const handleReaction = async (questionId: string, reaction: "like" | "dislike") => {
+    if (typeof window !== "undefined") {
+      const previous = window.localStorage.getItem(faqReactionStorageKey(questionId));
+      if (previous === reaction) {
+        addToast("Sua avaliação já foi registrada nesta pergunta.", "success");
+        return;
+      }
+    }
+
+    setReactingQuestionId(questionId);
+    try {
+      const payload = await sendPlatformFaqReaction({ questionId, reaction });
+      setConfig(payload.config);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(faqReactionStorageKey(questionId), reaction);
+      }
+      addToast("Obrigado pela avaliação.", "success");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Não foi possível registrar a avaliação.";
+      addToast(message, "error");
+    } finally {
+      setReactingQuestionId("");
+    }
+  };
+
+  const handleQuestionDoubt = async (section: PlatformFaqSection, questionId: string) => {
+    const question = section.questions.find((item) => item.id === questionId);
+    if (!question) return;
+
+    if (!user || user.isAnonymous) {
+      addToast("Entre com Google para enviar uma dúvida sobre esta pergunta.", "error");
+      return;
+    }
+
+    const message = (doubtTextByQuestion[questionId] || "").trim();
+    if (!message) {
+      addToast("Escreva a sua dúvida antes de enviar.", "error");
+      return;
+    }
+
+    setSendingDoubtQuestionId(questionId);
+    try {
+      await submitSupportRequest({
+        userId: user.uid,
+        userName: user.nome || "Usuário USC",
+        userEmail: typeof user.email === "string" ? user.email : "",
+        category: "geral",
+        subject: `FAQ USC - ${section.title} - ${question.question}`,
+        message: [
+          "Origem: FAQ USC",
+          `Seção: ${section.title}`,
+          `Pergunta: ${question.question}`,
+          `ID da pergunta: ${question.id}`,
+          typeof window !== "undefined" ? `URL: ${window.location.href}` : "",
+          "",
+          "Dúvida enviada:",
+          message,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      });
+      setDoubtTextByQuestion((current) => ({ ...current, [questionId]: "" }));
+      setDoubtQuestionId("");
+      addToast("Dúvida enviada para o painel master.", "success");
+    } catch (error: unknown) {
+      const messageError = error instanceof Error ? error.message : "Não foi possível enviar a dúvida.";
+      addToast(messageError, "error");
+    } finally {
+      setSendingDoubtQuestionId("");
+    }
+  };
+
   return (
     <div
       className="min-h-screen overflow-x-hidden bg-[#02050d] text-white"
@@ -171,7 +257,7 @@ export default function FaqPage() {
               href="/"
               className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase text-zinc-100 transition hover:bg-white/10"
             >
-              Inicio
+              Início
             </Link>
             <Link
               href="/contato-usc"
@@ -183,7 +269,7 @@ export default function FaqPage() {
               href="/nova-atletica"
               className="rounded-lg border border-brand bg-brand-soft px-3 py-2 text-xs font-black uppercase text-brand-accent transition hover:bg-brand-soft-strong"
             >
-              Cadastrar Atletica
+              Cadastrar Atlética
             </Link>
           </nav>
         </div>
@@ -225,7 +311,7 @@ export default function FaqPage() {
             <div className="grid max-w-3xl gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
                 <p className="text-3xl font-black text-white">{config.sections.length}</p>
-                <p className="mt-1 text-xs font-bold uppercase text-zinc-500">Secoes</p>
+                <p className="mt-1 text-xs font-bold uppercase text-zinc-500">Seções</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
                 <p className="text-3xl font-black text-white">{totalQuestions}</p>
@@ -283,12 +369,12 @@ export default function FaqPage() {
               <div>
                 <p className="text-sm font-black uppercase text-brand-accent">Categorias</p>
                 <h2 className="mt-2 text-2xl font-black uppercase text-white">
-                  Navegue pelo modulo
+                  Navegue pelo módulo
                 </h2>
               </div>
               {loading ? (
                 <span className="inline-flex items-center gap-2 text-sm font-bold text-zinc-500">
-                  <Loader2 size={16} className="animate-spin" /> Atualizando conteudo
+                  <Loader2 size={16} className="animate-spin" /> Atualizando conteúdo
                 </span>
               ) : null}
             </div>
@@ -407,18 +493,122 @@ export default function FaqPage() {
                                 <span className="text-base font-black text-white">
                                   {item.question}
                                 </span>
-                                <ChevronDown
-                                  className={`shrink-0 text-brand-accent transition ${
-                                    isOpen ? "rotate-180" : ""
-                                  }`}
-                                  size={20}
-                                />
+                                <span className="flex shrink-0 items-center gap-2">
+                                  <span className="hidden items-center gap-1 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[11px] font-black text-emerald-200 sm:inline-flex">
+                                    <ThumbsUp size={12} />
+                                    {item.likes || 0}
+                                  </span>
+                                  <span className="hidden items-center gap-1 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[11px] font-black text-red-200 sm:inline-flex">
+                                    <ThumbsDown size={12} />
+                                    {item.dislikes || 0}
+                                  </span>
+                                  <ChevronDown
+                                    className={`text-brand-accent transition ${
+                                      isOpen ? "rotate-180" : ""
+                                    }`}
+                                    size={20}
+                                  />
+                                </span>
                               </button>
                               {isOpen ? (
                                 <div className="border-t border-white/10 px-5 py-5">
                                   <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-300">
                                     {item.answer}
                                   </p>
+                                  {item.imageUrl ? (
+                                    <figure className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+                                      <div className="relative aspect-[16/9] w-full">
+                                        <Image
+                                          src={item.imageUrl}
+                                          alt={item.imageAlt || item.question}
+                                          fill
+                                          sizes="(max-width: 1024px) 100vw, 760px"
+                                          className="object-contain"
+                                          unoptimized
+                                        />
+                                      </div>
+                                      {item.imageAlt ? (
+                                        <figcaption className="border-t border-white/10 px-4 py-3 text-xs text-zinc-500">
+                                          {item.imageAlt}
+                                        </figcaption>
+                                      ) : null}
+                                    </figure>
+                                  ) : null}
+
+                                  <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/10 pt-4">
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleReaction(item.id, "like")}
+                                      disabled={reactingQuestionId === item.id}
+                                      className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-black uppercase text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-60"
+                                    >
+                                      {reactingQuestionId === item.id ? (
+                                        <Loader2 size={14} className="animate-spin" />
+                                      ) : (
+                                        <ThumbsUp size={14} />
+                                      )}
+                                      {item.likes || 0}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleReaction(item.id, "dislike")}
+                                      disabled={reactingQuestionId === item.id}
+                                      className="inline-flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-black uppercase text-red-200 hover:bg-red-500/20 disabled:opacity-60"
+                                    >
+                                      {reactingQuestionId === item.id ? (
+                                        <Loader2 size={14} className="animate-spin" />
+                                      ) : (
+                                        <ThumbsDown size={14} />
+                                      )}
+                                      {item.dislikes || 0}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setDoubtQuestionId((current) => (current === item.id ? "" : item.id))
+                                      }
+                                      className="ml-auto inline-flex items-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs font-black uppercase text-blue-200 hover:bg-blue-500/20"
+                                    >
+                                      <MessageCircle size={14} />
+                                      Enviar dúvida
+                                    </button>
+                                  </div>
+
+                                  {doubtQuestionId === item.id ? (
+                                    <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4">
+                                      <p className="text-xs font-black uppercase text-blue-100">
+                                        Dúvida sobre esta pergunta
+                                      </p>
+                                      <p className="mt-1 text-[11px] text-zinc-400">
+                                        A mensagem chega ao painel master com a seção e a pergunta de origem.
+                                      </p>
+                                      <textarea
+                                        value={doubtTextByQuestion[item.id] || ""}
+                                        onChange={(event) =>
+                                          setDoubtTextByQuestion((current) => ({
+                                            ...current,
+                                            [item.id]: event.target.value.slice(0, 1000),
+                                          }))
+                                        }
+                                        rows={4}
+                                        className="mt-3 w-full resize-none rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-blue-400"
+                                        placeholder="Escreva a sua dúvida sobre esta resposta."
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => void handleQuestionDoubt(section, item.id)}
+                                        disabled={sendingDoubtQuestionId === item.id}
+                                        className="mt-3 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-xs font-black uppercase text-zinc-950 transition hover:bg-zinc-200 disabled:opacity-60"
+                                      >
+                                        {sendingDoubtQuestionId === item.id ? (
+                                          <Loader2 size={14} className="animate-spin" />
+                                        ) : (
+                                          <Send size={14} />
+                                        )}
+                                        Enviar ao master
+                                      </button>
+                                    </div>
+                                  ) : null}
                                 </div>
                               ) : null}
                             </div>

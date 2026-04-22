@@ -76,6 +76,7 @@ type TreinoRow = Row & {
   dia?: unknown;
   diaSemana?: unknown;
   horario?: unknown;
+  local?: unknown;
   treinador?: unknown;
   status?: unknown;
 };
@@ -222,6 +223,21 @@ const formatNumber = (value: number): string =>
     Number.isFinite(value) ? value : 0
   );
 
+const formatPercent = (value: number): string =>
+  `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(
+    Number.isFinite(value) ? value : 0
+  )}%`;
+
+const formatShortDate = (value: unknown): string => {
+  const raw = asString(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split("-");
+    return `${day}/${month}/${year}`;
+  }
+  const date = parseDate(raw);
+  return date ? date.toLocaleDateString("pt-BR") : "Sem data";
+};
+
 const parseNumber = (value: unknown, fallback = 0): number => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return fallback;
@@ -287,17 +303,17 @@ const rowDateWeekday = (value: unknown): string => {
 
 const rowDatePeriod = (value: unknown): string => {
   const date = parseDate(value);
-  if (!date) return "Sem horario";
+  if (!date) return "Sem horário";
   const hour = date.getHours();
   if (hour < 6) return "Madrugada";
-  if (hour < 12) return "Manha";
+  if (hour < 12) return "Manhã";
   if (hour < 18) return "Tarde";
   return "Noite";
 };
 
 const hourBucket = (value: unknown): string => {
   const date = parseDate(value);
-  if (!date) return "Sem horario";
+  if (!date) return "Sem horário";
   return `${String(date.getHours()).padStart(2, "0")}:00`;
 };
 
@@ -470,7 +486,7 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
   }
 
   if (mode === "treinos") {
-    const [treinos, trainingPresence, trainingModalities] = await Promise.all([
+    const [treinos, trainingPresence, trainingModalities, chamada, rsvps] = await Promise.all([
       queryRows(
         "treinos",
         "id,modalidade,dia,diaSemana,horario,local,treinador,status,tenant_id,createdAt",
@@ -492,11 +508,7 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
         "presencas",
         1200
       ),
-    ]);
-    const [chamada, rsvps] = hasBiRows(trainingPresence, trainingModalities)
-      ? [[], []]
-      : await Promise.all([
-        queryRows(
+      queryRows(
         "treinos_chamada",
         "id,treinoId,userId,nome,turma,status,origem,performanceRating,timestamp,tenant_id",
         tenantId,
@@ -617,7 +629,17 @@ function Bars({ data, dataKey = "quantity" }: { data: MetricRow[]; dataKey?: "qu
   );
 }
 
-function BarsDual({ data }: { data: MetricRow[] }) {
+function BarsDual({
+  data,
+  quantityName = "Qtd",
+  valueName = "Valor",
+  valueAsCurrency = true,
+}: {
+  data: MetricRow[];
+  quantityName?: string;
+  valueName?: string;
+  valueAsCurrency?: boolean;
+}) {
   if (!data.length) return <EmptyChart />;
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -626,10 +648,17 @@ function BarsDual({ data }: { data: MetricRow[] }) {
         <XAxis dataKey="name" stroke="#a1a1aa" tick={{ fontSize: 11 }} />
         <YAxis yAxisId="left" stroke="#2dd4bf" tick={{ fontSize: 11 }} />
         <YAxis yAxisId="right" orientation="right" stroke="#fbbf24" tick={{ fontSize: 11 }} />
-        <Tooltip {...chartTooltipProps} formatter={(value, name) => (name === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))} />
+        <Tooltip
+          {...chartTooltipProps}
+          formatter={(value, name) =>
+            name === valueName && valueAsCurrency
+              ? formatCurrency(Number(value))
+              : formatNumber(Number(value))
+          }
+        />
         <Legend />
-        <Bar yAxisId="left" dataKey="quantity" name="Qtd" fill="#2dd4bf" radius={[6, 6, 0, 0]} />
-        <Bar yAxisId="right" dataKey="value" name="Valor" fill="#fbbf24" radius={[6, 6, 0, 0]} />
+        <Bar yAxisId="left" dataKey="quantity" name={quantityName} fill="#2dd4bf" radius={[6, 6, 0, 0]} />
+        <Bar yAxisId="right" dataKey="value" name={valueName} fill="#fbbf24" radius={[6, 6, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -728,7 +757,7 @@ function EventsBi({ data }: { data: LoadedData }) {
       selectedEventCheckins.forEach((row) => {
         const checkins = parseNumber(row.checkins, 0);
         scanned += checkins;
-        addMetric(checkinsByHour, asString(row.hora_label, "Sem horario"), checkins, 0);
+        addMetric(checkinsByHour, asString(row.hora_label, "Sem horário"), checkins, 0);
       });
 
       return {
@@ -746,7 +775,7 @@ function EventsBi({ data }: { data: LoadedData }) {
               value: 0,
             }
         ),
-        byPeriod: ["Madrugada", "Manha", "Tarde", "Noite"].map(
+        byPeriod: ["Madrugada", "Manhã", "Tarde", "Noite"].map(
           (period) =>
             aggregateDimensionRows(selectedEventSales, "periodo").find((row) => row.name === period) ?? {
               name: period,
@@ -796,7 +825,7 @@ function EventsBi({ data }: { data: LoadedData }) {
       byClass: metricRows(byClass),
       byLote: metricRows(byLote),
       byWeekday: WEEKDAYS.map((day) => byWeekday.get(day) ?? { name: day, quantity: 0, value: 0 }),
-      byPeriod: ["Madrugada", "Manha", "Tarde", "Noite"].map(
+      byPeriod: ["Madrugada", "Manhã", "Tarde", "Noite"].map(
         (period) => byPeriod.get(period) ?? { name: period, quantity: 0, value: 0 }
       ),
       byApprover: metricRows(byApprover, 10),
@@ -845,12 +874,13 @@ function EventsBi({ data }: { data: LoadedData }) {
         <ChartPanel title="Dias da semana"><Trend data={analytics.byWeekday} valueKey="value" /></ChartPanel>
         <ChartPanel title="Período do dia"><BarsDual data={analytics.byPeriod} /></ChartPanel>
         <ChartPanel title="Comprovantes por aprovador"><Bars data={analytics.byApprover} dataKey="quantity" /></ChartPanel>
-        <ChartPanel title="Scaneamento por horário"><LineMetric data={analytics.byScanHour} /></ChartPanel>
+        <ChartPanel title="Escaneamento por horário"><LineMetric data={analytics.byScanHour} /></ChartPanel>
       </div>
     </DashboardShell>
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function TrainingsBi({ data }: { data: LoadedData }) {
   const [modalidade, setModalidade] = useState("todas");
   const treinoMap = useMemo(
@@ -928,7 +958,7 @@ function TrainingsBi({ data }: { data: LoadedData }) {
       addMetric(byUser, asString(row.nome, "Aluno"), 1, 0);
       addMetric(byModalidade, asString(treino?.modalidade, "Treino"), 1, 0);
       addMetric(byWeekday, asString(treino?.diaSemana) || rowDateWeekday(treino?.dia), 1, 0);
-      addMetric(byHour, asString(treino?.horario, "Sem horario"), 1, 0);
+      addMetric(byHour, asString(treino?.horario, "Sem horário"), 1, 0);
       addMetric(byCoach, asString(treino?.treinador, "Sem treinador"), 1, 0);
     });
 
@@ -970,26 +1000,26 @@ function TrainingsBi({ data }: { data: LoadedData }) {
     {
       label: "Treinos",
       value: formatNumber(analytics.sessions),
-      hint: "sessoes no filtro",
+      hint: "sessões no filtro",
       icon: <CalendarDays size={18} />,
       tone: "bg-cyan-500/15 text-cyan-300",
     },
     {
-      label: "Confirmacoes",
+      label: "Confirmações",
       value: formatNumber(analytics.rsvps),
       hint: "RSVPs no app",
       icon: <Users size={18} />,
       tone: "bg-violet-500/15 text-violet-300",
     },
     {
-      label: "Presencas reais",
+      label: "Presenças reais",
       value: formatNumber(analytics.presences),
       hint: `${formatNumber(analytics.noShows)} no-shows`,
       icon: <Trophy size={18} />,
       tone: "bg-emerald-500/15 text-emerald-300",
     },
     {
-      label: "Nota media",
+      label: "Nota média",
       value: analytics.ratingAverage ? analytics.ratingAverage.toFixed(1) : "-",
       hint: "desempenho por estrelas",
       icon: <BarChart3 size={18} />,
@@ -1008,6 +1038,275 @@ function TrainingsBi({ data }: { data: LoadedData }) {
         <ChartPanel title="Dias com mais adesão"><PieMetric data={analytics.byWeekday} /></ChartPanel>
         <ChartPanel title="Horários com mais presença"><Trend data={analytics.byHour} /></ChartPanel>
         <ChartPanel title="Presença por treinador"><Bars data={analytics.byCoach} /></ChartPanel>
+      </div>
+    </DashboardShell>
+  );
+}
+
+function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
+  const { tenantSlug } = useTenantTheme();
+  const [modalidade, setModalidade] = useState("todas");
+  const [trainingDate, setTrainingDate] = useState("todas");
+  const treinoMap = useMemo(
+    () => new Map(data.treinos.map((treino) => [asString(treino.id), treino])),
+    [data.treinos]
+  );
+  const options = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...data.treinos.map((treino) => asString(treino.modalidade, "Treino")).filter(Boolean),
+          ...data.trainingModalities.map((row) => asString(row.modalidade, "Treino")).filter(Boolean),
+        ])
+      ).map((name) => ({ id: name, title: name })),
+    [data.trainingModalities, data.treinos]
+  );
+  const dateOptions = useMemo(() => {
+    const dates = Array.from(
+      new Set(data.treinos.map((treino) => asString(treino.dia).trim()).filter(Boolean))
+    ).sort((left, right) => right.localeCompare(left));
+    return dates.map((date) => ({ id: date, title: formatShortDate(date) }));
+  }, [data.treinos]);
+  const selectedTreinos = useMemo(
+    () =>
+      data.treinos.filter((treino) => {
+        const treinoModalidade = asString(treino.modalidade, "Treino");
+        const treinoDate = asString(treino.dia).trim();
+        return (
+          (modalidade === "todas" || treinoModalidade === modalidade) &&
+          (trainingDate === "todas" || treinoDate === trainingDate)
+        );
+      }),
+    [data.treinos, modalidade, trainingDate]
+  );
+  const selectedTreinoIds = useMemo(
+    () => new Set(selectedTreinos.map((treino) => asString(treino.id)).filter(Boolean)),
+    [selectedTreinos]
+  );
+  const selectedChamada = useMemo(
+    () => data.chamada.filter((row) => selectedTreinoIds.has(asString(row.treinoId))),
+    [data.chamada, selectedTreinoIds]
+  );
+  const presentes = useMemo(
+    () => selectedChamada.filter((row) => statusKey(row.status) === "presente"),
+    [selectedChamada]
+  );
+  const selectedRsvps = useMemo(
+    () =>
+      data.rsvps.filter(
+        (row) => selectedTreinoIds.has(asString(row.treinoId)) && statusKey(row.status) === "going"
+      ),
+    [data.rsvps, selectedTreinoIds]
+  );
+
+  const analytics = useMemo(() => {
+    const byClass = new Map<string, MetricRow>();
+    const byUser = new Map<string, MetricRow>();
+    const byModalidade = new Map<string, MetricRow>();
+    const byWeekday = new Map<string, MetricRow>();
+    const byHour = new Map<string, MetricRow>();
+    const byCoach = new Map<string, MetricRow>();
+    const byLocation = new Map<string, MetricRow>();
+    const byDate = new Map<string, MetricRow>();
+    const noShowByUser = new Map<string, MetricRow>();
+    const rated = presentes.filter((row) => parseNumber(row.performanceRating, 0) > 0);
+    const presentKeys = new Set(presentes.map((row) => `${asString(row.treinoId)}:${asString(row.userId)}`));
+
+    selectedTreinos.forEach((treino) => {
+      const modalidadeName = asString(treino.modalidade, "Treino");
+      const current = byModalidade.get(modalidadeName) ?? { name: modalidadeName, quantity: 0, value: 0 };
+      current.value += 1;
+      byModalidade.set(modalidadeName, current);
+
+      const dateLabel = formatShortDate(treino.dia);
+      const dateCurrent = byDate.get(dateLabel) ?? { name: dateLabel, quantity: 0, value: 0 };
+      dateCurrent.value += 1;
+      byDate.set(dateLabel, dateCurrent);
+    });
+
+    presentes.forEach((row) => {
+      const treino = treinoMap.get(asString(row.treinoId));
+      addMetric(byClass, asString(row.turma, "Sem turma"), 1, 0);
+      addMetric(byUser, asString(row.nome, "Aluno"), 1, 0);
+      addMetric(byModalidade, asString(treino?.modalidade, "Treino"), 1, 0);
+      addMetric(byWeekday, asString(treino?.diaSemana) || rowDateWeekday(treino?.dia), 1, 0);
+      addMetric(byHour, asString(treino?.horario, "Sem horário"), 1, 0);
+      addMetric(byCoach, asString(treino?.treinador, "Sem treinador"), 1, 0);
+      addMetric(byLocation, asString(treino?.local, "Sem local"), 1, 0);
+
+      const dateLabel = formatShortDate(treino?.dia);
+      const dateCurrent = byDate.get(dateLabel) ?? { name: dateLabel, quantity: 0, value: 0 };
+      dateCurrent.quantity += 1;
+      byDate.set(dateLabel, dateCurrent);
+    });
+
+    const noShowRows = selectedRsvps.filter(
+      (row) => !presentKeys.has(`${asString(row.treinoId)}:${asString(row.userId)}`)
+    );
+    noShowRows.forEach((row) => addMetric(noShowByUser, asString(row.userName, "Aluno"), 1, 0));
+
+    const ratingAverage =
+      rated.reduce((sum, row) => sum + parseNumber(row.performanceRating, 0), 0) / Math.max(1, rated.length);
+    const userRows = metricRows(byUser);
+    const topFivePresences = userRows.slice(0, 5).reduce((sum, row) => sum + row.quantity, 0);
+    const uniqueUsers = userRows.length;
+    const recurringUsers = userRows.filter((row) => row.quantity >= 2).length;
+    const attendanceRate = selectedRsvps.length > 0 ? (presentes.length / selectedRsvps.length) * 100 : 0;
+    const retentionRate = uniqueUsers > 0 ? (recurringUsers / uniqueUsers) * 100 : 0;
+    const topFiveDependency = presentes.length > 0 ? (topFivePresences / presentes.length) * 100 : 0;
+    const riskAthletes = metricRows(noShowByUser, 10);
+
+    return {
+      sessions: selectedTreinoIds.size,
+      rsvps: selectedRsvps.length,
+      presences: presentes.length,
+      noShows: noShowRows.length,
+      ratingAverage,
+      attendanceRate,
+      retentionRate,
+      topFiveDependency,
+      riskCount: riskAthletes.length,
+      recurringUsers,
+      uniqueUsers,
+      byClass: metricRows(byClass),
+      byUser: userRows.slice(0, 12),
+      byModalidade: metricRows(byModalidade),
+      byWeekday: metricRows(byWeekday),
+      byHour: metricRows(byHour),
+      byCoach: metricRows(byCoach, 10),
+      byLocation: metricRows(byLocation, 10),
+      byDate: metricRows(byDate).sort((left, right) => left.name.localeCompare(right.name)),
+      riskAthletes,
+      funnel: [
+        { name: "Treinos criados", quantity: selectedTreinoIds.size, value: 0 },
+        { name: "Confirmações", quantity: selectedRsvps.length, value: 0 },
+        { name: "Presenças", quantity: presentes.length, value: 0 },
+        { name: "No-shows", quantity: noShowRows.length, value: 0 },
+      ],
+    };
+  }, [presentes, selectedRsvps, selectedTreinoIds, selectedTreinos, treinoMap]);
+
+  const kpis: Kpi[] = [
+    {
+      label: "Treinos",
+      value: formatNumber(analytics.sessions),
+      hint: "sessões no filtro",
+      icon: <CalendarDays size={18} />,
+      tone: "bg-cyan-500/15 text-cyan-300",
+    },
+    {
+      label: "Confirmações",
+      value: formatNumber(analytics.rsvps),
+      hint: "RSVPs no app",
+      icon: <Users size={18} />,
+      tone: "bg-violet-500/15 text-violet-300",
+    },
+    {
+      label: "Presenças reais",
+      value: formatNumber(analytics.presences),
+      hint: `${formatNumber(analytics.noShows)} no-shows`,
+      icon: <Trophy size={18} />,
+      tone: "bg-emerald-500/15 text-emerald-300",
+    },
+    {
+      label: "Nota média",
+      value: analytics.ratingAverage ? analytics.ratingAverage.toFixed(1) : "-",
+      hint: "desempenho por estrelas",
+      icon: <BarChart3 size={18} />,
+      tone: "bg-amber-500/15 text-amber-300",
+    },
+  ];
+  const decisionKpis: Kpi[] = [
+    {
+      label: "Comparecimento",
+      value: formatPercent(analytics.attendanceRate),
+      hint: "presenças divididas por confirmações",
+      icon: <Trophy size={18} />,
+      tone: "bg-emerald-500/15 text-emerald-300",
+    },
+    {
+      label: "Retenção",
+      value: formatPercent(analytics.retentionRate),
+      hint: `${formatNumber(analytics.recurringUsers)} recorrentes entre ${formatNumber(analytics.uniqueUsers)} atletas`,
+      icon: <Users size={18} />,
+      tone: "bg-cyan-500/15 text-cyan-300",
+    },
+    {
+      label: "Dependência Top 5",
+      value: formatPercent(analytics.topFiveDependency),
+      hint: "peso dos 5 alunos mais presentes",
+      icon: <BarChart3 size={18} />,
+      tone: "bg-amber-500/15 text-amber-300",
+    },
+    {
+      label: "Atletas em risco",
+      value: formatNumber(analytics.riskCount),
+      hint: "confirmaram e não compareceram no filtro",
+      icon: <Users size={18} />,
+      tone: "bg-red-500/15 text-red-300",
+    },
+  ];
+  const frequencyHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/gestao/treinos/frequencia")
+    : "/admin/gestao/treinos/frequencia";
+
+  return (
+    <DashboardShell title="Gestão de Treinos" subtitle="Participação por turma, usuário, modalidade, local e horário" mode="treinos">
+      <div className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-black/40 p-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-zinc-500">
+          <BarChart3 size={16} className="text-cyan-300" />
+          Filtro analítico
+        </div>
+        <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)_auto]">
+          <select
+            value={modalidade}
+            onChange={(event) => setModalidade(event.target.value)}
+            className="min-h-11 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-cyan-400"
+          >
+            <option value="todas">Todas as modalidades</option>
+            {options.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.title}
+              </option>
+            ))}
+          </select>
+          <select
+            value={trainingDate}
+            onChange={(event) => setTrainingDate(event.target.value)}
+            className="min-h-11 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-cyan-400"
+          >
+            <option value="todas">Todas as datas com treino</option>
+            {dateOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.title}
+              </option>
+            ))}
+          </select>
+          <Link
+            href={frequencyHref}
+            className="inline-flex min-h-11 items-center justify-center rounded-lg border border-cyan-400/50 bg-cyan-400/10 px-4 text-xs font-black uppercase tracking-wide text-cyan-200 hover:bg-cyan-400 hover:text-black"
+          >
+            Frequência por data
+          </Link>
+        </div>
+      </div>
+      <KpiGrid items={kpis} />
+      <KpiGrid items={decisionKpis} />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ChartPanel title="Turmas mais presentes"><Bars data={analytics.byClass} /></ChartPanel>
+        <ChartPanel title="Usuários que mais participam"><Bars data={analytics.byUser} /></ChartPanel>
+        <ChartPanel title="Modalidades: presenças x treinos cadastrados">
+          <BarsDual data={analytics.byModalidade} quantityName="Presenças" valueName="Treinos cadastrados" valueAsCurrency={false} />
+        </ChartPanel>
+        <ChartPanel title="Principais locais"><Bars data={analytics.byLocation} /></ChartPanel>
+        <ChartPanel title="Funil de adesão"><Bars data={analytics.funnel} /></ChartPanel>
+        <ChartPanel title="Dias com mais adesão"><PieMetric data={analytics.byWeekday} /></ChartPanel>
+        <ChartPanel title="Horários com mais presença"><Trend data={analytics.byHour} /></ChartPanel>
+        <ChartPanel title="Presença por treinador"><Bars data={analytics.byCoach} /></ChartPanel>
+        <ChartPanel title="Presenças por data">
+          <BarsDual data={analytics.byDate} quantityName="Presenças" valueName="Treinos" valueAsCurrency={false} />
+        </ChartPanel>
+        <ChartPanel title="Atletas em risco por no-show"><Bars data={analytics.riskAthletes} /></ChartPanel>
       </div>
     </DashboardShell>
   );
@@ -1196,7 +1495,7 @@ function Filters({
     <div className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-black/40 p-3 md:flex-row md:items-center md:justify-between">
       <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-zinc-500">
         <BarChart3 size={16} className="text-cyan-300" />
-        Filtro analitico
+        Filtro analítico
       </div>
       <select
         value={value}
@@ -1319,6 +1618,6 @@ export default function AdminBiDashboard({ mode }: { mode: DashboardMode }) {
   }
 
   if (mode === "eventos") return <EventsBi data={data} />;
-  if (mode === "treinos") return <TrainingsBi data={data} />;
+  if (mode === "treinos") return <TrainingsBiEnhanced data={data} />;
   return <ProductsBi data={data} />;
 }

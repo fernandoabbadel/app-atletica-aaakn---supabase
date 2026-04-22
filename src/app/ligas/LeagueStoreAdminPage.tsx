@@ -44,6 +44,9 @@ import {
   hasValidPhoneLength,
   normalizePhoneToBrE164,
   PHONE_MAX_LENGTH,
+  PIX_BANK_MAX_LENGTH,
+  PIX_HOLDER_MAX_LENGTH,
+  PIX_KEY_MAX_LENGTH,
   URL_MAX_LENGTH,
 } from "@/utils/contactFields";
 
@@ -71,6 +74,10 @@ type ProductForm = {
   img: string;
   descricao: string;
   contato: string;
+  paymentEnabled: boolean;
+  pixChave: string;
+  pixBanco: string;
+  pixTitular: string;
   tagLabel: string;
   tagColor: ProductTagColor;
   tagEffect: ProductTagEffect;
@@ -101,6 +108,10 @@ const createEmptyProductForm = (): ProductForm => ({
   img: "",
   descricao: "",
   contato: "",
+  paymentEnabled: false,
+  pixChave: "",
+  pixBanco: "",
+  pixTitular: "",
   tagLabel: "",
   tagColor: "zinc",
   tagEffect: "none",
@@ -130,6 +141,12 @@ const asStringArray = (value: unknown): string[] =>
 
 const isLeagueSellerRow = (row: Row, leagueId: string): boolean =>
   asString(row.seller_type).toLowerCase() === "league" && asString(row.seller_id) === leagueId;
+
+const isLeagueCategoryRow = (row: Row, leagueId: string): boolean => {
+  const sellerId = asString(row.seller_id);
+  const sellerType = asString(row.seller_type).toLowerCase();
+  return sellerId === leagueId && (sellerType === "league" || sellerType === "tenant" || !sellerType);
+};
 
 const formatCurrency = (value: unknown): string => `R$ ${asNumber(value).toFixed(2)}`;
 
@@ -241,7 +258,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
         ]);
         const leagueProducts = (productRows as Row[]).filter((row) => isLeagueSellerRow(row, leagueId));
         const leagueCategory =
-          (categoryRows as Row[]).find((row) => isLeagueSellerRow(row, leagueId)) || null;
+          (categoryRows as Row[]).find((row) => isLeagueCategoryRow(row, leagueId)) || null;
         setLeague(leagueRow);
         setCategory(leagueCategory);
         setProducts(leagueProducts);
@@ -290,7 +307,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
           buttonColor: storeColor,
           logoUrl: leagueLogo,
           visible: typeof visible === "boolean" ? visible : category ? categoryVisible : true,
-          sellerType: "league",
+          sellerType: "tenant",
           sellerId: leagueId,
           tenantId: tenantId || undefined,
         },
@@ -360,6 +377,15 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
     const productStatus = asString(product?.status);
     const productTagColor = asString(product?.tagColor);
     const productTagEffect = asString(product?.tagEffect);
+    const productPaymentConfig = product?.payment_config as
+      | { whatsapp?: unknown; chave?: unknown; banco?: unknown; titular?: unknown }
+      | null
+      | undefined;
+    const productPaymentEnabled = Boolean(
+      asString(productPaymentConfig?.chave) ||
+        asString(productPaymentConfig?.banco) ||
+        asString(productPaymentConfig?.titular)
+    );
     setForm(
       product
         ? {
@@ -374,7 +400,11 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
             lote: asString(product.lote) || "geral",
             img: asString(product.img),
             descricao: asString(product.descricao),
-            contato: asString((product.payment_config as { whatsapp?: unknown } | null)?.whatsapp),
+            contato: asString(productPaymentConfig?.whatsapp),
+            paymentEnabled: productPaymentEnabled,
+            pixChave: asString(productPaymentConfig?.chave),
+            pixBanco: asString(productPaymentConfig?.banco),
+            pixTitular: asString(productPaymentConfig?.titular),
             tagLabel: asString(product.tagLabel),
             tagColor:
               productTagColor === "emerald" ||
@@ -472,11 +502,17 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
     const preco = parseMoney(form.preco);
     const precoAntigo = form.precoAntigo.trim() ? parseMoney(form.precoAntigo) : 0;
     const contatoComprovante = normalizePhoneToBrE164(form.contato).slice(0, PHONE_MAX_LENGTH);
+    const pixChave = form.pixChave.trim().slice(0, PIX_KEY_MAX_LENGTH);
+    const pixBanco = form.pixBanco.trim().slice(0, PIX_BANK_MAX_LENGTH);
+    const pixTitular = form.pixTitular.trim().slice(0, PIX_HOLDER_MAX_LENGTH);
     if (!league || !leagueId) return;
     if (!nome) return addToast("Nome do produto obrigatório.", "error");
     if (!Number.isFinite(preco) || preco < 0) return addToast("Preço inválido.", "error");
     if (!contatoComprovante || !hasValidPhoneLength(contatoComprovante)) {
       return addToast("Informe um WhatsApp válido para o comprovante da liga.", "error");
+    }
+    if (form.paymentEnabled && (!pixChave || !pixBanco || !pixTitular)) {
+      return addToast("Preencha a chave PIX, o banco e o titular para usar dados próprios.", "error");
     }
 
     const variants = form.usarVariantes
@@ -527,9 +563,9 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
         caracteristicas,
         likes: [],
         payment_config: {
-          chave: "",
-          banco: "",
-          titular: "",
+          chave: form.paymentEnabled ? pixChave : "",
+          banco: form.paymentEnabled ? pixBanco : "",
+          titular: form.paymentEnabled ? pixTitular : "",
           whatsapp: contatoComprovante,
         },
         seller_type: "league",
@@ -845,6 +881,69 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
                   <input value={form.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(event) => setForm((prev) => ({ ...prev, lote: event.target.value.slice(0, PRODUCT_LOTE_MAX_LENGTH) }))} placeholder="Lote" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
                   <input value={form.contato} maxLength={PHONE_MAX_LENGTH} onChange={(event) => setForm((prev) => ({ ...prev, contato: normalizePhoneToBrE164(event.target.value) }))} placeholder="Telefone/WhatsApp para comprovante" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
                   <textarea value={form.descricao} maxLength={PRODUCT_DESCRIPTION_MAX_LENGTH} onChange={(event) => setForm((prev) => ({ ...prev, descricao: event.target.value.slice(0, PRODUCT_DESCRIPTION_MAX_LENGTH) }))} placeholder="Descrição" rows={4} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-zinc-800 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black uppercase text-white">Pagamento do produto</p>
+                      <p className="text-[11px] text-zinc-500">
+                        Se desligado, usa automaticamente os dados gerais da atlética.
+                      </p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-[11px] font-bold text-zinc-400">
+                      <input
+                        type="checkbox"
+                        checked={form.paymentEnabled}
+                        onChange={(event) =>
+                          setForm((prev) => ({ ...prev, paymentEnabled: event.target.checked }))
+                        }
+                        className="accent-emerald-500"
+                      />
+                      Usar dados próprios
+                    </label>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <input
+                      value={form.pixChave}
+                      maxLength={PIX_KEY_MAX_LENGTH}
+                      onChange={(event) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          pixChave: event.target.value.slice(0, PIX_KEY_MAX_LENGTH),
+                        }))
+                      }
+                      placeholder="Chave PIX"
+                      disabled={!form.paymentEnabled}
+                      className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
+                    />
+                    <input
+                      value={form.pixBanco}
+                      maxLength={PIX_BANK_MAX_LENGTH}
+                      onChange={(event) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          pixBanco: event.target.value.slice(0, PIX_BANK_MAX_LENGTH),
+                        }))
+                      }
+                      placeholder="Banco"
+                      disabled={!form.paymentEnabled}
+                      className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
+                    />
+                    <input
+                      value={form.pixTitular}
+                      maxLength={PIX_HOLDER_MAX_LENGTH}
+                      onChange={(event) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          pixTitular: event.target.value.slice(0, PIX_HOLDER_MAX_LENGTH),
+                        }))
+                      }
+                      placeholder="Titular"
+                      disabled={!form.paymentEnabled}
+                      className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
+                    />
+                  </div>
                 </div>
 
                 {lotManagerOpen && (

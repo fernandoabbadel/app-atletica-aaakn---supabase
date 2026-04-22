@@ -1,0 +1,345 @@
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, Loader2, Table2 } from "lucide-react";
+
+import { useTenantTheme } from "@/context/TenantThemeContext";
+import { getSupabaseClient } from "@/lib/supabase";
+import { asString, throwSupabaseError, type Row } from "@/lib/supabaseData";
+import { withTenantSlug } from "@/lib/tenantRouting";
+
+type TreinoRow = Row & {
+  id?: unknown;
+  modalidade?: unknown;
+  dia?: unknown;
+  diaSemana?: unknown;
+  horario?: unknown;
+  local?: unknown;
+};
+
+type ChamadaRow = Row & {
+  treinoId?: unknown;
+  userId?: unknown;
+  nome?: unknown;
+  turma?: unknown;
+  status?: unknown;
+};
+
+type RsvpRow = Row & {
+  treinoId?: unknown;
+  userId?: unknown;
+  userName?: unknown;
+  userTurma?: unknown;
+  status?: unknown;
+};
+
+type MatrixData = {
+  treinos: TreinoRow[];
+  chamada: ChamadaRow[];
+  rsvps: RsvpRow[];
+};
+
+type CellStatus = "P" | "F" | "J" | "C";
+
+type MatrixStudent = {
+  id: string;
+  nome: string;
+  turma: string;
+  cells: Map<string, CellStatus>;
+};
+
+const emptyMatrixData: MatrixData = {
+  treinos: [],
+  chamada: [],
+  rsvps: [],
+};
+
+const statusLabel: Record<CellStatus, string> = {
+  P: "Presente",
+  F: "Falta",
+  J: "Justificado",
+  C: "Confirmado",
+};
+
+const statusClass: Record<CellStatus, string> = {
+  P: "border-emerald-500/30 bg-emerald-500/20 text-emerald-200",
+  F: "border-red-500/30 bg-red-500/20 text-red-200",
+  J: "border-amber-500/30 bg-amber-500/20 text-amber-100",
+  C: "border-cyan-500/30 bg-cyan-500/15 text-cyan-200",
+};
+
+const statusKey = (value: unknown): string => asString(value).trim().toLowerCase();
+
+const formatShortDate = (value: unknown): string => {
+  const raw = asString(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split("-");
+    return `${day}/${month}/${year}`;
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? "Sem data" : parsed.toLocaleDateString("pt-BR");
+};
+
+async function queryRows(
+  table: string,
+  select: string,
+  tenantId: string,
+  orderColumn: string,
+  limit: number
+): Promise<Row[]> {
+  const supabase = getSupabaseClient();
+  let query = supabase.from(table).select(select).order(orderColumn, { ascending: true }).limit(limit);
+  if (tenantId) {
+    query = query.eq("tenant_id", tenantId);
+  }
+
+  const { data, error } = await query;
+  if (error) throwSupabaseError(error);
+  return Array.isArray(data) ? (data as unknown as Row[]) : [];
+}
+
+async function loadMatrixData(tenantId: string): Promise<MatrixData> {
+  const [treinos, chamada, rsvps] = await Promise.all([
+    queryRows(
+      "treinos",
+      "id,modalidade,dia,diaSemana,horario,local,tenant_id",
+      tenantId,
+      "dia",
+      1200
+    ),
+    queryRows(
+      "treinos_chamada",
+      "id,treinoId,userId,nome,turma,status,tenant_id",
+      tenantId,
+      "timestamp",
+      5000
+    ),
+    queryRows(
+      "treinos_rsvps",
+      "id,treinoId,userId,userName,userTurma,status,tenant_id",
+      tenantId,
+      "timestamp",
+      5000
+    ),
+  ]);
+
+  return {
+    treinos: treinos as TreinoRow[],
+    chamada: chamada as ChamadaRow[],
+    rsvps: rsvps as RsvpRow[],
+  };
+}
+
+export default function TrainingFrequencyMatrix() {
+  const { tenantId, tenantSlug } = useTenantTheme();
+  const [data, setData] = useState<MatrixData>(emptyMatrixData);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [modalidade, setModalidade] = useState("todas");
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError("");
+    void loadMatrixData(tenantId.trim())
+      .then((nextData) => {
+        if (mounted) setData(nextData);
+      })
+      .catch((loadError: unknown) => {
+        console.error(loadError);
+        if (mounted) setError(loadError instanceof Error ? loadError.message : "Erro ao carregar frequência.");
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId]);
+
+  const modalidadeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(data.treinos.map((treino) => asString(treino.modalidade, "Treino")).filter(Boolean))
+      ).sort((left, right) => left.localeCompare(right, "pt-BR")),
+    [data.treinos]
+  );
+
+  const selectedTreinos = useMemo(
+    () =>
+      data.treinos
+        .filter((treino) => modalidade === "todas" || asString(treino.modalidade, "Treino") === modalidade)
+        .sort((left, right) => {
+          const dateCompare = asString(left.dia).localeCompare(asString(right.dia));
+          if (dateCompare !== 0) return dateCompare;
+          return asString(left.horario).localeCompare(asString(right.horario), "pt-BR");
+        }),
+    [data.treinos, modalidade]
+  );
+
+  const matrixRows = useMemo(() => {
+    const treinoIds = new Set(selectedTreinos.map((treino) => asString(treino.id)).filter(Boolean));
+    const students = new Map<string, MatrixStudent>();
+
+    const ensureStudent = (id: string, nome: string, turma: string): MatrixStudent => {
+      const current = students.get(id);
+      if (current) {
+        if (!current.nome || current.nome === "Aluno") current.nome = nome || current.nome;
+        if (!current.turma || current.turma === "Sem turma") current.turma = turma || current.turma;
+        return current;
+      }
+
+      const next: MatrixStudent = {
+        id,
+        nome: nome || "Aluno",
+        turma: turma || "Sem turma",
+        cells: new Map<string, CellStatus>(),
+      };
+      students.set(id, next);
+      return next;
+    };
+
+    data.rsvps.forEach((row) => {
+      const treinoId = asString(row.treinoId);
+      const userId = asString(row.userId);
+      if (!treinoIds.has(treinoId) || !userId || statusKey(row.status) !== "going") return;
+      const student = ensureStudent(userId, asString(row.userName, "Aluno"), asString(row.userTurma, "Sem turma"));
+      student.cells.set(treinoId, "C");
+    });
+
+    data.chamada.forEach((row) => {
+      const treinoId = asString(row.treinoId);
+      const userId = asString(row.userId);
+      if (!treinoIds.has(treinoId) || !userId) return;
+      const student = ensureStudent(userId, asString(row.nome, "Aluno"), asString(row.turma, "Sem turma"));
+      const status = statusKey(row.status);
+      student.cells.set(treinoId, status === "falta" ? "F" : status === "justificado" ? "J" : "P");
+    });
+
+    return Array.from(students.values()).sort((left, right) =>
+      left.nome.localeCompare(right.nome, "pt-BR", { sensitivity: "base" })
+    );
+  }, [data.chamada, data.rsvps, selectedTreinos]);
+
+  const backHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/gestao/treinos")
+    : "/admin/gestao/treinos";
+
+  return (
+    <main className="min-h-screen bg-[#050505] px-4 py-5 text-white md:px-6">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <header className="flex flex-col gap-4 rounded-lg border border-zinc-800 bg-zinc-950/70 p-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <Link href={backHref} className="rounded-lg border border-zinc-800 bg-black p-2 text-zinc-300 hover:text-white">
+              <ArrowLeft size={18} />
+            </Link>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">BI Treinos</p>
+              <h1 className="mt-1 text-2xl font-black uppercase text-white">Frequência por Data</h1>
+              <p className="mt-1 text-sm font-bold text-zinc-500">
+                Alunos nas linhas, treinos nas colunas e presença marcada por célula.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-black/50 px-3 py-2 text-xs font-black uppercase tracking-wide text-zinc-400">
+            <Table2 size={16} className="text-cyan-300" />
+            Modelo de planilha
+          </div>
+        </header>
+
+        <section className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-black/40 p-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap gap-2 text-[11px] font-black uppercase">
+            {Object.entries(statusLabel).map(([status, label]) => (
+              <span
+                key={status}
+                className={`rounded-lg border px-2.5 py-1.5 ${statusClass[status as CellStatus]}`}
+              >
+                {status} - {label}
+              </span>
+            ))}
+          </div>
+          <select
+            value={modalidade}
+            onChange={(event) => setModalidade(event.target.value)}
+            className="min-h-11 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-cyan-400"
+          >
+            <option value="todas">Todas as modalidades</option>
+            {modalidadeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </section>
+
+        {loading ? (
+          <div className="flex min-h-[420px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-950">
+            <Loader2 className="animate-spin text-cyan-300" />
+          </div>
+        ) : error ? (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-5 text-sm font-bold text-red-200">
+            {error}
+          </div>
+        ) : selectedTreinos.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm font-bold text-zinc-500">
+            Nenhum treino encontrado para o filtro atual.
+          </div>
+        ) : (
+          <section className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="max-h-[72vh] overflow-auto">
+              <table className="min-w-full border-separate border-spacing-0 text-left text-xs">
+                <thead className="sticky top-0 z-20 bg-zinc-950">
+                  <tr>
+                    <th className="sticky left-0 z-30 min-w-[260px] border-b border-r border-zinc-800 bg-zinc-950 px-4 py-3 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">
+                      Aluno
+                    </th>
+                    {selectedTreinos.map((treino) => (
+                      <th
+                        key={asString(treino.id)}
+                        className="min-w-[132px] border-b border-r border-zinc-800 px-3 py-3 text-center align-top"
+                      >
+                        <span className="block text-[11px] font-black text-white">{formatShortDate(treino.dia)}</span>
+                        <span className="mt-1 block text-[10px] font-bold uppercase text-zinc-500">
+                          {asString(treino.horario, "-")}
+                        </span>
+                        <span className="mt-1 block truncate text-[10px] font-bold text-cyan-300">
+                          {asString(treino.modalidade, "Treino")}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {matrixRows.map((student) => (
+                    <tr key={student.id} className="group">
+                      <td className="sticky left-0 z-10 border-b border-r border-zinc-800 bg-zinc-950 px-4 py-3">
+                        <p className="font-black text-white">{student.nome}</p>
+                        <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-zinc-500">{student.turma}</p>
+                      </td>
+                      {selectedTreinos.map((treino) => {
+                        const treinoId = asString(treino.id);
+                        const status = student.cells.get(treinoId);
+                        return (
+                          <td key={`${student.id}:${treinoId}`} className="border-b border-r border-zinc-800 px-3 py-3 text-center">
+                            {status ? (
+                              <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs font-black ${statusClass[status]}`}>
+                                {status}
+                              </span>
+                            ) : (
+                              <span className="text-zinc-700">-</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+      </div>
+    </main>
+  );
+}

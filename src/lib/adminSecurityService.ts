@@ -631,83 +631,105 @@ export async function updatePermissionUserRole(payload: {
   if (!targetUserId || !role) return;
 
   const requestPayload = { targetUserId, role, tenantId: tenantId || undefined };
-  await callWithFallback<typeof requestPayload, { ok: boolean }>(
-    UPDATE_USER_ROLE_CALLABLE,
-    requestPayload,
-    async () => {
-      const supabase = getSupabaseClient();
+  let directSynced = false;
 
-      const toFallbackTenantRole = (value: string): string => {
-        const normalized = value.trim().toLowerCase();
-        if (normalized === "admin_geral") return "admin_tenant";
-        if (normalized === "admin_tenant") return "admin_geral";
-        if (normalized === "master_tenant") return "master";
-        if (normalized === "master") return "master_tenant";
-        if (
-          normalized === "visitante" ||
-          normalized === "user" ||
-          normalized === "mini_vendor" ||
-          normalized === "vendas" ||
-          normalized === "treinador" ||
-          normalized === "empresa" ||
-          normalized === "admin_treino" ||
-          normalized === "admin_gestor"
-        ) {
-          return normalized;
-        }
-        return "user";
+  const toFallbackTenantRole = (value: string): string => {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "admin_geral") return "admin_tenant";
+    if (normalized === "admin_tenant") return "admin_geral";
+    if (normalized === "master_tenant") return "master";
+    if (normalized === "master") return "master_tenant";
+    if (
+      normalized === "visitante" ||
+      normalized === "user" ||
+      normalized === "mini_vendor" ||
+      normalized === "vendas" ||
+      normalized === "treinador" ||
+      normalized === "empresa" ||
+      normalized === "admin_treino" ||
+      normalized === "admin_gestor"
+    ) {
+      return normalized;
+    }
+    return "user";
+  };
+
+  const syncDirectRole = async (): Promise<void> => {
+    const supabase = getSupabaseClient();
+    const nowIso = new Date().toISOString();
+    let finalTenantRole = role;
+
+    const buildUserPatch = (nextRole: string): Record<string, unknown> => {
+      const patch: Record<string, unknown> = {
+        role: nextRole,
+        tenant_role: nextRole,
+        tenant_status: "approved",
+        updatedAt: nowIso,
       };
-
-      const nowIso = new Date().toISOString();
-      let finalTenantRole = role;
-      const buildUserPatch = (nextRole: string): Record<string, unknown> => {
-        const patch: Record<string, unknown> = {
-          tenant_role: nextRole,
-          tenant_status: "approved",
-          updatedAt: nowIso,
-        };
-        if (tenantId) {
-          patch.tenant_id = tenantId;
-        }
-        return patch;
-      };
-
-      let updateResult = await supabase
-        .from("users")
-        .update(buildUserPatch(role))
-        .eq("uid", targetUserId);
-
-      if (updateResult.error) {
-        const fallbackTenantRole = toFallbackTenantRole(role);
-        const isTenantRoleConstraintError =
-          asString(updateResult.error.message).toLowerCase().includes("tenant_role") ||
-          asString(updateResult.error.details).toLowerCase().includes("tenant_role") ||
-          asString(updateResult.error.hint).toLowerCase().includes("tenant_role");
-
-        if (isTenantRoleConstraintError && fallbackTenantRole !== role) {
-          finalTenantRole = fallbackTenantRole;
-          updateResult = await supabase
-            .from("users")
-            .update(buildUserPatch(fallbackTenantRole))
-            .eq("uid", targetUserId);
-        }
+      if (tenantId) {
+        patch.tenant_id = tenantId;
       }
+      return patch;
+    };
 
-      if (updateResult.error) throwSupabaseError(updateResult.error);
+    let updateResult = await supabase
+      .from("users")
+      .update(buildUserPatch(role))
+      .eq("uid", targetUserId);
 
-      let resolvedTenantId = tenantId;
-      if (!resolvedTenantId) {
-        const { data: userRow, error: userFetchError } = await supabase
+    if (updateResult.error) {
+      const fallbackTenantRole = toFallbackTenantRole(role);
+      const lowerError = [
+        updateResult.error.message,
+        updateResult.error.details,
+        updateResult.error.hint,
+      ]
+        .map((entry) => asString(entry).toLowerCase())
+        .join(" ");
+      const canRetryWithFallback =
+        fallbackTenantRole !== role &&
+        (lowerError.includes("tenant_role") ||
+          lowerError.includes("role") ||
+          lowerError.includes("check constraint"));
+
+      if (canRetryWithFallback) {
+        finalTenantRole = fallbackTenantRole;
+        updateResult = await supabase
           .from("users")
-          .select("tenant_id")
-          .eq("uid", targetUserId)
-          .maybeSingle();
-        if (userFetchError) throwSupabaseError(userFetchError);
-        resolvedTenantId = asString(asObject(userRow)?.tenant_id).trim();
+          .update(buildUserPatch(fallbackTenantRole))
+          .eq("uid", targetUserId);
       }
+    }
 
-      if (resolvedTenantId) {
-        let membershipUpdate = await supabase
+    if (updateResult.error) throwSupabaseError(updateResult.error);
+
+    let resolvedTenantId = tenantId;
+    if (!resolvedTenantId) {
+      const { data: userRow, error: userFetchError } = await supabase
+        .from("users")
+        .select("tenant_id")
+        .eq("uid", targetUserId)
+        .maybeSingle();
+      if (userFetchError) throwSupabaseError(userFetchError);
+      resolvedTenantId = asString(asObject(userRow)?.tenant_id).trim();
+    }
+
+    if (resolvedTenantId) {
+      let membershipWrite = await supabase
+        .from("tenant_memberships")
+        .upsert(
+          {
+            tenant_id: resolvedTenantId,
+            user_id: targetUserId,
+            role: finalTenantRole,
+            status: "approved",
+            updated_at: nowIso,
+          },
+          { onConflict: "tenant_id,user_id" }
+        );
+
+      if (membershipWrite.error) {
+        membershipWrite = await supabase
           .from("tenant_memberships")
           .update({
             role: finalTenantRole,
@@ -716,28 +738,30 @@ export async function updatePermissionUserRole(payload: {
           })
           .eq("tenant_id", resolvedTenantId)
           .eq("user_id", targetUserId);
-
-        if (membershipUpdate.error) {
-          const fallbackRole = toFallbackTenantRole(finalTenantRole);
-          if (fallbackRole !== finalTenantRole) {
-            membershipUpdate = await supabase
-              .from("tenant_memberships")
-              .update({
-                role: fallbackRole,
-                status: "approved",
-                updated_at: nowIso,
-              })
-              .eq("tenant_id", resolvedTenantId)
-              .eq("user_id", targetUserId);
-          }
-        }
-
-        if (membershipUpdate.error) throwSupabaseError(membershipUpdate.error);
       }
 
+      if (membershipWrite.error) throwSupabaseError(membershipWrite.error);
+    }
+
+    directSynced = true;
+  };
+
+  await callWithFallback<typeof requestPayload, { ok: boolean }>(
+    UPDATE_USER_ROLE_CALLABLE,
+    requestPayload,
+    async () => {
+      await syncDirectRole();
       return { ok: true };
     }
   );
+
+  if (!directSynced) {
+    try {
+      await syncDirectRole();
+    } catch (error) {
+      console.warn("Não foi possível sincronizar o cargo diretamente após a função remota.", error);
+    }
+  }
 
   permissionUsersCache.clear();
   clearAdminUsersCache();

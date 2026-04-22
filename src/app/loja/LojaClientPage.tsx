@@ -365,7 +365,12 @@ export default function LojaClientPage({
       categoriasCatalogo.forEach((category) => {
         const nome = String(category.nome || "").trim();
         if (!nome) return;
-        const sellerType = getStoreSellerType(category.seller_type);
+        const categorySellerId = String(category.seller_id || "").trim();
+        const rawSellerType = getStoreSellerType(category.seller_type);
+        const sellerType =
+          rawSellerType === "tenant" && activeTenantId && categorySellerId && categorySellerId !== activeTenantId
+            ? "league"
+            : rawSellerType;
         const categoryLogo =
           sellerType === "tenant"
             ? tenantLogo
@@ -384,6 +389,8 @@ export default function LojaClientPage({
             category.button_color ||
             (sellerType === "tenant" ? tenantColor : "#2563eb"),
           logo_url: categoryLogo,
+          seller_type: sellerType,
+          seller_id: categorySellerId,
         };
         categoriesByKey.set(buildCategoryListKey(normalizedCategory), normalizedCategory);
       });
@@ -396,8 +403,9 @@ export default function LojaClientPage({
           sellerType !== "tenant"
             ? categoriasCatalogo.find(
                 (category) =>
-                  getStoreSellerType(category.seller_type) === sellerType &&
-                  String(category.seller_id || "").trim() === String(product.seller?.id || "").trim()
+                  String(category.seller_id || "").trim() === String(product.seller?.id || "").trim() &&
+                  (getStoreSellerType(category.seller_type) === sellerType ||
+                    getStoreSellerType(category.seller_type) === "tenant")
               )
             : null;
         const categoryLogo =
@@ -441,7 +449,7 @@ export default function LojaClientPage({
         }
         return left.nome.localeCompare(right.nome, "pt-BR");
       });
-  }, [categoriasCatalogo, palette.primary, produtos, tenantLogoUrl]);
+  }, [activeTenantId, categoriasCatalogo, palette.primary, produtos, tenantLogoUrl]);
 
   const produtosFiltrados = useMemo(
     () =>

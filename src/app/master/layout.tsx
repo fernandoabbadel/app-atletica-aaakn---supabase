@@ -20,7 +20,10 @@ import {
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
-import { MASTER_CONTACT_PENDING_EVENT } from "@/lib/masterContactNotifications";
+import {
+  MASTER_CONTACT_PENDING_EVENT,
+  countUnreadMasterContactReports,
+} from "@/lib/masterContactNotifications";
 import { fetchSupportReports } from "@/lib/reportsService";
 import { isPlatformMaster } from "@/lib/roles";
 import { parseTenantScopedPath, withTenantSlug } from "@/lib/tenantRouting";
@@ -76,7 +79,7 @@ export default function MasterLayout({
       try {
         const reports = await fetchSupportReports(240);
         if (cancelled) return;
-        setPendingContactCount(reports.filter((report) => report.status !== "resolvida").length);
+        setPendingContactCount(countUnreadMasterContactReports(reports));
       } catch (error) {
         console.error("Falha ao carregar marcador do Contato USC:", error);
         if (!cancelled) setPendingContactCount(0);
@@ -298,7 +301,7 @@ export default function MasterLayout({
                       {item.icon}
                       {item.pendingCount ? (
                         <span
-                          aria-label={`${item.pendingCount} mensagens pendentes`}
+                          aria-label={`${item.pendingCount} mensagens não lidas`}
                           className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-zinc-950 bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]"
                         />
                       ) : null}

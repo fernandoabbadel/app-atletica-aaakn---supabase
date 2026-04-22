@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -40,6 +40,16 @@ const ROLES = [
   { id: "user", label: "Membro" },
   { id: "visitante", label: "Visitante" },
 ];
+
+const USER_LETTER_FILTERS = [
+  { id: "AF", label: "A-F", letters: ["A", "B", "C", "D", "E", "F"] },
+  { id: "GK", label: "G-K", letters: ["G", "H", "I", "J", "K"] },
+  { id: "LQ", label: "L-Q", letters: ["L", "M", "N", "O", "P", "Q"] },
+  { id: "RZ", label: "R-Z", letters: ["R", "S", "T", "U", "V", "W", "X", "Y", "Z"] },
+  { id: "all", label: "Todos", letters: [] },
+];
+
+type UserLetterFilterId = (typeof USER_LETTER_FILTERS)[number]["id"];
 
 const statusLabel: Record<AdminUserListItem["status"], string> = {
   ativo: "Ativo",
@@ -84,12 +94,18 @@ export default function AdminPermissoesUsuariosPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [activeLetterFilter, setActiveLetterFilter] = useState<UserLetterFilterId>("AF");
 
   const canManageRoles = canManageTenant(user);
   const effectiveAccessRole = resolveEffectiveAccessRole(user);
   const canAssignTurmaLeader =
     isPlatformMaster(user) || effectiveAccessRole === "master_tenant";
+  const selectedLetterFilter =
+    USER_LETTER_FILTERS.find((filter) => filter.id === activeLetterFilter) ??
+    USER_LETTER_FILTERS[0];
+  const activeSearchTerm = searchTerm.trim();
 
   const loadUsers = useCallback(
     async (options?: { reset?: boolean; cursorId?: string | null }) => {
@@ -103,8 +119,10 @@ export default function AdminPermissoesUsuariosPage() {
         const page = await fetchAdminUsersPage({
           pageSize: PAGE_SIZE,
           cursorId: reset ? null : cursorId,
-          forceRefresh: false,
+          forceRefresh: reset,
           tenantId: activeTenantId || undefined,
+          searchTerm: activeSearchTerm || undefined,
+          letters: activeSearchTerm ? undefined : selectedLetterFilter.letters,
         });
 
         if (reset) setRows(page.users);
@@ -125,8 +143,16 @@ export default function AdminPermissoesUsuariosPage() {
         else setLoadingMore(false);
       }
     },
-    [activeTenantId, addToast, router]
+    [activeSearchTerm, activeTenantId, addToast, router, selectedLetterFilter.letters]
   );
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setSearchTerm(searchInput);
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchInput]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -146,16 +172,6 @@ export default function AdminPermissoesUsuariosPage() {
 
     void loadUsers({ reset: true });
   }, [activeTenantId, authLoading, canManageRoles, router, loadUsers, addToast, tenantSlug]);
-
-  const filteredRows = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((row) =>
-      `${row.nome} ${row.email} ${row.matricula} ${row.turma}`
-        .toLowerCase()
-        .includes(term)
-    );
-  }, [rows, searchTerm]);
 
   const handleLoadMore = async () => {
     if (!hasMore || !nextCursor || loadingMore) return;
@@ -217,12 +233,12 @@ export default function AdminPermissoesUsuariosPage() {
       addToast(
         nextValue
           ? "Usuário marcado como líder de turma."
-          : "Lideranca de turma removida.",
+          : "Liderança de turma removida.",
         "success"
       );
     } catch (error: unknown) {
       console.error(error);
-      addToast("Erro ao atualizar lideranca de turma.", "error");
+      addToast("Erro ao atualizar liderança de turma.", "error");
     }
   };
 
@@ -257,7 +273,7 @@ export default function AdminPermissoesUsuariosPage() {
                 <Shield className="text-cyan-400" size={18} /> Cargos de Acesso
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">
-                {tenantSigla || tenantName || "Tenant atual"} • paginação 20 em 20
+                {tenantSigla || tenantName || "Tenant atual"} • paginação por grupos
               </p>
             </div>
           </div>
@@ -272,20 +288,45 @@ export default function AdminPermissoesUsuariosPage() {
       </header>
 
       <main className="px-6 py-6 space-y-4">
-        <section className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 flex items-center gap-2 sticky top-24 z-20 shadow-lg">
-          <Search className="text-zinc-500" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar usuário por nome, email, turma ou matrícula..."
-            className="bg-transparent outline-none text-sm text-white w-full placeholder:text-zinc-600"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-          />
+        <section className="sticky top-24 z-20 space-y-3 rounded-xl border border-zinc-800 bg-zinc-900 p-4 shadow-lg">
+          <div className="flex items-center gap-2">
+            <Search className="text-zinc-500" size={18} />
+            <input
+              type="text"
+              placeholder="Buscar usuário por nome, email, turma ou matrícula..."
+              className="bg-transparent outline-none text-sm text-white w-full placeholder:text-zinc-600"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-3 border-t border-zinc-800 pt-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {USER_LETTER_FILTERS.map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setActiveLetterFilter(filter.id)}
+                  className={`rounded-lg border px-3 py-2 text-[10px] font-black uppercase transition ${
+                    activeLetterFilter === filter.id
+                      ? "border-cyan-400 bg-cyan-400 text-black"
+                      : "border-zinc-700 bg-black/40 text-zinc-300 hover:border-zinc-500"
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+              {activeSearchTerm
+                ? "Busca em todos os usuários do tenant."
+                : "Alterações salvas automaticamente."}
+            </p>
+          </div>
         </section>
 
         <section className="grid gap-3">
-          {filteredRows.length > 0 ? (
-            filteredRows.map((entry) => (
+          {rows.length > 0 ? (
+            rows.map((entry) => (
               <div
                 key={entry.id}
                 className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 group hover:border-zinc-700 transition"
@@ -295,12 +336,12 @@ export default function AdminPermissoesUsuariosPage() {
                     {entry.nome || "Sem Nome"}
                     {entry.id === user?.uid && (
                       <span className="text-[9px] bg-emerald-500/20 text-emerald-500 px-2 rounded-full border border-emerald-500/30">
-                        VOCE
+                        VOCÊ
                       </span>
                     )}
                     {entry.isTurmaLeader && (
                       <span className="text-[9px] rounded-full border border-cyan-500/30 bg-cyan-500/15 px-2 text-cyan-300">
-                        LIDER DA TURMA
+                        LÍDER DA TURMA
                       </span>
                     )}
                   </p>
@@ -346,7 +387,7 @@ export default function AdminPermissoesUsuariosPage() {
                         : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
                     } disabled:cursor-not-allowed disabled:opacity-50`}
                   >
-                    {entry.isTurmaLeader ? "Remover Lider" : "Virar Lider"}
+                    {entry.isTurmaLeader ? "Remover líder" : "Virar líder"}
                   </button>
                 </div>
               </div>

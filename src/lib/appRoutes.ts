@@ -30,7 +30,7 @@ export type AppPageDefinition = {
 const PATH_LABEL_OVERRIDES: Record<string, string> = {
   "/admin": "Admin Dashboard",
   "/admin/atletica": "Atlética",
-  "/admin/dashboard-modulos": "Dashboard Modulos",
+  "/admin/dashboard-modulos": "Dashboard Módulos",
   "/admin/eventos/encerrados": "Admin Eventos Encerrados",
   "/admin/eventos/lista/[id]": "Admin Evento Detalhe",
   "/admin/gestao/eventos": "BI Eventos",
@@ -68,6 +68,8 @@ const PATH_LABEL_OVERRIDES: Record<string, string> = {
   "/loja/[id]/review": "Review do Produto",
   "/master": "Dashboard Master",
   "/faq": "FAQ USC",
+  "/master/contato": "Contato USC",
+  "/master/contato/respondidas": "Contato USC - Respondidas",
   "/master/faq": "FAQ USC",
   "/master/landing": "Landing USC",
   "/master/permissoes": "Permissões Globais",
@@ -172,6 +174,7 @@ const ADMIN_PAGE_PATHS = [
 const MASTER_PAGE_PATHS = [
   "/master",
   "/master/contato",
+  "/master/contato/respondidas",
   "/master/faq",
   "/master/landing",
   "/master/lancamento",
