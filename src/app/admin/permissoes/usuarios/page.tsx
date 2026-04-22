@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   ChevronDown,
   Loader2,
+  Save,
   Search,
   Shield,
   Users,
@@ -83,6 +84,14 @@ const mergeUniqueUsers = (
   return merged;
 };
 
+const normalizeRoleValue = (value?: string | null): string => {
+  const role = (value || "visitante").trim().toLowerCase();
+  return role === "guest" || !role ? "visitante" : role;
+};
+
+const roleLabel = (roleId: string): string =>
+  ROLES.find((role) => role.id === roleId)?.label ?? roleId.toUpperCase();
+
 export default function AdminPermissoesUsuariosPage() {
   const { user, loading: authLoading } = useAuth();
   const { tenantId: activeTenantId, tenantName, tenantSigla, tenantSlug } = useTenantTheme();
@@ -97,6 +106,8 @@ export default function AdminPermissoesUsuariosPage() {
   const [searchInput, setSearchInput] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [activeLetterFilter, setActiveLetterFilter] = useState<UserLetterFilterId>("AF");
+  const [pendingRoles, setPendingRoles] = useState<Record<string, string>>({});
+  const [savingRoles, setSavingRoles] = useState<Set<string>>(new Set());
 
   const canManageRoles = canManageTenant(user);
   const effectiveAccessRole = resolveEffectiveAccessRole(user);
@@ -106,6 +117,8 @@ export default function AdminPermissoesUsuariosPage() {
     USER_LETTER_FILTERS.find((filter) => filter.id === activeLetterFilter) ??
     USER_LETTER_FILTERS[0];
   const activeSearchTerm = searchTerm.trim();
+  const pendingRolesCount = Object.keys(pendingRoles).length;
+  const savingAnyRole = savingRoles.size > 0;
 
   const loadUsers = useCallback(
     async (options?: { reset?: boolean; cursorId?: string | null }) => {
@@ -178,7 +191,25 @@ export default function AdminPermissoesUsuariosPage() {
     await loadUsers({ reset: false, cursorId: nextCursor });
   };
 
-  const handleUpdateRole = async (targetUserId: string, role: string) => {
+  const handleSelectRole = (targetUserId: string, currentRole: string, nextRole: string) => {
+    const normalizedNextRole = normalizeRoleValue(nextRole);
+    const normalizedCurrentRole = normalizeRoleValue(currentRole);
+    setPendingRoles((prev) => {
+      const next = { ...prev };
+      if (normalizedNextRole === normalizedCurrentRole) {
+        delete next[targetUserId];
+      } else {
+        next[targetUserId] = normalizedNextRole;
+      }
+      return next;
+    });
+  };
+
+  const handleSaveRole = async (targetUserId: string, roleOverride?: string) => {
+    const role = normalizeRoleValue(roleOverride ?? pendingRoles[targetUserId]);
+    if (!role || (!pendingRoles[targetUserId] && !roleOverride)) return;
+
+    setSavingRoles((prev) => new Set(prev).add(targetUserId));
     try {
       await updatePermissionUserRole({
         targetUserId,
@@ -191,6 +222,11 @@ export default function AdminPermissoesUsuariosPage() {
           entry.id === targetUserId ? { ...entry, role } : entry
         )
       );
+      setPendingRoles((prev) => {
+        const next = { ...prev };
+        delete next[targetUserId];
+        return next;
+      });
 
       const adminName =
         typeof user?.displayName === "string" ? user.displayName : "Admin Master";
@@ -203,7 +239,7 @@ export default function AdminPermissoesUsuariosPage() {
         `Alterou cargo do usuário ${targetUserId} para ${role}`
       );
 
-      addToast(`Cargo atualizado para ${role.toUpperCase()}.`, "success");
+      addToast(`Cargo salvo como ${roleLabel(role)}.`, "success");
     } catch (error: unknown) {
       if (isPermissionError(error)) {
         addToast("Sem permissão para alterar cargo.", "error");
@@ -211,6 +247,20 @@ export default function AdminPermissoesUsuariosPage() {
       }
       console.error(error);
       addToast("Erro ao atualizar cargo.", "error");
+    } finally {
+      setSavingRoles((prev) => {
+        const next = new Set(prev);
+        next.delete(targetUserId);
+        return next;
+      });
+    }
+  };
+
+  const handleSaveAllRoles = async () => {
+    const entries = Object.entries(pendingRoles);
+    if (!entries.length) return;
+    for (const [targetUserId, role] of entries) {
+      await handleSaveRole(targetUserId, role);
     }
   };
 
@@ -316,17 +366,39 @@ export default function AdminPermissoesUsuariosPage() {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
-              {activeSearchTerm
-                ? "Busca em todos os usuários do tenant."
-                : "Alterações salvas automaticamente."}
-            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+                {pendingRolesCount > 0
+                  ? pendingRolesCount === 1
+                    ? "1 alteração pendente."
+                    : `${pendingRolesCount} alterações pendentes.`
+                  : activeSearchTerm
+                    ? "Busca em todos os usuários do tenant."
+                    : "Escolha o cargo e clique em salvar."}
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleSaveAllRoles()}
+                disabled={pendingRolesCount === 0 || savingAnyRole}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-200 transition hover:bg-emerald-500 hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingAnyRole ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Salvar alterações
+              </button>
+            </div>
           </div>
         </section>
 
         <section className="grid gap-3">
           {rows.length > 0 ? (
-            rows.map((entry) => (
+            rows.map((entry) => {
+              const currentRole = normalizeRoleValue(entry.role);
+              const selectedRole = pendingRoles[entry.id] ?? currentRole;
+              const hasPendingRole = pendingRoles[entry.id] !== undefined;
+              const savingRole = savingRoles.has(entry.id);
+              const roleLocked = entry.id === user?.uid || !activeTenantId;
+
+              return (
               <div
                 key={entry.id}
                 className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 group hover:border-zinc-700 transition"
@@ -359,10 +431,12 @@ export default function AdminPermissoesUsuariosPage() {
                   </span>
 
                   <select
-                    value={(entry.role || "visitante").toLowerCase() === "guest" ? "visitante" : entry.role || "visitante"}
-                    onChange={(event) => void handleUpdateRole(entry.id, event.target.value)}
-                    className="bg-zinc-900 text-white text-xs rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase font-bold border border-zinc-700"
-                    disabled={entry.id === user?.uid || !activeTenantId}
+                    value={selectedRole}
+                    onChange={(event) => handleSelectRole(entry.id, currentRole, event.target.value)}
+                    className={`bg-zinc-900 text-white text-xs rounded px-3 py-1.5 outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase font-bold border ${
+                      hasPendingRole ? "border-amber-400" : "border-zinc-700"
+                    }`}
+                    disabled={roleLocked || savingRole}
                   >
                     {ROLES.map((role) => (
                       <option key={role.id} value={role.id}>
@@ -370,6 +444,16 @@ export default function AdminPermissoesUsuariosPage() {
                       </option>
                     ))}
                   </select>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveRole(entry.id)}
+                    disabled={!hasPendingRole || roleLocked || savingRole}
+                    className="inline-flex items-center gap-2 rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-black uppercase text-emerald-200 transition hover:bg-emerald-500 hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {savingRole ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                    Salvar
+                  </button>
 
                   <button
                     type="button"
@@ -391,7 +475,8 @@ export default function AdminPermissoesUsuariosPage() {
                   </button>
                 </div>
               </div>
-            ))
+              );
+            })
           ) : (
             <div className="text-center py-12 text-zinc-500 bg-zinc-900/40 border border-zinc-800 rounded-xl">
               Nenhum usuário encontrado.

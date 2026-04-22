@@ -625,10 +625,12 @@ const normalizeTenantScopedAdminUserListItem = (
   const base = normalizeAdminUserListItem(rowIdFromUnknown(raw), raw);
   if (!base) return null;
 
+  const rawData = asObject(raw) ?? {};
+  const userScopedRole = asString(rawData.tenant_role).trim() || asString(rawData.role).trim();
   const membershipRole = asString(membership?.role).trim();
   return {
     ...base,
-    role: membershipRole || base.role,
+    role: userScopedRole || membershipRole || base.role,
     tenantId,
   };
 };

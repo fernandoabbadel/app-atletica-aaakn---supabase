@@ -1108,9 +1108,12 @@ function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
     const byCoach = new Map<string, MetricRow>();
     const byLocation = new Map<string, MetricRow>();
     const byDate = new Map<string, MetricRow>();
+    const byStatus = new Map<string, MetricRow>();
+    const byOrigin = new Map<string, MetricRow>();
     const noShowByUser = new Map<string, MetricRow>();
     const rated = presentes.filter((row) => parseNumber(row.performanceRating, 0) > 0);
     const presentKeys = new Set(presentes.map((row) => `${asString(row.treinoId)}:${asString(row.userId)}`));
+    const chamadaKeys = new Set(selectedChamada.map((row) => `${asString(row.treinoId)}:${asString(row.userId)}`));
 
     selectedTreinos.forEach((treino) => {
       const modalidadeName = asString(treino.modalidade, "Treino");
@@ -1133,6 +1136,12 @@ function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
       addMetric(byHour, asString(treino?.horario, "Sem horário"), 1, 0);
       addMetric(byCoach, asString(treino?.treinador, "Sem treinador"), 1, 0);
       addMetric(byLocation, asString(treino?.local, "Sem local"), 1, 0);
+      addMetric(
+        byOrigin,
+        statusKey(row.origem) === "app" ? "Presença do app" : "Presença manual",
+        1,
+        0
+      );
 
       const dateLabel = formatShortDate(treino?.dia);
       const dateCurrent = byDate.get(dateLabel) ?? { name: dateLabel, quantity: 0, value: 0 };
@@ -1140,9 +1149,23 @@ function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
       byDate.set(dateLabel, dateCurrent);
     });
 
+    selectedChamada.forEach((row) => {
+      const status = statusKey(row.status);
+      const label =
+        status === "falta"
+          ? "Falta"
+          : status === "justificado"
+            ? "Justificativa"
+            : "Presença";
+      addMetric(byStatus, label, 1, 0);
+    });
+
     const noShowRows = selectedRsvps.filter(
       (row) => !presentKeys.has(`${asString(row.treinoId)}:${asString(row.userId)}`)
     );
+    selectedRsvps
+      .filter((row) => !chamadaKeys.has(`${asString(row.treinoId)}:${asString(row.userId)}`))
+      .forEach(() => addMetric(byStatus, "Confirmado", 1, 0));
     noShowRows.forEach((row) => addMetric(noShowByUser, asString(row.userName, "Aluno"), 1, 0));
 
     const ratingAverage =
@@ -1176,6 +1199,8 @@ function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
       byCoach: metricRows(byCoach, 10),
       byLocation: metricRows(byLocation, 10),
       byDate: metricRows(byDate).sort((left, right) => left.name.localeCompare(right.name)),
+      byStatus: metricRows(byStatus),
+      byOrigin: metricRows(byOrigin),
       riskAthletes,
       funnel: [
         { name: "Treinos criados", quantity: selectedTreinoIds.size, value: 0 },
@@ -1184,7 +1209,7 @@ function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
         { name: "No-shows", quantity: noShowRows.length, value: 0 },
       ],
     };
-  }, [presentes, selectedRsvps, selectedTreinoIds, selectedTreinos, treinoMap]);
+  }, [presentes, selectedChamada, selectedRsvps, selectedTreinoIds, selectedTreinos, treinoMap]);
 
   const kpis: Kpi[] = [
     {
@@ -1297,6 +1322,12 @@ function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
         <ChartPanel title="Usuários que mais participam"><Bars data={analytics.byUser} /></ChartPanel>
         <ChartPanel title="Modalidades: presenças x treinos cadastrados">
           <BarsDual data={analytics.byModalidade} quantityName="Presenças" valueName="Treinos cadastrados" valueAsCurrency={false} />
+        </ChartPanel>
+        <ChartPanel title="Status da frequência">
+          <PieMetric data={analytics.byStatus} />
+        </ChartPanel>
+        <ChartPanel title="Presença do app x manual">
+          <PieMetric data={analytics.byOrigin} />
         </ChartPanel>
         <ChartPanel title="Principais locais"><Bars data={analytics.byLocation} /></ChartPanel>
         <ChartPanel title="Funil de adesão"><Bars data={analytics.funnel} /></ChartPanel>

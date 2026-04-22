@@ -715,32 +715,22 @@ export async function updatePermissionUserRole(payload: {
     }
 
     if (resolvedTenantId) {
-      let membershipWrite = await supabase
+      const { error: membershipSyncError } = await supabase
         .from("tenant_memberships")
-        .upsert(
-          {
-            tenant_id: resolvedTenantId,
-            user_id: targetUserId,
-            role: finalTenantRole,
-            status: "approved",
-            updated_at: nowIso,
-          },
-          { onConflict: "tenant_id,user_id" }
+        .update({
+          role: finalTenantRole,
+          status: "approved",
+          updated_at: nowIso,
+        })
+        .eq("tenant_id", resolvedTenantId)
+        .eq("user_id", targetUserId);
+
+      if (membershipSyncError) {
+        console.warn(
+          "Não foi possível sincronizar tenant_memberships; cargo salvo em users.",
+          membershipSyncError
         );
-
-      if (membershipWrite.error) {
-        membershipWrite = await supabase
-          .from("tenant_memberships")
-          .update({
-            role: finalTenantRole,
-            status: "approved",
-            updated_at: nowIso,
-          })
-          .eq("tenant_id", resolvedTenantId)
-          .eq("user_id", targetUserId);
       }
-
-      if (membershipWrite.error) throwSupabaseError(membershipWrite.error);
     }
 
     directSynced = true;

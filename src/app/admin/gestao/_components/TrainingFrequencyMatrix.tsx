@@ -2,12 +2,14 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Table2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Table2 } from "lucide-react";
 
 import { useTenantTheme } from "@/context/TenantThemeContext";
+import { useToast } from "@/context/ToastContext";
 import { getSupabaseClient } from "@/lib/supabase";
 import { asString, throwSupabaseError, type Row } from "@/lib/supabaseData";
 import { withTenantSlug } from "@/lib/tenantRouting";
+import { upsertChamadaPresence } from "@/lib/treinosNativeService";
 
 type TreinoRow = Row & {
   id?: unknown;
@@ -19,10 +21,13 @@ type TreinoRow = Row & {
 };
 
 type ChamadaRow = Row & {
+  id?: unknown;
   treinoId?: unknown;
   userId?: unknown;
   nome?: unknown;
+  avatar?: unknown;
   turma?: unknown;
+  origem?: unknown;
   status?: unknown;
 };
 
@@ -30,6 +35,7 @@ type RsvpRow = Row & {
   treinoId?: unknown;
   userId?: unknown;
   userName?: unknown;
+  userAvatar?: unknown;
   userTurma?: unknown;
   status?: unknown;
 };
@@ -45,6 +51,7 @@ type CellStatus = "P" | "F" | "J" | "C";
 type MatrixStudent = {
   id: string;
   nome: string;
+  avatar: string;
   turma: string;
   cells: Map<string, CellStatus>;
 };
@@ -70,6 +77,17 @@ const statusClass: Record<CellStatus, string> = {
 };
 
 const statusKey = (value: unknown): string => asString(value).trim().toLowerCase();
+
+const statusToChamadaStatus = (status: CellStatus): "presente" | "falta" | "justificado" => {
+  if (status === "F") return "falta";
+  if (status === "J") return "justificado";
+  return "presente";
+};
+
+const cellStatusFromChamada = (status: string): CellStatus =>
+  status === "falta" ? "F" : status === "justificado" ? "J" : "P";
+
+const csvEscape = (value: unknown): string => `"${asString(value).replace(/"/g, '""')}"`;
 
 const formatShortDate = (value: unknown): string => {
   const raw = asString(value).trim();
@@ -110,14 +128,14 @@ async function loadMatrixData(tenantId: string): Promise<MatrixData> {
     ),
     queryRows(
       "treinos_chamada",
-      "id,treinoId,userId,nome,turma,status,tenant_id",
+      "id,treinoId,userId,nome,avatar,turma,status,origem,tenant_id",
       tenantId,
       "timestamp",
       5000
     ),
     queryRows(
       "treinos_rsvps",
-      "id,treinoId,userId,userName,userTurma,status,tenant_id",
+      "id,treinoId,userId,userName,userAvatar,userTurma,status,tenant_id",
       tenantId,
       "timestamp",
       5000
@@ -133,10 +151,12 @@ async function loadMatrixData(tenantId: string): Promise<MatrixData> {
 
 export default function TrainingFrequencyMatrix() {
   const { tenantId, tenantSlug } = useTenantTheme();
+  const { addToast } = useToast();
   const [data, setData] = useState<MatrixData>(emptyMatrixData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modalidade, setModalidade] = useState("todas");
+  const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let mounted = true;
@@ -182,17 +202,19 @@ export default function TrainingFrequencyMatrix() {
     const treinoIds = new Set(selectedTreinos.map((treino) => asString(treino.id)).filter(Boolean));
     const students = new Map<string, MatrixStudent>();
 
-    const ensureStudent = (id: string, nome: string, turma: string): MatrixStudent => {
+    const ensureStudent = (id: string, nome: string, turma: string, avatar = ""): MatrixStudent => {
       const current = students.get(id);
       if (current) {
         if (!current.nome || current.nome === "Aluno") current.nome = nome || current.nome;
         if (!current.turma || current.turma === "Sem turma") current.turma = turma || current.turma;
+        if (!current.avatar && avatar) current.avatar = avatar;
         return current;
       }
 
       const next: MatrixStudent = {
         id,
         nome: nome || "Aluno",
+        avatar,
         turma: turma || "Sem turma",
         cells: new Map<string, CellStatus>(),
       };
@@ -204,7 +226,12 @@ export default function TrainingFrequencyMatrix() {
       const treinoId = asString(row.treinoId);
       const userId = asString(row.userId);
       if (!treinoIds.has(treinoId) || !userId || statusKey(row.status) !== "going") return;
-      const student = ensureStudent(userId, asString(row.userName, "Aluno"), asString(row.userTurma, "Sem turma"));
+      const student = ensureStudent(
+        userId,
+        asString(row.userName, "Aluno"),
+        asString(row.userTurma, "Sem turma"),
+        asString(row.userAvatar)
+      );
       student.cells.set(treinoId, "C");
     });
 
@@ -212,9 +239,14 @@ export default function TrainingFrequencyMatrix() {
       const treinoId = asString(row.treinoId);
       const userId = asString(row.userId);
       if (!treinoIds.has(treinoId) || !userId) return;
-      const student = ensureStudent(userId, asString(row.nome, "Aluno"), asString(row.turma, "Sem turma"));
+      const student = ensureStudent(
+        userId,
+        asString(row.nome, "Aluno"),
+        asString(row.turma, "Sem turma"),
+        asString(row.avatar)
+      );
       const status = statusKey(row.status);
-      student.cells.set(treinoId, status === "falta" ? "F" : status === "justificado" ? "J" : "P");
+      student.cells.set(treinoId, cellStatusFromChamada(status));
     });
 
     return Array.from(students.values()).sort((left, right) =>
@@ -225,6 +257,92 @@ export default function TrainingFrequencyMatrix() {
   const backHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/admin/gestao/treinos")
     : "/admin/gestao/treinos";
+
+  const handleSetStatus = async (
+    treinoId: string,
+    student: MatrixStudent,
+    status: CellStatus
+  ) => {
+    if (!treinoId || status === "C") return;
+    const cellKey = `${student.id}:${treinoId}`;
+    setSavingCells((prev) => new Set(prev).add(cellKey));
+
+    try {
+      const nextStatus = statusToChamadaStatus(status);
+      await upsertChamadaPresence({
+        treinoId,
+        userId: student.id,
+        nome: student.nome,
+        turma: student.turma,
+        avatar: student.avatar,
+        origem: "manual",
+        status: nextStatus,
+        tenantId,
+      });
+
+      setData((prev) => ({
+        ...prev,
+        chamada: [
+          ...prev.chamada.filter(
+            (row) => !(asString(row.treinoId) === treinoId && asString(row.userId) === student.id)
+          ),
+          {
+            id: `${treinoId}:${student.id}`,
+            treinoId,
+            userId: student.id,
+            nome: student.nome,
+            avatar: student.avatar,
+            turma: student.turma,
+            origem: "manual",
+            status: nextStatus,
+            tenant_id: tenantId,
+          },
+        ],
+      }));
+
+      addToast("Frequência atualizada.", "success");
+    } catch (saveError: unknown) {
+      console.error(saveError);
+      addToast("Erro ao atualizar frequência.", "error");
+    } finally {
+      setSavingCells((prev) => {
+        const next = new Set(prev);
+        next.delete(cellKey);
+        return next;
+      });
+    }
+  };
+
+  const handleExportCsv = () => {
+    const header = [
+      "Aluno",
+      "Turma",
+      ...selectedTreinos.map((treino) =>
+        `${formatShortDate(treino.dia)} - ${asString(treino.modalidade, "Treino")} - ${asString(
+          treino.horario,
+          "Sem horário"
+        )}`
+      ),
+    ];
+    const rows = matrixRows.map((student) => [
+      student.nome,
+      student.turma,
+      ...selectedTreinos.map((treino) => {
+        const status = student.cells.get(asString(treino.id));
+        return status ? `${status} - ${statusLabel[status]}` : "";
+      }),
+    ]);
+    const csv = `\ufeff${[header, ...rows].map((row) => row.map(csvEscape).join(";")).join("\r\n")}`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `frequencia-treinos-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <main className="min-h-screen bg-[#050505] px-4 py-5 text-white md:px-6">
@@ -259,18 +377,29 @@ export default function TrainingFrequencyMatrix() {
               </span>
             ))}
           </div>
-          <select
-            value={modalidade}
-            onChange={(event) => setModalidade(event.target.value)}
-            className="min-h-11 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-cyan-400"
-          >
-            <option value="todas">Todas as modalidades</option>
-            {modalidadeOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={matrixRows.length === 0}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 text-xs font-black uppercase tracking-wide text-emerald-200 transition hover:bg-emerald-500 hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download size={15} />
+              Exportar CSV
+            </button>
+            <select
+              value={modalidade}
+              onChange={(event) => setModalidade(event.target.value)}
+              className="min-h-11 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-cyan-400"
+            >
+              <option value="todas">Todas as modalidades</option>
+              {modalidadeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
         </section>
 
         {loading ? (
@@ -320,15 +449,32 @@ export default function TrainingFrequencyMatrix() {
                       {selectedTreinos.map((treino) => {
                         const treinoId = asString(treino.id);
                         const status = student.cells.get(treinoId);
+                        const cellKey = `${student.id}:${treinoId}`;
+                        const saving = savingCells.has(cellKey);
                         return (
                           <td key={`${student.id}:${treinoId}`} className="border-b border-r border-zinc-800 px-3 py-3 text-center">
-                            {status ? (
-                              <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs font-black ${statusClass[status]}`}>
-                                {status}
-                              </span>
-                            ) : (
-                              <span className="text-zinc-700">-</span>
-                            )}
+                            <div className="relative inline-flex min-w-[74px] items-center justify-center">
+                              <select
+                                aria-label={`Frequência de ${student.nome} em ${formatShortDate(treino.dia)}`}
+                                value={status ?? ""}
+                                disabled={saving}
+                                onChange={(event) => {
+                                  const nextStatus = event.target.value as CellStatus | "";
+                                  if (!nextStatus || nextStatus === "C") return;
+                                  void handleSetStatus(treinoId, student, nextStatus);
+                                }}
+                                className={`h-9 w-full rounded-lg border bg-black/70 px-2 text-center text-xs font-black outline-none transition focus:border-cyan-300 disabled:cursor-wait disabled:opacity-60 ${
+                                  status ? statusClass[status] : "border-zinc-800 text-zinc-500"
+                                }`}
+                              >
+                                <option value="">-</option>
+                                <option value="P">P</option>
+                                <option value="F">F</option>
+                                <option value="J">J</option>
+                                {status === "C" && <option value="C">C</option>}
+                              </select>
+                              {saving && <Loader2 size={13} className="pointer-events-none absolute right-2 animate-spin text-cyan-200" />}
+                            </div>
                           </td>
                         );
                       })}
