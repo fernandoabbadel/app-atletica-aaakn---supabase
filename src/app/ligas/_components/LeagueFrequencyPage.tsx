@@ -8,8 +8,10 @@ import {
   ArrowLeft,
   CheckCircle2,
   ClipboardList,
+  Download,
   Loader2,
   Save,
+  Table2,
   Ticket,
   Trash2,
   Users,
@@ -26,6 +28,7 @@ import { withTenantSlug } from "@/lib/tenantRouting";
 import { LeagueAdminQuickNav } from "./LeagueAdminQuickNav";
 
 type ManualFrequencyStatus = "presenca" | "falta" | "justificada";
+type CellSelectStatus = "" | "A" | "P" | "F" | "J";
 
 type ManualFrequencyEntry = {
   id: string;
@@ -211,6 +214,29 @@ const statusLabel = (status: ManualFrequencyStatus): string => {
   return "Justificativa";
 };
 
+const manualStatusFromCell = (status: CellSelectStatus): ManualFrequencyStatus | null => {
+  if (status === "P") return "presenca";
+  if (status === "F") return "falta";
+  if (status === "J") return "justificada";
+  return null;
+};
+
+const cellStatusLabel = (status: CellSelectStatus): string => {
+  if (status === "P") return "Presente";
+  if (status === "F") return "Falta";
+  if (status === "J") return "Justificado";
+  if (status === "A") return "Aprovado";
+  return "-";
+};
+
+const cellStatusClass = (status: CellSelectStatus): string => {
+  if (status === "P") return "border-emerald-500/40 bg-emerald-500/15 text-emerald-200";
+  if (status === "F") return "border-red-500/40 bg-red-500/15 text-red-200";
+  if (status === "J") return "border-amber-500/40 bg-amber-500/15 text-amber-200";
+  if (status === "A") return "border-cyan-500/40 bg-cyan-500/15 text-cyan-200";
+  return "border-zinc-800 bg-black/40 text-zinc-500";
+};
+
 const formatDateTime = (value: unknown): string => {
   const text = asString(value);
   const date = text ? new Date(text) : null;
@@ -377,8 +403,10 @@ export function LeagueFrequencyPage() {
   const [data, setData] = useState<LeagueFrequencyData>(emptyFrequencyData);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingCell, setSavingCell] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  const [eventFilter, setEventFilter] = useState<"todos" | "public" | "internal">("todos");
   const [draft, setDraft] = useState<DraftState>({
     eventKey: "",
     userId: "",
@@ -517,6 +545,26 @@ export function LeagueFrequencyPage() {
     return { kind: "vazio" as const, label: "-", manual: null };
   }, [presenceData]);
 
+  const filteredEvents = useMemo(
+    () =>
+      eventFilter === "todos"
+        ? presenceData.events
+        : presenceData.events.filter((event) => event.visibility === eventFilter),
+    [eventFilter, presenceData.events]
+  );
+
+  const getCellStatus = useCallback(
+    (event: FrequencyEvent, member: FrequencyMember): CellSelectStatus => {
+      const cell = resolveCell(event, member);
+      if (cell.kind === "presenca") return "P";
+      if (cell.kind === "falta") return "F";
+      if (cell.kind === "justificada") return "J";
+      if (cell.kind === "aprovado") return "A";
+      return "";
+    },
+    [resolveCell]
+  );
+
   const analytics = useMemo(() => {
     let presentes = 0;
     let faltas = 0;
@@ -524,7 +572,7 @@ export function LeagueFrequencyPage() {
     let aprovados = 0;
 
     presenceData.members.forEach((member) => {
-      presenceData.events.forEach((event) => {
+      filteredEvents.forEach((event) => {
         const cell = resolveCell(event, member);
         if (cell.kind === "presenca") presentes += 1;
         if (cell.kind === "falta") faltas += 1;
@@ -534,7 +582,7 @@ export function LeagueFrequencyPage() {
     });
 
     return { presentes, faltas, justificadas, aprovados };
-  }, [presenceData, resolveCell]);
+  }, [filteredEvents, presenceData.members, resolveCell]);
 
   const openManualForm = (event?: FrequencyEvent, member?: FrequencyMember) => {
     setDraft({
@@ -596,6 +644,70 @@ export function LeagueFrequencyPage() {
     }
   };
 
+  const handleCellStatusChange = async (
+    event: FrequencyEvent,
+    member: FrequencyMember,
+    nextStatus: CellSelectStatus
+  ) => {
+    if (nextStatus === "A") return;
+    const cellKey = `${event.key}:${member.id}`;
+    if (savingCell === cellKey) return;
+
+    setSavingCell(cellKey);
+    try {
+      const manualStatus = manualStatusFromCell(nextStatus);
+      const entries = manualStatus
+        ? await saveManualFrequencyEntry({
+            leagueId,
+            tenantId,
+            entry: {
+              eventKey: event.key,
+              eventTitle: event.title,
+              userId: member.id,
+              userName: member.nome,
+              status: manualStatus,
+              justification: presenceData.manualByCell.get(cellKey)?.justification || "",
+            },
+          })
+        : await deleteManualFrequencyEntry({
+            leagueId,
+            tenantId,
+            eventKey: event.key,
+            userId: member.id,
+          });
+
+      setData((current) => ({ ...current, manualEntries: entries }));
+      addToast(nextStatus ? "Frequencia atualizada." : "Ajuste removido.", "success");
+    } catch (error: unknown) {
+      console.error(error);
+      const message = error instanceof Error && error.message ? error.message : "Nao foi possivel atualizar.";
+      addToast(message, "error");
+    } finally {
+      setSavingCell("");
+    }
+  };
+
+  const handleExportCsv = () => {
+    const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const rows = [
+      ["Membro", "Turma", "Cargo", ...filteredEvents.map((event) => event.title)],
+      ...presenceData.members.map((member) => [
+        member.nome,
+        member.turma,
+        member.cargo,
+        ...filteredEvents.map((event) => cellStatusLabel(getCellStatus(event, member))),
+      ]),
+    ];
+    const csv = rows.map((row) => row.map((value) => escapeCsv(value)).join(";")).join("\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `frequencia-${leagueId || "liga"}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const league = data.league;
   const leagueName = league?.sigla?.trim() || league?.nome?.trim() || "Liga";
   const leagueLogo = (league ? resolveLeagueLogoSrc(league) : "") || "/logo.png";
@@ -639,15 +751,26 @@ export function LeagueFrequencyPage() {
                 <h1 className="text-xl font-black uppercase">{leagueName}</h1>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => openManualForm()}
-              disabled={presenceData.events.length === 0 || presenceData.members.length === 0}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-xs font-black uppercase text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <ClipboardList size={16} />
-              Adicionar ajuste manual
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                disabled={filteredEvents.length === 0 || presenceData.members.length === 0}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs font-black uppercase text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Download size={16} />
+                Exportar CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => openManualForm()}
+                disabled={presenceData.events.length === 0 || presenceData.members.length === 0}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-xs font-black uppercase text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <ClipboardList size={16} />
+                Ajuste manual
+              </button>
+            </div>
           </div>
           <LeagueAdminQuickNav
             active="finance"
@@ -821,16 +944,42 @@ export function LeagueFrequencyPage() {
               </p>
             </div>
             <span className="rounded-xl border border-zinc-800 bg-black/40 px-3 py-2 text-[10px] font-black uppercase text-zinc-400">
-              {presenceData.members.length} membros / {presenceData.events.length} eventos
+              {presenceData.members.length} membros / {filteredEvents.length} eventos
             </span>
           </div>
 
+          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-zinc-800 bg-black/30 p-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-200">
+                <Table2 size={14} />
+                Matriz P/F/J/A
+              </span>
+              {(["P", "F", "J", "A", ""] as CellSelectStatus[]).map((status) => (
+                <span
+                  key={status || "empty"}
+                  className={`inline-flex min-w-24 items-center justify-center rounded-xl border px-3 py-2 text-[10px] font-black uppercase ${cellStatusClass(status)}`}
+                >
+                  {status || "-"} {cellStatusLabel(status)}
+                </span>
+              ))}
+            </div>
+            <select
+              value={eventFilter}
+              onChange={(event) => setEventFilter(event.target.value as "todos" | "public" | "internal")}
+              className="rounded-xl border border-zinc-800 bg-black/60 px-3 py-2 text-xs font-black uppercase text-zinc-200 outline-none focus:border-emerald-400"
+            >
+              <option value="todos">Todas as visibilidades</option>
+              <option value="public">Publicos</option>
+              <option value="internal">Internos</option>
+            </select>
+          </div>
+
           <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800 bg-black/30">
-            <table className="w-full min-w-[820px] border-collapse text-left text-xs">
+            <table className="w-full min-w-[860px] border-collapse text-left text-xs">
               <thead className="bg-black/40 text-zinc-500">
                 <tr>
                   <th className="sticky left-0 z-10 min-w-[240px] bg-black/80 p-3 uppercase">Membro</th>
-                  {presenceData.events.map((event) => (
+                  {filteredEvents.map((event) => (
                     <th key={event.key} className="min-w-[170px] p-3 align-top uppercase">
                       <span className="line-clamp-2 text-[11px] font-black text-zinc-200">{event.title}</span>
                       <span className={`mt-1 inline-flex rounded border px-2 py-0.5 text-[9px] font-black ${
@@ -864,33 +1013,30 @@ export function LeagueFrequencyPage() {
                         </div>
                       </div>
                     </td>
-                    {presenceData.events.map((event) => {
+                    {filteredEvents.map((event) => {
                       const cell = resolveCell(event, member);
-                      const badgeClass =
-                        cell.kind === "presenca"
-                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                          : cell.kind === "aprovado"
-                            ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                            : cell.kind === "justificada"
-                              ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-                              : cell.kind === "falta"
-                                ? "border-red-500/30 bg-red-500/10 text-red-300"
-                                : "border-zinc-800 bg-zinc-950 text-zinc-600";
-                      const Icon =
-                        cell.kind === "presenca"
-                          ? CheckCircle2
-                          : cell.kind === "aprovado"
-                            ? Ticket
-                            : cell.kind === "vazio"
-                              ? XCircle
-                              : ClipboardList;
+                      const cellStatus = getCellStatus(event, member);
+                      const cellKey = `${event.key}:${member.id}`;
+                      const isSavingCell = savingCell === cellKey;
 
                       return (
                         <td key={`${member.id}-${event.key}`} className="p-3">
                           <div className="flex flex-col items-start gap-2">
-                            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-black uppercase ${badgeClass}`}>
-                              <Icon size={12} /> {cell.label}
-                            </span>
+                            <select
+                              value={cellStatus}
+                              onChange={(changeEvent) =>
+                                void handleCellStatusChange(event, member, changeEvent.target.value as CellSelectStatus)
+                              }
+                              disabled={isSavingCell}
+                              aria-label={`Frequencia de ${member.nome} em ${event.title}`}
+                              className={`h-9 w-28 rounded-lg border px-2 text-center text-xs font-black uppercase outline-none focus:border-emerald-400 disabled:opacity-60 ${cellStatusClass(cellStatus)}`}
+                            >
+                              <option value="">-</option>
+                              <option value="A" disabled>A</option>
+                              <option value="P">P</option>
+                              <option value="F">F</option>
+                              <option value="J">J</option>
+                            </select>
                             {cell.manual?.justification ? (
                               <span className="line-clamp-2 max-w-[150px] text-[10px] leading-4 text-zinc-400">
                                 {cell.manual.justification}
@@ -909,7 +1055,7 @@ export function LeagueFrequencyPage() {
                               }}
                               className="rounded-lg border border-zinc-700 bg-black/40 px-2 py-1 text-[9px] font-black uppercase text-zinc-400 hover:border-emerald-500/30 hover:text-emerald-200"
                             >
-                              Editar
+                              Obs.
                             </button>
                           </div>
                         </td>
@@ -919,7 +1065,7 @@ export function LeagueFrequencyPage() {
                 ))}
                 {presenceData.members.length === 0 ? (
                   <tr>
-                    <td colSpan={Math.max(1, presenceData.events.length + 1)} className="p-8 text-center text-sm text-zinc-500">
+                    <td colSpan={Math.max(1, filteredEvents.length + 1)} className="p-8 text-center text-sm text-zinc-500">
                       Nenhum membro encontrado nesta liga.
                     </td>
                   </tr>

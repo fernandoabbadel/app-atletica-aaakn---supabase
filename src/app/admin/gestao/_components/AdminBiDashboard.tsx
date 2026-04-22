@@ -31,6 +31,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { EventManagementAnalytics } from "@/components/EventManagementAnalytics";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { getSupabaseClient } from "@/lib/supabase";
 import { asObject, asString, type Row } from "@/lib/supabaseData";
@@ -450,7 +451,7 @@ async function queryRowsOptional(
 
 async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise<LoadedData> {
   if (mode === "eventos") {
-    const [events, eventSales, eventCheckins] = await Promise.all([
+    const [events, eventSales, eventCheckins, tickets] = await Promise.all([
       queryRows("eventos", "id,titulo,data,hora,lotes,stats,tenant_id,createdAt", tenantId, "data", 160),
       queryRowsOptional(
         "bi_eventos_vendas_dimensoes",
@@ -466,16 +467,14 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
         "hora_label",
         5000
       ),
-    ]);
-    const tickets = hasBiRows(eventSales, eventCheckins)
-      ? []
-      : await queryRows(
+      queryRows(
         "solicitacoes_ingressos",
         "id,eventoId,eventoNome,userId,userName,userTurma,status,loteNome,quantidade,valorTotal,dataSolicitacao,dataAprovacao,aprovadoPor,payment_config,tenant_id",
         tenantId,
         "dataSolicitacao",
         3500
-      );
+      ),
+    ]);
     return {
       ...emptyLoadedData,
       events: events as EventRow[],
@@ -718,6 +717,15 @@ function LineMetric({ data }: { data: MetricRow[] }) {
 }
 
 function EventsBi({ data }: { data: LoadedData }) {
+  return (
+    <DashboardShell title="Gestao de Eventos" subtitle="Vendas, funil, lotes, aprovadores e scan de entrada" mode="eventos">
+      <EventManagementAnalytics events={data.events} tickets={data.tickets} allLabel="Todos os eventos" />
+    </DashboardShell>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyEventsBi({ data }: { data: LoadedData }) {
   const [eventId, setEventId] = useState("todos");
   const eventOptions = data.events
     .map((event) => ({ id: asString(event.id), title: asString(event.titulo, "Evento") }))

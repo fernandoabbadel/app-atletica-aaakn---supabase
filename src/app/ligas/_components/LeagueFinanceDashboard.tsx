@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import { ArrowLeft, BarChart3, CheckCircle2, Loader2, Package, QrCode, Ticket, Users, Wallet, XCircle } from "lucide-react";
 
+import { EventManagementAnalytics } from "@/components/EventManagementAnalytics";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { getSupabaseClient } from "@/lib/supabase";
@@ -97,11 +98,6 @@ const formatNumber = (value: number): string =>
   new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(
     Number.isFinite(value) ? value : 0
   );
-
-const formatPercent = (value: number): string =>
-  `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(
-    Number.isFinite(value) ? value : 0
-  )}%`;
 
 const parseDate = (value: unknown): Date | null => {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
@@ -339,7 +335,7 @@ async function loadLeagueFinanceData(
   const eventTickets = ticketsRaw.filter((row) => {
     const eventId = asString(row.eventoId);
     const eventName = asString(row.eventoNome);
-    return statusIsApproved(row.status) && (eventIds.has(eventId) || eventNames.has(eventName));
+    return eventIds.has(eventId) || eventNames.has(eventName);
   });
 
   return {
@@ -391,76 +387,6 @@ function ChartPanel({
       </div>
       <div className="h-72">{children}</div>
     </section>
-  );
-}
-
-function EmptyChart() {
-  return (
-    <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-zinc-800 text-sm font-bold text-zinc-600">
-      Sem dados para o filtro atual.
-    </div>
-  );
-}
-
-function Bars({ data, dataKey = "quantity" }: { data: MetricRow[]; dataKey?: "quantity" | "value" | "secondary" }) {
-  if (!data.length) return <EmptyChart />;
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} layout="vertical" margin={{ left: 12, right: 18, top: 8, bottom: 8 }}>
-        <CartesianGrid stroke="#27272a" horizontal={false} />
-        <XAxis type="number" hide />
-        <YAxis dataKey="name" type="category" width={118} stroke="#a1a1aa" tick={{ fontSize: 11 }} />
-        <Tooltip
-          {...chartTooltipProps}
-          formatter={(value) => (dataKey === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))}
-        />
-        <Bar dataKey={dataKey} radius={[0, 8, 8, 0]} fill="#34d399" />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function BarsDual({
-  data,
-  quantityName = "Qtd",
-  valueName = "Valor",
-}: {
-  data: MetricRow[];
-  quantityName?: string;
-  valueName?: string;
-}) {
-  if (!data.length) return <EmptyChart />;
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} margin={{ left: 8, right: 18, top: 8, bottom: 8 }}>
-        <CartesianGrid stroke="#27272a" vertical={false} />
-        <XAxis dataKey="name" stroke="#a1a1aa" tick={{ fontSize: 11 }} />
-        <YAxis yAxisId="left" stroke="#34d399" tick={{ fontSize: 11 }} />
-        <YAxis yAxisId="right" orientation="right" stroke="#fbbf24" tick={{ fontSize: 11 }} />
-        <Tooltip
-          {...chartTooltipProps}
-          formatter={(value, name) => (name === valueName ? formatCurrency(Number(value)) : formatNumber(Number(value)))}
-        />
-        <Bar yAxisId="left" dataKey="quantity" name={quantityName} fill="#34d399" radius={[8, 8, 0, 0]} />
-        <Bar yAxisId="right" dataKey="value" name={valueName} fill="#fbbf24" radius={[8, 8, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function PieMetric({ data }: { data: MetricRow[] }) {
-  if (!data.length) return <EmptyChart />;
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <PieChart>
-        <Tooltip formatter={(value) => formatNumber(Number(value))} {...chartTooltipProps} />
-        <Pie data={data} dataKey="quantity" nameKey="name" innerRadius={58} outerRadius={94} paddingAngle={4}>
-          {data.map((entry, index) => (
-            <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
-          ))}
-        </Pie>
-      </PieChart>
-    </ResponsiveContainer>
   );
 }
 
@@ -534,7 +460,9 @@ export function LeagueFinanceDashboard() {
       addMetric(productSalesByLot, lotName, quantity, total);
     });
 
-    data.eventTickets.forEach((ticket) => {
+    const approvedEventTickets = data.eventTickets.filter((ticket) => statusIsApproved(ticket.status));
+
+    approvedEventTickets.forEach((ticket) => {
       const quantity = parseQuantity(ticket.quantidade, 1);
       const total = parseNumber(ticket.valorTotal);
       eventRevenue += total;
@@ -571,7 +499,7 @@ export function LeagueFinanceDashboard() {
       productQuantity,
       eventRevenue,
       eventQuantity,
-      eventApprovedOrders: data.eventTickets.length,
+      eventApprovedOrders: approvedEventTickets.length,
       eventScanned,
       eventTicketAverage: eventQuantity > 0 ? eventRevenue / eventQuantity : 0,
       eventShowRate,
@@ -648,6 +576,7 @@ export function LeagueFinanceDashboard() {
 
     const presence = new Map<string, { approved: number; scanned: number; total: number }>();
     data.eventTickets.forEach((ticket) => {
+      if (!statusIsApproved(ticket.status)) return;
       const userId = asString(ticket.userId);
       if (!userId) return;
       const event =
@@ -749,54 +678,6 @@ export function LeagueFinanceDashboard() {
             hint="produtos cadastrados pela liga"
             icon={<BarChart3 size={18} />}
           />
-        </section>
-
-        <section className="grid gap-3 md:grid-cols-4">
-          <MetricCard
-            label="Receita eventos"
-            value={formatCurrency(analytics.eventRevenue)}
-            hint={`${formatNumber(analytics.eventQuantity)} ingressos vendidos`}
-            icon={<Wallet size={18} />}
-          />
-          <MetricCard
-            label="Pedidos aprovados"
-            value={formatNumber(analytics.eventApprovedOrders)}
-            hint="comprovantes aprovados"
-            icon={<Ticket size={18} />}
-          />
-          <MetricCard
-            label="Check-ins"
-            value={formatNumber(analytics.eventScanned)}
-            hint={`${formatPercent(analytics.eventShowRate)} de comparecimento`}
-            icon={<QrCode size={18} />}
-          />
-          <MetricCard
-            label="Ticket medio"
-            value={formatCurrency(analytics.eventTicketAverage)}
-            hint={`${formatPercent(analytics.eventNoShowRate)} no-show`}
-            icon={<BarChart3 size={18} />}
-          />
-        </section>
-
-        <section className="grid gap-5 lg:grid-cols-2">
-          <ChartPanel title="Turmas por quantidade e valor" subtitle="Ingressos aprovados agrupados por turma.">
-            <BarsDual data={analytics.eventSalesByClass} quantityName="Ingressos" valueName="Valor" />
-          </ChartPanel>
-          <ChartPanel title="Lotes mais vendidos" subtitle="Volume aprovado por lote do evento.">
-            <PieMetric data={analytics.eventSalesByLot} />
-          </ChartPanel>
-          <ChartPanel title="Dias da semana" subtitle="Receita e quantidade por dia da compra.">
-            <BarsDual data={analytics.eventSalesByWeekday} quantityName="Ingressos" valueName="Valor" />
-          </ChartPanel>
-          <ChartPanel title="Periodo do dia" subtitle="Quando os pedidos aprovados foram criados.">
-            <BarsDual data={analytics.eventSalesByPeriod} quantityName="Ingressos" valueName="Valor" />
-          </ChartPanel>
-          <ChartPanel title="Comprovantes por aprovador" subtitle="Carga operacional de aprovacao.">
-            <Bars data={analytics.eventApprovers} dataKey="quantity" />
-          </ChartPanel>
-          <ChartPanel title="Escaneamento por horario" subtitle="Leituras de QR na entrada.">
-            <Bars data={analytics.eventScanByHour} dataKey="quantity" />
-          </ChartPanel>
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
@@ -915,6 +796,12 @@ export function LeagueFinanceDashboard() {
             </table>
           </div>
         </section>
+
+        <EventManagementAnalytics
+          events={(data.league?.eventos || []) as unknown as Row[]}
+          tickets={data.eventTickets}
+          allLabel="Todos os eventos da liga"
+        />
 
         <section className="grid gap-5 lg:grid-cols-2">
           <ChartPanel title="Receita por origem" subtitle="Comparação entre loja e eventos vendidos.">
