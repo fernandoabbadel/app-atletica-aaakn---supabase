@@ -9,6 +9,7 @@ import { ReceiptContactButton } from "@/components/ReceiptContactButton";
 import { useToast } from "../../../context/ToastContext";
 import { useAuth } from "../../../context/AuthContext";
 import { createEventTicketRequest, fetchEventCheckoutData } from "../../../lib/eventsService";
+import { fetchLeagueById } from "../../../lib/leaguesService";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { collectUserPlanScope } from "@/lib/userPlanScope";
@@ -33,6 +34,13 @@ interface EventoData {
     tipo?: string;
     categoria?: string;
     imagem?: string;
+    stats?: {
+        leagueId?: string;
+        leagueEventVisibility?: string;
+        eventVisibility?: string;
+    };
+    leagueId?: string;
+    leagueEventVisibility?: string;
     lotes?: Lote[];
     [key: string]: unknown; // Flexibilidade para outros campos do evento
 }
@@ -45,6 +53,19 @@ const buildPaymentRecipientKey = (
 ): string =>
   recipient.userId?.trim() ||
   `${recipient.name || "recebedor"}-${recipient.phone || "sem-telefone"}-${index}`;
+
+const getLeagueEventVisibility = (event: EventoData | null): "public" | "internal" => {
+    const raw = String(
+        event?.leagueEventVisibility ||
+        event?.stats?.leagueEventVisibility ||
+        event?.stats?.eventVisibility ||
+        ""
+    ).trim().toLowerCase();
+    return raw === "internal" || raw === "interno" ? "internal" : "public";
+};
+
+const getLeagueIdFromEvent = (event: EventoData | null): string =>
+    String(event?.leagueId || event?.stats?.leagueId || "").trim();
 
 // Componente interno que usa useSearchParams
 function CompraContent() {
@@ -67,6 +88,7 @@ function CompraContent() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const financeFallback = buildTenantFinanceFallback({ tenantSigla, tenantName });
   const eventosHref = tenantSlug ? withTenantSlug(tenantSlug, "/eventos") : "/eventos";
   const isLeagueEvent = React.useMemo(
@@ -161,7 +183,27 @@ function CompraContent() {
               });
 
               if (checkoutData.evento) {
-                  setEvento(checkoutData.evento as unknown as EventoData);
+                  const loadedEvent = checkoutData.evento as unknown as EventoData;
+                  if (getLeagueEventVisibility(loadedEvent) === "internal") {
+                      const leagueId = getLeagueIdFromEvent(loadedEvent);
+                      const league = leagueId
+                          ? await fetchLeagueById(leagueId, {
+                                tenantId: tenantId || undefined,
+                            })
+                          : null;
+                      const canBuyInternalEvent = Boolean(
+                          user?.uid &&
+                          league?.membros?.some((member) => member.id.trim() === user.uid.trim())
+                      );
+                      if (!canBuyInternalEvent) {
+                          setAccessDenied(true);
+                          setEvento(null);
+                          setLote(null);
+                          return;
+                      }
+                  }
+                  setAccessDenied(false);
+                  setEvento(loadedEvent);
               }
 
               if (checkoutData.lote) {
@@ -182,7 +224,7 @@ function CompraContent() {
           }
       };
       void loadData();
-  }, [addToast, eventoId, financeFallback, loteId, tenantId, userPlanIds, userPlanNames]); // Dependencias corrigidas
+  }, [addToast, eventoId, financeFallback, loteId, tenantId, user?.uid, userPlanIds, userPlanNames]); // Dependencias corrigidas
 
   const handleFinish = async () => {
       if (!user || !evento || !lote) return;
@@ -260,6 +302,7 @@ function CompraContent() {
   };
 
   if (fetching) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-emerald-500"><Loader2 className="animate-spin"/></div>;
+  if (accessDenied) return <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center gap-4 px-6 text-center"><p className="max-w-sm text-sm text-zinc-300">Este evento interno aceita pedidos apenas de membros da liga.</p><button onClick={() => router.push(eventosHref)} className="text-emerald-500 underline">Voltar</button></div>;
   if (!evento || !lote) return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center">Lote ou evento inválido.</div>;
 
   const valorTotalDisplay = (parseFloat(lote.preco.replace(',', '.')) * quantidade).toFixed(2).replace('.', ',');

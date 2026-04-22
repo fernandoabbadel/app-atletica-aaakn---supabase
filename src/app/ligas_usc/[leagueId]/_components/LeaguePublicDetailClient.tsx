@@ -48,6 +48,12 @@ const sortEvents = (events: LeagueRecord["eventos"]) =>
     return (left.titulo || "").localeCompare(right.titulo || "", "pt-BR");
   });
 
+const isInternalLeagueEvent = (event: LeagueRecord["eventos"][number]): boolean =>
+  String(event.visibility || "").trim().toLowerCase() === "internal";
+
+const getVisibilityLabel = (event: LeagueRecord["eventos"][number]): string =>
+  isInternalLeagueEvent(event) ? "Evento interno" : "Aberto ao publico";
+
 const getEventBadge = (value: string) => {
   const parsedMs = parseEventDateTimeMs(value, "00:00");
   if (parsedMs === null) {
@@ -200,6 +206,15 @@ export function LeaguePublicDetailClient({
   const isOfficialMember = Boolean(
     user?.uid && sortedMembers.some((member) => member.id.trim() === user.uid.trim())
   );
+  const publicAgendaEvents = useMemo(
+    () => sortedEvents.filter((event) => !isInternalLeagueEvent(event)),
+    [sortedEvents]
+  );
+  const internalAgendaEvents = useMemo(
+    () => (isOfficialMember ? sortedEvents.filter(isInternalLeagueEvent) : []),
+    [isOfficialMember, sortedEvents]
+  );
+  const visibleAgendaCount = publicAgendaEvents.length + internalAgendaEvents.length;
 
   useEffect(() => {
     if (!currentMemberRequest) return;
@@ -406,7 +421,7 @@ export function LeaguePublicDetailClient({
                 </div>
                 <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
                   <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">Agenda</p>
-                  <p className="mt-3 text-2xl font-black text-white">{sortedEvents.length}</p>
+                  <p className="mt-3 text-2xl font-black text-white">{visibleAgendaCount}</p>
                 </div>
                 <button type="button" onClick={() => void handleLike()} disabled={!user} className={`rounded-[1.5rem] border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${isLiked ? "border-red-500/30 bg-red-500/10 text-red-100" : "border-white/10 bg-white/5 text-zinc-100 hover:border-red-500/30 hover:bg-red-500/10"}`}>
                   <div className="flex items-center justify-between">
@@ -560,19 +575,36 @@ export function LeaguePublicDetailClient({
               <h2 className="mt-3 text-2xl font-black text-white">{"Eventos, encontros e convoca\u00e7\u00f5es"}</h2>
               <p className="mt-3 text-sm leading-7 text-zinc-400">{"Tudo que a liga publicou para a comunidade acompanhar em um s\u00f3 lugar."}</p>
             </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {sortedEvents.map((event) => {
-                const badge = getEventBadge(event.data || "");
-                const href = event.linkEvento?.startsWith("/") ? tenantPath(event.linkEvento) : event.linkEvento || "";
-                const card = (
-                  <article className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] transition hover:-translate-y-1 hover:border-cyan-400/30">
-                    <div className="flex gap-4"><div className="flex w-[72px] shrink-0 flex-col items-center justify-center rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-4 text-center"><span className="text-2xl font-black text-white">{badge.day}</span><span className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">{badge.month}</span></div><div className="min-w-0 flex-1"><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Agenda oficial</p><h3 className="mt-2 text-xl font-black text-white">{event.titulo}</h3><div className="mt-3 flex flex-wrap gap-2 text-xs font-bold uppercase text-zinc-300">{event.hora ? <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{event.hora}</span> : null}{event.local ? <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{event.local}</span> : null}</div><p className="mt-4 text-sm leading-6 text-zinc-400">{event.descricao || "Evento publicado pela liga sem descri\u00e7\u00e3o adicional."}</p></div></div>
-                  </article>
-                );
-                return href ? <Link key={event.id || event.titulo} href={href}>{card}</Link> : <div key={event.id || event.titulo}>{card}</div>;
-              })}
-              {sortedEvents.length === 0 ? <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">{"A agenda da liga ainda est\u00e1 vazia."}</p> : null}
-            </div>
+            {[
+              { title: "Aberto ao publico", events: publicAgendaEvents },
+              { title: "Evento interno", events: internalAgendaEvents },
+            ].map((section) => (
+              <div key={section.title} className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-black uppercase tracking-[0.2em] text-zinc-300">{section.title}</h3>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black text-zinc-400">{section.events.length}</span>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {section.events.map((event) => {
+                    const badge = getEventBadge(event.data || "");
+                    const href = event.linkEvento?.startsWith("/") ? tenantPath(event.linkEvento) : event.linkEvento || "";
+                    const internal = isInternalLeagueEvent(event);
+                    const card = (
+                      <article className={`relative overflow-hidden rounded-[1.75rem] border p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] transition hover:-translate-y-1 ${
+                        internal
+                          ? "border-amber-500/20 bg-[linear-gradient(180deg,rgba(30,23,11,0.96),rgba(10,10,10,0.98))] hover:border-amber-400/30"
+                          : "border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] hover:border-cyan-400/30"
+                      }`}>
+                        <div className="flex gap-4"><div className={`flex w-[72px] shrink-0 flex-col items-center justify-center rounded-2xl border px-3 py-4 text-center ${internal ? "border-amber-500/20 bg-amber-500/10" : "border-cyan-500/20 bg-cyan-500/10"}`}><span className="text-2xl font-black text-white">{badge.day}</span><span className={`text-[10px] font-black uppercase tracking-[0.24em] ${internal ? "text-amber-200" : "text-cyan-200"}`}>{badge.month}</span></div><div className="min-w-0 flex-1"><p className={`text-[10px] font-black uppercase tracking-[0.24em] ${internal ? "text-amber-300" : "text-cyan-300"}`}>{getVisibilityLabel(event)}</p><h3 className="mt-2 text-xl font-black text-white">{event.titulo}</h3><div className="mt-3 flex flex-wrap gap-2 text-xs font-bold uppercase text-zinc-300">{event.hora ? <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{event.hora}</span> : null}{event.local ? <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{event.local}</span> : null}</div><p className="mt-4 text-sm leading-6 text-zinc-400">{event.descricao || "Evento publicado pela liga sem descricao adicional."}</p></div></div>
+                      </article>
+                    );
+                    return href ? <Link key={event.id || event.titulo} href={href}>{card}</Link> : <div key={event.id || event.titulo}>{card}</div>;
+                  })}
+                  {section.events.length === 0 ? <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">{section.title === "Evento interno" && !isOfficialMember ? "Eventos internos aparecem somente para membros da liga." : "Nenhum evento nessa categoria."}</p> : null}
+                </div>
+              </div>
+            ))}
+            {visibleAgendaCount === 0 ? <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">{"A agenda da liga ainda esta vazia."}</p> : null}
           </section>
         )}
       </main>

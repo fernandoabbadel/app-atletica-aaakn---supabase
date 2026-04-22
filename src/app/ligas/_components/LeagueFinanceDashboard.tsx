@@ -16,12 +16,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ArrowLeft, BarChart3, Loader2, Package, Ticket, Wallet } from "lucide-react";
+import { ArrowLeft, BarChart3, CheckCircle2, Loader2, Package, QrCode, Ticket, Users, Wallet, XCircle } from "lucide-react";
 
+import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { getSupabaseClient } from "@/lib/supabase";
 import { asString as rawString, type Row } from "@/lib/supabaseData";
-import { fetchLeagueById, type LeagueRecord } from "@/lib/leaguesService";
+import { fetchLeagueById, fetchLeagueUsers, type LeagueRecord, type LeagueUserRecord } from "@/lib/leaguesService";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { LeagueAdminQuickNav } from "./LeagueAdminQuickNav";
@@ -34,6 +35,7 @@ type MetricRow = {
 
 type LeagueFinanceData = {
   league: LeagueRecord | null;
+  leagueUsers: LeagueUserRecord[];
   products: Row[];
   productOrders: Row[];
   eventTickets: Row[];
@@ -55,12 +57,16 @@ const chartTooltipProps = {
 
 const emptyFinanceData: LeagueFinanceData = {
   league: null,
+  leagueUsers: [],
   products: [],
   productOrders: [],
   eventTickets: [],
 };
 
 const asString = (value: unknown): string => rawString(value).trim();
+
+const asRecord = (value: unknown): Row | null =>
+  typeof value === "object" && value !== null ? (value as Row) : null;
 
 const parseNumber = (value: unknown): number => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -99,6 +105,45 @@ const statusIsApproved = (status: unknown): boolean => {
 const isLeagueSellerRow = (row: Row, leagueId: string): boolean =>
   asString(row.seller_id) === leagueId &&
   ["league", "tenant", ""].includes(asString(row.seller_type).toLowerCase());
+
+const getLeagueEventVisibility = (
+  event: LeagueRecord["eventos"][number]
+): "public" | "internal" =>
+  asString(event.visibility).toLowerCase() === "internal" ? "internal" : "public";
+
+const getLeagueEventGlobalId = (event: LeagueRecord["eventos"][number]): string => {
+  const direct = asString(event.globalEventId) || asString(event.id);
+  if (direct) return direct;
+  const linkMatch = asString(event.linkEvento).match(/\/eventos\/([^/?#]+)/i);
+  return linkMatch?.[1] ? decodeURIComponent(linkMatch[1]) : "";
+};
+
+const ticketEntries = (paymentConfig: unknown): Row[] => {
+  const config = asRecord(paymentConfig);
+  const entries = config?.ticketEntries || config?.tickets || config?.ingressos;
+  return Array.isArray(entries)
+    ? entries.map((entry) => asRecord(entry)).filter((entry): entry is Row => entry !== null)
+    : [];
+};
+
+const ticketScannedCount = (row: Row): number =>
+  ticketEntries(row.payment_config).filter((entry) => {
+    const status = asString(entry.status).toLowerCase();
+    return status === "lido" || Boolean(asString(entry.scannedAt));
+  }).length;
+
+const normalizeLeagueRoleKey = (value: unknown): string =>
+  asString(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const canScanInternalLeagueEvents = (role: unknown): boolean => {
+  const key = normalizeLeagueRoleKey(role);
+  return key === "presidente" || key === "vice-presidente" || key === "vice presidente" || key === "secretaria" || key === "secretario";
+};
 
 const addMetric = (map: Map<string, MetricRow>, name: string, quantity: number, value: number) => {
   const cleanName = name.trim() || "Sem nome";
@@ -205,12 +250,15 @@ async function loadLeagueFinanceData(
 ): Promise<LeagueFinanceData> {
   if (!leagueId) return emptyFinanceData;
 
-  const league = await fetchLeagueById(leagueId, {
-    forceRefresh: true,
-    tenantId: tenantId || undefined,
-  });
-
-  const [productsRaw, ordersRaw, ticketsRaw] = await Promise.all([
+  const [league, leagueUsers, productsRaw, ordersRaw, ticketsRaw] = await Promise.all([
+    fetchLeagueById(leagueId, {
+      forceRefresh: true,
+      tenantId: tenantId || undefined,
+    }),
+    fetchLeagueUsers({
+      maxResults: 2000,
+      tenantId: tenantId || undefined,
+    }),
     queryRows(
       "produtos",
       "id,nome,lote,preco,estoque,status,active,aprovado,vendidos,seller_type,seller_id,seller_name,tenant_id,createdAt",
@@ -253,6 +301,7 @@ async function loadLeagueFinanceData(
 
   return {
     league,
+    leagueUsers,
     products,
     productOrders,
     eventTickets,
@@ -305,6 +354,7 @@ function ChartPanel({
 export function LeagueFinanceDashboard() {
   const params = useParams<{ leagueId?: string }>();
   const router = useRouter();
+  const { user } = useAuth();
   const { tenantId, tenantSlug } = useTenantTheme();
   const leagueId = typeof params?.leagueId === "string" ? params.leagueId : "";
   const [data, setData] = useState<LeagueFinanceData>(emptyFinanceData);
@@ -406,6 +456,67 @@ export function LeagueFinanceDashboard() {
   const leagueStoreHref = `${leagueBaseHref}/loja`;
   const leagueFinanceHref = `${leagueBaseHref}/gestao`;
   const leagueBoardHref = `${leagueBaseHref}/board-round`;
+  const scannerHref = tenantPath("/scanner");
+  const memberPresence = useMemo(() => {
+    const userById = new Map(data.leagueUsers.map((entry) => [entry.id.trim(), entry]));
+    const events = (data.league?.eventos || []).map((event) => {
+      const globalId = getLeagueEventGlobalId(event);
+      const ids = new Set([asString(event.id), asString(event.globalEventId), globalId].filter(Boolean));
+      return {
+        key: globalId || asString(event.id) || asString(event.titulo),
+        title: asString(event.titulo) || "Evento",
+        visibility: getLeagueEventVisibility(event),
+        ids,
+      };
+    });
+    const members = (data.league?.membros || [])
+      .map((member) => {
+        const userRecord = userById.get(member.id.trim());
+        return {
+          id: member.id.trim(),
+          nome: member.nome,
+          cargo: member.cargo,
+          foto: member.foto || userRecord?.foto || "",
+          turma: userRecord?.turma || "Sem turma",
+        };
+      })
+      .filter((member) => member.id)
+      .sort((left, right) =>
+        left.turma.localeCompare(right.turma, "pt-BR") ||
+        left.nome.localeCompare(right.nome, "pt-BR")
+      );
+
+    const eventByTicketKey = new Map<string, (typeof events)[number]>();
+    events.forEach((event) => {
+      event.ids.forEach((id) => eventByTicketKey.set(id, event));
+      eventByTicketKey.set(event.title, event);
+    });
+
+    const presence = new Map<string, { approved: number; scanned: number; total: number }>();
+    data.eventTickets.forEach((ticket) => {
+      const userId = asString(ticket.userId);
+      if (!userId) return;
+      const event =
+        eventByTicketKey.get(asString(ticket.eventoId)) ||
+        eventByTicketKey.get(asString(ticket.eventoNome));
+      if (!event?.key) return;
+      const quantity = parseQuantity(ticket.quantidade, 1);
+      const entries = ticketEntries(ticket.payment_config);
+      const scanned = ticketScannedCount(ticket);
+      const key = `${event.key}:${userId}`;
+      const current = presence.get(key) ?? { approved: 0, scanned: 0, total: 0 };
+      current.approved += quantity;
+      current.scanned += scanned;
+      current.total += Math.max(quantity, entries.length);
+      presence.set(key, current);
+    });
+
+    return { events, members, presence };
+  }, [data]);
+  const currentLeagueMember = league?.membros.find(
+    (member) => member.id.trim() === (user?.uid || "").trim()
+  );
+  const canCurrentUserScanInternal = canScanInternalLeagueEvents(currentLeagueMember?.cargo);
 
   if (loading) {
     return (
@@ -484,6 +595,113 @@ export function LeagueFinanceDashboard() {
             hint="produtos cadastrados pela liga"
             icon={<BarChart3 size={18} />}
           />
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+                Presenca dos membros
+              </p>
+              <h2 className="mt-2 text-lg font-black uppercase text-white">
+                Membros por evento
+              </h2>
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Aprovado mostra ingresso liberado; presente mostra QR lido.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push(scannerHref)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-xs font-black uppercase text-black hover:bg-emerald-400"
+            >
+              <QrCode size={16} />
+              Abrir scanner
+            </button>
+          </div>
+          {canCurrentUserScanInternal ? (
+            <p className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] font-bold text-emerald-100">
+              Seu cargo na liga permite leitura de QR em eventos internos.
+            </p>
+          ) : null}
+
+          <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800 bg-black/30">
+            <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+              <thead className="bg-black/40 text-zinc-500">
+                <tr>
+                  <th className="sticky left-0 z-10 min-w-[220px] bg-black/80 p-3 uppercase">Membro</th>
+                  {memberPresence.events.map((event) => (
+                    <th key={event.key} className="min-w-[150px] p-3 align-top uppercase">
+                      <button
+                        type="button"
+                        onClick={() => router.push(`${leagueBaseHref}/eventos/lista/${encodeURIComponent(event.key)}`)}
+                        className="text-left hover:text-emerald-300"
+                      >
+                        <span className="line-clamp-2 text-[11px] font-black text-zinc-200">{event.title}</span>
+                        <span className={`mt-1 inline-flex rounded border px-2 py-0.5 text-[9px] font-black ${
+                          event.visibility === "internal"
+                            ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                            : "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                        }`}>
+                          {event.visibility === "internal" ? "Interno" : "Publico"}
+                        </span>
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800">
+                {memberPresence.members.map((member) => (
+                  <tr key={member.id} className="hover:bg-zinc-950/70">
+                    <td className="sticky left-0 z-10 bg-zinc-950 p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="relative h-9 w-9 overflow-hidden rounded-xl border border-zinc-700 bg-black">
+                          {member.foto ? (
+                            <Image src={member.foto} alt={member.nome} fill sizes="36px" className="object-cover" />
+                          ) : (
+                            <Users size={16} className="m-2 text-zinc-600" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate font-black text-white">{member.nome}</p>
+                          <p className="text-[10px] font-bold uppercase text-zinc-500">{member.turma} - {member.cargo}</p>
+                        </div>
+                      </div>
+                    </td>
+                    {memberPresence.events.map((event) => {
+                      const cell = memberPresence.presence.get(`${event.key}:${member.id}`);
+                      const present = Boolean(cell && cell.scanned > 0);
+                      const approved = Boolean(cell && cell.approved > 0);
+                      return (
+                        <td key={`${member.id}-${event.key}`} className="p-3">
+                          {present ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-black uppercase text-emerald-300">
+                              <CheckCircle2 size={12} /> Presente
+                            </span>
+                          ) : approved ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-300">
+                              <Ticket size={12} /> Aprovado
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1 text-[10px] font-black uppercase text-zinc-600">
+                              <XCircle size={12} /> -
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+                {memberPresence.members.length === 0 ? (
+                  <tr>
+                    <td colSpan={Math.max(1, memberPresence.events.length + 1)} className="p-8 text-center text-sm text-zinc-500">
+                      Nenhum membro encontrado nesta liga.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section className="grid gap-5 lg:grid-cols-2">

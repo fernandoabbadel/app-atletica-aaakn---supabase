@@ -119,6 +119,7 @@ const LEAGUE_GLOBAL_EVENT_SELECT_COLUMNS = [
   "pixBanco",
   "pixTitular",
   "contatoComprovante",
+  "stats",
 ] as const;
 
 const asObject = (value: unknown): Record<string, unknown> | null => {
@@ -134,6 +135,28 @@ const asNumber = (value: unknown, fallback = 0): number =>
 
 const asBoolean = (value: unknown, fallback = false): boolean =>
   typeof value === "boolean" ? value : fallback;
+
+export type LeagueEventVisibility = "public" | "internal";
+
+export const normalizeLeagueEventVisibility = (
+  value: unknown,
+  fallback: LeagueEventVisibility = "public"
+): LeagueEventVisibility => {
+  const raw = asString(value).trim().toLowerCase();
+  if (
+    raw === "internal" ||
+    raw === "interno" ||
+    raw === "evento_interno" ||
+    raw === "private" ||
+    raw === "privado"
+  ) {
+    return "internal";
+  }
+  if (raw === "public" || raw === "publico" || raw === "público" || raw === "aberto") {
+    return "public";
+  }
+  return fallback;
+};
 
 const rowIdFromUnknown = (row: unknown, fallback = ""): string => {
   const obj = asObject(row);
@@ -859,6 +882,7 @@ export async function syncLeagueEvents(payload: {
       ...event,
       globalEventId: eventId,
       linkEvento: `/eventos/${eventId}`,
+      visibility: normalizeLeagueEventVisibility(event.visibility),
       imagem: asString(event.imagem).trim() || leagueLogoUrl,
       imagePositionY: Math.max(0, Math.min(100, asNumber(event.imagePositionY, 50))),
       lotes: Array.isArray(event.lotes) ? event.lotes : [],
@@ -891,6 +915,11 @@ export async function syncLeagueEvents(payload: {
       categoria: "Liga",
       status: "ativo",
       sale_status: asString(nextEvent.saleStatus, "ativo").trim() || "ativo",
+      stats: {
+        leagueId,
+        leagueEventVisibility: nextEvent.visibility,
+        eventVisibility: nextEvent.visibility,
+      },
       updatedAt: timestamp,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     };
@@ -1055,6 +1084,7 @@ export interface LeagueEventRecord {
   globalEventId?: string;
   pollQuestion?: string;
   saleStatus?: "ativo" | "em_breve" | "esgotado";
+  visibility?: LeagueEventVisibility;
   pixChave?: string;
   pixBanco?: string;
   pixTitular?: string;
@@ -1234,6 +1264,10 @@ const hydrateLeagueEventsFromGlobalCatalog = async (
 
       const globalRow = rowsById.get(globalEventId);
       if (!globalRow) return event;
+      const globalStats = asObject(globalRow.stats) ?? {};
+      const visibility = normalizeLeagueEventVisibility(
+        globalStats.leagueEventVisibility || globalStats.eventVisibility || event.visibility
+      );
 
       return {
         ...event,
@@ -1264,6 +1298,7 @@ const hydrateLeagueEventsFromGlobalCatalog = async (
         pixTitular: asString(globalRow.pixTitular, event.pixTitular || ""),
         contatoComprovante: asString(globalRow.contatoComprovante, event.contatoComprovante || ""),
         linkEvento: event.linkEvento || `/eventos/${globalEventId}`,
+        visibility,
       } satisfies LeagueEventRecord;
     }),
   };
@@ -1431,6 +1466,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
         .map((row) => {
           const event = asObject(row);
           if (!event) return null;
+          const eventStats = asObject(event.stats) ?? {};
           const lotes = Array.isArray(event.lotes)
             ? event.lotes
                 .map((entry) => {
@@ -1468,6 +1504,14 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
           const pixBanco = asString(event.pixBanco) || undefined;
           const pixTitular = asString(event.pixTitular) || undefined;
           const contatoComprovante = asString(event.contatoComprovante) || undefined;
+          const visibility = normalizeLeagueEventVisibility(
+            event.visibility ||
+              event.visibilidade ||
+              event.leagueEventVisibility ||
+              event.eventVisibility ||
+              eventStats.leagueEventVisibility ||
+              eventStats.eventVisibility
+          );
 
           return {
             id: asString(event.id),
@@ -1486,6 +1530,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
             ...(globalEventId ? { globalEventId } : {}),
             ...(pollQuestion ? { pollQuestion } : {}),
             ...(saleStatus ? { saleStatus } : {}),
+            visibility,
             ...(pixChave ? { pixChave } : {}),
             ...(pixBanco ? { pixBanco } : {}),
             ...(pixTitular ? { pixTitular } : {}),

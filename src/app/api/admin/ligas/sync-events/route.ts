@@ -41,6 +41,7 @@ type NormalizedLeagueEvent = {
   descricao: string;
   pollQuestion: string;
   saleStatus: "ativo" | "em_breve" | "esgotado";
+  visibility: "public" | "internal";
   pixChave: string;
   pixBanco: string;
   pixTitular: string;
@@ -57,6 +58,20 @@ const normalizeStatus = (value: unknown): "ativo" | "em_breve" | "esgotado" => {
   if (raw === "em_breve" || raw === "agendado") return "em_breve";
   if (raw === "esgotado" || raw === "encerrado") return "esgotado";
   return "ativo";
+};
+
+const normalizeVisibility = (value: unknown): "public" | "internal" => {
+  const raw = asString(value).trim().toLowerCase();
+  if (
+    raw === "internal" ||
+    raw === "interno" ||
+    raw === "evento_interno" ||
+    raw === "private" ||
+    raw === "privado"
+  ) {
+    return "internal";
+  }
+  return "public";
 };
 
 const normalizeLotes = (value: unknown): NormalizedLote[] => {
@@ -131,6 +146,7 @@ const normalizeEvents = (value: unknown, leagueLogoUrl: string): NormalizedLeagu
       descricao: asString(raw.descricao).trim().slice(0, 1200),
       pollQuestion: asString(raw.pollQuestion).trim().slice(0, 280),
       saleStatus: normalizeStatus(raw.saleStatus),
+      visibility: normalizeVisibility(raw.visibility || raw.visibilidade || raw.eventVisibility),
       pixChave:
         asString(normalizedPaymentConfig?.chave).trim().slice(0, 140) ||
         asString(raw.pixChave).trim().slice(0, 140),
@@ -251,7 +267,7 @@ export async function POST(request: NextRequest) {
       eventIds.length > 0
         ? await supabaseAdmin
             .from("eventos")
-            .select("id,tenant_id")
+            .select("id,tenant_id,stats")
             .in("id", eventIds)
         : { data: [], error: null };
 
@@ -281,6 +297,7 @@ export async function POST(request: NextRequest) {
       const eventId = event.globalEventId;
       const existingEvent = existingEventIds.get(eventId);
       const existingTenantId = asString(existingEvent?.tenant_id).trim();
+      const existingStats = asObject(existingEvent?.stats) ?? {};
 
       if (existingTenantId && existingTenantId !== effectiveTenantId) {
         throw new LeagueAdminApiError(
@@ -308,6 +325,12 @@ export async function POST(request: NextRequest) {
         pixTitular: event.pixTitular,
         contatoComprovante: event.contatoComprovante,
         ...(event.paymentConfig ? { payment_config: event.paymentConfig } : {}),
+        stats: {
+          ...existingStats,
+          leagueId,
+          leagueEventVisibility: event.visibility,
+          eventVisibility: event.visibility,
+        },
         status: "ativo",
         sale_status: event.saleStatus,
         tenant_id: effectiveTenantId,
@@ -346,6 +369,7 @@ export async function POST(request: NextRequest) {
         lotes: event.lotes,
         descricao: event.descricao,
         saleStatus: event.saleStatus,
+        visibility: event.visibility,
         pixChave: event.pixChave,
         pixBanco: event.pixBanco,
         pixTitular: event.pixTitular,

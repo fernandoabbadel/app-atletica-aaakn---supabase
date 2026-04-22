@@ -87,6 +87,7 @@ interface Member {
 }
 
 type EventSaleStatus = "ativo" | "em_breve" | "esgotado";
+type EventVisibility = "public" | "internal";
 
 interface Lote { 
     id: number; 
@@ -128,6 +129,7 @@ interface LeagueEvent {
     globalEventId?: string;
     pollQuestion?: string; 
     saleStatus?: EventSaleStatus;
+    visibility?: EventVisibility;
     pixChave?: string;
     pixBanco?: string;
     pixTitular?: string;
@@ -202,6 +204,14 @@ const normalizeEventSaleStatus = (value: unknown): EventSaleStatus => {
     return "ativo";
 };
 
+const normalizeEventVisibility = (value: unknown): EventVisibility => {
+    const raw = String(value || "").trim().toLowerCase();
+    if (raw === "internal" || raw === "interno" || raw === "private" || raw === "privado") {
+        return "internal";
+    }
+    return "public";
+};
+
 const normalizeEditorLote = (value: unknown, index: number): Lote | null => {
     if (!value || typeof value !== "object") return null;
     const raw = value as Partial<Lote>;
@@ -235,6 +245,7 @@ const normalizeEditableLeagueEvent = (value: unknown): Partial<LeagueEvent> => {
         descricao: String(raw.descricao || "").slice(0, EVENT_DESCRIPTION_MAX_LENGTH),
         pollQuestion: String(raw.pollQuestion || "").slice(0, EVENT_POLL_QUESTION_MAX_CHARS),
         saleStatus: normalizeEventSaleStatus(raw.saleStatus),
+        visibility: normalizeEventVisibility(raw.visibility),
         pixChave: String(raw.pixChave || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
         pixBanco: String(raw.pixBanco || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
         pixTitular: String(raw.pixTitular || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
@@ -275,6 +286,7 @@ const createEmptyEventDraft = (): Partial<LeagueEvent> => ({
     descricao: "",
     pollQuestion: "",
     saleStatus: "ativo",
+    visibility: "public",
     pixChave: "",
     pixBanco: "",
     pixTitular: "",
@@ -1224,6 +1236,7 @@ export default function LigasAdminPageContent({
           mapsUrl: String(currentEvent.mapsUrl || "").trim().slice(0, 400),
           descricao: String(currentEvent.descricao || "").trim().slice(0, EVENT_DESCRIPTION_MAX_LENGTH),
           saleStatus: normalizeEventSaleStatus(currentEvent.saleStatus),
+          visibility: normalizeEventVisibility(currentEvent.visibility),
           pixChave: String(currentEvent.pixChave || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
           pixBanco: String(currentEvent.pixBanco || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
           pixTitular: String(currentEvent.pixTitular || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
@@ -2088,7 +2101,14 @@ export default function LigasAdminPageContent({
                                           <span>•</span>
                                           <span>{ev.local}</span>
                                       </div>
-                                      <div className="flex gap-2 mt-2">
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                          <span className={`rounded border px-2 py-0.5 text-[9px] font-black uppercase ${
+                                              normalizeEventVisibility(ev.visibility) === "internal"
+                                                  ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                                                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                          }`}>
+                                              {normalizeEventVisibility(ev.visibility) === "internal" ? "Evento interno" : "Aberto ao publico"}
+                                          </span>
                                           <button onClick={() => handleOpenEventModal(idx)} className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1"><Edit3 size={10}/> Editar Evento</button>
                                           {ev.globalEventId && (
                                               <button onClick={() => openEventPresenceList(ev.globalEventId || "")} className="text-[10px] text-cyan-400 hover:underline flex items-center gap-1"><Users size={10}/> Lista Presença</button>
@@ -2418,6 +2438,34 @@ export default function LigasAdminPageContent({
                               <option value="Outro">Outro...</option>
                           </select>
                           <input type="text" maxLength={EVENT_LOCATION_MAX_LENGTH} placeholder="Local" className="flex-1 bg-black border border-zinc-700 rounded-xl p-3 text-sm text-white" value={currentEvent.local || ""} onChange={(e) => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), local: e.target.value.slice(0, EVENT_LOCATION_MAX_LENGTH) })} />
+                      </div>
+
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+                          <div>
+                              <span className="text-xs font-bold text-zinc-300 uppercase">Visibilidade do evento</span>
+                              <p className="text-[10px] text-zinc-500">Eventos internos aparecem apenas para membros da liga.</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                              {([
+                                  { value: "public" as EventVisibility, label: "Aberto ao publico" },
+                                  { value: "internal" as EventVisibility, label: "Evento interno" },
+                              ]).map((option) => (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), visibility: option.value })}
+                                    className={`rounded-lg border px-3 py-2 text-[11px] font-black uppercase ${
+                                        normalizeEventVisibility(currentEvent.visibility) === option.value
+                                            ? option.value === "internal"
+                                                ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                                                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                            : "border-zinc-700 bg-black text-zinc-400"
+                                    }`}
+                                  >
+                                      {option.label}
+                                  </button>
+                              ))}
+                          </div>
                       </div>
                       
                       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">

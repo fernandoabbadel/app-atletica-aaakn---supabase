@@ -250,21 +250,32 @@ const setCache = <T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): 
 };
 
 const normalizeRows = (rows: Row[]): Row[] => rows.map((row) => normalizeRowTimestamps(row));
-const normalizeEventRow = (row: Row): Row => ({
-  ...normalizeRowTimestamps(row),
-  sale_status: normalizeAvailabilityStatus(row.sale_status, "ativo"),
-  payment_config: normalizePaymentConfig(row.payment_config),
-  lotes: Array.isArray(row.lotes)
-    ? row.lotes.map((entry) => {
-        const lote = asObject(entry) ?? {};
-        return {
-          ...lote,
-          status: normalizeAvailabilityStatus(lote.status, "ativo"),
-          planPrices: normalizePlanPriceEntries(lote.planPrices ?? lote.plan_prices),
-        };
-      })
-    : [],
-});
+const normalizeEventRow = (row: Row): Row => {
+  const normalized = normalizeRowTimestamps(row);
+  const stats = asObject(normalized.stats) ?? {};
+
+  return {
+    ...normalized,
+    leagueId: asString(normalized.leagueId || stats.leagueId),
+    leagueEventVisibility: asString(
+      normalized.leagueEventVisibility ||
+        stats.leagueEventVisibility ||
+        stats.eventVisibility
+    ),
+    sale_status: normalizeAvailabilityStatus(normalized.sale_status, "ativo"),
+    payment_config: normalizePaymentConfig(normalized.payment_config),
+    lotes: Array.isArray(normalized.lotes)
+      ? normalized.lotes.map((entry) => {
+          const lote = asObject(entry) ?? {};
+          return {
+            ...lote,
+            status: normalizeAvailabilityStatus(lote.status, "ativo"),
+            planPrices: normalizePlanPriceEntries(lote.planPrices ?? lote.plan_prices),
+          };
+        })
+      : [],
+  };
+};
 const normalizeCommentRows = (rows: Row[]): Row[] =>
   normalizeRows(rows).map((row) => {
     const text = asString(row.text);

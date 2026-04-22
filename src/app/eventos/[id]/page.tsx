@@ -36,6 +36,7 @@ import {
   resolvePlanScopedPriceInfo,
   type CommercePaymentConfig,
 } from "../../../lib/commerceCatalog";
+import { fetchLeagueById } from "../../../lib/leaguesService";
 import { isAdminLikeRole, resolveEffectiveAccessRole } from "../../../lib/roles";
 import {
   buildEventReceiptWhatsappMessage,
@@ -71,7 +72,12 @@ interface Evento {
     confirmados: number;
     talvez: number;
     likes?: number;
+    leagueId?: string;
+    leagueEventVisibility?: string;
+    eventVisibility?: string;
   };
+  leagueId?: string;
+  leagueEventVisibility?: string;
   lotes?: Lote[];
   // ID 12: Dados financeiros locais do evento
   pixChave?: string;
@@ -338,6 +344,22 @@ const UserBadges = ({ data, patentesConfig }: { data: Comentario, patentesConfig
         </div>
     );
 };
+
+const getLeagueEventVisibility = (event: Evento | null): "public" | "internal" => {
+  const raw = String(
+    event?.leagueEventVisibility ||
+      event?.stats?.leagueEventVisibility ||
+      event?.stats?.eventVisibility ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+  return raw === "internal" || raw === "interno" ? "internal" : "public";
+};
+
+const getLeagueIdFromEvent = (event: Evento | null): string =>
+  String(event?.leagueId || event?.stats?.leagueId || "").trim();
+
 export default function DetalhesEventoPage() {
   const params = useParams();
   const { user, isAdmin } = useAuth(); 
@@ -352,6 +374,7 @@ export default function DetalhesEventoPage() {
   const [enquetes, setEnquetes] = useState<Enquete[]>([]);
   const [patentesConfig, setPatentesConfig] = useState<PatenteConfig[]>(DEFAULT_PATENTES);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [userRsvp, setUserRsvp] = useState<string | null>(null);
   
   const [modalUsersType, setModalUsersType] = useState<"going" | "maybe" | null>(null);
@@ -420,7 +443,32 @@ export default function DetalhesEventoPage() {
                   tenantId: activeTenantId || undefined,
               });
 
-              setEvento(bundle.evento as Evento | null);
+              const loadedEvent = bundle.evento as Evento | null;
+              if (getLeagueEventVisibility(loadedEvent) === "internal") {
+                  const leagueId = getLeagueIdFromEvent(loadedEvent);
+                  const league = leagueId
+                      ? await fetchLeagueById(leagueId, {
+                            tenantId: activeTenantId || undefined,
+                          })
+                      : null;
+                  const canViewInternalEvent = Boolean(
+                      user?.uid &&
+                      league?.membros?.some((member) => member.id.trim() === user.uid.trim())
+                  );
+                  if (!canViewInternalEvent) {
+                      setAccessDenied(true);
+                      setEvento(null);
+                      setRsvps([]);
+                      setComentarios([]);
+                      setEnquetes([]);
+                      setMeusPedidos([]);
+                      setUserRsvp(null);
+                      return;
+                  }
+              }
+
+              setAccessDenied(false);
+              setEvento(loadedEvent);
               setRsvps(bundle.rsvps as unknown as Rsvp[]);
               setComentarios(bundle.comentarios as unknown as Comentario[]);
               setEnquetes(bundle.enquetes as unknown as Enquete[]);
@@ -839,6 +887,7 @@ export default function DetalhesEventoPage() {
   }, [rsvps]);
 
   if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500 w-10 h-10"/></div>;
+  if (accessDenied) return <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center gap-4 px-6 text-center"><ShieldAlert size={40} className="text-amber-400"/> <p className="max-w-sm text-sm text-zinc-300">Este evento interno aparece apenas para membros da liga.</p> <Link href={tenantPath("/eventos")} className="text-emerald-500 underline">Voltar</Link></div>;
   if (!evento) return <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center gap-4"><XCircle size={40} className="text-red-500"/> <p>Evento não encontrado.</p> <Link href={tenantPath("/eventos")} className="text-emerald-500 underline">Voltar</Link></div>;
   const eventoSaleStatus = evento.saleStatus || evento.sale_status || "ativo";
   const firstActiveLote = evento.lotes?.find((lote) => lote.status === "ativo");

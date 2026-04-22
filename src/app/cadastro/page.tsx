@@ -115,6 +115,8 @@ const normalizeInviteJoinFailureMessage = (message: string): string => {
 };
 
 const GUEST_PLACEHOLDER_NAME = "visitante usc";
+const INVITE_LOCAL_GUEST_MESSAGE =
+  "Você entrou no modo visitante. Clique em Menu depois sair e volte a abrir o link do convite.";
 const CADASTRO_DRAFT_PREFIX = "usc:cadastro:draft:v2";
 const CADASTRO_DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -227,6 +229,7 @@ export default function CadastroPage() {
   const hasInviteToken = effectiveInviteToken.length > 0;
   const normalizedUserRole = String(user?.role || "").trim().toLowerCase();
   const isGuestUser = normalizedUserRole === "guest" || Boolean(user?.isAnonymous);
+  const inviteBlockedByLocalGuest = hasInviteToken && Boolean(user?.isAnonymous);
   const rawUserName = String(user?.nome || "").trim();
   const isGuestPlaceholderName =
     rawUserName.toLowerCase() === GUEST_PLACEHOLDER_NAME ||
@@ -290,6 +293,7 @@ export default function CadastroPage() {
   const formDraftReadyRef = useRef(false);
   const suppressDraftWriteRef = useRef(false);
   const hydratedDraftKeyRef = useRef("");
+  const inviteLocalGuestWarningShownRef = useRef(false);
 
   const scopedPath = (path: string) =>
     effectiveTenantSlug ? withTenantSlug(effectiveTenantSlug, path) : path;
@@ -536,6 +540,19 @@ export default function CadastroPage() {
   }, [authLoading, loginPath, router, user]);
 
   useEffect(() => {
+    if (!inviteBlockedByLocalGuest) {
+      inviteLocalGuestWarningShownRef.current = false;
+      return;
+    }
+
+    setError(INVITE_LOCAL_GUEST_MESSAGE);
+    if (!inviteLocalGuestWarningShownRef.current) {
+      addToast(INVITE_LOCAL_GUEST_MESSAGE, "error");
+      inviteLocalGuestWarningShownRef.current = true;
+    }
+  }, [addToast, inviteBlockedByLocalGuest]);
+
+  useEffect(() => {
     setFormData((prev) => {
       const normalizedSports = normalizeSelectedSportIds(
         prev.esportes,
@@ -667,6 +684,10 @@ export default function CadastroPage() {
     setLoading(true);
     setError("");
 
+    if (inviteBlockedByLocalGuest) {
+      failValidation(INVITE_LOCAL_GUEST_MESSAGE);
+      return;
+    }
     if (hasInviteToken && inviteContextLoading) {
       failValidation("Ainda estou validando a atlética desse convite. Tente novamente em alguns segundos.");
       return;
@@ -1328,9 +1349,9 @@ export default function CadastroPage() {
                 </div>
                 ) : null}
                 
-                <button type="submit" disabled={loading || imageLoading || inviteContextLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase py-5 rounded-[2rem] shadow-xl shadow-emerald-900/20 transition-all flex justify-center items-center gap-2 disabled:cursor-not-allowed disabled:opacity-70">
+                <button type="submit" disabled={loading || imageLoading || inviteContextLoading || inviteBlockedByLocalGuest} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase py-5 rounded-[2rem] shadow-xl shadow-emerald-900/20 transition-all flex justify-center items-center gap-2 disabled:cursor-not-allowed disabled:opacity-70">
                     {loading ? <Loader2 className="animate-spin"/> : <Save size={20} />}
-                    {loading ? "Gravando Ficha..." : "Finalizar & Ir pro Perfil"}
+                    {loading ? "Gravando Ficha..." : inviteBlockedByLocalGuest ? "Saia do modo visitante" : "Finalizar & Ir pro Perfil"}
                 </button>
 
             </form>

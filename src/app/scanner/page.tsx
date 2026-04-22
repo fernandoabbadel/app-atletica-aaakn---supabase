@@ -48,7 +48,7 @@ export default function FloatingScannerPage() {
   );
   const canScanEvento = roles.some((role) =>
     ["vendas", "master_tenant", "master"].includes(role)
-  );
+  ) || Boolean(user?.uid);
 
   const stopScanner = useCallback(async () => {
     const scanner = scannerRef.current;

@@ -13,16 +13,60 @@ import {
 
 export const runtime = "nodejs";
 
+const normalizeRoleKey = (value: unknown): string =>
+  asString(value)
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+
+const canLeagueRoleScanInternalEvent = (role: unknown): boolean => {
+  const key = normalizeRoleKey(role);
+  return key === "presidente" || key === "vice-presidente" || key === "vice presidente" || key === "secretaria" || key === "secretario";
+};
+
+const getLeagueEventMetadata = (
+  eventRow: Record<string, unknown> | null
+): { leagueId: string; visibility: "public" | "internal" } => {
+  const stats = asObject(eventRow?.stats) ?? {};
+  const visibilityRaw = asString(stats.leagueEventVisibility || stats.eventVisibility)
+    .trim()
+    .toLowerCase();
+  return {
+    leagueId: asString(stats.leagueId).trim(),
+    visibility: visibilityRaw === "internal" || visibilityRaw === "interno" ? "internal" : "public",
+  };
+};
+
+const userCanScanInternalLeagueEvent = async (payload: {
+  leagueId: string;
+  userId: string;
+  tenantId: string;
+}): Promise<boolean> => {
+  if (!payload.leagueId || !payload.userId) return false;
+  let query = supabaseAdmin
+    .from("ligas_membros")
+    .select("cargo")
+    .eq("ligaId", payload.leagueId)
+    .eq("userId", payload.userId)
+    .limit(1);
+  if (payload.tenantId) {
+    query = query.eq("tenant_id", payload.tenantId);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) return false;
+  const member = asObject(data);
+  return canLeagueRoleScanInternalEvent(member?.cargo);
+};
+
 export async function POST(request: NextRequest) {
   try {
     const scope = await getLeagueAdminAuthScope(request);
-    const canScanEvents =
+    const hasTenantScannerRole =
       scope.isPlatformMaster ||
       (scope.tenantStatus === "approved" &&
         (scope.canManageTenant || scope.tenantRole === "vendas" || scope.userRole === "vendas"));
-    if (!canScanEvents) {
-      throw new LeagueAdminApiError("Sem permissão para validar ingressos.", 403);
-    }
     const { data: readerProfileRow } = await supabaseAdmin
       .from("users")
       .select("uid,nome,turma")
@@ -46,7 +90,7 @@ export async function POST(request: NextRequest) {
           }
         : null);
     if (!parsedPayload?.orderId) {
-      throw new LeagueAdminApiError("QR code inválido para ingresso.", 400);
+      throw new LeagueAdminApiError("QR code invalido para ingresso.", 400);
     }
 
     const { data: orderRow, error: orderError } = await supabaseAdmin
@@ -60,7 +104,7 @@ export async function POST(request: NextRequest) {
 
     const order = asObject(orderRow);
     if (!order) {
-      throw new LeagueAdminApiError("Pedido do ingresso não encontrado.", 404);
+      throw new LeagueAdminApiError("Pedido do ingresso nao encontrado.", 404);
     }
 
     const orderTenantId = asString(order.tenant_id);
@@ -72,7 +116,29 @@ export async function POST(request: NextRequest) {
       throw new LeagueAdminApiError("Ingresso fora do tenant ativo.", 403);
     }
     if (!["aprovado", "approved", "pago", "paid", "entregue", "presente"].includes(asString(order.status).toLowerCase())) {
-      throw new LeagueAdminApiError("Pagamento ainda não aprovado para check-in.", 400);
+      throw new LeagueAdminApiError("Pagamento ainda nao aprovado para check-in.", 400);
+    }
+
+    const { data: eventRowRaw, error: eventError } = await supabaseAdmin
+      .from("eventos")
+      .select("id,tenant_id,tipo,categoria,stats")
+      .eq("id", eventId)
+      .maybeSingle();
+    if (eventError) {
+      throw new LeagueAdminApiError(eventError.message, 400);
+    }
+    const eventMetadata = getLeagueEventMetadata(asObject(eventRowRaw));
+    const canScanLeagueInternal =
+      eventMetadata.visibility === "internal" &&
+      Boolean(eventMetadata.leagueId) &&
+      (await userCanScanInternalLeagueEvent({
+        leagueId: eventMetadata.leagueId,
+        userId: scope.userId,
+        tenantId: orderTenantId,
+      }));
+
+    if (!hasTenantScannerRole && !canScanLeagueInternal) {
+      throw new LeagueAdminApiError("Sem permissao para validar ingressos.", 403);
     }
 
     const paymentConfig = normalizePaymentConfig(order.payment_config);
@@ -82,7 +148,7 @@ export async function POST(request: NextRequest) {
         paymentConfig?.ticketEntries?.[0] ||
         null;
     if (!ticketEntry || !paymentConfig?.ticketEntries) {
-      throw new LeagueAdminApiError("Ingresso não encontrado para esse QR code.", 404);
+      throw new LeagueAdminApiError("Ingresso nao encontrado para esse QR code.", 404);
     }
 
     const alreadyScanned = ticketEntry.status === "lido";

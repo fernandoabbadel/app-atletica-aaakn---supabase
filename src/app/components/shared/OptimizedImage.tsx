@@ -41,6 +41,9 @@ export function OptimizedImage({
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const containerStyle = getContainerStyle(fill, width, height);
+  const bypassOptimizer =
+    typeof src === "string" &&
+    /^https?:\/\//i.test(src);
 
   if (hasError || !src) {
     return (
@@ -70,6 +73,7 @@ export function OptimizedImage({
         width={fill ? undefined : width}
         height={fill ? undefined : height}
         sizes={fill ? sizes : undefined}
+        unoptimized={bypassOptimizer}
         onLoad={(event) => {
           setIsLoading(false);
           onLoad?.(event);

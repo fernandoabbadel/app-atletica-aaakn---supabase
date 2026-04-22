@@ -12,6 +12,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "../../context/ToastContext";
 import { fetchEventsFeed, toggleEventLike } from "../../lib/eventsNativeService";
+import { fetchLeagueById } from "../../lib/leaguesService";
 import { getTurmaImage } from "../../constants/turmaImages";
 import { resolvePlanScopedPriceInfo } from "../../lib/commerceCatalog";
 import { withTenantSlug } from "@/lib/tenantRouting";
@@ -43,7 +44,12 @@ export interface Evento {
     confirmados: number;
     talvez: number;
     likes?: number;
+    leagueId?: string;
+    leagueEventVisibility?: string;
+    eventVisibility?: string;
   };
+  leagueId?: string;
+  leagueEventVisibility?: string;
   lotes?: Array<{
     nome: string;
     preco: string;
@@ -79,8 +85,26 @@ const EVENTS_CLIENT_CACHE_TTL_MS = 2 * 60 * 1000;
 const isLeagueEvent = (event: Evento): boolean => {
   const tipo = String(event.tipo || "").trim().toLowerCase();
   const categoria = String(event.categoria || "").trim().toLowerCase();
-  return tipo === "liga" || categoria === "liga";
+  return tipo === "liga" || categoria === "liga" || categoria.startsWith("liga ");
 };
+
+const getLeagueEventVisibility = (event: Evento): "public" | "internal" => {
+  const raw = String(
+    event.leagueEventVisibility ||
+      event.stats?.leagueEventVisibility ||
+      event.stats?.eventVisibility ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+  return raw === "internal" || raw === "interno" ? "internal" : "public";
+};
+
+const getLeagueIdFromEvent = (event: Evento): string =>
+  String(event.leagueId || event.stats?.leagueId || "").trim();
+
+const isInternalLeagueEvent = (event: Evento): boolean =>
+  isLeagueEvent(event) && getLeagueEventVisibility(event) === "internal";
 
 // --- HELPER: PARSER DE DATA ---
 const parseEventDate = (dateStr: string, timeStr: string = "00:00") => {
@@ -324,6 +348,11 @@ function EventCard({
                 <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase backdrop-blur-md shadow-lg ${ev.tipo === 'Liga' ? 'bg-blue-600 text-white' : 'bg-emerald-500 text-black'}`}>
                     {ev.tipo}
                 </span>
+                {isInternalLeagueEvent(ev) && (
+                    <span className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-amber-500 text-black shadow-lg">
+                        Interno
+                    </span>
+                )}
                 <span className={`px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase backdrop-blur-md shadow-lg ${getSaleStatusClass(saleStatus)}`}>
                     {getSaleStatusLabel(saleStatus)}
                 </span>
@@ -415,6 +444,7 @@ export default function EventosClientPage({
   const [modulesConfig, setModulesConfig] = useState<TenantAppModulesConfig>(
     initialModulesConfig ?? createDefaultTenantAppModulesConfig()
   );
+  const [leagueMembershipById, setLeagueMembershipById] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState(EVENT_FILTER_ALL);
   const [searchTerm, setSearchTerm] = useState("");
   const { userPlanNames, userPlanIds } = useMemo(() => collectUserPlanScope(user), [user]);
@@ -489,6 +519,48 @@ export default function EventosClientPage({
     };
   }, [tenantId, tenantSlug, user?.tenant_id]);
 
+  useEffect(() => {
+    const internalLeagueIds = Array.from(
+      new Set(
+        eventos
+          .filter(isInternalLeagueEvent)
+          .map(getLeagueIdFromEvent)
+          .filter((leagueId) => leagueId.length > 0)
+      )
+    );
+
+    if (!user?.uid || internalLeagueIds.length === 0) {
+      setLeagueMembershipById({});
+      return;
+    }
+
+    let mounted = true;
+    const loadLeagueMemberships = async () => {
+      const entries = await Promise.all(
+        internalLeagueIds.map(async (leagueId) => {
+          try {
+            const league = await fetchLeagueById(leagueId, {
+              tenantId: tenantId || undefined,
+            });
+            const isMember = Boolean(
+              league?.membros?.some((member) => member.id.trim() === user.uid.trim())
+            );
+            return [leagueId, isMember] as const;
+          } catch (error: unknown) {
+            console.error("Erro ao validar membro da liga:", error);
+            return [leagueId, false] as const;
+          }
+        })
+      );
+      if (mounted) setLeagueMembershipById(Object.fromEntries(entries));
+    };
+
+    void loadLeagueMemberships();
+    return () => {
+      mounted = false;
+    };
+  }, [eventos, tenantId, user?.uid]);
+
   const ligasModuleEnabled = isTenantAppModuleVisible(modulesConfig, "ligas");
   const tenantEventsLabel = useMemo(() => {
     const sigla = String(tenantSigla || "").trim().toUpperCase();
@@ -513,12 +585,16 @@ export default function EventosClientPage({
       eventos.filter((event) => {
         const status = String(event.status || "ativo").toLowerCase().trim();
         if (status !== "ativo") return false;
+        if (isInternalLeagueEvent(event)) {
+          const leagueId = getLeagueIdFromEvent(event);
+          if (!leagueId || leagueMembershipById[leagueId] !== true) return false;
+        }
 
         const parsedDate = parseEventDate(event.data, event.hora);
         if (!parsedDate) return true;
         return parsedDate.getTime() >= Date.now();
       }),
-    [eventos]
+    [eventos, leagueMembershipById]
   );
 
   const visibleEvents = useMemo(

@@ -14,7 +14,7 @@ type Row = Record<string, unknown>;
 const FINANCEIRO_CACHE_TTL_MS = 90_000;
 const FINANCEIRO_DOC_ID = "financeiro";
 const EVENT_CHECKOUT_SELECT_COLUMNS =
-  "id,titulo,imagem,lotes,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,data,hora,local,tipo,categoria";
+  "id,titulo,imagem,lotes,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,data,hora,local,tipo,categoria,stats";
 const TICKET_REQUEST_INSERT_SELECT_COLUMNS = "id";
 
 const financeiroCache = new Map<string, CacheEntry<Row | null>>();
@@ -28,6 +28,20 @@ const asString = (value: unknown, fallback = ""): string =>
 const asTrimmedId = (value: unknown): string => String(value ?? "").trim();
 
 const nowIso = (): string => new Date().toISOString();
+
+const getLeagueEventMetadata = (eventRow: Row | null): {
+  leagueId: string;
+  visibility: "public" | "internal";
+} => {
+  const stats = asObject(eventRow?.stats) ?? {};
+  const visibilityRaw = asString(stats.leagueEventVisibility || stats.eventVisibility)
+    .trim()
+    .toLowerCase();
+  return {
+    leagueId: asString(stats.leagueId).trim(),
+    visibility: visibilityRaw === "internal" || visibilityRaw === "interno" ? "internal" : "public",
+  };
+};
 
 const throwSupabaseError = (error: {
   message: string;
@@ -256,7 +270,7 @@ export async function createEventTicketRequest(payload: {
 
   let eventLookup = supabase
     .from("eventos")
-    .select("id,lotes")
+    .select("id,lotes,stats")
     .eq("id", payload.eventoId.trim());
   if (scopedTenantId) {
     eventLookup = eventLookup.eq("tenant_id", scopedTenantId);
@@ -264,6 +278,23 @@ export async function createEventTicketRequest(payload: {
   const { data: eventRow, error: eventError } = await eventLookup.maybeSingle();
   if (eventError) throwSupabaseError(eventError);
   if (eventRow) {
+    const eventMetadata = getLeagueEventMetadata(eventRow as Row);
+    if (eventMetadata.visibility === "internal" && eventMetadata.leagueId) {
+      let memberQuery = supabase
+        .from("ligas_membros")
+        .select("id")
+        .eq("ligaId", eventMetadata.leagueId)
+        .eq("userId", payload.userId.trim())
+        .limit(1);
+      if (scopedTenantId) {
+        memberQuery = memberQuery.eq("tenant_id", scopedTenantId);
+      }
+      const { data: memberRow, error: memberError } = await memberQuery.maybeSingle();
+      if (memberError) throwSupabaseError(memberError);
+      if (!memberRow) {
+        throw new Error("Este evento interno aceita pedidos apenas de membros da liga.");
+      }
+    }
     const lotes = Array.isArray(eventRow.lotes) ? eventRow.lotes : [];
     const lote = lotes.find((entry) => {
       const row = asObject(entry);

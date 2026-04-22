@@ -55,7 +55,6 @@ const CALLABLE_SET_ORDER_STATUS = "storeSetOrderStatus";
 const CALLABLE_SET_REVIEW_STATUS = "storeSetReviewStatus";
 const CALLABLE_UPSERT_PRODUCT = "storeAdminUpsertProduct";
 const CALLABLE_DELETE_PRODUCT = "storeAdminDeleteProduct";
-const CALLABLE_CREATE_CATEGORY = "storeAdminCreateCategory";
 
 const adminBundleCache = new Map<string, CacheEntry<StoreAdminBundle>>();
 const productsFeedCache = new Map<string, CacheEntry<Row[]>>();
@@ -133,6 +132,18 @@ const extractMissingSchemaColumn = (error: unknown): string | null => {
     if (match?.[1]) return match[1];
   }
   return null;
+};
+
+const isUniqueConstraintError = (error: unknown, constraintName?: string): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const raw = error as { code?: unknown; message?: unknown; details?: unknown };
+  const code = typeof raw.code === "string" ? raw.code.trim() : "";
+  const text = [raw.message, raw.details]
+    .map((entry) => (typeof entry === "string" ? entry.toLowerCase() : ""))
+    .filter(Boolean)
+    .join(" | ");
+  if (code !== "23505") return false;
+  return constraintName ? text.includes(constraintName.toLowerCase()) : true;
 };
 
 const getStoreSelectColumns = (tableName: string): string[] =>
@@ -358,6 +369,35 @@ async function mutateStoreTableWithSchemaFallback(options: {
 
     throwSupabaseError(error);
   }
+}
+
+async function mutateStoreCategoryByNameWithSchemaFallback(options: {
+  nome: string;
+  payload: Row;
+}): Promise<void> {
+  await mutateStoreTableWithSchemaFallback({
+    tableName: "categorias",
+    operation: "update",
+    payload: options.payload,
+    filters: [{ field: "nome", value: options.nome }],
+  });
+}
+
+async function findStoreCategoryIdByName(nome: string): Promise<string> {
+  const cleanNome = nome.trim();
+  if (!cleanNome) return "";
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("categorias")
+    .select("id")
+    .eq("nome", cleanNome)
+    .maybeSingle();
+  if (error) {
+    throwSupabaseError(error);
+  }
+
+  return asString((data as Row | null)?.id).trim();
 }
 
 const normalizeAdminStoreRow = (table: string, row: Row): Row => {
@@ -1370,7 +1410,10 @@ export async function upsertStoreCategory(payload: {
   const scopedTenantId = resolveStoreTenantId(source.tenantId);
   if (!cleanNome) return;
 
-  if (categoryId) {
+  const existingCategoryId = categoryId || (await findStoreCategoryIdByName(cleanNome));
+  const shouldFilterExistingCategoryByTenant = Boolean(categoryId && scopedTenantId);
+
+  if (existingCategoryId) {
     const updatePayload: Row = {
       nome: cleanNome,
       cover_img: coverImg || null,
@@ -1386,8 +1429,8 @@ export async function upsertStoreCategory(payload: {
       operation: "update",
       payload: updatePayload,
       filters: [
-        { field: "id", value: categoryId },
-        ...(scopedTenantId ? [{ field: "tenant_id", value: scopedTenantId }] : []),
+        { field: "id", value: existingCategoryId },
+        ...(shouldFilterExistingCategoryByTenant ? [{ field: "tenant_id", value: scopedTenantId }] : []),
       ],
     });
     invalidateStoreCaches();
@@ -1409,28 +1452,31 @@ export async function upsertStoreCategory(payload: {
     createdAt: nowIso(),
   };
 
-  await callWithFallback<Record<string, unknown>, { ok: boolean }>(
-    CALLABLE_CREATE_CATEGORY,
-    {
-      nome: cleanNome,
-      cover_img: coverImg,
-      button_color: buttonColor,
-      logo_url: logoUrl,
-      ...(nextDisplayOrder !== null ? { display_order: nextDisplayOrder } : {}),
+  try {
+    await mutateStoreTableWithSchemaFallback({
+      tableName: "categorias",
+      operation: "insert",
+      payload: insertPayload,
+    });
+  } catch (error: unknown) {
+    if (!isUniqueConstraintError(error, "categorias_nome_key")) {
+      throw error;
+    }
+    const updatePayload: Row = {
+      cover_img: coverImg || null,
+      button_color: buttonColor || null,
+      logo_url: logoUrl || null,
       seller_type: sellerTypeForWrite,
-      seller_id: sellerId,
+      seller_id: sellerId || null,
+      ...(nextDisplayOrder !== null ? { display_order: nextDisplayOrder } : {}),
       visible,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
-    },
-    async () => {
-      await mutateStoreTableWithSchemaFallback({
-        tableName: "categorias",
-        operation: "insert",
-        payload: insertPayload,
-      });
-      return { ok: true };
-    }
-  );
+    };
+    await mutateStoreCategoryByNameWithSchemaFallback({
+      nome: cleanNome,
+      payload: updatePayload,
+    });
+  }
 
   invalidateStoreCaches();
 }
