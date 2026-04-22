@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Check, Clock3, HeartHandshake, Loader2, Users, X } from "lucide-react";
+import { ArrowLeft, Check, Clock3, HeartHandshake, Loader2, Plus, Trash2, UserPlus, Users, X } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -11,6 +11,7 @@ import { useToast } from "@/context/ToastContext";
 import {
   fetchMentorshipHubBundle,
   respondToMentorshipInvite,
+  sendMentorshipInvite,
   type MentorshipHubBundle,
   type MentorshipLabelsConfig,
   type MentorshipRoleSide,
@@ -18,6 +19,7 @@ import {
   resolveMentorshipRoleOptions,
   updateMentorshipRoleLabel,
 } from "@/lib/mentorshipService";
+import { fetchLeagueUsers, type LeagueUserRecord } from "@/lib/leaguesService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const EMPTY_BUNDLE: MentorshipHubBundle = {
@@ -67,6 +69,11 @@ export default function ConfiguracoesApadrinhamentoPage() {
   const [bundle, setBundle] = useState<MentorshipHubBundle>(EMPTY_BUNDLE);
   const [actionId, setActionId] = useState("");
   const [editingRoleId, setEditingRoleId] = useState("");
+  const [candidateUsers, setCandidateUsers] = useState<LeagueUserRecord[]>([]);
+  const [inviteMode, setInviteMode] = useState<"mentor" | "mentee">("mentor");
+  const [selectedTurma, setSelectedTurma] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [sendingInvite, setSendingInvite] = useState(false);
 
   const effectiveTenantId =
     tenantId.trim() || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
@@ -100,6 +107,77 @@ export default function ConfiguracoesApadrinhamentoPage() {
   useEffect(() => {
     void loadBundle(true);
   }, [loadBundle]);
+
+  useEffect(() => {
+    const requestedMode =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("tipo") === "mentee"
+        ? "mentee"
+        : "mentor";
+    setInviteMode(requestedMode);
+  }, []);
+
+  const loadCandidates = useCallback(
+    async (forceRefresh = false) => {
+      if (!effectiveTenantId || !user?.uid) {
+        setCandidateUsers([]);
+        return;
+      }
+      try {
+        const users = await fetchLeagueUsers({
+          maxResults: 200,
+          forceRefresh,
+          tenantId: effectiveTenantId,
+        });
+        setCandidateUsers(users.filter((row) => row.id !== user.uid));
+      } catch (error: unknown) {
+        console.error(error);
+        setCandidateUsers([]);
+      }
+    },
+    [effectiveTenantId, user?.uid]
+  );
+
+  useEffect(() => {
+    void loadCandidates(true);
+  }, [loadCandidates]);
+
+  const turmaOptions = Array.from(
+    new Set(
+      candidateUsers
+        .map((row) => (row.turma || "Sem turma").trim() || "Sem turma")
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right, "pt-BR"));
+  const usersBySelectedTurma = candidateUsers
+    .filter((row) => ((row.turma || "Sem turma").trim() || "Sem turma") === selectedTurma)
+    .sort((left, right) => (left.nome || "").localeCompare(right.nome || "", "pt-BR"));
+
+  useEffect(() => {
+    setSelectedUserId("");
+  }, [selectedTurma, inviteMode]);
+
+  const handleSendInvite = async () => {
+    if (!effectiveTenantId || !user?.uid || !selectedUserId || sendingInvite) return;
+    try {
+      setSendingInvite(true);
+      await sendMentorshipInvite({
+        tenantId: effectiveTenantId,
+        currentUserId: user.uid,
+        targetUserId: selectedUserId,
+        mode: inviteMode,
+      });
+      addToast("Convite de apadrinhamento enviado.", "success");
+      setSelectedUserId("");
+      await loadBundle(true);
+      await loadCandidates(true);
+    } catch (error: unknown) {
+      console.error(error);
+      addToast(error instanceof Error ? error.message : "Erro ao enviar convite.", "error");
+    } finally {
+      setSendingInvite(false);
+    }
+  };
 
   const handleAction = async (
     relationshipId: string,
@@ -214,6 +292,66 @@ export default function ConfiguracoesApadrinhamentoPage() {
           </div>
         ) : (
           <>
+            <section className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <UserPlus size={16} className="text-emerald-300" />
+                <h3 className="text-sm font-black uppercase text-white">Adicionar vínculo</h3>
+              </div>
+              <div className="grid gap-3 md:grid-cols-[180px_1fr_1fr_auto] md:items-end">
+                <label className="grid gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                  Tipo
+                  <select
+                    value={inviteMode}
+                    onChange={(event) => setInviteMode(event.target.value as "mentor" | "mentee")}
+                    className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-3 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-emerald-500"
+                  >
+                    <option value="mentor">{labels.mentorLabel}</option>
+                    <option value="mentee">{labels.menteeLabel}</option>
+                  </select>
+                </label>
+                <label className="grid gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                  Turma
+                  <select
+                    value={selectedTurma}
+                    onChange={(event) => setSelectedTurma(event.target.value)}
+                    className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-3 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-emerald-500"
+                  >
+                    <option value="">Selecione a turma</option>
+                    {turmaOptions.map((turma) => (
+                      <option key={turma} value={turma}>
+                        {turma}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                  Aluno
+                  <select
+                    value={selectedUserId}
+                    onChange={(event) => setSelectedUserId(event.target.value)}
+                    disabled={!selectedTurma}
+                    className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-3 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-emerald-500 disabled:opacity-50"
+                  >
+                    <option value="">{selectedTurma ? "Selecione o aluno" : "Escolha uma turma"}</option>
+                    {usersBySelectedTurma.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.nome || "Atleta"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void handleSendInvite()}
+                  disabled={!selectedUserId || sendingInvite}
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 text-[11px] font-black uppercase text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-60"
+                >
+                  {sendingInvite ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Adicionar
+                </button>
+              </div>
+            </section>
+
             <section className="grid gap-4 md:grid-cols-2">
               <RoleCard
                 title={labels.mentorLabel}
@@ -433,7 +571,7 @@ function RoleCard({
                 disabled={removing}
                 className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] font-black uppercase text-red-300 hover:bg-red-500/20 disabled:opacity-60"
               >
-                {removing ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
+                {removing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                 Remover vinculo
               </button>
             </div>

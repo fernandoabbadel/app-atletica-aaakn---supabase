@@ -140,7 +140,8 @@ const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 
 const isLeagueSellerRow = (row: Row, leagueId: string): boolean =>
-  asString(row.seller_type).toLowerCase() === "league" && asString(row.seller_id) === leagueId;
+  asString(row.seller_id) === leagueId &&
+  ["league", "tenant", ""].includes(asString(row.seller_type).toLowerCase());
 
 const isLeagueCategoryRow = (row: Row, leagueId: string): boolean => {
   const sellerId = asString(row.seller_id);
@@ -155,6 +156,71 @@ const parseMoney = (value: string): number =>
 
 const parseIntSafe = (value: string): number =>
   Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
+
+type StorePaymentConfig = {
+  chave: string;
+  banco: string;
+  titular: string;
+  whatsapp: string;
+};
+
+const EMPTY_PAYMENT_CONFIG: StorePaymentConfig = {
+  chave: "",
+  banco: "",
+  titular: "",
+  whatsapp: "",
+};
+
+const normalizePaymentConfigFields = (value: unknown): StorePaymentConfig => {
+  const row = value && typeof value === "object" ? (value as Row) : {};
+  return {
+    chave: asString(row.chave).slice(0, PIX_KEY_MAX_LENGTH),
+    banco: asString(row.banco).slice(0, PIX_BANK_MAX_LENGTH),
+    titular: asString(row.titular).slice(0, PIX_HOLDER_MAX_LENGTH),
+    whatsapp: normalizePhoneToBrE164(asString(row.whatsapp)).slice(0, PHONE_MAX_LENGTH),
+  };
+};
+
+const hasAnyPaymentConfig = (config: StorePaymentConfig): boolean =>
+  Boolean(config.chave || config.banco || config.titular || config.whatsapp);
+
+const hasCompletePaymentConfig = (config: StorePaymentConfig): boolean =>
+  Boolean(
+    config.chave &&
+      config.banco &&
+      config.titular &&
+      config.whatsapp &&
+      hasValidPhoneLength(config.whatsapp)
+  );
+
+const paymentConfigMatches = (
+  source: { chave?: unknown; banco?: unknown; titular?: unknown; whatsapp?: unknown } | null | undefined,
+  target: StorePaymentConfig
+): boolean => {
+  const normalized = normalizePaymentConfigFields(source);
+  return (
+    normalized.chave === target.chave &&
+    normalized.banco === target.banco &&
+    normalized.titular === target.titular &&
+    normalized.whatsapp === target.whatsapp
+  );
+};
+
+const resolveLeaguePaymentConfig = (league: LeagueRecord | null): StorePaymentConfig => {
+  const candidates = (league?.eventos || []).map((event) =>
+    normalizePaymentConfigFields({
+      chave: event.paymentConfig?.chave || event.pixChave,
+      banco: event.paymentConfig?.banco || event.pixBanco,
+      titular: event.paymentConfig?.titular || event.pixTitular,
+      whatsapp: event.paymentConfig?.whatsapp || event.contatoComprovante,
+    })
+  );
+  return (
+    candidates.find((config) => hasCompletePaymentConfig(config)) ||
+    candidates.find((config) => hasAnyPaymentConfig(config)) ||
+    EMPTY_PAYMENT_CONFIG
+  );
+};
 
 const extractErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message.trim();
@@ -217,6 +283,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
 
   const leagueName = league?.sigla?.trim() || league?.nome?.trim() || "Liga";
   const leagueLogo = (league ? resolveLeagueLogoSrc(league) : "") || "/logo.png";
+  const leaguePaymentConfig = useMemo(() => resolveLeaguePaymentConfig(league), [league]);
   const categoryVisible = category ? category.visible !== false : false;
   const visibleProducts = products.filter((row) => row.active !== false);
   const productIds = useMemo(() => products.map((row) => asString(row.id)).filter(Boolean), [products]);
@@ -381,11 +448,13 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
       | { whatsapp?: unknown; chave?: unknown; banco?: unknown; titular?: unknown }
       | null
       | undefined;
-    const productPaymentEnabled = Boolean(
+    const productHasPaymentData = Boolean(
       asString(productPaymentConfig?.chave) ||
         asString(productPaymentConfig?.banco) ||
         asString(productPaymentConfig?.titular)
     );
+    const productPaymentEnabled =
+      productHasPaymentData && !paymentConfigMatches(productPaymentConfig, leaguePaymentConfig);
     setForm(
       product
         ? {
@@ -400,11 +469,13 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
             lote: asString(product.lote) || "geral",
             img: asString(product.img),
             descricao: asString(product.descricao),
-            contato: asString(productPaymentConfig?.whatsapp),
+            contato: productPaymentEnabled
+              ? asString(productPaymentConfig?.whatsapp)
+              : leaguePaymentConfig.whatsapp,
             paymentEnabled: productPaymentEnabled,
-            pixChave: asString(productPaymentConfig?.chave),
-            pixBanco: asString(productPaymentConfig?.banco),
-            pixTitular: asString(productPaymentConfig?.titular),
+            pixChave: productPaymentEnabled ? asString(productPaymentConfig?.chave) : "",
+            pixBanco: productPaymentEnabled ? asString(productPaymentConfig?.banco) : "",
+            pixTitular: productPaymentEnabled ? asString(productPaymentConfig?.titular) : "",
             tagLabel: asString(product.tagLabel),
             tagColor:
               productTagColor === "emerald" ||
@@ -420,7 +491,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
             usarVariantes: productVariants.length > 0,
             variantes: productVariants.length > 0 ? productVariants : [newVariant()],
           }
-        : createEmptyProductForm()
+        : { ...createEmptyProductForm(), contato: leaguePaymentConfig.whatsapp }
     );
     setFormOpen(true);
   };
@@ -508,11 +579,14 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
     if (!league || !leagueId) return;
     if (!nome) return addToast("Nome do produto obrigatório.", "error");
     if (!Number.isFinite(preco) || preco < 0) return addToast("Preço inválido.", "error");
-    if (!contatoComprovante || !hasValidPhoneLength(contatoComprovante)) {
+    if (form.paymentEnabled && (!contatoComprovante || !hasValidPhoneLength(contatoComprovante))) {
       return addToast("Informe um WhatsApp válido para o comprovante da liga.", "error");
     }
     if (form.paymentEnabled && (!pixChave || !pixBanco || !pixTitular)) {
       return addToast("Preencha a chave PIX, o banco e o titular para usar dados próprios.", "error");
+    }
+    if (!form.paymentEnabled && !hasCompletePaymentConfig(leaguePaymentConfig)) {
+      return addToast("Configure os dados de pagamento na edição da liga ou use dados próprios.", "error");
     }
 
     const variants = form.usarVariantes
@@ -543,6 +617,14 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
       .map((line) => line.trim())
       .filter(Boolean)
       .join("\n");
+    const paymentConfig = form.paymentEnabled
+      ? {
+          chave: pixChave,
+          banco: pixBanco,
+          titular: pixTitular,
+          whatsapp: contatoComprovante,
+        }
+      : leaguePaymentConfig;
 
     setSaving(true);
     try {
@@ -562,12 +644,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
         cores: coresText,
         caracteristicas,
         likes: [],
-        payment_config: {
-          chave: form.paymentEnabled ? pixChave : "",
-          banco: form.paymentEnabled ? pixBanco : "",
-          titular: form.paymentEnabled ? pixTitular : "",
-          whatsapp: contatoComprovante,
-        },
+        payment_config: paymentConfig,
         seller_type: "league",
         seller_id: leagueId,
         seller_name: leagueName,
@@ -888,7 +965,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
                     <div>
                       <p className="text-xs font-black uppercase text-white">Pagamento do produto</p>
                       <p className="text-[11px] text-zinc-500">
-                        Se desligado, usa automaticamente os dados gerais da atlética.
+                        Se desligado, usa automaticamente os dados de pagamento da edição da liga.
                       </p>
                     </div>
                     <label className="inline-flex items-center gap-2 text-[11px] font-bold text-zinc-400">

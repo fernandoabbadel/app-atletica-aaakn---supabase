@@ -97,7 +97,8 @@ const statusIsApproved = (status: unknown): boolean => {
 };
 
 const isLeagueSellerRow = (row: Row, leagueId: string): boolean =>
-  asString(row.seller_type).toLowerCase() === "league" && asString(row.seller_id) === leagueId;
+  asString(row.seller_id) === leagueId &&
+  ["league", "tenant", ""].includes(asString(row.seller_type).toLowerCase());
 
 const addMetric = (map: Map<string, MetricRow>, name: string, quantity: number, value: number) => {
   const cleanName = name.trim() || "Sem nome";

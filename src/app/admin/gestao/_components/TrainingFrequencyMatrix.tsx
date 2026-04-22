@@ -355,9 +355,6 @@ export default function TrainingFrequencyMatrix() {
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">BI Treinos</p>
               <h1 className="mt-1 text-2xl font-black uppercase text-white">Frequência por Data</h1>
-              <p className="mt-1 text-sm font-bold text-zinc-500">
-                Alunos nas linhas, treinos nas colunas e presença marcada por célula.
-              </p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-black/50 px-3 py-2 text-xs font-black uppercase tracking-wide text-zinc-400">

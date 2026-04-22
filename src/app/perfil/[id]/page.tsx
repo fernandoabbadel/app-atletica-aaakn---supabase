@@ -8,7 +8,7 @@ import Image from "next/image";
 import { 
   ArrowLeft, MapPin, Edit3, Instagram, MessageCircle, Ghost, Fish, Share2, ShieldCheck, Loader2, 
   UserPlus, UserCheck, X, PawPrint, Users, Lock, Heart,
-  Calendar, Clock, CheckCircle, EyeOff, Store, HeartHandshake, MoreHorizontal
+  Calendar, Clock, CheckCircle, EyeOff, Store, HeartHandshake, MoreHorizontal, Plus, Trash2
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext"; 
 import { useToast } from "../../../context/ToastContext";
@@ -796,9 +796,13 @@ export default function PerfilPublicoPage() {
                                 {[{
                                   title: mentorshipLabels.mentorLabel,
                                   item: mentorshipBundle?.mentor,
+                                  inviteMode: "mentor" as const,
+                                  requestStatus: mentorshipBundle?.viewerMentorRequestStatus || "none",
                                 }, {
                                   title: mentorshipLabels.menteeLabel,
                                   item: mentorshipBundle?.mentee,
+                                  inviteMode: "mentee" as const,
+                                  requestStatus: mentorshipBundle?.viewerMenteeRequestStatus || "none",
                                 }].map((section) => (
                                   <div key={section.title} className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5 text-center">
                                       <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
@@ -877,7 +881,7 @@ export default function PerfilPublicoPage() {
                                                 {removingMentorshipId === section.item.relationshipId ? (
                                                   <Loader2 size={14} className="animate-spin" />
                                                 ) : (
-                                                  <X size={14} />
+                                                  <Trash2 size={14} />
                                                 )}
                                                 Remover
                                               </button>
@@ -886,7 +890,42 @@ export default function PerfilPublicoPage() {
                                         </div>
                                       ) : (
                                         <div className="mt-4 flex flex-col items-center">
-                                            <div className="h-32 w-32 rounded-full border border-dashed border-zinc-800 bg-black/20" />
+                                            <div className="relative flex h-32 w-32 items-center justify-center rounded-full border border-dashed border-zinc-800 bg-black/20">
+                                              {isOwnProfile ? (
+                                                <Link
+                                                  href={tenantPath(`/configuracoes/apadrinhamento?tipo=${section.inviteMode}`)}
+                                                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 transition hover:bg-emerald-500/20"
+                                                  title="Adicionar"
+                                                >
+                                                  <Plus size={20} />
+                                                </Link>
+                                              ) : user?.uid && effectiveMentorshipTenantId ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void handleSendMentorshipInvite(section.inviteMode)}
+                                                  disabled={sendingMentorshipMode.length > 0 || section.requestStatus !== "none"}
+                                                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                                  title={
+                                                    section.requestStatus === "none"
+                                                      ? "Adicionar"
+                                                      : section.requestStatus === "pending"
+                                                      ? "Convite pendente"
+                                                      : "Vinculo existente"
+                                                  }
+                                                >
+                                                  {sendingMentorshipMode === section.inviteMode ? (
+                                                    <Loader2 size={18} className="animate-spin" />
+                                                  ) : (
+                                                    <Plus size={20} />
+                                                  )}
+                                                </button>
+                                              ) : null}
+                                            </div>
+                                            {section.requestStatus !== "none" && !isOwnProfile ? (
+                                              <p className="mt-3 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                                                {section.requestStatus === "pending" ? "Convite pendente" : "Vinculo existente"}
+                                              </p>
+                                            ) : null}
                                         </div>
                                       )}
                                   </div>

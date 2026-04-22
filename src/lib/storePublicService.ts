@@ -73,6 +73,10 @@ const normalizeStoreSellerType = (value: unknown): "tenant" | "mini_vendor" | "l
   if (raw === "league") return "league";
   return "tenant";
 };
+const normalizeStoreSellerTypeForWrite = (value: unknown): "tenant" | "mini_vendor" => {
+  const sellerType = normalizeStoreSellerType(value);
+  return sellerType === "mini_vendor" ? "mini_vendor" : "tenant";
+};
 const getStoreSellerSortOrder = (value: unknown): number => {
   const sellerType = normalizeStoreSellerType(value);
   if (sellerType === "tenant") return 0;
@@ -214,6 +218,7 @@ const collectUserPlanEntries = (
 const normalizeProductRow = (
   row: Row,
   options?: {
+    tenantId?: string | null;
     userPlanNames?: Array<string | null | undefined>;
     userPlanIds?: Array<string | null | undefined>;
   }
@@ -232,6 +237,22 @@ const normalizeProductRow = (
     return null;
   }
 
+  const seller = normalizeSellerSnapshot({
+    type: row.seller_type,
+    id: row.seller_id,
+    name: row.seller_name,
+    logoUrl: row.seller_logo_url,
+  });
+  const scopedTenantId = asString(options?.tenantId).trim();
+  const normalizedSeller =
+    seller &&
+    seller.type === "tenant" &&
+    seller.id &&
+    scopedTenantId &&
+    seller.id !== scopedTenantId
+      ? { ...seller, type: "league" as const }
+      : seller;
+
   return {
     ...normalizeRowTimestamps(row),
     preco_base: asNum(row.preco, 0),
@@ -245,12 +266,7 @@ const normalizeProductRow = (
     plan_prices: normalizePlanPriceEntries(row.plan_prices),
     plan_visibility: planVisibility,
     payment_config: normalizePaymentConfig(row.payment_config),
-    seller: normalizeSellerSnapshot({
-      type: row.seller_type,
-      id: row.seller_id,
-      name: row.seller_name,
-      logoUrl: row.seller_logo_url,
-    }),
+    seller: normalizedSeller,
   };
 };
 
@@ -526,6 +542,7 @@ export async function fetchStoreProductsPage(options?: {
   const visibleRows = rows
     .map((row) =>
       normalizeProductRow(row, {
+        tenantId: scopedTenantId,
         userPlanNames: options?.userPlanNames,
         userPlanIds: options?.userPlanIds,
       })
@@ -593,6 +610,7 @@ export async function fetchStoreProducts(options?: {
   const normalizedRows = rows
     .map((row) =>
       normalizeProductRow(row, {
+        tenantId: scopedTenantId,
         userPlanNames: options?.userPlanNames,
         userPlanIds: options?.userPlanIds,
       })
@@ -614,6 +632,7 @@ export async function fetchStoreProductsBySeller(options: {
   const scopedTenantId = resolveStoreTenantId(options.tenantId);
   const sellerId = asString(options.seller?.id).trim();
   const sellerType = normalizeStoreSellerType(options.seller?.type);
+  const sellerTypeForQuery = sellerType === "league" ? "tenant" : sellerType;
   if (!sellerId) return [];
 
   const maxResults = boundedLimit(options.maxResults ?? 24, MAX_PRODUCTS);
@@ -637,7 +656,7 @@ export async function fetchStoreProductsBySeller(options: {
             eq: {
               active: true,
               aprovado: true,
-              seller_type: sellerType,
+              seller_type: sellerTypeForQuery,
               seller_id: sellerId,
             },
             orderBy: { column: "nome", ascending: true },
@@ -650,7 +669,7 @@ export async function fetchStoreProductsBySeller(options: {
             eq: {
               active: true,
               aprovado: true,
-              seller_type: sellerType,
+              seller_type: sellerTypeForQuery,
               seller_id: sellerId,
             },
             limit: maxResults,
@@ -670,6 +689,7 @@ export async function fetchStoreProductsBySeller(options: {
   const normalizedRows = rows
     .map((row) =>
       normalizeProductRow(row, {
+        tenantId: scopedTenantId,
         userPlanNames: options?.userPlanNames,
         userPlanIds: options?.userPlanIds,
       })
@@ -728,6 +748,7 @@ export async function fetchStoreProductDetail(options: {
   }
   const produtoCandidate = productData
     ? normalizeProductRow(productData as Row, {
+        tenantId: scopedTenantId,
         userPlanNames: options.userPlanNames,
         userPlanIds: options.userPlanIds,
       })
@@ -1079,7 +1100,7 @@ export async function createStoreOrder(payload: {
     mutableInsertPayload.payment_config = scopedPaymentConfig;
   }
   if (seller) {
-    mutableInsertPayload.seller_type = seller.type;
+    mutableInsertPayload.seller_type = normalizeStoreSellerTypeForWrite(seller.type);
     mutableInsertPayload.seller_id = seller.id;
     mutableInsertPayload.seller_name = seller.name;
     mutableInsertPayload.seller_logo_url = seller.logoUrl;

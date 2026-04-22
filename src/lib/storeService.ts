@@ -175,6 +175,10 @@ const normalizeStoreSellerType = (value: unknown): "tenant" | "mini_vendor" | "l
   if (raw === "league") return "league";
   return "tenant";
 };
+const normalizeStoreSellerTypeForWrite = (value: unknown): "tenant" | "mini_vendor" => {
+  const sellerType = normalizeStoreSellerType(value);
+  return sellerType === "mini_vendor" ? "mini_vendor" : "tenant";
+};
 const getStoreSellerSortOrder = (value: unknown): number => {
   const sellerType = normalizeStoreSellerType(value);
   if (sellerType === "tenant") return 0;
@@ -1215,7 +1219,7 @@ export async function upsertStoreProduct(payload: {
       logoUrl: rawData.seller_logo_url,
     });
 
-    sanitizedData.seller_type = seller?.type ?? "tenant";
+    sanitizedData.seller_type = normalizeStoreSellerTypeForWrite(seller?.type);
     sanitizedData.seller_id = seller?.id ?? "";
     sanitizedData.seller_name = seller?.name ?? "";
     sanitizedData.seller_logo_url = seller?.logoUrl ?? "";
@@ -1361,6 +1365,7 @@ export async function upsertStoreCategory(payload: {
   const displayOrder = asInt(source.displayOrder);
   const visible = typeof source.visible === "boolean" ? source.visible : true;
   const sellerType = normalizeStoreSellerType(source.sellerType);
+  const sellerTypeForWrite = normalizeStoreSellerTypeForWrite(sellerType);
   const sellerId = asString(source.sellerId).trim().slice(0, 120);
   const scopedTenantId = resolveStoreTenantId(source.tenantId);
   if (!cleanNome) return;
@@ -1371,11 +1376,10 @@ export async function upsertStoreCategory(payload: {
       cover_img: coverImg || null,
       button_color: buttonColor || null,
       logo_url: logoUrl || null,
-      seller_type: sellerType,
+      seller_type: sellerTypeForWrite,
       seller_id: sellerId || null,
       ...(displayOrder !== null ? { display_order: displayOrder } : {}),
       visible,
-      updatedAt: nowIso(),
     };
     await mutateStoreTableWithSchemaFallback({
       tableName: "categorias",
@@ -1397,13 +1401,12 @@ export async function upsertStoreCategory(payload: {
     cover_img: coverImg || null,
     button_color: buttonColor || null,
     logo_url: logoUrl || null,
-    seller_type: sellerType,
+    seller_type: sellerTypeForWrite,
     seller_id: sellerId || null,
     ...(nextDisplayOrder !== null ? { display_order: nextDisplayOrder } : {}),
     visible,
     ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
     createdAt: nowIso(),
-    updatedAt: nowIso(),
   };
 
   await callWithFallback<Record<string, unknown>, { ok: boolean }>(
@@ -1414,7 +1417,7 @@ export async function upsertStoreCategory(payload: {
       button_color: buttonColor,
       logo_url: logoUrl,
       ...(nextDisplayOrder !== null ? { display_order: nextDisplayOrder } : {}),
-      seller_type: sellerType,
+      seller_type: sellerTypeForWrite,
       seller_id: sellerId,
       visible,
       ...(scopedTenantId ? { tenant_id: scopedTenantId } : {}),
@@ -1493,7 +1496,6 @@ export async function saveStoreCategoryDisplayOrder(payload: {
       operation: "update",
       payload: {
         display_order: index,
-        updatedAt: nowIso(),
       },
       filters: [
         { field: "id", value: categoryId },
@@ -1519,7 +1521,6 @@ export async function setStoreCategoryVisibility(payload: {
     operation: "update",
     payload: {
       visible: payload.visible,
-      updatedAt: nowIso(),
     },
     filters: [
       { field: "id", value: categoryId },
@@ -1541,6 +1542,7 @@ export async function renameStoreProductsCategory(payload: {
   const nextName = payload.nextName.trim().slice(0, 80);
   const scopedTenantId = resolveStoreTenantId(payload.tenantId);
   const sellerType = normalizeStoreSellerType(payload.sellerType);
+  const sellerTypeForWrite = normalizeStoreSellerTypeForWrite(sellerType);
   const sellerId = asString(payload.sellerId).trim().slice(0, 120);
 
   if (!previousName || !nextName || previousName === nextName) {
@@ -1557,7 +1559,7 @@ export async function renameStoreProductsCategory(payload: {
     filters: [
       { field: "categoria", value: previousName },
       ...(scopedTenantId ? [{ field: "tenant_id", value: scopedTenantId }] : []),
-      { field: "seller_type", value: sellerType },
+      { field: "seller_type", value: sellerTypeForWrite },
       ...(sellerId ? [{ field: "seller_id", value: sellerId }] : []),
     ],
   });
