@@ -60,6 +60,8 @@ const LEAGUES_SELECT_COLUMNS = [
   "membrosIds",
   "eventos",
   "perguntas",
+  "links",
+  "payment_config",
   "bizu",
   "likes",
   "status",
@@ -81,6 +83,7 @@ const LEAGUE_SUMMARY_SELECT_COLUMNS = [
   "bizu",
   "likes",
   "status",
+  "links",
   "createdAt",
   "updatedAt",
   "membrosIds",
@@ -122,6 +125,36 @@ const LEAGUE_GLOBAL_EVENT_SELECT_COLUMNS = [
   "stats",
 ] as const;
 
+export type LeagueLinkType =
+  | "instagram"
+  | "tiktok"
+  | "youtube"
+  | "site"
+  | "whatsapp"
+  | "linkedin"
+  | "outro";
+
+export interface LeagueExternalLinkRecord {
+  id: string;
+  type: LeagueLinkType;
+  label: string;
+  url: string;
+}
+
+const LEAGUE_LINK_MAX_COUNT = 12;
+const LEAGUE_LINK_LABEL_MAX_LENGTH = 80;
+const LEAGUE_LINK_URL_MAX_LENGTH = 500;
+
+const LEAGUE_LINK_TYPE_LABELS: Record<LeagueLinkType, string> = {
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  youtube: "YouTube",
+  site: "Site",
+  whatsapp: "WhatsApp",
+  linkedin: "LinkedIn",
+  outro: "Outro",
+};
+
 const asObject = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== "object" || value === null) return null;
   return value as Record<string, unknown>;
@@ -135,6 +168,58 @@ const asNumber = (value: unknown, fallback = 0): number =>
 
 const asBoolean = (value: unknown, fallback = false): boolean =>
   typeof value === "boolean" ? value : fallback;
+
+const normalizeLeagueLinkType = (value: unknown): LeagueLinkType => {
+  const raw = asString(value).trim().toLowerCase();
+  if (raw === "instagram") return "instagram";
+  if (raw === "tiktok" || raw === "tik_tok" || raw === "tik tok") return "tiktok";
+  if (raw === "youtube" || raw === "you_tube" || raw === "you tube") return "youtube";
+  if (raw === "site" || raw === "website" || raw === "web") return "site";
+  if (raw === "whatsapp" || raw === "whats" || raw === "zap") return "whatsapp";
+  if (raw === "linkedin" || raw === "linked_in" || raw === "linked in") return "linkedin";
+  return "outro";
+};
+
+const normalizeLeagueLinkUrl = (value: unknown): string => {
+  const raw = asString(value).trim().slice(0, LEAGUE_LINK_URL_MAX_LENGTH);
+  if (!raw) return "";
+  if (/^(https?:\/\/|mailto:|tel:)/i.test(raw)) return raw;
+  return `https://${raw.replace(/^\/+/, "")}`;
+};
+
+const normalizeLeagueLinks = (value: unknown): LeagueExternalLinkRecord[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+
+  return value
+    .map((entry, index) => {
+      const row = asObject(entry);
+      if (!row) return null;
+
+      const type = normalizeLeagueLinkType(row.type || row.tipo);
+      const url = normalizeLeagueLinkUrl(row.url || row.href || row.link);
+      if (!url) return null;
+
+      const label =
+        asString(row.label || row.nome || row.title).trim().slice(0, LEAGUE_LINK_LABEL_MAX_LENGTH) ||
+        LEAGUE_LINK_TYPE_LABELS[type];
+      const id =
+        asString(row.id).trim().slice(0, 120) ||
+        `${type}-${index + 1}`;
+      const dedupeKey = `${type}:${url.toLowerCase()}`;
+      if (seen.has(dedupeKey)) return null;
+      seen.add(dedupeKey);
+
+      return {
+        id,
+        type,
+        label,
+        url,
+      } satisfies LeagueExternalLinkRecord;
+    })
+    .filter((entry): entry is LeagueExternalLinkRecord => entry !== null)
+    .slice(0, LEAGUE_LINK_MAX_COUNT);
+};
 
 export type LeagueEventVisibility = "public" | "internal";
 
@@ -396,6 +481,16 @@ const normalizeLeaguePartialPatch = (
   }
   if (hasOwn("perguntas")) {
     normalized.perguntas = Array.isArray(patch.perguntas) ? patch.perguntas : [];
+  }
+  if (hasOwn("links")) {
+    normalized.links = normalizeLeagueLinks(patch.links);
+  }
+  if (hasOwn("paymentConfig") || hasOwn("payment_config")) {
+    const paymentConfig = normalizePaymentConfig(
+      hasOwn("paymentConfig") ? patch.paymentConfig : patch.payment_config
+    );
+    normalized.paymentConfig = paymentConfig;
+    normalized.payment_config = paymentConfig;
   }
   if (hasOwn("bizu")) {
     normalized.bizu = asString(patch.bizu).slice(0, 500);
@@ -1111,6 +1206,8 @@ export interface LeagueRecord {
   membros: LeagueMemberRecord[];
   eventos: LeagueEventRecord[];
   perguntas: LeagueQuestionRecord[];
+  links: LeagueExternalLinkRecord[];
+  paymentConfig?: CommercePaymentConfig | null;
   bizu: string;
   likes: number;
   membrosIds?: string[];
@@ -1416,6 +1513,9 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
   const perguntasSource = Array.isArray(readLeagueField(data, "perguntas"))
     ? (readLeagueField(data, "perguntas") as unknown[])
     : [];
+  const linksSource = readLeagueField(data, "links");
+  const paymentConfigSource =
+    readLeagueField(data, "paymentConfig") || readLeagueField(data, "payment_config");
   const eventosSource = Array.isArray(readLeagueField(data, "eventos"))
     ? (readLeagueField(data, "eventos") as unknown[])
     : [];
@@ -1563,6 +1663,8 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     membros,
     eventos,
     perguntas,
+    links: normalizeLeagueLinks(linksSource),
+    paymentConfig: normalizePaymentConfig(paymentConfigSource),
     bizu: asString(readLeagueField(data, "bizu")),
     likes: Math.max(0, asNumber(readLeagueField(data, "likes"), 0)),
     membrosIds: resolvedMemberIds,
@@ -1678,6 +1780,8 @@ const normalizeLeaguePayload = (
     ])
   );
   const memberRequests = normalizeLeagueMemberRequests(payload.memberRequests);
+  const links = normalizeLeagueLinks(payload.links);
+  const paymentConfig = normalizePaymentConfig(payload.paymentConfig);
   const membersCount = Math.max(
     0,
     asNumber(
@@ -1701,6 +1805,9 @@ const normalizeLeaguePayload = (
     membrosIds,
     eventos: Array.isArray(payload.eventos) ? payload.eventos : [],
     perguntas,
+    links,
+    paymentConfig,
+    payment_config: paymentConfig,
     bizu: asString(payload.bizu).slice(0, 500),
     likes: Math.max(0, asNumber(payload.likes, 0)),
     membersCount,

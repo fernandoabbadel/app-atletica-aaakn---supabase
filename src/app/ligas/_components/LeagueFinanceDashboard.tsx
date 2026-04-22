@@ -42,6 +42,7 @@ type LeagueFinanceData = {
 };
 
 const COLORS = ["#34d399", "#60a5fa", "#fbbf24", "#f472b6", "#a78bfa", "#22d3ee"];
+const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"];
 
 const chartTooltipProps = {
   contentStyle: {
@@ -96,6 +97,48 @@ const formatNumber = (value: number): string =>
   new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(
     Number.isFinite(value) ? value : 0
   );
+
+const formatPercent = (value: number): string =>
+  `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(
+    Number.isFinite(value) ? value : 0
+  )}%`;
+
+const parseDate = (value: unknown): Date | null => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "object" && value !== null && "toDate" in value) {
+    const toDate = (value as { toDate?: unknown }).toDate;
+    if (typeof toDate === "function") {
+      const parsed = toDate.call(value);
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) return parsed;
+    }
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return null;
+};
+
+const rowDateWeekday = (value: unknown): string => {
+  const date = parseDate(value);
+  return date ? WEEKDAYS[date.getDay()] ?? "Sem data" : "Sem data";
+};
+
+const rowDatePeriod = (value: unknown): string => {
+  const date = parseDate(value);
+  if (!date) return "Sem horario";
+  const hour = date.getHours();
+  if (hour < 6) return "Madrugada";
+  if (hour < 12) return "Manha";
+  if (hour < 18) return "Tarde";
+  return "Noite";
+};
+
+const hourBucket = (value: unknown): string => {
+  const date = parseDate(value);
+  if (!date) return "Sem horario";
+  return `${String(date.getHours()).padStart(2, "0")}:00`;
+};
 
 const statusIsApproved = (status: unknown): boolean => {
   const normalized = asString(status).toLowerCase();
@@ -351,6 +394,76 @@ function ChartPanel({
   );
 }
 
+function EmptyChart() {
+  return (
+    <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-zinc-800 text-sm font-bold text-zinc-600">
+      Sem dados para o filtro atual.
+    </div>
+  );
+}
+
+function Bars({ data, dataKey = "quantity" }: { data: MetricRow[]; dataKey?: "quantity" | "value" | "secondary" }) {
+  if (!data.length) return <EmptyChart />;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} layout="vertical" margin={{ left: 12, right: 18, top: 8, bottom: 8 }}>
+        <CartesianGrid stroke="#27272a" horizontal={false} />
+        <XAxis type="number" hide />
+        <YAxis dataKey="name" type="category" width={118} stroke="#a1a1aa" tick={{ fontSize: 11 }} />
+        <Tooltip
+          {...chartTooltipProps}
+          formatter={(value) => (dataKey === "value" ? formatCurrency(Number(value)) : formatNumber(Number(value)))}
+        />
+        <Bar dataKey={dataKey} radius={[0, 8, 8, 0]} fill="#34d399" />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function BarsDual({
+  data,
+  quantityName = "Qtd",
+  valueName = "Valor",
+}: {
+  data: MetricRow[];
+  quantityName?: string;
+  valueName?: string;
+}) {
+  if (!data.length) return <EmptyChart />;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} margin={{ left: 8, right: 18, top: 8, bottom: 8 }}>
+        <CartesianGrid stroke="#27272a" vertical={false} />
+        <XAxis dataKey="name" stroke="#a1a1aa" tick={{ fontSize: 11 }} />
+        <YAxis yAxisId="left" stroke="#34d399" tick={{ fontSize: 11 }} />
+        <YAxis yAxisId="right" orientation="right" stroke="#fbbf24" tick={{ fontSize: 11 }} />
+        <Tooltip
+          {...chartTooltipProps}
+          formatter={(value, name) => (name === valueName ? formatCurrency(Number(value)) : formatNumber(Number(value)))}
+        />
+        <Bar yAxisId="left" dataKey="quantity" name={quantityName} fill="#34d399" radius={[8, 8, 0, 0]} />
+        <Bar yAxisId="right" dataKey="value" name={valueName} fill="#fbbf24" radius={[8, 8, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function PieMetric({ data }: { data: MetricRow[] }) {
+  if (!data.length) return <EmptyChart />;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <PieChart>
+        <Tooltip formatter={(value) => formatNumber(Number(value))} {...chartTooltipProps} />
+        <Pie data={data} dataKey="quantity" nameKey="name" innerRadius={58} outerRadius={94} paddingAngle={4}>
+          {data.map((entry, index) => (
+            <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
+          ))}
+        </Pie>
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
 export function LeagueFinanceDashboard() {
   const params = useParams<{ leagueId?: string }>();
   const router = useRouter();
@@ -397,11 +510,17 @@ export function LeagueFinanceDashboard() {
     const productSalesByLot = new Map<string, MetricRow>();
     const eventSalesByName = new Map<string, MetricRow>();
     const eventSalesByLot = new Map<string, MetricRow>();
+    const eventSalesByClass = new Map<string, MetricRow>();
+    const eventSalesByWeekday = new Map<string, MetricRow>();
+    const eventSalesByPeriod = new Map<string, MetricRow>();
+    const eventApprovers = new Map<string, MetricRow>();
+    const eventScanByHour = new Map<string, MetricRow>();
 
     let productRevenue = 0;
     let productQuantity = 0;
     let eventRevenue = 0;
     let eventQuantity = 0;
+    let eventScanned = 0;
 
     data.productOrders.forEach((order) => {
       const quantity = parseQuantity(order.quantidade ?? order.itens, 1);
@@ -422,16 +541,41 @@ export function LeagueFinanceDashboard() {
       eventQuantity += quantity;
       addMetric(eventSalesByName, asString(ticket.eventoNome) || "Evento", quantity, total);
       addMetric(eventSalesByLot, asString(ticket.loteNome) || "Sem lote", quantity, total);
+      addMetric(eventSalesByClass, asString(ticket.userTurma) || "Sem turma", quantity, total);
+      addMetric(eventSalesByWeekday, rowDateWeekday(ticket.dataSolicitacao), quantity, total);
+      addMetric(eventSalesByPeriod, rowDatePeriod(ticket.dataSolicitacao), quantity, total);
+      addMetric(eventApprovers, asString(ticket.aprovadoPor) || "Sem aprovador", quantity, total);
+
+      const entries = ticketEntries(ticket.payment_config);
+      const scannedEntries = entries.filter((entry) => {
+        const status = asString(entry.status).toLowerCase();
+        return status === "lido" || Boolean(asString(entry.scannedAt));
+      });
+      const scannedCount = scannedEntries.length || ticketScannedCount(ticket);
+      eventScanned += scannedCount;
+      if (scannedEntries.length > 0) {
+        scannedEntries.forEach((entry) => {
+          addMetric(eventScanByHour, hourBucket(entry.scannedAt), 1, 0);
+        });
+      } else if (scannedCount > 0) {
+        addMetric(eventScanByHour, "Sem horario", scannedCount, 0);
+      }
     });
 
     const totalRevenue = productRevenue + eventRevenue;
     const totalQuantity = productQuantity + eventQuantity;
+    const eventShowRate = eventQuantity > 0 ? (eventScanned / eventQuantity) * 100 : 0;
 
     return {
       productRevenue,
       productQuantity,
       eventRevenue,
       eventQuantity,
+      eventApprovedOrders: data.eventTickets.length,
+      eventScanned,
+      eventTicketAverage: eventQuantity > 0 ? eventRevenue / eventQuantity : 0,
+      eventShowRate,
+      eventNoShowRate: eventQuantity > 0 ? Math.max(0, 100 - eventShowRate) : 0,
       totalRevenue,
       totalQuantity,
       revenueBySource: [
@@ -442,6 +586,15 @@ export function LeagueFinanceDashboard() {
       productSalesByLot: sortMetrics(productSalesByLot),
       eventSalesByName: sortMetrics(eventSalesByName),
       eventSalesByLot: sortMetrics(eventSalesByLot),
+      eventSalesByClass: sortMetrics(eventSalesByClass),
+      eventSalesByWeekday: WEEKDAYS.map(
+        (day) => eventSalesByWeekday.get(day) ?? { name: day, quantity: 0, value: 0 }
+      ),
+      eventSalesByPeriod: ["Madrugada", "Manha", "Tarde", "Noite"].map(
+        (period) => eventSalesByPeriod.get(period) ?? { name: period, quantity: 0, value: 0 }
+      ),
+      eventApprovers: sortMetrics(eventApprovers, 10),
+      eventScanByHour: sortMetrics(eventScanByHour).sort((left, right) => left.name.localeCompare(right.name)),
     };
   }, [data]);
 
@@ -596,6 +749,54 @@ export function LeagueFinanceDashboard() {
             hint="produtos cadastrados pela liga"
             icon={<BarChart3 size={18} />}
           />
+        </section>
+
+        <section className="grid gap-3 md:grid-cols-4">
+          <MetricCard
+            label="Receita eventos"
+            value={formatCurrency(analytics.eventRevenue)}
+            hint={`${formatNumber(analytics.eventQuantity)} ingressos vendidos`}
+            icon={<Wallet size={18} />}
+          />
+          <MetricCard
+            label="Pedidos aprovados"
+            value={formatNumber(analytics.eventApprovedOrders)}
+            hint="comprovantes aprovados"
+            icon={<Ticket size={18} />}
+          />
+          <MetricCard
+            label="Check-ins"
+            value={formatNumber(analytics.eventScanned)}
+            hint={`${formatPercent(analytics.eventShowRate)} de comparecimento`}
+            icon={<QrCode size={18} />}
+          />
+          <MetricCard
+            label="Ticket medio"
+            value={formatCurrency(analytics.eventTicketAverage)}
+            hint={`${formatPercent(analytics.eventNoShowRate)} no-show`}
+            icon={<BarChart3 size={18} />}
+          />
+        </section>
+
+        <section className="grid gap-5 lg:grid-cols-2">
+          <ChartPanel title="Turmas por quantidade e valor" subtitle="Ingressos aprovados agrupados por turma.">
+            <BarsDual data={analytics.eventSalesByClass} quantityName="Ingressos" valueName="Valor" />
+          </ChartPanel>
+          <ChartPanel title="Lotes mais vendidos" subtitle="Volume aprovado por lote do evento.">
+            <PieMetric data={analytics.eventSalesByLot} />
+          </ChartPanel>
+          <ChartPanel title="Dias da semana" subtitle="Receita e quantidade por dia da compra.">
+            <BarsDual data={analytics.eventSalesByWeekday} quantityName="Ingressos" valueName="Valor" />
+          </ChartPanel>
+          <ChartPanel title="Periodo do dia" subtitle="Quando os pedidos aprovados foram criados.">
+            <BarsDual data={analytics.eventSalesByPeriod} quantityName="Ingressos" valueName="Valor" />
+          </ChartPanel>
+          <ChartPanel title="Comprovantes por aprovador" subtitle="Carga operacional de aprovacao.">
+            <Bars data={analytics.eventApprovers} dataKey="quantity" />
+          </ChartPanel>
+          <ChartPanel title="Escaneamento por horario" subtitle="Leituras de QR na entrada.">
+            <Bars data={analytics.eventScanByHour} dataKey="quantity" />
+          </ChartPanel>
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">

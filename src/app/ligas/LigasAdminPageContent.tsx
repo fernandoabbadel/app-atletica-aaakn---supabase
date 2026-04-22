@@ -7,7 +7,7 @@ import {
   Lock, ArrowRight, Upload, Plus, Trash2, Save, LogOut, 
   Image as ImageIcon, Layout, Edit3, Bell, 
   Calendar, UserPlus, Search, X, Users, ShoppingBag,
-  Loader2, MessageCircle, LayoutGrid, MoveVertical, Wallet
+  Loader2, MessageCircle, LayoutGrid, MoveVertical, Wallet, Link2
 } from 'lucide-react';
 import Image from "next/image";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
@@ -44,6 +44,7 @@ import {
   updateLeagueConfigPatch,
   uploadLeagueImageToStorage,
   updateEventPollOptions,
+  type LeagueExternalLinkRecord,
   type LeagueMemberJoinRequestRecord,
   type LeaguePollRecord,
 } from "../../lib/leaguesService";
@@ -159,6 +160,8 @@ interface LigaData {
     perguntas: PerguntaLiga[]; 
     membros?: Member[]; 
     eventos?: LeagueEvent[];
+    links?: LeagueExternalLinkRecord[];
+    paymentConfig?: CommercePaymentConfig | null;
     membrosIds?: string[];
     membersCount?: number;
     memberRequests?: LeagueMemberJoinRequestRecord[];
@@ -187,6 +190,94 @@ const EVENT_TYPE_MAX_LENGTH = 40;
 const EVENT_DESCRIPTION_MAX_LENGTH = 1200;
 const EVENT_PIX_FIELD_MAX_LENGTH = 140;
 const EVENT_LOTE_NAME_MAX_LENGTH = 80;
+const LEAGUE_LINK_MAX_COUNT = 12;
+const LEAGUE_LINK_LABEL_MAX_LENGTH = 80;
+const LEAGUE_LINK_URL_MAX_LENGTH = 500;
+
+const LEAGUE_LINK_OPTIONS: Array<{ value: LeagueExternalLinkRecord["type"]; label: string }> = [
+    { value: "instagram", label: "Instagram" },
+    { value: "tiktok", label: "TikTok" },
+    { value: "youtube", label: "YouTube" },
+    { value: "site", label: "Site" },
+    { value: "whatsapp", label: "WhatsApp" },
+    { value: "linkedin", label: "LinkedIn" },
+    { value: "outro", label: "Outro" },
+];
+
+const getLeagueLinkTypeLabel = (type: LeagueExternalLinkRecord["type"]): string =>
+    LEAGUE_LINK_OPTIONS.find((option) => option.value === type)?.label || "Outro";
+
+const createLeagueLinkDraft = (): LeagueExternalLinkRecord => ({
+    id: `link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: "instagram",
+    label: "Instagram",
+    url: "",
+});
+
+const normalizeLeagueLinkDrafts = (links: unknown): LeagueExternalLinkRecord[] => {
+    if (!Array.isArray(links)) return [];
+    const seen = new Set<string>();
+    return links
+        .map((entry, index) => {
+            if (!entry || typeof entry !== "object") return null;
+            const row = entry as Partial<LeagueExternalLinkRecord>;
+            const type = LEAGUE_LINK_OPTIONS.some((option) => option.value === row.type)
+                ? (row.type as LeagueExternalLinkRecord["type"])
+                : "outro";
+            const url = String(row.url || "").trim().slice(0, LEAGUE_LINK_URL_MAX_LENGTH);
+            const label =
+                String(row.label || "").trim().slice(0, LEAGUE_LINK_LABEL_MAX_LENGTH) ||
+                getLeagueLinkTypeLabel(type);
+            const id = String(row.id || "").trim() || `link-${index + 1}`;
+            const dedupeKey = `${type}:${url.toLowerCase()}`;
+            if (url && seen.has(dedupeKey)) return null;
+            if (url) seen.add(dedupeKey);
+            return { id, type, label, url } satisfies LeagueExternalLinkRecord;
+        })
+        .filter((entry): entry is LeagueExternalLinkRecord => entry !== null)
+        .slice(0, LEAGUE_LINK_MAX_COUNT);
+};
+
+const createEmptyLeaguePaymentConfig = (): CommercePaymentConfig => ({
+    chave: "",
+    banco: "",
+    titular: "",
+    whatsapp: "",
+});
+
+const normalizeLeaguePaymentDraft = (
+    paymentConfig?: CommercePaymentConfig | null
+): CommercePaymentConfig => ({
+    chave: String(paymentConfig?.chave || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+    banco: String(paymentConfig?.banco || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+    titular: String(paymentConfig?.titular || "").slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+    whatsapp: String(paymentConfig?.whatsapp || "").slice(0, PHONE_MAX_LENGTH),
+});
+
+const hasLeaguePaymentDraft = (paymentConfig?: CommercePaymentConfig | null): boolean => {
+    const normalized = normalizeLeaguePaymentDraft(paymentConfig);
+    return Boolean(
+        normalized.chave.trim() ||
+        normalized.banco.trim() ||
+        normalized.titular.trim() ||
+        normalized.whatsapp?.trim()
+    );
+};
+
+const compactLeaguePaymentDraft = (
+    paymentConfig?: CommercePaymentConfig | null
+): CommercePaymentConfig | null => {
+    const normalized = normalizeLeaguePaymentDraft(paymentConfig);
+    const whatsapp = normalizePhoneToBrE164(normalized.whatsapp || "").slice(0, PHONE_MAX_LENGTH);
+    if (!hasLeaguePaymentDraft({ ...normalized, whatsapp })) return null;
+    return {
+        chave: normalized.chave.trim(),
+        banco: normalized.banco.trim(),
+        titular: normalized.titular.trim(),
+        ...(whatsapp ? { whatsapp } : {}),
+    };
+};
+
 const buildLigaEditorLastSelectedKey = (tenantScopeId?: string | null): string =>
     `usc:ligas:${tenantScopeId?.trim() || "default"}:last-selected`;
 
@@ -598,6 +689,8 @@ export default function LigasAdminPageContent({
                   perguntas: sanitizeQuestionDrafts((target.perguntas || []) as PerguntaLiga[]),
                   membros: (target.membros || []) as Member[],
                   eventos: (target.eventos || []) as LeagueEvent[],
+                  links: normalizeLeagueLinkDrafts(target.links),
+                  paymentConfig: normalizeLeaguePaymentDraft(target.paymentConfig),
                   memberRequests: target.memberRequests || [],
                   membersCount: target.membersCount,
                   updatedAt: target.updatedAt,
@@ -836,6 +929,8 @@ export default function LigasAdminPageContent({
                   perguntas: sanitizeQuestionDrafts((target.perguntas || []) as PerguntaLiga[]),
                   membros: (target.membros || []) as Member[],
                   eventos: (target.eventos || []) as LeagueEvent[],
+                  links: normalizeLeagueLinkDrafts(target.links),
+                  paymentConfig: normalizeLeaguePaymentDraft(target.paymentConfig),
                   memberRequests: target.memberRequests || [],
                   membersCount: target.membersCount,
                   updatedAt: target.updatedAt,
@@ -1020,6 +1115,82 @@ export default function LigasAdminPageContent({
           setUploadingLeagueAsset(false);
           input.value = "";
       }
+  };
+
+  const handleAddLeagueLink = () => {
+      setLigaData((prev) => {
+          if (!prev) return prev;
+          const currentLinks = normalizeLeagueLinkDrafts(prev.links);
+          if (currentLinks.length >= LEAGUE_LINK_MAX_COUNT) {
+              addToast(`Limite de ${LEAGUE_LINK_MAX_COUNT} links por liga.`, "info");
+              return prev;
+          }
+          return {
+              ...prev,
+              links: [...currentLinks, createLeagueLinkDraft()],
+          };
+      });
+  };
+
+  const handleUpdateLeagueLink = (
+      linkId: string,
+      patch: Partial<LeagueExternalLinkRecord>
+  ) => {
+      setLigaData((prev) => {
+          if (!prev) return prev;
+          return {
+              ...prev,
+              links: normalizeLeagueLinkDrafts(prev.links).map((link) => {
+                  if (link.id !== linkId) return link;
+                  const nextType = patch.type || link.type;
+                  const shouldRefreshLabel =
+                      patch.type && (!link.label.trim() || link.label === getLeagueLinkTypeLabel(link.type));
+                  return {
+                      ...link,
+                      ...patch,
+                      type: nextType,
+                      label: String(
+                          shouldRefreshLabel
+                              ? getLeagueLinkTypeLabel(nextType)
+                              : patch.label ?? link.label
+                      ).slice(0, LEAGUE_LINK_LABEL_MAX_LENGTH),
+                      url: String(patch.url ?? link.url).slice(0, LEAGUE_LINK_URL_MAX_LENGTH),
+                  };
+              }),
+          };
+      });
+  };
+
+  const handleRemoveLeagueLink = (linkId: string) => {
+      setLigaData((prev) =>
+          prev
+              ? {
+                    ...prev,
+                    links: normalizeLeagueLinkDrafts(prev.links).filter((link) => link.id !== linkId),
+                }
+              : prev
+      );
+  };
+
+  const handleUpdateLeaguePayment = (
+      field: keyof Pick<CommercePaymentConfig, "chave" | "banco" | "titular" | "whatsapp">,
+      value: string
+  ) => {
+      setLigaData((prev) => {
+          if (!prev) return prev;
+          const paymentConfig = normalizeLeaguePaymentDraft(prev.paymentConfig);
+          const nextValue =
+              field === "whatsapp"
+                  ? normalizePhoneToBrE164(value).slice(0, PHONE_MAX_LENGTH)
+                  : value.slice(0, EVENT_PIX_FIELD_MAX_LENGTH);
+          return {
+              ...prev,
+              paymentConfig: {
+                  ...paymentConfig,
+                  [field]: nextValue,
+              },
+          };
+      });
   };
 
   const handleEventImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1208,21 +1379,26 @@ export default function LigasAdminPageContent({
       ) {
           return addToast("Informe um WhatsApp valido para comprovante.", "error");
       }
-      const normalizedWhatsapp = normalizePhoneToBrE164(
+      const leaguePaymentFallback = compactLeaguePaymentDraft(ligaData.paymentConfig);
+      const eventWhatsapp = normalizePhoneToBrE164(
           String(currentEvent.contatoComprovante || "").trim()
       ).slice(0, PHONE_MAX_LENGTH);
+      const normalizedWhatsapp = eventWhatsapp || String(leaguePaymentFallback?.whatsapp || "").slice(0, PHONE_MAX_LENGTH);
       if (!normalizedWhatsapp) {
           return addToast("Informe um WhatsApp para comprovante da liga.", "error");
       }
+      const pixChave = String(currentEvent.pixChave || leaguePaymentFallback?.chave || "").trim();
+      const pixBanco = String(currentEvent.pixBanco || leaguePaymentFallback?.banco || "").trim();
+      const pixTitular = String(currentEvent.pixTitular || leaguePaymentFallback?.titular || "").trim();
       const paymentConfig =
-          String(currentEvent.pixChave || "").trim() ||
-          String(currentEvent.pixBanco || "").trim() ||
-          String(currentEvent.pixTitular || "").trim() ||
+          pixChave ||
+          pixBanco ||
+          pixTitular ||
           normalizedWhatsapp
               ? {
-                    chave: String(currentEvent.pixChave || "").trim(),
-                    banco: String(currentEvent.pixBanco || "").trim(),
-                    titular: String(currentEvent.pixTitular || "").trim(),
+                    chave: pixChave,
+                    banco: pixBanco,
+                    titular: pixTitular,
                     ...(normalizedWhatsapp ? { whatsapp: normalizedWhatsapp } : {}),
                 }
               : null;
@@ -1237,9 +1413,9 @@ export default function LigasAdminPageContent({
           descricao: String(currentEvent.descricao || "").trim().slice(0, EVENT_DESCRIPTION_MAX_LENGTH),
           saleStatus: normalizeEventSaleStatus(currentEvent.saleStatus),
           visibility: normalizeEventVisibility(currentEvent.visibility),
-          pixChave: String(currentEvent.pixChave || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
-          pixBanco: String(currentEvent.pixBanco || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
-          pixTitular: String(currentEvent.pixTitular || "").trim().slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+          pixChave: pixChave.slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+          pixBanco: pixBanco.slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
+          pixTitular: pixTitular.slice(0, EVENT_PIX_FIELD_MAX_LENGTH),
           contatoComprovante: normalizedWhatsapp,
           recipientUserId: "",
           recipientUserName: "",
@@ -1384,12 +1560,23 @@ export default function LigasAdminPageContent({
           const supabase = getSupabaseClient();
           const timestamp = nowIso();
           const leagueLogoUrl = resolveLeagueLogoSrc(ligaData) || "";
+          const links = normalizeLeagueLinkDrafts(ligaData.links).filter((link) => link.url.trim());
+          const paymentConfig = compactLeaguePaymentDraft(ligaData.paymentConfig);
+
+          if (
+              paymentConfig?.whatsapp &&
+              !hasValidPhoneLength(paymentConfig.whatsapp)
+          ) {
+              throw new Error("Informe um WhatsApp valido para as informacoes de pagamento.");
+          }
 
           await persistLeagueConfigPatch({
               nome: ligaData.nome,
               sigla: ligaData.sigla,
               descricao: ligaData.descricao || "",
               visaoGeral: ligaData.visaoGeral || "",
+              links,
+              paymentConfig,
               bizu: ligaData.bizu || "",
               likes: Number.isFinite(Number(ligaData.likes)) ? Number(ligaData.likes) : 0,
               senha: ligaData.senha,
@@ -1398,6 +1585,15 @@ export default function LigasAdminPageContent({
               logo: leagueLogoUrl || null,
               ativa: Boolean(ligaData.ativa),
           });
+          setLigaData((prev) =>
+              prev
+                  ? {
+                        ...prev,
+                        links,
+                        paymentConfig: paymentConfig || createEmptyLeaguePaymentConfig(),
+                    }
+                  : prev
+          );
 
           if (sendNotification && ligaData.bizu) {
               const { error: notificationInsertError } = await supabase
@@ -1858,6 +2054,51 @@ export default function LigasAdminPageContent({
                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Visão geral da liga</label>
                       <textarea className="w-full bg-black border border-zinc-700 rounded-lg p-3 text-sm h-32 focus:border-emerald-500 outline-none resize-none" value={ligaData.visaoGeral || ""} onChange={e => setLigaData({...ligaData, visaoGeral: e.target.value.slice(0, LEAGUE_OVERVIEW_MAX_LENGTH)})} maxLength={LEAGUE_OVERVIEW_MAX_LENGTH} placeholder={"Explique o que a liga faz.\nEx: Aulas\nAções\nEventos\nEstágio\nCurso\nViagens"}/>
                       <p className="mt-1 text-[10px] text-zinc-500">{String(ligaData.visaoGeral || "").length}/{LEAGUE_OVERVIEW_MAX_LENGTH} caracteres.</p>
+                  </div>
+                  <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/10 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                              <p className="flex items-center gap-2 text-[10px] font-bold uppercase text-cyan-300"><Link2 size={14}/> Links publicos</p>
+                              <p className="mt-1 text-xs text-zinc-500">Esses links aparecem no perfil publico da liga.</p>
+                          </div>
+                          <button type="button" onClick={handleAddLeagueLink} className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-black uppercase text-cyan-100 hover:bg-cyan-500/20">
+                              <Plus size={14}/>
+                              Adicionar link
+                          </button>
+                      </div>
+                      <div className="mt-4 space-y-3">
+                          {normalizeLeagueLinkDrafts(ligaData.links).map((link) => (
+                              <div key={link.id} className="grid gap-2 rounded-xl border border-zinc-800 bg-black/35 p-3 md:grid-cols-[150px_1fr_1.4fr_auto]">
+                                  <select value={link.type} onChange={(event) => handleUpdateLeagueLink(link.id, { type: event.target.value as LeagueExternalLinkRecord["type"] })} className="min-h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-xs font-bold uppercase text-zinc-200 outline-none focus:border-cyan-400">
+                                      {LEAGUE_LINK_OPTIONS.map((option) => (
+                                          <option key={option.value} value={option.value}>{option.label}</option>
+                                      ))}
+                                  </select>
+                                  <input type="text" value={link.label} maxLength={LEAGUE_LINK_LABEL_MAX_LENGTH} onChange={(event) => handleUpdateLeagueLink(link.id, { label: event.target.value })} placeholder="Nome do botao" className="min-h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-xs font-bold text-white outline-none focus:border-cyan-400" />
+                                  <input type="url" value={link.url} maxLength={LEAGUE_LINK_URL_MAX_LENGTH} onChange={(event) => handleUpdateLeagueLink(link.id, { url: event.target.value })} placeholder="https://..." className="min-h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-xs font-bold text-white outline-none focus:border-cyan-400" />
+                                  <button type="button" onClick={() => handleRemoveLeagueLink(link.id)} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-red-500/20 bg-red-500/10 px-3 text-red-200 hover:bg-red-500/20" aria-label="Remover link">
+                                      <Trash2 size={14}/>
+                                  </button>
+                              </div>
+                          ))}
+                          {normalizeLeagueLinkDrafts(ligaData.links).length === 0 ? (
+                              <div className="rounded-xl border border-dashed border-zinc-800 bg-black/20 p-4 text-xs font-bold text-zinc-500">
+                                  Nenhum link cadastrado.
+                              </div>
+                          ) : null}
+                      </div>
+                  </div>
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-4">
+                      <div className="mb-3">
+                          <p className="flex items-center gap-2 text-[10px] font-bold uppercase text-emerald-300"><Wallet size={14}/> Informacoes de pagamento da liga</p>
+                          <p className="mt-1 text-xs text-zinc-500">Usado no perfil publico e como fallback para eventos da liga.</p>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-3">
+                          <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Chave PIX" className="rounded-lg border border-zinc-700 bg-black p-3 text-xs text-white outline-none focus:border-emerald-400" value={normalizeLeaguePaymentDraft(ligaData.paymentConfig).chave} onChange={(event) => handleUpdateLeaguePayment("chave", event.target.value)} />
+                          <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Banco" className="rounded-lg border border-zinc-700 bg-black p-3 text-xs text-white outline-none focus:border-emerald-400" value={normalizeLeaguePaymentDraft(ligaData.paymentConfig).banco} onChange={(event) => handleUpdateLeaguePayment("banco", event.target.value)} />
+                          <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Nome do titular" className="rounded-lg border border-zinc-700 bg-black p-3 text-xs text-white outline-none focus:border-emerald-400" value={normalizeLeaguePaymentDraft(ligaData.paymentConfig).titular} onChange={(event) => handleUpdateLeaguePayment("titular", event.target.value)} />
+                      </div>
+                      <input type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="WhatsApp para comprovantes" className="mt-2 w-full rounded-lg border border-zinc-700 bg-black p-3 text-xs text-white outline-none focus:border-emerald-400" value={normalizeLeaguePaymentDraft(ligaData.paymentConfig).whatsapp || ""} onChange={(event) => handleUpdateLeaguePayment("whatsapp", event.target.value)} />
                   </div>
                   <div className="rounded-xl border border-blue-500/20 bg-blue-950/10 p-4">
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

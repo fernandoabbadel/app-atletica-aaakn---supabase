@@ -28,7 +28,7 @@ const MAX_REVIEWS = 600;
 const MAX_CATEGORIES = 300;
 const USER_REVIEW_EXISTS_LIMIT = 1;
 const STORE_PRODUCT_SELECT_COLUMNS =
-  "id,tenant_id,nome,preco,precoAntigo,img,descricao,likes,categoria,estoque,lote,tagLabel,tagColor,tagEffect,cores,variantes,caracteristicas,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,cliques,createdAt,updatedAt";
+  "id,tenant_id,nome,preco,precoAntigo,img,descricao,likes,categoria,estoque,lote,tagLabel,tagColor,tagEffect,cores,variantes,caracteristicas,active,aprovado,status,plan_prices,plan_visibility,payment_config,seller_type,seller_id,seller_name,seller_logo_url,vendidos,cliques,data,createdAt,updatedAt";
 const STORE_CATEGORY_SELECT_COLUMNS =
   "id,tenant_id,nome,cover_img,button_color,logo_url,seller_type,seller_id,display_order,visible";
 const STORE_REVIEW_SELECT_COLUMNS =
@@ -252,9 +252,16 @@ const normalizeProductRow = (
     seller.id !== scopedTenantId
       ? { ...seller, type: "league" as const }
       : seller;
+  const extraData = asObject(row.data) ?? {};
 
   return {
     ...normalizeRowTimestamps(row),
+    destaque:
+      row.destaque ??
+      extraData.destaque ??
+      extraData.featured ??
+      extraData.emDestaque ??
+      extraData.highlighted,
     preco_base: asNum(row.preco, 0),
     preco: resolvePlanScopedPriceInfo({
       basePrice: asNum(row.preco, 0),

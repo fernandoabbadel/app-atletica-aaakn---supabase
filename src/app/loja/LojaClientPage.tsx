@@ -147,6 +147,19 @@ const getStoreSellerSortOrder = (value: unknown): number => {
   return 2;
 };
 
+const getEffectiveProductSellerType = (
+  product: Pick<Produto, "seller">,
+  activeTenantId?: string | null
+): StoreSellerType => {
+  const sellerType = getStoreSellerType(product.seller?.type);
+  const sellerId = String(product.seller?.id || "").trim();
+  const tenantId = String(activeTenantId || "").trim();
+  if (sellerType === "tenant" && tenantId && sellerId && sellerId !== tenantId) {
+    return "league";
+  }
+  return sellerType;
+};
+
 const getProductCreatedMs = (product: Produto): number => {
   const value = product.createdAt;
   if (!value) return 0;
@@ -176,9 +189,9 @@ const productIsHighlighted = (product: Produto): boolean => {
   return Boolean(product.tagLabel?.trim()) || Boolean(product.tagEffect && product.tagEffect !== "none");
 };
 
-const compareStoreProducts = (left: Produto, right: Produto): number => {
-  const leftSellerOrder = getStoreSellerSortOrder(left.seller?.type);
-  const rightSellerOrder = getStoreSellerSortOrder(right.seller?.type);
+const compareStoreProducts = (left: Produto, right: Produto, activeTenantId?: string | null): number => {
+  const leftSellerOrder = getStoreSellerSortOrder(getEffectiveProductSellerType(left, activeTenantId));
+  const rightSellerOrder = getStoreSellerSortOrder(getEffectiveProductSellerType(right, activeTenantId));
   if (leftSellerOrder !== rightSellerOrder) {
     return leftSellerOrder - rightSellerOrder;
   }
@@ -450,7 +463,7 @@ export default function LojaClientPage({
       produtos.forEach((product) => {
         const nome = String(product.categoria || "").trim();
         if (!nome) return;
-        const sellerType = getStoreSellerType(product.seller?.type);
+        const sellerType = getEffectiveProductSellerType(product, activeTenantId);
         const vendorCategory =
           sellerType !== "tenant"
             ? categoriasCatalogo.find(
@@ -511,8 +524,8 @@ export default function LojaClientPage({
           const matchCat = filtroCategoria === "Todos" || product.categoria === filtroCategoria;
           return matchNome && matchCat;
         })
-        .sort(compareStoreProducts),
-    [busca, filtroCategoria, produtos]
+        .sort((left, right) => compareStoreProducts(left, right, activeTenantId)),
+    [activeTenantId, busca, filtroCategoria, produtos]
   );
   const selectedCategory = useMemo(
     () =>
@@ -728,15 +741,26 @@ export default function LojaClientPage({
                     const status = prod.status || (estoqueTotal > 0 ? "ativo" : "esgotado");
                     const sellerLogo = prod.seller?.logoUrl || tenantLogoUrl || "/logo.png";
                     const sellerName = prod.seller?.name || brandLabel;
+                    const effectiveSellerType = getEffectiveProductSellerType(prod, activeTenantId);
                     const sellerKindLabel =
                       prod.seller?.type === "league" ? "Loja da liga" : "Loja da atlética";
                     const isDisabledSale = status !== "ativo";
+                    const sellerProfileLabel =
+                      effectiveSellerType === "mini_vendor"
+                        ? "Mini vendor"
+                        : effectiveSellerType === "league"
+                        ? "Loja da liga"
+                        : sellerKindLabel;
                     const productHref = tenantSlug ? withTenantSlug(tenantSlug, `/loja/${prod.id}`) : `/loja/${prod.id}`;
                     const sellerHref =
-                      prod.seller?.type === "mini_vendor" && prod.seller.id
+                      effectiveSellerType === "mini_vendor" && prod.seller?.id
                         ? tenantSlug
                           ? withTenantSlug(tenantSlug, `/perfil/mini-vendor/${prod.seller.id}`)
                           : `/perfil/mini-vendor/${prod.seller.id}`
+                        : effectiveSellerType === "league" && prod.seller?.id
+                        ? tenantSlug
+                          ? withTenantSlug(tenantSlug, `/ligas_usc/${prod.seller.id}`)
+                          : `/ligas_usc/${prod.seller.id}`
                         : "";
 
                     return (
@@ -799,7 +823,7 @@ export default function LojaClientPage({
                                     </div>
                                     <div className="min-w-0">
                                       <p className="truncate text-[10px] font-black uppercase tracking-wide text-zinc-400">
-                                        Mini vendor
+                                        {sellerProfileLabel}
                                       </p>
                                       <p className="truncate text-[11px] font-bold text-zinc-200">{sellerName}</p>
                                     </div>

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Heart, Lightbulb, Loader2, ShoppingBag, Users } from "lucide-react";
+import { ArrowLeft, ExternalLink, Heart, Lightbulb, Link2, Loader2, ShoppingBag, Users, Wallet } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -83,6 +83,28 @@ const formatProductPrice = (value: unknown): string => {
     currency: "BRL",
   }).format(price);
 };
+
+const LEAGUE_LINK_TYPE_LABELS: Record<string, string> = {
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  youtube: "YouTube",
+  site: "Site",
+  whatsapp: "WhatsApp",
+  linkedin: "LinkedIn",
+  outro: "Link",
+};
+
+const getLeagueLinkTypeLabel = (type: unknown): string =>
+  LEAGUE_LINK_TYPE_LABELS[String(type || "").trim().toLowerCase()] || "Link";
+
+const hasPaymentInfo = (paymentConfig: LeagueRecord["paymentConfig"]): boolean =>
+  Boolean(
+    paymentConfig &&
+      (paymentConfig.chave?.trim() ||
+        paymentConfig.banco?.trim() ||
+        paymentConfig.titular?.trim() ||
+        paymentConfig.whatsapp?.trim())
+  );
 
 export function LeaguePublicDetailClient({
   leagueId,
@@ -271,6 +293,11 @@ export function LeaguePublicDetailClient({
     [isOfficialMember, sortedEvents]
   );
   const visibleAgendaCount = publicAgendaEvents.length + internalAgendaEvents.length;
+  const publicLinks = useMemo(
+    () => (league?.links || []).filter((link) => String(link.url || "").trim()),
+    [league?.links]
+  );
+  const paymentInfo = league?.paymentConfig || null;
 
   useEffect(() => {
     if (!currentMemberRequest) return;
@@ -607,6 +634,55 @@ export function LeaguePublicDetailClient({
               </div>
               <Link href={eventsFeedHref} className="mt-5 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20">Ver eventos publicados</Link>
             </article>
+            {publicLinks.length > 0 ? (
+              <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(12,22,28,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-200">
+                    <Link2 size={18} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Links da liga</p>
+                    <h2 className="mt-2 text-2xl font-black text-white">Canais oficiais</h2>
+                  </div>
+                </div>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {publicLinks.map((link) => (
+                    <a
+                      key={link.id}
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex min-h-[68px] items-center justify-between gap-3 rounded-[1.25rem] border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-black text-cyan-50 transition hover:border-cyan-300/40 hover:bg-cyan-500/20"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate">{link.label || getLeagueLinkTypeLabel(link.type)}</span>
+                        <span className="mt-1 block text-[10px] uppercase tracking-[0.18em] text-cyan-200/70">{getLeagueLinkTypeLabel(link.type)}</span>
+                      </span>
+                      <ExternalLink size={16} className="shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              </article>
+            ) : null}
+            {hasPaymentInfo(paymentInfo) ? (
+              <article className="rounded-[2rem] border border-emerald-500/20 bg-[linear-gradient(180deg,rgba(10,24,20,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-emerald-200">
+                    <Wallet size={18} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">Pagamento</p>
+                    <h2 className="mt-2 text-2xl font-black text-white">Dados da liga</h2>
+                  </div>
+                </div>
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  {paymentInfo?.chave ? <div className="rounded-[1.25rem] border border-emerald-500/20 bg-emerald-500/10 p-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">Chave PIX</p><p className="mt-2 break-words text-sm font-bold text-emerald-50">{paymentInfo.chave}</p></div> : null}
+                  {paymentInfo?.banco ? <div className="rounded-[1.25rem] border border-emerald-500/20 bg-emerald-500/10 p-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">Banco</p><p className="mt-2 break-words text-sm font-bold text-emerald-50">{paymentInfo.banco}</p></div> : null}
+                  {paymentInfo?.titular ? <div className="rounded-[1.25rem] border border-emerald-500/20 bg-emerald-500/10 p-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">Titular</p><p className="mt-2 break-words text-sm font-bold text-emerald-50">{paymentInfo.titular}</p></div> : null}
+                  {paymentInfo?.whatsapp ? <a href={`https://wa.me/${paymentInfo.whatsapp.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="rounded-[1.25rem] border border-emerald-500/20 bg-emerald-500/10 p-4 transition hover:bg-emerald-500/20"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">Comprovante</p><p className="mt-2 break-words text-sm font-bold text-emerald-50">{paymentInfo.whatsapp}</p></a> : null}
+                </div>
+              </article>
+            ) : null}
           </section>
         ) : activeTab === "membros" ? (
           <section className="space-y-5">
