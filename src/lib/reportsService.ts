@@ -70,6 +70,11 @@ export type AdminReportOrigin = "banned_appeals" | "support_requests";
 export interface AdminReportRecord {
   id: string;
   autor: string;
+  registeredName?: string;
+  registeredTenantId?: string;
+  registeredTenantName?: string;
+  registeredTenantSlug?: string;
+  registeredTenantSigla?: string;
   alvo?: string;
   categoria: "banidos" | "suporte";
   motivo: string;
@@ -316,6 +321,48 @@ const fetchRowsWithFallback = async (payload: {
   return [];
 };
 
+const fetchRowsByIdsWithFallback = async (payload: {
+  table: string;
+  idField: string;
+  ids: string[];
+  selectColumns: string[];
+}): Promise<Array<Record<string, unknown>>> => {
+  const ids = Array.from(
+    new Set(payload.ids.map((entry) => entry.trim()).filter((entry) => entry.length > 0))
+  );
+  if (ids.length === 0) return [];
+
+  const supabase = getSupabaseClient();
+  let selectColumns = [...payload.selectColumns];
+
+  while (selectColumns.length > 0) {
+    const { data, error } = await supabase
+      .from(payload.table)
+      .select(selectColumns.join(","))
+      .in(payload.idField, ids);
+    if (!error) {
+      return (data ?? []) as unknown as Array<Record<string, unknown>>;
+    }
+
+    if (isMissingTableError(error)) return [];
+
+    const missingColumn = asString(extractMissingSchemaColumn(error)).trim();
+    if (!missingColumn || missingColumn.toLowerCase() === payload.idField.toLowerCase()) {
+      throwSupabaseError(error);
+    }
+
+    const nextColumns = selectColumns.filter(
+      (column) => column.toLowerCase() !== missingColumn.toLowerCase()
+    );
+    if (nextColumns.length === 0 || nextColumns.length === selectColumns.length) {
+      throwSupabaseError(error);
+    }
+    selectColumns = nextColumns;
+  }
+
+  return [];
+};
+
 const toMillis = (value: unknown): number => {
   if (value instanceof Date) return value.getTime();
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -427,6 +474,69 @@ const buildSupportRecord = (id: string, raw: unknown): AdminReportRecord | null 
     originCollection: "support_requests",
     reporterId: asString(obj.userId) || undefined,
   };
+};
+
+const enrichReportsWithRegistration = async (
+  reports: AdminReportRecord[]
+): Promise<AdminReportRecord[]> => {
+  const reporterIds = Array.from(
+    new Set(
+      reports
+        .map((report) => report.reporterId?.trim() || "")
+        .filter((entry) => entry.length > 0)
+    )
+  );
+  if (reporterIds.length === 0) return reports;
+
+  const userRows = await fetchRowsByIdsWithFallback({
+    table: "users",
+    idField: "uid",
+    ids: reporterIds,
+    selectColumns: ["uid", "nome", "tenant_id"],
+  });
+  const usersById = new Map<string, Record<string, unknown>>();
+  const tenantIds = new Set<string>();
+
+  userRows.forEach((row) => {
+    const uid = asString(row.uid).trim();
+    if (!uid) return;
+    usersById.set(uid, row);
+    const tenantId = asString(row.tenant_id).trim();
+    if (tenantId) tenantIds.add(tenantId);
+  });
+
+  const tenantRows = await fetchRowsByIdsWithFallback({
+    table: "tenants",
+    idField: "id",
+    ids: Array.from(tenantIds),
+    selectColumns: ["id", "nome", "sigla", "slug"],
+  });
+  const tenantsById = new Map<string, Record<string, unknown>>();
+  tenantRows.forEach((row) => {
+    const id = asString(row.id).trim();
+    if (id) tenantsById.set(id, row);
+  });
+
+  return reports.map((report) => {
+    const userRow = report.reporterId ? usersById.get(report.reporterId.trim()) : null;
+    if (!userRow) return report;
+
+    const tenantId = asString(userRow.tenant_id).trim();
+    const tenantRow = tenantId ? tenantsById.get(tenantId) : null;
+    const tenantName = asString(tenantRow?.nome).trim();
+    const tenantSigla = asString(tenantRow?.sigla).trim();
+    const tenantSlug = asString(tenantRow?.slug).trim();
+    const registeredName = asString(userRow.nome).trim();
+
+    return {
+      ...report,
+      ...(registeredName ? { registeredName } : {}),
+      ...(tenantId ? { registeredTenantId: tenantId } : {}),
+      ...(tenantName || tenantSigla ? { registeredTenantName: tenantName || tenantSigla } : {}),
+      ...(tenantSlug ? { registeredTenantSlug: tenantSlug } : {}),
+      ...(tenantSigla ? { registeredTenantSigla: tenantSigla } : {}),
+    };
+  });
 };
 
 const normalizeModerationStatus = (value: unknown): "pendente" | "resolvida" => {
@@ -575,9 +685,10 @@ export async function fetchSupportReports(
     const reports = response.reports
       .map((row) => buildSupportRecord(asString(row.id), row))
       .filter((item): item is AdminReportRecord => item !== null);
+    const enrichedReports = await enrichReportsWithRegistration(reports);
 
-    setCachedValue(adminReportsCache, cacheKey, reports);
-    return reports;
+    setCachedValue(adminReportsCache, cacheKey, enrichedReports);
+    return enrichedReports;
   });
 }
 

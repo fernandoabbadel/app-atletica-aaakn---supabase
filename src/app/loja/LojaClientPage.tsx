@@ -45,6 +45,7 @@ export interface Produto {
   tagLabel?: string;
   tagColor?: string;
   tagEffect?: "pulse" | "shine" | "none";
+  destaque?: boolean | string | number;
   variantes: Variante[];
   caracteristicas?: string[];
   cliques: number;
@@ -144,6 +145,57 @@ const getStoreSellerSortOrder = (value: unknown): number => {
   if (sellerType === "tenant") return 0;
   if (sellerType === "mini_vendor") return 1;
   return 2;
+};
+
+const getProductCreatedMs = (product: Produto): number => {
+  const value = product.createdAt;
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value === "object" && "toDate" in value) {
+    const toDate = (value as { toDate?: unknown }).toDate;
+    if (typeof toDate === "function") {
+      const date = toDate.call(value) as Date;
+      return date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+    }
+  }
+  return 0;
+};
+
+const productIsHighlighted = (product: Produto): boolean => {
+  if (typeof product.destaque === "boolean") return product.destaque;
+  if (typeof product.destaque === "number") return product.destaque > 0;
+  if (typeof product.destaque === "string") {
+    const normalized = product.destaque.trim().toLowerCase();
+    if (["true", "sim", "1", "destaque", "destacado"].includes(normalized)) return true;
+  }
+  return Boolean(product.tagLabel?.trim()) || Boolean(product.tagEffect && product.tagEffect !== "none");
+};
+
+const compareStoreProducts = (left: Produto, right: Produto): number => {
+  const leftSellerOrder = getStoreSellerSortOrder(left.seller?.type);
+  const rightSellerOrder = getStoreSellerSortOrder(right.seller?.type);
+  if (leftSellerOrder !== rightSellerOrder) {
+    return leftSellerOrder - rightSellerOrder;
+  }
+
+  const leftHighlighted = productIsHighlighted(left);
+  const rightHighlighted = productIsHighlighted(right);
+  if (leftHighlighted !== rightHighlighted) {
+    return leftHighlighted ? -1 : 1;
+  }
+
+  const leftCreatedAt = getProductCreatedMs(left);
+  const rightCreatedAt = getProductCreatedMs(right);
+  if (leftCreatedAt !== rightCreatedAt) {
+    return rightCreatedAt - leftCreatedAt;
+  }
+
+  return left.nome.localeCompare(right.nome, "pt-BR", { sensitivity: "base" });
 };
 
 const buildCategoryListKey = (
@@ -459,14 +511,7 @@ export default function LojaClientPage({
           const matchCat = filtroCategoria === "Todos" || product.categoria === filtroCategoria;
           return matchNome && matchCat;
         })
-        .sort((left, right) => {
-          const leftSellerOrder = getStoreSellerSortOrder(left.seller?.type);
-          const rightSellerOrder = getStoreSellerSortOrder(right.seller?.type);
-          if (leftSellerOrder !== rightSellerOrder) {
-            return leftSellerOrder - rightSellerOrder;
-          }
-          return left.nome.localeCompare(right.nome, "pt-BR");
-        }),
+        .sort(compareStoreProducts),
     [busca, filtroCategoria, produtos]
   );
   const selectedCategory = useMemo(

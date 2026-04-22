@@ -1236,7 +1236,7 @@ export default function CadastroPage() {
                 {cadastroFields.pets.enabled ? (
                 <div className="space-y-3">
                     <label className="text-[10px] font-black uppercase text-zinc-500 tracking-widest ml-2 block border-b border-zinc-800 pb-1 flex items-center gap-2">
-                        <PawPrint size={12} className="text-orange-500"/> Mascote do QG
+                        <PawPrint size={12} className="text-orange-500"/> Mascote do QG (Animal preferido)
                     </label>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {DEFAULT_PET_OPTIONS.map((pet) => (

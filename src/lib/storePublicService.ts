@@ -334,6 +334,57 @@ const sortStoreCategoryRows = <T extends Row>(rows: T[]): T[] =>
     });
   });
 
+const rowDateMs = (value: unknown): number => {
+  const dateLike = toDateLike(value);
+  if (!dateLike) return 0;
+  const date = dateLike.toDate();
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+};
+
+const productIsHighlighted = (row: Row): boolean => {
+  const destaque = row.destaque;
+  if (typeof destaque === "boolean") return destaque;
+  if (typeof destaque === "number") return destaque > 0;
+  if (typeof destaque === "string") {
+    const normalized = destaque.trim().toLowerCase();
+    if (["true", "sim", "1", "destaque", "destacado"].includes(normalized)) return true;
+  }
+
+  const tagLabel = asString(row.tagLabel).trim();
+  const tagEffect = asString(row.tagEffect).trim().toLowerCase();
+  return Boolean(tagLabel) || (tagEffect.length > 0 && tagEffect !== "none");
+};
+
+const getStoreProductSellerSortOrder = (row: Row): number => {
+  const seller = asObject(row.seller);
+  return getStoreSellerSortOrder(seller?.type ?? row.seller_type);
+};
+
+const sortStoreProductRows = <T extends Row>(rows: T[]): T[] =>
+  [...rows].sort((left, right) => {
+    const leftSellerOrder = getStoreProductSellerSortOrder(left);
+    const rightSellerOrder = getStoreProductSellerSortOrder(right);
+    if (leftSellerOrder !== rightSellerOrder) {
+      return leftSellerOrder - rightSellerOrder;
+    }
+
+    const leftHighlighted = productIsHighlighted(left);
+    const rightHighlighted = productIsHighlighted(right);
+    if (leftHighlighted !== rightHighlighted) {
+      return leftHighlighted ? -1 : 1;
+    }
+
+    const leftCreatedAt = rowDateMs(left.createdAt);
+    const rightCreatedAt = rowDateMs(right.createdAt);
+    if (leftCreatedAt !== rightCreatedAt) {
+      return rightCreatedAt - leftCreatedAt;
+    }
+
+    return asString(left.nome).localeCompare(asString(right.nome), "pt-BR", {
+      sensitivity: "base",
+    });
+  });
+
 async function queryRows(table: string, options?: {
   selectColumns?: string;
   eq?: Record<string, string | number | boolean>;
@@ -511,6 +562,9 @@ export async function fetchStoreProductsPage(options?: {
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize; // inclui +1 item para detectar hasMore (range e inclusivo)
+  const shouldSortFullCatalog = !category;
+  const queryFrom = shouldSortFullCatalog ? 0 : from;
+  const queryTo = shouldSortFullCatalog ? MAX_PRODUCTS : to;
 
   const runQuery = async (withOrder: boolean): Promise<Row[]> => {
     let query = supabase.from("produtos").select(STORE_PRODUCT_SELECT_COLUMNS);
@@ -518,9 +572,11 @@ export async function fetchStoreProductsPage(options?: {
     if (scopedTenantId) query = query.eq("tenant_id", scopedTenantId);
     if (category) query = query.eq("categoria", category);
     if (withOrder) {
-      query = query.order("nome", { ascending: true });
+      query = query.order(shouldSortFullCatalog ? "createdAt" : "nome", {
+        ascending: !shouldSortFullCatalog,
+      });
     }
-    query = query.range(from, to);
+    query = query.range(queryFrom, queryTo);
 
     const { data, error } = await query;
     if (error) {
@@ -539,7 +595,7 @@ export async function fetchStoreProductsPage(options?: {
     rows = await runQuery(false);
   }
 
-  const visibleRows = rows
+  const visibleRows = sortStoreProductRows(rows
     .map((row) =>
       normalizeProductRow(row, {
         tenantId: scopedTenantId,
@@ -547,11 +603,15 @@ export async function fetchStoreProductsPage(options?: {
         userPlanIds: options?.userPlanIds,
       })
     )
-    .filter((row): row is Row => row !== null);
+    .filter((row): row is Row => row !== null));
 
   const result: StoreProductsPageResult = {
-    products: visibleRows.slice(0, pageSize),
-    hasMore: visibleRows.length > pageSize,
+    products: shouldSortFullCatalog
+      ? visibleRows.slice(from, from + pageSize)
+      : visibleRows.slice(0, pageSize),
+    hasMore: shouldSortFullCatalog
+      ? visibleRows.length > from + pageSize
+      : visibleRows.length > pageSize,
     page,
     pageSize,
     category,
@@ -607,7 +667,7 @@ export async function fetchStoreProducts(options?: {
     rows = await runQuery(false);
   }
 
-  const normalizedRows = rows
+  const normalizedRows = sortStoreProductRows(rows
     .map((row) =>
       normalizeProductRow(row, {
         tenantId: scopedTenantId,
@@ -615,7 +675,7 @@ export async function fetchStoreProducts(options?: {
         userPlanIds: options?.userPlanIds,
       })
     )
-    .filter((row): row is Row => row !== null);
+    .filter((row): row is Row => row !== null));
 
   setCache(productsFeedCache, cacheKey, normalizedRows);
   return normalizedRows;
@@ -686,7 +746,7 @@ export async function fetchStoreProductsBySeller(options: {
     rows = await runQuery(false);
   }
 
-  const normalizedRows = rows
+  const normalizedRows = sortStoreProductRows(rows
     .map((row) =>
       normalizeProductRow(row, {
         tenantId: scopedTenantId,
@@ -694,7 +754,7 @@ export async function fetchStoreProductsBySeller(options: {
         userPlanIds: options?.userPlanIds,
       })
     )
-    .filter((row): row is Row => row !== null);
+    .filter((row): row is Row => row !== null));
 
   setCache(sellerProductsCache, cacheKey, normalizedRows);
   return normalizedRows;

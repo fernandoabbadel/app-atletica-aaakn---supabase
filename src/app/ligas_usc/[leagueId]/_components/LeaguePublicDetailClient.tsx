@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Heart, Lightbulb, Loader2, Users } from "lucide-react";
+import { ArrowLeft, Heart, Lightbulb, Loader2, ShoppingBag, Users } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -19,6 +19,7 @@ import {
   toggleUserLeagueFollow,
   type LeagueRecord,
 } from "@/lib/leaguesService";
+import { fetchStoreProductsBySeller } from "@/lib/storePublicService";
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import {
@@ -33,7 +34,16 @@ import {
 } from "@/lib/ligasUscUiService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
-type LeaguePublicTab = "overview" | "membros" | "agenda";
+type LeaguePublicTab = "overview" | "membros" | "agenda" | "loja";
+
+type LeagueStoreProduct = {
+  id: string;
+  nome?: string;
+  img?: string;
+  preco?: number;
+  categoria?: string;
+  tagLabel?: string;
+};
 
 const getLeagueImage = (league?: LeagueRecord | null) =>
   league?.foto?.trim() || resolveLeagueLogoSrc(league, "/placeholder_liga.png");
@@ -66,6 +76,14 @@ const getEventBadge = (value: string) => {
   };
 };
 
+const formatProductPrice = (value: unknown): string => {
+  const price = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(price);
+};
+
 export function LeaguePublicDetailClient({
   leagueId,
   activeTab,
@@ -84,6 +102,8 @@ export function LeaguePublicDetailClient({
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [followedIds, setFollowedIds] = useState<string[]>([]);
   const [uiConfig, setUiConfig] = useState(DEFAULT_LIGAS_USC_UI_CONFIG);
+  const [leagueProducts, setLeagueProducts] = useState<LeagueStoreProduct[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
   const [requestRole, setRequestRole] = useState<string>(DEFAULT_LEAGUE_ROLE);
   const [submittingMemberRequest, setSubmittingMemberRequest] = useState(false);
 
@@ -118,6 +138,42 @@ export function LeaguePublicDetailClient({
       mounted = false;
     };
   }, [cleanLeagueId, tenantId]);
+
+  useEffect(() => {
+    let mounted = true;
+    const leagueProductId = league?.id?.trim() || "";
+    if (!leagueProductId || activeTab !== "loja") {
+      setLeagueProducts([]);
+      setLoadingProducts(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    setLoadingProducts(true);
+    fetchStoreProductsBySeller({
+      seller: { type: "league", id: leagueProductId },
+      tenantId: tenantId || undefined,
+      maxResults: 12,
+      forceRefresh: true,
+    })
+      .then((products) => {
+        if (!mounted) return;
+        setLeagueProducts(products as unknown as LeagueStoreProduct[]);
+      })
+      .catch((error: unknown) => {
+        console.error(error);
+        if (!mounted) return;
+        setLeagueProducts([]);
+      })
+      .finally(() => {
+        if (mounted) setLoadingProducts(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeTab, league?.id, tenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -372,6 +428,8 @@ export function LeaguePublicDetailClient({
   const overviewHref = tenantPath(`/ligas_usc/${league.id}`);
   const membersHref = tenantPath(`/ligas_usc/${league.id}/membros`);
   const agendaHref = tenantPath(`/ligas_usc/${league.id}/agenda`);
+  const storeTabHref = tenantPath(`/ligas_usc/${league.id}/loja`);
+  const storeHref = tenantPath("/loja");
   const eventsFeedHref = tenantPath("/eventos");
   const imageSrc = getLeagueImage(league);
 
@@ -503,11 +561,12 @@ export function LeaguePublicDetailClient({
       </section>
 
       <main className="mx-auto max-w-6xl space-y-6 px-6 py-2">
-        <nav className="grid gap-3 sm:grid-cols-3">
+        <nav className="grid gap-3 sm:grid-cols-4">
           {[
             { href: overviewHref, label: "Vis\u00e3o geral", tab: "overview" as const },
             { href: membersHref, label: "Membros", tab: "membros" as const },
             { href: agendaHref, label: "Agenda", tab: "agenda" as const },
+            { href: storeTabHref, label: "Loja", tab: "loja" as const },
           ].map((item) => (
             <Link key={item.href} href={item.href} className={`flex min-h-[76px] items-center justify-center rounded-[1.5rem] border px-5 py-4 text-center text-[12px] font-black uppercase tracking-[0.24em] transition ${activeTab === item.tab ? "border-emerald-500/30 bg-[linear-gradient(135deg,rgba(16,185,129,0.18),rgba(6,182,212,0.14))] text-emerald-200 shadow-[0_20px_40px_rgba(16,185,129,0.12)]" : "border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-white"}`}>
               {item.label}
@@ -568,7 +627,7 @@ export function LeaguePublicDetailClient({
               {sortedMembers.length === 0 ? <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">{"Essa liga ainda n\u00e3o publicou os membros oficiais."}</p> : null}
             </div>
           </section>
-        ) : (
+        ) : activeTab === "agenda" ? (
           <section className="space-y-5">
             <div className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,24,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
               <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Agenda oficial</p>
@@ -605,6 +664,71 @@ export function LeaguePublicDetailClient({
               </div>
             ))}
             {visibleAgendaCount === 0 ? <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">{"A agenda da liga ainda esta vazia."}</p> : null}
+          </section>
+        ) : (
+          <section className="space-y-5">
+            <div className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,24,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">
+                    Loja da liga
+                  </p>
+                  <h2 className="mt-3 text-2xl font-black text-white">Produtos da {league.sigla || league.nome}</h2>
+                  <p className="mt-3 text-sm leading-7 text-zinc-400">
+                    Os cards mostram os produtos vinculados à liga. Ao abrir qualquer item, você vai para a loja do tenant.
+                  </p>
+                </div>
+                <Link href={storeHref} className="inline-flex items-center justify-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-5 py-3 text-xs font-black uppercase tracking-[0.16em] text-emerald-200 hover:bg-emerald-500/20">
+                  <ShoppingBag size={16} />
+                  Loja
+                </Link>
+              </div>
+            </div>
+
+            {loadingProducts ? (
+              <div className="flex items-center gap-3 rounded-[1.75rem] border border-zinc-800 bg-zinc-950/70 p-5 text-sm font-bold text-zinc-400">
+                <Loader2 size={18} className="animate-spin text-emerald-400" />
+                Carregando produtos
+              </div>
+            ) : leagueProducts.length === 0 ? (
+              <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">
+                Nenhum produto da liga foi encontrado na loja.
+              </p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {leagueProducts.map((product) => {
+                  const image = product.img?.trim() || imageSrc;
+                  return (
+                    <Link key={product.id} href={storeHref}>
+                      <article className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] shadow-[0_20px_60px_rgba(0,0,0,0.35)] transition hover:-translate-y-1 hover:border-emerald-500/30">
+                        <div className="relative aspect-[4/3] bg-black">
+                          <Image src={image} alt={product.nome || "Produto da liga"} fill sizes="(min-width: 1280px) 33vw, (min-width: 768px) 50vw, 100vw" className="object-cover" />
+                          {product.tagLabel ? (
+                            <span className="absolute left-3 top-3 rounded-full border border-emerald-500/30 bg-emerald-500/20 px-3 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-emerald-100">
+                              {product.tagLabel}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="p-5">
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">
+                            {product.categoria || "Produto"}
+                          </p>
+                          <h3 className="mt-2 line-clamp-2 min-h-[3.5rem] text-xl font-black text-white">
+                            {product.nome || "Produto da liga"}
+                          </h3>
+                          <div className="mt-4 flex items-center justify-between gap-3">
+                            <p className="text-lg font-black text-emerald-300">{formatProductPrice(product.preco)}</p>
+                            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase text-zinc-300">
+                              Abrir loja
+                            </span>
+                          </div>
+                        </div>
+                      </article>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
           </section>
         )}
       </main>

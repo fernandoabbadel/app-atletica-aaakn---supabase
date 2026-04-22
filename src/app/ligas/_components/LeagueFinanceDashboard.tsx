@@ -455,6 +455,7 @@ export function LeagueFinanceDashboard() {
   const leagueEventsHref = `${leagueBaseHref}/eventos`;
   const leagueStoreHref = `${leagueBaseHref}/loja`;
   const leagueFinanceHref = `${leagueBaseHref}/gestao`;
+  const leagueFrequencyHref = `${leagueBaseHref}/gestao/frequencia`;
   const leagueBoardHref = `${leagueBaseHref}/board-round`;
   const scannerHref = tenantPath("/scanner");
   const memberPresence = useMemo(() => {
@@ -601,7 +602,7 @@ export function LeagueFinanceDashboard() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
-                Presenca dos membros
+                Presença dos membros
               </p>
               <h2 className="mt-2 text-lg font-black uppercase text-white">
                 Membros por evento
@@ -610,14 +611,24 @@ export function LeagueFinanceDashboard() {
                 Aprovado mostra ingresso liberado; presente mostra QR lido.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => router.push(scannerHref)}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-xs font-black uppercase text-black hover:bg-emerald-400"
-            >
-              <QrCode size={16} />
-              Abrir scanner
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => router.push(leagueFrequencyHref)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs font-black uppercase text-cyan-100 hover:bg-cyan-500/20"
+              >
+                <CheckCircle2 size={16} />
+                Ver frequência
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push(scannerHref)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-xs font-black uppercase text-black hover:bg-emerald-400"
+              >
+                <QrCode size={16} />
+                Abrir scanner
+              </button>
+            </div>
           </div>
           {canCurrentUserScanInternal ? (
             <p className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] font-bold text-emerald-100">

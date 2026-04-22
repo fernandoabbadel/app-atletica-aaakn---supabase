@@ -222,6 +222,12 @@ export function MasterContatoInbox({ mode }: { mode: InboxMode }) {
             const response = responseById[row.id] || "";
             const isBusy = busyId === row.id;
             const faqOrigin = extractFaqOrigin(row.descricao);
+            const registeredTenant =
+              row.registeredTenantName ||
+              row.registeredTenantSigla ||
+              row.registeredTenantSlug ||
+              row.registeredTenantId ||
+              "";
 
             return (
               <article
@@ -241,6 +247,18 @@ export function MasterContatoInbox({ mode }: { mode: InboxMode }) {
                     {statusLabel(row)}
                   </span>
                 </div>
+
+                {row.registeredName || registeredTenant ? (
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-100">
+                    <span className="mb-2 block text-[10px] font-black uppercase tracking-wide text-emerald-300">
+                      Cadastro encontrado
+                    </span>
+                    <div className="grid gap-1 text-[11px] text-emerald-50/85 md:grid-cols-2">
+                      {row.registeredName ? <span>Nome: {row.registeredName}</span> : null}
+                      {registeredTenant ? <span>Tenant: {registeredTenant}</span> : null}
+                    </div>
+                  </div>
+                ) : null}
 
                 {faqOrigin ? (
                   <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3 text-xs text-blue-100">
