@@ -584,16 +584,6 @@ export function LeagueFrequencyPage() {
     return { presentes, faltas, justificadas, aprovados };
   }, [filteredEvents, presenceData.members, resolveCell]);
 
-  const openManualForm = (event?: FrequencyEvent, member?: FrequencyMember) => {
-    setDraft({
-      eventKey: event?.key || firstEventKey,
-      userId: member?.id || firstMemberId,
-      status: "presenca",
-      justification: "",
-    });
-    setFormOpen(true);
-  };
-
   const handleSave = async () => {
     if (!selectedEvent || !selectedMember || saving) return;
     setSaving(true);
@@ -677,7 +667,7 @@ export function LeagueFrequencyPage() {
           });
 
       setData((current) => ({ ...current, manualEntries: entries }));
-      addToast(nextStatus ? "Frequencia atualizada." : "Ajuste removido.", "success");
+      addToast(nextStatus ? "Frequência atualizada." : "Ajuste removido.", "success");
     } catch (error: unknown) {
       console.error(error);
       const message = error instanceof Error && error.message ? error.message : "Nao foi possivel atualizar.";
@@ -760,15 +750,6 @@ export function LeagueFrequencyPage() {
               >
                 <Download size={16} />
                 Exportar CSV
-              </button>
-              <button
-                type="button"
-                onClick={() => openManualForm()}
-                disabled={presenceData.events.length === 0 || presenceData.members.length === 0}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-xs font-black uppercase text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <ClipboardList size={16} />
-                Ajuste manual
               </button>
             </div>
           </div>
@@ -1028,14 +1009,24 @@ export function LeagueFrequencyPage() {
                                 void handleCellStatusChange(event, member, changeEvent.target.value as CellSelectStatus)
                               }
                               disabled={isSavingCell}
-                              aria-label={`Frequencia de ${member.nome} em ${event.title}`}
-                              className={`h-9 w-28 rounded-lg border px-2 text-center text-xs font-black uppercase outline-none focus:border-emerald-400 disabled:opacity-60 ${cellStatusClass(cellStatus)}`}
+                              aria-label={`Frequência de ${member.nome} em ${event.title}`}
+                              className={`h-9 w-28 rounded-lg border bg-zinc-950 px-2 text-center text-xs font-black uppercase text-white outline-none focus:border-emerald-400 disabled:opacity-60 ${
+                                cellStatus === "P"
+                                  ? "border-emerald-500/60"
+                                  : cellStatus === "F"
+                                    ? "border-red-500/60"
+                                    : cellStatus === "J"
+                                      ? "border-amber-500/60"
+                                      : cellStatus === "A"
+                                        ? "border-cyan-500/60"
+                                        : "border-zinc-700"
+                              }`}
                             >
-                              <option value="">-</option>
-                              <option value="A" disabled>A</option>
-                              <option value="P">P</option>
-                              <option value="F">F</option>
-                              <option value="J">J</option>
+                              <option value="" className="bg-zinc-950 text-white">-</option>
+                              <option value="A" disabled className="bg-zinc-950 text-white">A</option>
+                              <option value="P" className="bg-zinc-950 text-white">P</option>
+                              <option value="F" className="bg-zinc-950 text-white">F</option>
+                              <option value="J" className="bg-zinc-950 text-white">J</option>
                             </select>
                             {cell.manual?.justification ? (
                               <span className="line-clamp-2 max-w-[150px] text-[10px] leading-4 text-zinc-400">

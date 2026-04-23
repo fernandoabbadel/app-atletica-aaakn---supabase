@@ -1,5 +1,5 @@
 import { LeagueFinanceDashboard } from "../../_components/LeagueFinanceDashboard";
 
 export default function LigaFinancePage() {
-  return <LeagueFinanceDashboard />;
+  return <LeagueFinanceDashboard view="hub" />;
 }

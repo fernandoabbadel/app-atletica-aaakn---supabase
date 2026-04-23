@@ -23,6 +23,7 @@ import {
 
 import { PaymentRecipientCheckboxList } from "@/components/PaymentRecipientCheckboxList";
 import { PaymentReceiversManager } from "@/components/PaymentReceiversManager";
+import { LotNameSelector } from "@/components/LotNameSelector";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
@@ -1329,7 +1330,7 @@ export default function AdminLojaProdutosPage() {
               <input value={form.preco} onChange={(e) => setForm((prev) => ({ ...prev, preco: e.target.value }))} placeholder="Preço" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
               <input value={form.precoAntigo} onChange={(e) => setForm((prev) => ({ ...prev, precoAntigo: e.target.value }))} placeholder="Preço antigo (promo)" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
               <input value={form.estoque} onChange={(e) => setForm((prev) => ({ ...prev, estoque: e.target.value.replace(/[^\d]/g, "") }))} disabled={variantsEnabled} placeholder="Estoque total (sem variacoes)" inputMode="numeric" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
-              <input value={form.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(e) => setForm((prev) => ({ ...prev, lote: e.target.value.slice(0, PRODUCT_LOTE_MAX_LENGTH) }))} placeholder="Lote / promocao" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
+              <LotNameSelector value={form.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(value) => setForm((prev) => ({ ...prev, lote: value }))} />
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
                 <input value={form.img} maxLength={URL_MAX_LENGTH} onChange={(e) => setForm((prev) => ({ ...prev, img: e.target.value.slice(0, URL_MAX_LENGTH) }))} placeholder="URL da imagem (opcional)" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
                 <label className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-black uppercase cursor-pointer transition ${uploadingProductImage ? "border-zinc-700 bg-zinc-800 text-zinc-400 cursor-wait" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"}`}>

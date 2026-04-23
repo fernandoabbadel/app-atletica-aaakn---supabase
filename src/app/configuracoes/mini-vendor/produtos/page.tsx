@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { ImagePlus, Loader2, Pencil, Plus, Save, Tags, Trash2, X } from "lucide-react";
 
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
+import { LotNameSelector } from "@/components/LotNameSelector";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
@@ -579,7 +580,7 @@ export default function MiniVendorProductsPage() {
                     <input value={productForm.preco} onChange={(event) => setProductForm((previous) => ({ ...previous, preco: event.target.value }))} placeholder="Preco" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
                     <input value={productForm.precoAntigo} onChange={(event) => setProductForm((previous) => ({ ...previous, precoAntigo: event.target.value }))} placeholder="Preco antigo" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
                     <input value={productForm.estoque} onChange={(event) => setProductForm((previous) => ({ ...previous, estoque: event.target.value.replace(/[^\d]/g, "") }))} disabled={productForm.usarVariantes} placeholder="Estoque" inputMode="numeric" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
-                    <input value={productForm.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, lote: event.target.value.slice(0, PRODUCT_LOTE_MAX_LENGTH) }))} placeholder="Lote / promocao" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
+                    <LotNameSelector value={productForm.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(value) => setProductForm((previous) => ({ ...previous, lote: value }))} />
                     <div className="grid grid-cols-1 gap-2 md:col-span-2 md:grid-cols-[1fr_auto]">
                       <input value={productForm.img} maxLength={URL_MAX_LENGTH} onChange={(event) => setProductForm((previous) => ({ ...previous, img: event.target.value.slice(0, URL_MAX_LENGTH) }))} placeholder="URL da imagem" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
                       <label className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-black uppercase transition ${uploadingProductImage ? "cursor-wait border-zinc-700 bg-zinc-800 text-zinc-400" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"}`}>

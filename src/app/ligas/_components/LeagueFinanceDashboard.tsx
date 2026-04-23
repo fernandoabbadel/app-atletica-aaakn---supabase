@@ -19,6 +19,7 @@ import {
 import { ArrowLeft, BarChart3, CheckCircle2, Loader2, Package, QrCode, Ticket, Users, Wallet, XCircle } from "lucide-react";
 
 import { EventManagementAnalytics } from "@/components/EventManagementAnalytics";
+import { ProductManagementAnalytics } from "@/components/ProductManagementAnalytics";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { getSupabaseClient } from "@/lib/supabase";
@@ -329,7 +330,7 @@ async function loadLeagueFinanceData(
   const productOrders = ordersRaw.filter((row) => {
     const belongsToProduct = productIds.has(asString(row.productId));
     const belongsToSeller = isLeagueSellerRow(row, leagueId);
-    return (belongsToProduct || belongsToSeller) && statusIsApproved(row.status);
+    return belongsToProduct || belongsToSeller;
   });
 
   const eventTickets = ticketsRaw.filter((row) => {
@@ -390,7 +391,7 @@ function ChartPanel({
   );
 }
 
-export function LeagueFinanceDashboard() {
+export function LeagueFinanceDashboard({ view = "hub" }: { view?: "hub" | "eventos" | "produtos" }) {
   const params = useParams<{ leagueId?: string }>();
   const router = useRouter();
   const { user } = useAuth();
@@ -448,7 +449,9 @@ export function LeagueFinanceDashboard() {
     let eventQuantity = 0;
     let eventScanned = 0;
 
-    data.productOrders.forEach((order) => {
+    const approvedProductOrders = data.productOrders.filter((order) => statusIsApproved(order.status));
+
+    approvedProductOrders.forEach((order) => {
       const quantity = parseQuantity(order.quantidade ?? order.itens, 1);
       const total = parseNumber(order.total) || parseNumber(order.price) * quantity;
       const product = productMap.get(asString(order.productId));
@@ -537,6 +540,8 @@ export function LeagueFinanceDashboard() {
   const leagueStoreHref = `${leagueBaseHref}/loja`;
   const leagueFinanceHref = `${leagueBaseHref}/gestao`;
   const leagueFrequencyHref = `${leagueBaseHref}/gestao/frequencia`;
+  const leagueEventsManagementHref = `${leagueBaseHref}/gestao/eventos`;
+  const leagueProductsManagementHref = `${leagueBaseHref}/gestao/produtos`;
   const leagueBoardHref = `${leagueBaseHref}/board-round`;
   const scannerHref = tenantPath("/scanner");
   const memberPresence = useMemo(() => {
@@ -680,6 +685,74 @@ export function LeagueFinanceDashboard() {
           />
         </section>
 
+        {view === "hub" ? (
+          <section className="grid gap-4 md:grid-cols-3">
+            {[
+              {
+                title: "Frequência",
+                description: "Matriz de presença por membro e evento, com exportação CSV.",
+                href: leagueFrequencyHref,
+                icon: <CheckCircle2 size={18} />,
+              },
+              {
+                title: "Eventos",
+                description: "Funil, aprovação, portaria, recorrência e lotes da liga.",
+                href: leagueEventsManagementHref,
+                icon: <Ticket size={18} />,
+              },
+              {
+                title: "Produtos",
+                description: "Receita, estoque, recompra, conversão e curva ABC dos produtos da liga.",
+                href: leagueProductsManagementHref,
+                icon: <Package size={18} />,
+              },
+            ].map((item) => (
+              <button
+                key={item.title}
+                type="button"
+                onClick={() => router.push(item.href)}
+                className="flex min-h-36 flex-col items-start justify-between rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-emerald-500/40 hover:bg-zinc-900/80"
+              >
+                <span className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
+                  {item.icon}
+                </span>
+                <span>
+                  <strong className="block text-lg font-black uppercase text-white">{item.title}</strong>
+                  <span className="mt-1 block text-sm font-semibold text-zinc-500">{item.description}</span>
+                </span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => router.push(scannerHref)}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500 px-5 py-4 text-sm font-black uppercase text-black hover:bg-emerald-400 md:col-span-3"
+            >
+              <QrCode size={18} />
+              Abrir scanner de QR
+            </button>
+          </section>
+        ) : null}
+
+        {view === "eventos" ? (
+          <EventManagementAnalytics
+            events={(data.league?.eventos || []) as unknown as Row[]}
+            tickets={data.eventTickets}
+            allLabel="Todos os eventos da liga"
+          />
+        ) : null}
+
+        {view === "produtos" ? (
+          <ProductManagementAnalytics
+            products={data.products}
+            orders={data.productOrders}
+            users={data.leagueUsers as unknown as Row[]}
+            title="Produtos da liga"
+            subtitle="Receita, compradores únicos, valor médio, conversão por produto, estoque, recompra e curva ABC apenas desta liga."
+            allLabel="Todos os produtos da liga"
+          />
+        ) : null}
+
+        {false ? <>
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -900,6 +973,7 @@ export function LeagueFinanceDashboard() {
             </div>
           </div>
         </section>
+        </> : null}
       </main>
     </div>
   );

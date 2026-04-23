@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   CheckCircle2,
+  BarChart3,
   ChevronRight,
   Clock3,
   Loader2,
@@ -55,6 +56,17 @@ export default function MiniVendorSettingsPage() {
           ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/produtos")
           : "/configuracoes/mini-vendor/produtos",
         Icon: Package,
+        accentClass:
+          "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 shadow-emerald-500/10",
+      },
+      {
+        title: "Gestão da lojinha",
+        description:
+          "Acompanha receita, compradores, conversão, estoque, recompra e produtos parados só do mini-vendor.",
+        href: tenantSlug
+          ? withTenantSlug(tenantSlug, "/configuracoes/mini-vendor/gestao")
+          : "/configuracoes/mini-vendor/gestao",
+        Icon: BarChart3,
         accentClass:
           "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 shadow-emerald-500/10",
       },

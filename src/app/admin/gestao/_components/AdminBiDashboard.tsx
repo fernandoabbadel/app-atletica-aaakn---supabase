@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 
 import { EventManagementAnalytics } from "@/components/EventManagementAnalytics";
+import { ProductManagementAnalytics } from "@/components/ProductManagementAnalytics";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { getSupabaseClient } from "@/lib/supabase";
 import { asObject, asString, type Row } from "@/lib/supabaseData";
@@ -354,9 +355,6 @@ const aggregateDimensionRows = (
   return metricRows(map, options?.limit);
 };
 
-const hasBiRows = (...groups: Row[][]): boolean =>
-  groups.some((group) => Array.isArray(group) && group.length > 0);
-
 const extractMissingSchemaColumn = (error: unknown): string | null => {
   if (!error || typeof error !== "object") return null;
   const raw = error as { message?: unknown; details?: unknown };
@@ -535,7 +533,7 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
   const [products, productSales, productEngagement] = await Promise.all([
     queryRows(
       "produtos",
-      "id,nome,lote,categoria,preco,likes,cliques,vendidos,seller_type,seller_id,seller_name,tenant_id,createdAt",
+      "id,nome,lote,categoria,preco,precoAntigo,estoque,likes,cliques,vendidos,active,aprovado,status,seller_type,seller_id,seller_name,tenant_id,createdAt",
       tenantId,
       "createdAt",
       1600
@@ -555,9 +553,7 @@ async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise
       2000
     ),
   ]);
-  const [orders, users] = hasBiRows(productSales, productEngagement)
-    ? [[], []]
-    : await Promise.all([
+  const [orders, users] = await Promise.all([
     queryRows(
       "orders",
       "id,userId,userName,productId,productName,quantidade,total,price,status,createdAt,seller_type,seller_id,seller_name,data,tenant_id",
@@ -718,7 +714,7 @@ function LineMetric({ data }: { data: MetricRow[] }) {
 
 function EventsBi({ data }: { data: LoadedData }) {
   return (
-    <DashboardShell title="Gestao de Eventos" subtitle="Vendas, funil, lotes, aprovadores e scan de entrada" mode="eventos">
+    <DashboardShell title="Gestão de Eventos" subtitle="Vendas, funil, lotes, aprovadores e leitura de entrada" mode="eventos">
       <EventManagementAnalytics events={data.events} tickets={data.tickets} allLabel="Todos os eventos" />
     </DashboardShell>
   );
@@ -1352,6 +1348,32 @@ function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
 }
 
 function ProductsBi({ data }: { data: LoadedData }) {
+  const tenantProducts = data.products.filter((product) => {
+    const sellerType = asString(product.seller_type).trim().toLowerCase();
+    return !["mini_vendor", "league", "liga"].includes(sellerType);
+  });
+  const tenantProductIds = new Set(tenantProducts.map((product) => asString(product.id)).filter(Boolean));
+  const tenantOrders = data.orders.filter((order) => {
+    const sellerType = asString(order.seller_type).trim().toLowerCase();
+    return tenantProductIds.has(asString(order.productId)) || (!sellerType || sellerType === "tenant");
+  });
+
+  return (
+    <DashboardShell title="Gestão de Produtos" subtitle="Produtos oficiais da atlética, sem misturar mini-vendors ou ligas" mode="produtos">
+      <ProductManagementAnalytics
+        products={tenantProducts}
+        orders={tenantOrders}
+        users={data.users}
+        title="Produtos da atlética"
+        subtitle="Receita, compradores únicos, valor médio, conversão por produto, estoque, recompra e curva ABC apenas dos produtos oficiais."
+        allLabel="Todos os produtos da atlética"
+      />
+    </DashboardShell>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyProductsBi({ data }: { data: LoadedData }) {
   const [productId, setProductId] = useState("todos");
   const productMap = useMemo(
     () => new Map(data.products.map((product) => [asString(product.id), product])),

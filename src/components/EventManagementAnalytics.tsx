@@ -80,6 +80,13 @@ const percentFormatter = new Intl.NumberFormat("pt-BR", {
 const PERIODS = ["Madrugada", "Manha", "Tarde", "Noite"];
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"];
 const COLORS = ["#12d18e", "#38bdf8", "#facc15", "#f97316", "#f472b6", "#a78bfa", "#fb7185", "#22c55e"];
+const chartTooltipStyle = {
+  background: "#101114",
+  border: "1px solid rgba(255,255,255,.12)",
+  color: "#fff",
+};
+const chartTooltipLabelStyle = { color: "#ffffff", fontWeight: 800 };
+const chartTooltipItemStyle = { color: "#ffffff", fontWeight: 700 };
 
 function formatCurrency(value: number) {
   return currencyFormatter.format(Number.isFinite(value) ? value : 0);
@@ -312,7 +319,7 @@ function eventStatusLabel(event: Row) {
 
 function periodFromDate(date: Date | null) {
   if (!date) {
-    return "Sem horario";
+    return "Sem horário";
   }
   const hour = date.getHours();
   if (hour < 6) return "Madrugada";
@@ -539,10 +546,12 @@ function Bars({ data, dataKey = "quantity", currency = false }: { data: MetricRo
         />
         <YAxis dataKey="name" type="category" width={112} stroke="rgba(255,255,255,0.45)" tick={{ fontSize: 11 }} />
         <Tooltip
-          contentStyle={{ background: "#101114", border: "1px solid rgba(255,255,255,.12)", color: "#fff" }}
+          contentStyle={chartTooltipStyle}
+          labelStyle={chartTooltipLabelStyle}
+          itemStyle={chartTooltipItemStyle}
           formatter={(value) => (currency ? formatCurrency(Number(value)) : formatNumber(Number(value)))}
         />
-        <Bar dataKey={dataKey as string} fill="#12d18e" radius={[0, 8, 8, 0]} />
+        <Bar dataKey={dataKey as string} name={dataKey === "value" ? "Valor" : dataKey === "average" ? "Média" : "Qtd"} fill="#12d18e" radius={[0, 8, 8, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -558,7 +567,7 @@ function BarsDual({ data }: { data: MetricRow[] }) {
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" vertical={false} />
         <XAxis dataKey="name" stroke="rgba(255,255,255,0.45)" tick={{ fontSize: 11 }} angle={-18} textAnchor="end" height={58} />
         <YAxis stroke="rgba(255,255,255,0.45)" tick={{ fontSize: 11 }} />
-        <Tooltip contentStyle={{ background: "#101114", border: "1px solid rgba(255,255,255,.12)", color: "#fff" }} />
+        <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} />
         <Legend />
         <Bar dataKey="quantity" name="Ingressos" fill="#12d18e" radius={[8, 8, 0, 0]} />
         <Bar dataKey="value" name="Receita" fill="#38bdf8" radius={[8, 8, 0, 0]} />
@@ -577,8 +586,8 @@ function LineMetric({ data, dataKey = "quantity" }: { data: MetricRow[]; dataKey
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" vertical={false} />
         <XAxis dataKey="name" stroke="rgba(255,255,255,0.45)" tick={{ fontSize: 11 }} angle={-18} textAnchor="end" height={46} />
         <YAxis stroke="rgba(255,255,255,0.45)" tick={{ fontSize: 11 }} />
-        <Tooltip contentStyle={{ background: "#101114", border: "1px solid rgba(255,255,255,.12)", color: "#fff" }} />
-        <Line type="monotone" dataKey={dataKey as string} stroke="#12d18e" strokeWidth={3} dot={{ r: 4 }} />
+        <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} />
+        <Line type="monotone" dataKey={dataKey as string} name="Qtd" stroke="#12d18e" strokeWidth={3} dot={{ r: 4 }} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -596,7 +605,7 @@ function PieMetric({ data }: { data: MetricRow[] }) {
             <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
           ))}
         </Pie>
-        <Tooltip contentStyle={{ background: "#101114", border: "1px solid rgba(255,255,255,.12)", color: "#fff" }} />
+        <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} />
         <Legend />
       </PieChart>
     </ResponsiveContainer>
@@ -692,7 +701,6 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
     const scanned = approvedTickets.reduce((sum, ticket) => sum + ticketScannedCount(ticket), 0);
     const emitted = approvedTickets.reduce((sum, ticket) => sum + Math.max(ticketQuantity(ticket), readTicketEntries(ticket).length), 0);
     const noShow = Math.max(approvedQuantity - scanned, 0);
-    const views = selectedEvents.reduce((sum, event) => sum + readStatsNumber(event, ["visualizacoes", "views", "pageViews", "viewCount"]), 0);
     const buyClicks = selectedEvents.reduce((sum, event) => sum + readStatsNumber(event, ["cliquesCompra", "buyClicks", "checkoutClicks", "clicks"]), 0);
     const createdOrders = selectedTickets.length;
     const paymentSent = selectedTickets.filter((ticket) => statusValue(ticket) !== "rascunho").length || selectedTickets.length;
@@ -706,13 +714,12 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
 
     const funnelSource = [
       { name: "Publicado", quantity: selectedEvents.length },
-      { name: "Visualizacao", quantity: views },
-      { name: "Clique compra", quantity: buyClicks },
+      { name: "Clique em comprar", quantity: buyClicks },
       { name: "Pedido criado", quantity: createdOrders },
-      { name: "Comprovante", quantity: paymentSent },
-      { name: "Aprovado", quantity: approvedOrders },
-      { name: "Ingresso", quantity: emitted },
-      { name: "Check-in", quantity: scanned },
+      { name: "Comprovante enviado", quantity: paymentSent },
+      { name: "Pedido aprovado", quantity: approvedOrders },
+      { name: "Ingresso emitido", quantity: emitted },
+      { name: "Entrada validada", quantity: scanned },
     ];
     const funnelRows = funnelSource.map((step, index) => {
       const previous = funnelSource[index - 1]?.quantity ?? 0;
@@ -927,7 +934,6 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
       noShowRate,
       approvalRate,
       rejectionRate,
-      views,
       buyClicks,
       createdOrders,
       paymentSent,
@@ -965,10 +971,10 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
     <section className="space-y-5">
       <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">Gestao de eventos</p>
-          <h2 className="text-2xl font-black uppercase tracking-tight text-white">Painel de decisao</h2>
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">Gestão de eventos</p>
+          <h2 className="text-2xl font-black uppercase tracking-tight text-white">Painel de decisão</h2>
           <p className="mt-1 max-w-3xl text-sm font-semibold text-white/55">
-            Comercial, aprovacao, portaria e estrategia no mesmo recorte para mostrar onde vende, onde trava e o que vale repetir.
+            Comercial, aprovação, portaria e estratégia no mesmo recorte para mostrar onde vende, onde trava e o que vale repetir.
           </p>
         </div>
         <label className="flex flex-col gap-1 text-xs font-black uppercase tracking-[0.18em] text-white/45">
@@ -990,29 +996,29 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
 
       <SectionTitle
         label="Bloco comercial"
-        title="Venda, funil, lotes e preco"
-        description="Mostra da publicacao ate o check-in, com receita, ticket medio exato, sell-through ou velocidade por lote e leitura por turma, dia e periodo."
+        title="Venda, funil, lotes e preço"
+        description="Mostra da publicação até a entrada validada, com receita, valor médio exato, lotes, turma, dia e período."
       />
       <KpiGrid>
         <KpiCard label="Receita bruta" value={formatCurrency(analytics.revenue)} hint={`${formatNumber(analytics.approvedQuantity)} ingressos aprovados`} icon={<DollarSign className="h-4 w-4" />} />
-        <KpiCard label="Ticket medio exato" value={formatCurrency(analytics.avgTicket)} hint="receita / ingressos aprovados" icon={<Ticket className="h-4 w-4" />} />
-        <KpiCard label="Taxa de aprovacao" value={formatPercent(analytics.approvalRate)} hint={`${formatNumber(analytics.approvedOrders)} aprovados de ${formatNumber(analytics.paymentSent)} enviados`} icon={<CheckCircle2 className="h-4 w-4" />} />
-        <KpiCard label="Conversao compra" value={formatPercent(safeDivide(analytics.buyClicks, analytics.views) * 100)} hint="cliques em comprar / visualizacoes" icon={<Target className="h-4 w-4" />} />
+        <KpiCard label="Valor médio exato" value={formatCurrency(analytics.avgTicket)} hint="receita / ingressos aprovados" icon={<Ticket className="h-4 w-4" />} />
+        <KpiCard label="Taxa de aprovação" value={formatPercent(analytics.approvalRate)} hint={`${formatNumber(analytics.approvedOrders)} aprovados de ${formatNumber(analytics.paymentSent)} enviados`} icon={<CheckCircle2 className="h-4 w-4" />} />
+        <KpiCard label="Clique para pedido" value={formatPercent(safeDivide(analytics.createdOrders, analytics.buyClicks) * 100)} hint="pedidos criados / cliques em comprar" icon={<Target className="h-4 w-4" />} />
       </KpiGrid>
       <div className="grid gap-4 xl:grid-cols-2">
-        <ChartPanel title="Funil completo do evento" subtitle="Publicado -> visualizacao -> compra -> comprovante -> aprovacao -> ingresso -> check-in">
+        <ChartPanel title="Funil completo do evento" subtitle="Publicado -> clique -> pedido -> comprovante -> aprovação -> ingresso -> entrada">
           <Bars data={analytics.funnelRows} />
         </ChartPanel>
         <ChartPanel title="Lotes por retorno" subtitle="Quantidade e receita por lote">
           <BarsDual data={analytics.lotRows} />
         </ChartPanel>
-        <ChartPanel title="Turmas por venda" subtitle="Quem compra, receita e ticket medio">
+        <ChartPanel title="Turmas por venda" subtitle="Quem compra, receita e valor médio">
           <BarsDual data={analytics.classRows} />
         </ChartPanel>
-        <ChartPanel title="Aluno x nao aluno" subtitle="Mix de publico inferido pelo nome do lote">
+        <ChartPanel title="Aluno x não aluno" subtitle="Mix de público inferido pelo nome do lote">
           <PieMetric data={analytics.audienceRows} />
         </ChartPanel>
-        <ChartPanel title="Compras por dia da semana" subtitle="Quantidade, receita e ticket medio">
+        <ChartPanel title="Compras por dia da semana" subtitle="Quantidade, receita e valor médio">
           <BarsDual data={analytics.weekdayRows} />
         </ChartPanel>
         <ChartPanel title="Compras por periodo" subtitle="Manha, tarde, noite e madrugada">
@@ -1027,18 +1033,18 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
           { key: "quantity", label: "Ingressos" },
           { key: "value", label: "Receita", format: "currency" },
           { key: "average", label: "Ticket", format: "currency" },
-          { key: "secondary", label: "Sell/vel.", format: "decimal" },
+          { key: "secondary", label: "Venda/vel.", format: "decimal" },
         ]}
       />
 
       <SectionTitle
         label="Bloco operacional"
-        title="Aprovacao de comprovantes"
-        description="Controla SLA, reprovacao, fila pendente e dependencia do aprovador principal para achar gargalos antes do evento."
+        title="Aprovação de comprovantes"
+        description="Controla prazo médio, reprovação, fila pendente e dependência do aprovador principal para achar gargalos antes do evento."
       />
       <KpiGrid>
-        <KpiCard label="SLA medio" value={`${formatDecimal(analytics.avgSlaHours)}h`} hint="tempo entre pedido e aprovacao" icon={<Clock3 className="h-4 w-4" />} />
-        <KpiCard label="Taxa de reprovacao" value={formatPercent(analytics.rejectionRate)} hint={`${formatNumber(analytics.rejectedTickets.length)} comprovantes recusados`} icon={<AlertTriangle className="h-4 w-4" />} />
+        <KpiCard label="Prazo médio" value={`${formatDecimal(analytics.avgSlaHours)}h`} hint="tempo entre pedido e aprovação" icon={<Clock3 className="h-4 w-4" />} />
+        <KpiCard label="Taxa de reprovação" value={formatPercent(analytics.rejectionRate)} hint={`${formatNumber(analytics.rejectedTickets.length)} comprovantes recusados`} icon={<AlertTriangle className="h-4 w-4" />} />
         <KpiCard label="Dependencia top 1" value={formatPercent(analytics.topApproverDependency)} hint={`top 3 concentram ${formatPercent(analytics.top3ApproverDependency)}`} icon={<Users className="h-4 w-4" />} />
         <KpiCard label="Fila/atraso" value={formatNumber(analytics.pendingTickets.length + analytics.slowApprovals)} hint={`${formatNumber(analytics.pendingTickets.length)} pendentes, ${formatNumber(analytics.slowApprovals)} acima de 24h`} icon={<TrendingUp className="h-4 w-4" />} />
       </KpiGrid>
@@ -1046,43 +1052,43 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
         <ChartPanel title="Aprovacoes por aprovador" subtitle="Volume e receita processada">
           <BarsDual data={analytics.approverRows} />
         </ChartPanel>
-        <ChartPanel title="SLA por aprovador" subtitle="Tempo medio de aprovacao em horas">
+        <ChartPanel title="Prazo por aprovador" subtitle="Tempo médio de aprovação em horas">
           <Bars data={analytics.approverRows} dataKey="average" />
         </ChartPanel>
       </div>
 
       <SectionTitle
         label="Bloco portaria"
-        title="Entrada, check-in e no-show"
-        description="Compara ingressos aprovados com leitura real de QR para apontar falta, duplicidade, scan invalido e horario de pico."
+        title="Entrada, presença e ausência"
+        description="Compara ingressos aprovados com leitura real de QR para apontar ausência, duplicidade, leitura inválida e horário de pico."
       />
       <KpiGrid>
-        <KpiCard label="Show rate" value={formatPercent(analytics.showRate)} hint={`${formatNumber(analytics.scanned)} check-ins de ${formatNumber(analytics.approvedQuantity)} aprovados`} icon={<QrCode className="h-4 w-4" />} />
-        <KpiCard label="No-show rate" value={formatPercent(analytics.noShowRate)} hint={`${formatNumber(analytics.noShow)} aprovados sem entrada`} icon={<AlertTriangle className="h-4 w-4" />} />
-        <KpiCard label="Receita por presente" value={formatCurrency(analytics.revenuePerPresent)} hint="receita / check-ins" icon={<DollarSign className="h-4 w-4" />} />
-        <KpiCard label="Scan duplicado/invalido" value={formatNumber(analytics.duplicateScans + analytics.invalidScans)} hint={`${formatNumber(analytics.duplicateScans)} duplicados, ${formatNumber(analytics.invalidScans)} invalidos`} icon={<QrCode className="h-4 w-4" />} />
+        <KpiCard label="Taxa de presença" value={formatPercent(analytics.showRate)} hint={`${formatNumber(analytics.scanned)} leituras QR de ${formatNumber(analytics.approvedQuantity)} aprovados`} icon={<QrCode className="h-4 w-4" />} />
+        <KpiCard label="Taxa de ausência" value={formatPercent(analytics.noShowRate)} hint={`${formatNumber(analytics.noShow)} aprovados sem entrada`} icon={<AlertTriangle className="h-4 w-4" />} />
+        <KpiCard label="Receita por presente" value={formatCurrency(analytics.revenuePerPresent)} hint="receita / leituras QR" icon={<DollarSign className="h-4 w-4" />} />
+        <KpiCard label="Leitura duplicada/inválida" value={formatNumber(analytics.duplicateScans + analytics.invalidScans)} hint={`${formatNumber(analytics.duplicateScans)} duplicadas, ${formatNumber(analytics.invalidScans)} inválidas`} icon={<QrCode className="h-4 w-4" />} />
       </KpiGrid>
       <div className="grid gap-4 xl:grid-cols-3">
-        <ChartPanel title="Check-ins por horario" subtitle="Pico de entrada">
+        <ChartPanel title="Leituras por horário" subtitle="Pico de entrada">
           <LineMetric data={analytics.scanHourRows} />
         </ChartPanel>
-        <ChartPanel title="No-show por turma" subtitle="Aprovados sem check-in">
+        <ChartPanel title="Ausência por turma" subtitle="Aprovados sem leitura QR">
           <Bars data={analytics.noShowClassRows} />
         </ChartPanel>
-        <ChartPanel title="No-show por lote" subtitle="Atrito por tipo de ingresso">
+        <ChartPanel title="Ausência por lote" subtitle="Atrito por tipo de ingresso">
           <Bars data={analytics.noShowLotRows} />
         </ChartPanel>
       </div>
 
       <SectionTitle
-        label="Bloco estrategico"
-        title="Recorrencia, antecedencia e repeticao"
+        label="Bloco estratégico"
+        title="Recorrência, antecedência e repetição"
         description="Ajuda presidencia e financeiro a entender quem volta, quando compra e quais eventos merecem repeticao ou ajuste de formato."
       />
       <KpiGrid>
-        <KpiCard label="Compradores unicos" value={formatNumber(analytics.uniqueBuyers)} hint={`${formatPercent(analytics.recurringRate)} recorrentes`} icon={<Users className="h-4 w-4" />} />
-        <KpiCard label="Previsao final" value={analytics.projectedTickets ? formatNumber(analytics.projectedTickets) : "Sem ritmo"} hint="estimativa simples pelo ritmo atual" icon={<TrendingUp className="h-4 w-4" />} />
-        <KpiCard label="Resultado estimado" value={formatCurrency(analytics.revenue)} hint="custos ainda nao cadastrados" icon={<DollarSign className="h-4 w-4" />} />
+        <KpiCard label="Compradores únicos" value={formatNumber(analytics.uniqueBuyers)} hint={`${formatPercent(analytics.recurringRate)} recorrentes`} icon={<Users className="h-4 w-4" />} />
+        <KpiCard label="Previsão final" value={analytics.projectedTickets ? formatNumber(analytics.projectedTickets) : "Sem ritmo"} hint="estimativa simples pelo ritmo atual" icon={<TrendingUp className="h-4 w-4" />} />
+        <KpiCard label="Resultado estimado" value={formatCurrency(analytics.revenue)} hint="custos ainda não cadastrados" icon={<DollarSign className="h-4 w-4" />} />
         <KpiCard label="Status do recorte" value={analytics.eventStatus} hint={`${formatNumber(analytics.createdOrders)} pedidos criados`} icon={<BarChart3 className="h-4 w-4" />} />
       </KpiGrid>
       <div className="grid gap-4 xl:grid-cols-2">

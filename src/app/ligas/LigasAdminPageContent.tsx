@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import Image from "next/image";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
+import { LotNameSelector } from "@/components/LotNameSelector";
 import {
   LeagueAdminQuickNav,
   type LeagueAdminQuickNavKey,
@@ -2771,7 +2772,7 @@ export default function LigasAdminPageContent({
                       <div className="bg-black/40 border border-zinc-800 rounded-xl p-4">
                           <label className="text-xs text-zinc-500 font-bold uppercase mb-3 block border-b border-zinc-800 pb-2">Configurar Lotes</label>
                           <div className="grid grid-cols-2 gap-2 mb-2">
-                              <input type="text" maxLength={EVENT_LOTE_NAME_MAX_LENGTH} placeholder="Nome (ex: Lote 1)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.nome} onChange={e => setNovoLote({ ...novoLote, nome: e.target.value.slice(0, EVENT_LOTE_NAME_MAX_LENGTH) })} />
+                              <LotNameSelector value={novoLote.nome} maxLength={EVENT_LOTE_NAME_MAX_LENGTH} onChange={(value) => setNovoLote({ ...novoLote, nome: value })} containerClassName="grid grid-cols-2 gap-2 col-span-2" selectClassName="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" inputClassName="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" />
                               <input type="text" placeholder="Preço (R$)" className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" value={novoLote.preco} onChange={e => setNovoLote({ ...novoLote, preco: e.target.value })} />
                           </div>
                           <button onClick={handleAddLoteToCurrentEvent} className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold text-xs uppercase hover:bg-emerald-500">Adicionar Lote</button>

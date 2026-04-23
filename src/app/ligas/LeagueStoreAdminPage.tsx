@@ -26,6 +26,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
+import { LotNameSelector } from "@/components/LotNameSelector";
 import { LeagueAdminQuickNav } from "./_components/LeagueAdminQuickNav";
 import { fetchLeagueById, uploadLeagueImageToStorage, type LeagueRecord } from "@/lib/leaguesService";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
@@ -955,7 +956,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
                     <option value="esgotado">Esgotado</option>
                   </select>
                   <input value={form.estoque} onChange={(event) => setForm((prev) => ({ ...prev, estoque: event.target.value.replace(/[^\d]/g, "") }))} placeholder="Estoque" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
-                  <input value={form.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(event) => setForm((prev) => ({ ...prev, lote: event.target.value.slice(0, PRODUCT_LOTE_MAX_LENGTH) }))} placeholder="Lote" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+                  <LotNameSelector value={form.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(value) => setForm((prev) => ({ ...prev, lote: value }))} selectClassName="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" inputClassName="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" />
                   <input value={form.contato} maxLength={PHONE_MAX_LENGTH} onChange={(event) => setForm((prev) => ({ ...prev, contato: normalizePhoneToBrE164(event.target.value) }))} placeholder="Telefone/WhatsApp para comprovante" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
                   <textarea value={form.descricao} maxLength={PRODUCT_DESCRIPTION_MAX_LENGTH} onChange={(event) => setForm((prev) => ({ ...prev, descricao: event.target.value.slice(0, PRODUCT_DESCRIPTION_MAX_LENGTH) }))} placeholder="Descrição" rows={4} className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2 text-sm outline-none focus:border-emerald-500 md:col-span-2" />
                 </div>
