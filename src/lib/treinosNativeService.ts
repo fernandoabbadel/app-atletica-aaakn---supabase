@@ -719,6 +719,94 @@ export async function upsertTreinoCategory(payload: {
   return fetchTreinoSettings({ tenantId: payload.tenantId });
 }
 
+export async function renameTreinoCategory(payload: {
+  previousName: string;
+  nextName: string;
+  imageUrl?: string | null;
+  calendarColor?: string | null;
+  tenantId?: string | null;
+}): Promise<TreinoSettingsRecord> {
+  const previousName = normalizeModalidadeName(payload.previousName);
+  const nextName = normalizeModalidadeName(payload.nextName);
+  if (!previousName || !nextName) {
+    throw new Error("Nome da categoria inválido.");
+  }
+
+  const previousKey = toModalidadeKey(previousName);
+  const nextKey = toModalidadeKey(nextName);
+  if (previousKey === nextKey) {
+    return upsertTreinoCategory({
+      name: nextName,
+      imageUrl: payload.imageUrl,
+      calendarColor: payload.calendarColor,
+      tenantId: payload.tenantId,
+    });
+  }
+
+  const currentSettings = await fetchTreinoSettings({
+    tenantId: payload.tenantId,
+  });
+  const nameAlreadyExists = currentSettings.modalidades.some(
+    (item) => toModalidadeKey(item) === nextKey && toModalidadeKey(item) !== previousKey
+  );
+  if (nameAlreadyExists) {
+    throw new Error("Já existe uma categoria com esse nome.");
+  }
+
+  const nextModalidades = currentSettings.modalidades.map((item) =>
+    toModalidadeKey(item) === previousKey ? nextName : item
+  );
+  const nextImagens = { ...currentSettings.modalidadeImagens };
+  const nextColors = { ...currentSettings.modalidadeColors };
+
+  const resolvedImageUrl =
+    payload.imageUrl === null
+      ? null
+      : typeof payload.imageUrl === "string"
+        ? payload.imageUrl.trim().slice(0, 2000) || ""
+        : nextImagens[previousKey] || nextImagens[nextKey] || "";
+  if (resolvedImageUrl) {
+    nextImagens[nextKey] = resolvedImageUrl;
+  } else {
+    delete nextImagens[nextKey];
+  }
+  delete nextImagens[previousKey];
+
+  nextColors[nextKey] =
+    payload.calendarColor === null
+      ? DEFAULT_MODALIDADE_COLOR
+      : typeof payload.calendarColor === "string"
+        ? normalizeCalendarColor(payload.calendarColor)
+        : nextColors[previousKey] || nextColors[nextKey] || DEFAULT_MODALIDADE_COLOR;
+  delete nextColors[previousKey];
+
+  await saveTreinoSettings(
+    {
+      modalidades: nextModalidades,
+      modalidadeImagens: nextImagens,
+      modalidadeColors: nextColors,
+    },
+    { tenantId: payload.tenantId }
+  );
+
+  const supabase = getSupabaseClient();
+  let treinoUpdate = supabase
+    .from("treinos")
+    .update({
+      modalidade: nextName,
+      updatedAt: nowIso(),
+    })
+    .eq("modalidade", previousName);
+  const scopedTenantId = resolveTreinosTenantId(payload.tenantId);
+  if (scopedTenantId) {
+    treinoUpdate = treinoUpdate.eq("tenant_id", scopedTenantId);
+  }
+  const { error } = await treinoUpdate;
+  if (error) throwSupabaseError(error);
+
+  return fetchTreinoSettings({ tenantId: payload.tenantId });
+}
+
 export async function fetchTreinosAdminList(options?: {
   maxResults?: number;
   forceRefresh?: boolean;

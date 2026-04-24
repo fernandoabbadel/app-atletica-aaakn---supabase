@@ -23,8 +23,9 @@ type OrganogramDisplayMember = OrganogramMemberRecord & {
 
 const INITIAL_CONFIG: OrganogramConfig = {
   tituloPagina: "Organograma da Atlética",
-  subtituloPagina: "Carregando liderancas...",
+  subtituloPagina: "Carregando lideranças...",
   membros: [],
+  ordemSecoes: [],
 };
 
 const sectionIcon = (section: string) => {
@@ -69,7 +70,7 @@ export default function OrganogramaPage() {
                 visual?.nome || member.nome || "Membro a definir",
               fotoExibicao: visual?.foto || member.foto || fallbackLogo,
               detalheExibicao:
-                visual?.turma || (member.userId ? "Membro vinculado" : "Vinculacao pendente"),
+                visual?.turma || (member.userId ? "Membro vinculado" : "Vinculação pendente"),
               isFallbackVisual: !visual,
             };
           })
@@ -100,16 +101,24 @@ export default function OrganogramaPage() {
       current.push(member);
       grouped.set(key, current);
     });
-
-    return Array.from(grouped.entries()).map(([section, sectionMembers]) => ({
-      section,
-      members: sectionMembers.sort(
-        (left, right) =>
-          left.ordem - right.ordem ||
-          left.cargo.localeCompare(right.cargo, "pt-BR")
+    const orderedSections = [
+      ...(config.ordemSecoes || []),
+      ...Array.from(grouped.keys()).filter(
+        (section) => !(config.ordemSecoes || []).includes(section)
       ),
-    }));
-  }, [members]);
+    ];
+
+    return orderedSections
+      .map((section) => ({
+        section,
+        members: (grouped.get(section) || []).sort(
+          (left, right) =>
+            left.ordem - right.ordem ||
+            left.cargo.localeCompare(right.cargo, "pt-BR")
+        ),
+      }))
+      .filter((group) => group.members.length > 0);
+  }, [config.ordemSecoes, members]);
 
   if (loading) {
     return (
@@ -137,7 +146,7 @@ export default function OrganogramaPage() {
           <div className="mt-8">
             <div className="max-w-2xl">
               <p className="text-[11px] font-black uppercase tracking-[0.35em] text-brand">
-                {tenantSigla || "USC"} • Liderancas
+                {tenantSigla || "USC"} • Lideranças
               </p>
               <h1 className="mt-3 text-4xl font-black uppercase tracking-tighter text-white md:text-5xl">
                 {config.tituloPagina}
@@ -173,7 +182,7 @@ export default function OrganogramaPage() {
                     </div>
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-                        Nucleo
+                        Núcleo
                       </p>
                       <h2 className="text-2xl font-black uppercase tracking-tight text-white">
                         {group.section}
@@ -182,7 +191,14 @@ export default function OrganogramaPage() {
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {group.members.map((member) => (
+                    {group.members.map((member) => {
+                      const profileHref = member.userId
+                        ? tenantSlug
+                          ? withTenantSlug(tenantSlug, `/perfil/${member.userId}`)
+                          : `/perfil/${member.userId}`
+                        : "";
+
+                      return (
                       <article
                         key={member.id}
                         className="group relative overflow-hidden rounded-[28px] border border-zinc-800 bg-zinc-950/90 p-5 shadow-[0_25px_60px_rgba(0,0,0,0.35)] transition hover:border-brand/40"
@@ -218,15 +234,25 @@ export default function OrganogramaPage() {
                             <p className="mt-2 text-xs font-bold uppercase tracking-wide text-zinc-500">
                               {member.detalheExibicao}
                             </p>
-                            {member.isFallbackVisual ? (
-                              <p className="mt-4 inline-flex rounded-full border border-zinc-700 bg-zinc-900/70 px-3 py-1 text-[10px] font-black uppercase tracking-[0.25em] text-zinc-400">
-                                Vinculacao pendente
-                              </p>
-                            ) : null}
+                            <div className="mt-4 flex flex-wrap items-center gap-2">
+                              {member.isFallbackVisual ? (
+                                <p className="inline-flex rounded-full border border-zinc-700 bg-zinc-900/70 px-3 py-1 text-[10px] font-black uppercase tracking-[0.25em] text-zinc-400">
+                                  Vinculação pendente
+                                </p>
+                              ) : null}
+                              {profileHref ? (
+                                <Link
+                                  href={profileHref}
+                                  className="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-cyan-300 transition hover:bg-cyan-500/20"
+                                >
+                                  Abrir perfil
+                                </Link>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
                       </article>
-                    ))}
+                    )})}
                   </div>
                 </section>
               );

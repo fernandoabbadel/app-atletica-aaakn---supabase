@@ -31,6 +31,7 @@ import {
   sanitizeInviteToken,
   storeInviteToken,
 } from "@/lib/inviteTokenStorage";
+import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import {
   fetchTurmasConfig,
   getDefaultTurmas,
@@ -1055,13 +1056,13 @@ export default function CadastroPage() {
                 {/* AVISO DE FOTO */}
                 <div className="mt-4 bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl max-w-sm mx-auto">
                     <p className="text-[10px] text-yellow-400 font-bold uppercase tracking-wide flex items-center justify-center gap-2">
-                        <ShieldAlert size={14}/> Atencao: Use sua foto real!
+                        <ShieldAlert size={14}/> Atenção: use sua foto real!
                     </p>
                     <p className="text-[10px] text-zinc-400 mt-1">
-                        Perfis com fotos fake, desenhos ou conteudo improprio serao <span className="text-red-400 font-bold underline">bloqueados</span> sem aviso.
+                        Perfis com fotos fake, desenhos ou conteúdo impróprio serão <span className="text-red-400 font-bold underline">bloqueados</span> sem aviso.
                     </p>
                     <p className="text-[10px] text-zinc-300 mt-2">
-                        Se for trocar a foto, reduza antes no <span className="font-black text-emerald-300">Squash App</span> para ate <span className="font-black text-emerald-400">200 KB</span>.
+                        Se for trocar a foto, reduza antes no <ImageResizeHelpLink label="Squoosh" className="font-black text-emerald-300" /> para até <span className="font-black text-emerald-400">200 KB</span>.
                     </p>
                 </div>
             </div>

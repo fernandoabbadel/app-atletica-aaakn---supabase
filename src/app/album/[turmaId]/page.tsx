@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Html5Qrcode } from "html5-qrcode";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -50,6 +50,7 @@ import {
   isPermissionError,
 } from "@/lib/backendErrors";
 import { getSportPresentation } from "@/lib/cadastroOptions";
+import { buildUserIdentityQrPayload } from "@/lib/qrPayloads";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 interface UserData {
@@ -144,6 +145,7 @@ const extractTargetUidFromQr = (rawValue: string): string => {
 
 export default function AlbumTurmaPage() {
   const params = useParams<{ turmaId: string }>();
+  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
@@ -172,6 +174,8 @@ export default function AlbumTurmaPage() {
   const [loadingAlbum, setLoadingAlbum] = useState(true);
   const [loadingTurma, setLoadingTurma] = useState(true);
   const [processingScan, setProcessingScan] = useState(false);
+  const [focusUserId, setFocusUserId] = useState("");
+  const [highlightedUserId, setHighlightedUserId] = useState("");
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const processingScanRef = useRef(false);
@@ -179,10 +183,25 @@ export default function AlbumTurmaPage() {
   const autoScanHandledRef = useRef(false);
   const directCaptureHandledRef = useRef("");
   const meuAlbumRef = useRef<string[]>([]);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     meuAlbumRef.current = meuAlbum;
   }, [meuAlbum]);
+
+  const myQrPayload = useMemo(
+    () =>
+      user?.uid
+        ? buildUserIdentityQrPayload({
+            userId: user.uid,
+            tenantId: effectiveTenantId || undefined,
+            userName: user.nome,
+            userTurma: user.turma,
+            userAvatar: user.foto,
+          })
+        : "",
+    [effectiveTenantId, user]
+  );
 
   const calcularIdade = (dataNasc?: string): string => {
     const idade = calculateAgeFromBirthDate(dataNasc);
@@ -352,6 +371,22 @@ export default function AlbumTurmaPage() {
     setShowScanner(true);
   }, [searchParams]);
 
+  useEffect(() => {
+    if (searchParams.get("qr") !== "1") return;
+    setShowMyQr(true);
+  }, [searchParams]);
+
+  useEffect(() => {
+    const requestedFocusUid =
+      searchParams.get("focusUid")?.trim() ||
+      searchParams.get("captureUid")?.trim() ||
+      searchParams.get("targetUid")?.trim() ||
+      searchParams.get("uid")?.trim() ||
+      "";
+    if (!requestedFocusUid) return;
+    setFocusUserId(requestedFocusUid);
+  }, [searchParams]);
+
   const handleFoundUser = useCallback(
     async (rawScanned: string) => {
       if (!user || processingScanRef.current) return;
@@ -361,6 +396,7 @@ export default function AlbumTurmaPage() {
       lastScanAtRef.current = now;
 
       const targetId = extractTargetUidFromQr(rawScanned);
+      setFocusUserId(targetId);
       if (!targetId) {
         addToast("QR inválido. Tente um QR de usuário.", "error");
         return;
@@ -393,6 +429,7 @@ export default function AlbumTurmaPage() {
         });
 
         if (result.status === "invalid-target") {
+          setFocusUserId("");
       addToast("Código inválido ou usuário não encontrado.", "error");
           return;
         }
@@ -429,6 +466,7 @@ export default function AlbumTurmaPage() {
   useEffect(() => {
     if (!user?.uid) return;
     const targetUid =
+      searchParams.get("captureUid")?.trim() ||
       searchParams.get("targetUid")?.trim() ||
       searchParams.get("uid")?.trim() ||
       "";
@@ -436,6 +474,41 @@ export default function AlbumTurmaPage() {
     directCaptureHandledRef.current = targetUid;
     void handleFoundUser(targetUid);
   }, [handleFoundUser, searchParams, user?.uid]);
+
+  useEffect(() => {
+    if (!focusUserId) return;
+    if (usuarios.some((entry) => entry.id === focusUserId)) return;
+    if (!hasMoreUsers || loadingMoreUsers) return;
+    void loadMoreUsers();
+  }, [focusUserId, hasMoreUsers, loadingMoreUsers, loadMoreUsers, usuarios]);
+
+  useEffect(() => {
+    if (!focusUserId) return;
+    if (!usuarios.some((entry) => entry.id === focusUserId)) return;
+
+    const nextCard = cardRefs.current[focusUserId];
+    if (!nextCard) return;
+
+    setHighlightedUserId(focusUserId);
+    nextCard.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFocusUserId("");
+
+    const clearHighlightTimeout = window.setTimeout(() => {
+      setHighlightedUserId((current) => (current === focusUserId ? "" : current));
+    }, 3200);
+
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete("captureUid");
+    nextSearchParams.delete("focusUid");
+    nextSearchParams.delete("targetUid");
+    nextSearchParams.delete("uid");
+    const nextQuery = nextSearchParams.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+
+    return () => {
+      window.clearTimeout(clearHighlightTimeout);
+    };
+  }, [focusUserId, pathname, router, searchParams, usuarios]);
 
   useEffect(() => {
     if (!showScanner || scannerRef.current) return;
@@ -631,17 +704,21 @@ export default function AlbumTurmaPage() {
       <main className="px-4 grid grid-cols-1 gap-6 max-w-3xl mx-auto">
         {usuarios.map((u) => {
           const isColada = meuAlbum.includes(u.id);
+          const isHighlighted = highlightedUserId === u.id;
           const profileHref = tenantSlug.trim()
             ? withTenantSlug(tenantSlug, `/perfil/${u.id}`)
             : `/perfil/${u.id}`;
           return (
             <div
               key={u.id}
+              ref={(node) => {
+                cardRefs.current[u.id] = node;
+              }}
               className={`group relative rounded-[2.2rem] border transition-all duration-500 overflow-hidden ${
                 isColada
                   ? "bg-zinc-900/80 border-emerald-500/40 shadow-2xl cursor-pointer hover:border-emerald-400/80 hover:-translate-y-0.5 hover:shadow-[0_20px_60px_rgba(16,185,129,0.18)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#050505]"
                   : "bg-zinc-950 border-white/5 grayscale brightness-50 opacity-40"
-              }`}
+              } ${isHighlighted ? "ring-2 ring-emerald-300/90 ring-offset-2 ring-offset-[#050505]" : ""}`}
               role={isColada ? "link" : undefined}
               tabIndex={isColada ? 0 : undefined}
               title={isColada ? `Visitar perfil de ${u.apelido || u.nome}` : undefined}
@@ -879,7 +956,7 @@ export default function AlbumTurmaPage() {
             </div>
             <h2 className="text-2xl font-black uppercase italic mb-1 text-white">Meu Shark Code</h2>
             <div className="bg-white p-4 rounded-[2rem] inline-block my-6 shadow-inner">
-              <QRCodeSVG value={user?.uid || ""} size={220} />
+              <QRCodeSVG value={myQrPayload || user?.uid || ""} size={220} />
             </div>
             <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest bg-emerald-500/10 py-2 rounded-xl border border-emerald-500/20 break-all px-2">
               ID: {user?.uid || "usuário-não-autenticado"}

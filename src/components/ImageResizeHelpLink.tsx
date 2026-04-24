@@ -21,7 +21,8 @@ export function ImageResizeHelpLink({
       href={IMAGE_RESIZE_HELP_URL}
       target="_blank"
       rel="noreferrer"
-      className={`text-[11px] font-medium text-zinc-400 underline underline-offset-4 hover:text-white ${className}`.trim()}
+      title="Abrir Squoosh.app em nova aba"
+      className={`inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-300 underline underline-offset-4 hover:text-emerald-200 ${className}`.trim()}
     >
       {normalizedLabel}
     </Link>

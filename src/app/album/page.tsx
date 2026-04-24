@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ChevronRight,
@@ -31,6 +32,7 @@ import {
   toggleTurmaVisibility,
   type TurmaConfig,
 } from "../../lib/turmasService";
+import { buildUserIdentityQrPayload } from "@/lib/qrPayloads";
 
 const ADMIN_ROLES = new Set([
   "master",
@@ -73,6 +75,7 @@ export default function AlbumTurmasPage() {
   const { user } = useAuth();
   const { tenantId: activeTenantId } = useTenantTheme();
   const { addToast } = useToast();
+  const searchParams = useSearchParams();
   const [uiConfig, setUiConfig] = useState<AlbumUiConfig | null>(null);
   const [turmas, setTurmas] = useState<TurmaConfig[]>(() => getDefaultTurmas());
   const [imageFallbackIndex, setImageFallbackIndex] = useState<Record<string, number>>(
@@ -104,11 +107,11 @@ export default function AlbumTurmasPage() {
     };
   }, [activeTenantId]);
 
-  const title = uiConfig?.titulo?.trim() || "Album da Galera";
+  const title = uiConfig?.titulo?.trim() || "Álbum da Galera";
   const subtitle =
     uiConfig?.subtitulo?.trim() ||
     "Escolha a turma para abrir somente o que você precisa";
-  const heroHeadline = "Escolha a turma e domine o album";
+  const heroHeadline = "Escolha a turma e domine o álbum";
   const shouldShowSubtitle =
     subtitle.trim().toLowerCase() !== heroHeadline.trim().toLowerCase();
   const hero = uiConfig?.capa?.trim() || "/capa_t8.jpg";
@@ -117,6 +120,19 @@ export default function AlbumTurmasPage() {
   const canEditAlbum =
     ADMIN_ROLES.has(String(user?.role || "").toLowerCase()) || ADMIN_ROLES.has(currentRole);
   const visibleTurmas = canEditAlbum ? turmas : turmas.filter((turma) => !turma.hidden);
+  const myQrPayload = useMemo(
+    () =>
+      user?.uid
+        ? buildUserIdentityQrPayload({
+            userId: user.uid,
+            tenantId: activeTenantId || user.tenant_id || "",
+            userName: user.nome,
+            userTurma: user.turma,
+            userAvatar: user.foto,
+          })
+        : "",
+    [activeTenantId, user]
+  );
   const turmaImageCandidates = useMemo(
     () =>
       turmas.reduce<Record<string, string[]>>((acc, turma) => {
@@ -173,6 +189,11 @@ export default function AlbumTurmasPage() {
       setProcessingTurmaId("");
     }
   };
+
+  useEffect(() => {
+    if (searchParams.get("qr") !== "1") return;
+    setShowMyQr(true);
+  }, [searchParams]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans pb-28">
@@ -386,7 +407,7 @@ export default function AlbumTurmasPage() {
               Mostre para outro integrante escanear.
             </p>
             <div className="inline-block bg-white rounded-2xl p-4 mt-5">
-              <QRCodeSVG value={user?.uid || ""} size={210} />
+              <QRCodeSVG value={myQrPayload || user?.uid || ""} size={210} />
             </div>
             <p className="mt-4 text-[10px] text-zinc-500 font-bold uppercase break-all">
               {user?.uid || "Usuário não autenticado"}

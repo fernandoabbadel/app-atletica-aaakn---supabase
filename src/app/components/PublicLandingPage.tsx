@@ -719,7 +719,7 @@ export default function PublicLandingPage({
               </div>
             ) : (
               <div className="py-8 text-center text-xs text-zinc-500">
-                Area restrita a parceiros.
+                Área restrita a parceiros.
               </div>
             )}
           </div>

@@ -445,7 +445,7 @@ export default function BottomNavbar() {
 
   // --- DEFINIÃ‡ÃƒO DOS MENUS (CSS e Badges Atualizados) ---
   const bottomItemsBase: NavItemProps[] = [
-      { id: 'home', label: 'Inicio', icon: <Home size={22}/>, path: '/dashboard' },
+      { id: 'home', label: 'Início', icon: <Home size={22}/>, path: '/dashboard' },
       { id: 'eventos', label: 'Eventos', icon: <Calendar size={22}/>, path: '/eventos', moduleKey: 'eventos' },
       {
         id: 'scan',
@@ -469,7 +469,7 @@ export default function BottomNavbar() {
       { id: 'carteira_side', label: 'Carteirinha', icon: <CreditCard size={18} />, path: '/carteirinha', moduleKey: 'carteirinha' },
       { id: 'parceiros', label: 'Parceiros', icon: <Handshake size={18} />, path: '/parceiros', moduleKey: 'parceiros' },
       { id: 'comunidade', label: 'Comunidade', icon: <MessageCircle size={18} />, path: '/comunidade', moduleKey: 'comunidade' },
-      { id: 'album', label: 'Album da Galera', icon: <Camera size={18} />, path: '/album', moduleKey: 'album' },
+      { id: 'album', label: 'Álbum da Galera', icon: <Camera size={18} />, path: '/album', moduleKey: 'album' },
   ];
 
   const sidebarItemsAtletaBase: NavItemProps[] = [
@@ -477,16 +477,16 @@ export default function BottomNavbar() {
       { id: 'arena', label: 'Arena Games', icon: <Gamepad2 size={18} />, path: '/arena-games', badge: "Vem ai", isComingSoon: true, moduleKey: 'arena_games' },
       { id: 'shark_round', label: boardroundDisplayName, icon: <Target size={18} />, path: '/boardround', isComingSoon: true, moduleKey: 'sharkround' },
       { id: 'ranking', label: 'Ranking', icon: <Trophy size={18} />, path: '/ranking', badge: "Vem ai", isComingSoon: true, moduleKey: 'ranking' },
-      { id: 'gym_side', label: 'Treinos Avancados', icon: <Dumbbell size={18} />, path: '/gym-rats', badge: "Vem ai", isComingSoon: true, moduleKey: 'gym_rats' },
+      { id: 'gym_side', label: 'Treinos Avançados', icon: <Dumbbell size={18} />, path: '/gym-rats', badge: "Vem ai", isComingSoon: true, moduleKey: 'gym_rats' },
   ];
 
   const sidebarItemsInfoBase: NavItemProps[] = [
-      { id: 'ligas', label: 'Area das Ligas', icon: <Users size={18} />, path: '/ligas_usc', moduleKey: 'ligas' },
+      { id: 'ligas', label: 'Área das Ligas', icon: <Users size={18} />, path: '/ligas_usc', moduleKey: 'ligas' },
       { id: 'avaliacao', label: 'Avaliação Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true, moduleKey: 'avaliacao' },
       { id: 'conquistas', label: 'Conquistas', icon: <Medal size={18} />, path: '/conquistas', isComingSoon: true, moduleKey: 'conquistas' },
       { id: 'fidelidade', label: 'Fidelidade', icon: <Star size={18} />, path: '/fidelidade', isComingSoon: true, moduleKey: 'fidelidade' },
       { id: 'guia', label: 'Guia', icon: <HelpCircle size={18} />, path: '/guia', moduleKey: 'guia' },
-      { id: 'historico', label: 'Nossa Historia', icon: <Clock size={18} />, path: '/historico', moduleKey: 'historico' },
+      { id: 'historico', label: 'Nossa História', icon: <Clock size={18} />, path: '/historico', moduleKey: 'historico' },
   ];
 
   const lockGuestItem = (item: NavItemProps): NavItemProps =>
@@ -621,7 +621,7 @@ export default function BottomNavbar() {
                 </div>
 
                 {/* ÁREA DO ATLETA (COM BADGES NOVAS) */}
-                <div className="px-2 pt-6 pb-2 border-t border-zinc-800/50 mt-2"><h3 className="text-[10px] font-black text-brand uppercase flex items-center gap-2 tracking-widest"><Dumbbell size={10}/> Area do Atleta</h3></div>
+                <div className="px-2 pt-6 pb-2 border-t border-zinc-800/50 mt-2"><h3 className="text-[10px] font-black text-brand uppercase flex items-center gap-2 tracking-widest"><Dumbbell size={10}/> Área do Atleta</h3></div>
                 <div className="space-y-1">
                     {sidebarItemsAtleta.map((item) => (
                         <button key={item.id} onClick={() => handleNavigation(item.path!, isItemBlocked(item), resolveBlockedTarget(item))} className={cn("w-full flex items-center justify-between p-3 rounded-xl transition-all group", normalizedPathname === item.path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200", isItemBlocked(item) && "opacity-60 cursor-not-allowed grayscale")}>

@@ -142,7 +142,7 @@ export default function FloatingScannerPage() {
     }
 
     const turmaSlug = normalizeTurmaSlug(payload.userTurma || user.turma || "t8");
-    const path = `/album/${encodeURIComponent(turmaSlug)}?targetUid=${encodeURIComponent(payload.userId)}`;
+    const path = `/album/${encodeURIComponent(turmaSlug)}?captureUid=${encodeURIComponent(payload.userId)}&focusUid=${encodeURIComponent(payload.userId)}`;
     router.push(tenantSlug ? withTenantSlug(tenantSlug, path) : path);
   };
 

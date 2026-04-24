@@ -5,7 +5,7 @@ import {
   ArrowLeft, Plus, Edit, Trash2, 
   Dumbbell, Image as ImageIcon, CheckCircle, X, 
   AlertTriangle, ChevronDown, Save, 
-  Trophy, Users, Search, Download, Ban, LayoutDashboard, List, Loader2, Filter, ArrowUpDown, CalendarRange, User, Crown, UserCheck, ExternalLink
+  Trophy, Users, Search, Download, Ban, LayoutDashboard, List, Loader2, Filter, ArrowUpDown, CalendarRange, User, Crown, UserCheck, ExternalLink, Copy
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -30,6 +30,7 @@ import {
     fetchTreinoSettings,
     fetchTreinosAdminList,
     fetchUserDirectory,
+    renameTreinoCategory,
     toggleTreinoStatus,
     type TreinoDashboardMetrics,
     type TreinoRecord,
@@ -77,6 +78,7 @@ interface VergonhaItem {
 }
 
 interface CategoriaDraft {
+    name?: string;
     imageUrl: string;
     color: string;
 }
@@ -220,6 +222,7 @@ export default function AdminTreinosPage() {
       setCategoriaDrafts(
           settings.categorias.reduce<Record<string, CategoriaDraft>>((accumulator, categoria) => {
               accumulator[categoria.key] = {
+                  name: categoria.name,
                   imageUrl: categoria.imageUrl || "",
                   color: categoria.calendarColor || DEFAULT_MODALIDADE_COLOR,
               };
@@ -560,6 +563,7 @@ export default function AdminTreinosPage() {
           setCategoriaDrafts((prev) => ({
               ...prev,
               [categoriaKey]: {
+                  name: prev[categoriaKey]?.name || modalidade,
                   imageUrl: url,
                   color: prev[categoriaKey]?.color || getModalidadeColor(modalidade),
               },
@@ -579,6 +583,7 @@ export default function AdminTreinosPage() {
       setCategoriaDrafts((prev) => ({
           ...prev,
           [key]: {
+              name: prev[key]?.name || modalidade,
               imageUrl: "",
               color: prev[key]?.color || getModalidadeColor(modalidade),
           },
@@ -594,16 +599,31 @@ export default function AdminTreinosPage() {
       setSavingCategoriaEdicao(modalidade);
       try {
           const draft = categoriaDrafts[key];
-          const settings = await upsertTreinoCategory({
-              name: modalidade,
-              imageUrl: draft?.imageUrl ? draft.imageUrl : null,
-              calendarColor: draft?.color || DEFAULT_MODALIDADE_COLOR,
-              tenantId: activeTenantId,
-          });
+          const nextName = normalizeModalidadeNome(draft?.name || modalidade);
+          const settings =
+              nextName && toModalidadeKey(nextName) !== key
+                  ? await renameTreinoCategory({
+                        previousName: modalidade,
+                        nextName,
+                        imageUrl: draft?.imageUrl ? draft.imageUrl : null,
+                        calendarColor: draft?.color || DEFAULT_MODALIDADE_COLOR,
+                        tenantId: activeTenantId,
+                    })
+                  : await upsertTreinoCategory({
+                        name: nextName || modalidade,
+                        imageUrl: draft?.imageUrl ? draft.imageUrl : null,
+                        calendarColor: draft?.color || DEFAULT_MODALIDADE_COLOR,
+                        tenantId: activeTenantId,
+                    });
+          const nextKey = toModalidadeKey(nextName || modalidade);
           applyTreinoSettings(settings);
           setNovoTreino((prev) =>
               toModalidadeKey(prev.modalidade || "") === key
-                  ? { ...prev, imagem: settings.modalidadeImagens[key] || "" }
+                  ? {
+                        ...prev,
+                        modalidade: nextName || modalidade,
+                        imagem: settings.modalidadeImagens[nextKey] || "",
+                    }
                   : prev
           );
           addToast("Categoria salva!", "success");
@@ -656,6 +676,23 @@ export default function AdminTreinosPage() {
       setExtraDateDraft("");
       setExtraDates([]);
       setShowModal(true);
+  };
+
+  const handleDuplicateTreino = (treino: Treino) => {
+      setNovoTreino({
+          ...treino,
+          dia: "",
+          status: "ativo",
+          imagem: treino.imagem || getModalidadeImagem(treino.modalidade),
+      });
+      setEditingId(null);
+      setIsEditing(false);
+      setRepeatMode("none");
+      setRecurrenceDate("");
+      setExtraDateDraft("");
+      setExtraDates([]);
+      setShowModal(true);
+      addToast("Treino carregado para duplicação. Escolha a nova data e salve.", "info");
   };
 
   const handleSelectTreinador = (user: UserBase) => {
@@ -1009,6 +1046,7 @@ export default function AdminTreinosPage() {
                                                         <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/admin/treinos/lista/${treino.id}`) : `/admin/treinos/lista/${treino.id}`} className="p-2 rounded-lg transition bg-zinc-800 text-zinc-400 hover:text-white" title="Abrir lista de presença">
                                                             <ChevronDown size={16}/>
                                                         </Link>
+                                                        <button onClick={() => handleDuplicateTreino(treino)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-emerald-300" title="Duplicar treino"><Copy size={16}/></button>
                                                         <button onClick={() => handleOpenEdit(treino)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white"><Edit size={16}/></button>
                                                         <button onClick={() => handleDeleteTreino(treino.id)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-red-500"><Trash2 size={16}/></button>
                                                     </div>
@@ -1306,12 +1344,41 @@ export default function AdminTreinosPage() {
                                       {imagem ? <Image src={imagem} alt={modalidade} fill sizes="64px" className="object-cover"/> : <ImageIcon size={16} className="text-zinc-600"/>}
                                   </div>
                                   <div className="flex-1">
-                                      <p className="text-sm font-bold text-white">{modalidade}</p>
+                                      <input
+                                          type="text"
+                                          value={draft?.name ?? modalidade}
+                                          onChange={(event) =>
+                                              setCategoriaDrafts((prev) => ({
+                                                  ...prev,
+                                                  [key]: {
+                                                      name: event.target.value,
+                                                      imageUrl: prev[key]?.imageUrl ?? imagem,
+                                                      color: prev[key]?.color ?? color,
+                                                  },
+                                              }))
+                                          }
+                                          className="w-full rounded-lg border border-zinc-800 bg-black/30 px-3 py-2 text-sm font-bold text-white outline-none focus:border-emerald-500"
+                                          placeholder="Nome da categoria"
+                                      />
                                       <div className="mt-2 flex items-center justify-between rounded-lg border border-zinc-800 bg-black/30 px-3 py-2">
                                           <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">Cor do ponto</span>
                                           <div className="flex items-center gap-3">
                                               <span className="h-3 w-3 rounded-full border border-white/10" style={{ backgroundColor: color }} />
-                                              <input type="color" value={color} onChange={(event) => setCategoriaDrafts((prev) => ({ ...prev, [key]: { imageUrl: prev[key]?.imageUrl ?? imagem, color: event.target.value } }))} className="h-9 w-14 cursor-pointer rounded border border-zinc-700 bg-transparent" />
+                                              <input
+                                                  type="color"
+                                                  value={color}
+                                                  onChange={(event) =>
+                                                      setCategoriaDrafts((prev) => ({
+                                                          ...prev,
+                                                          [key]: {
+                                                              name: prev[key]?.name ?? modalidade,
+                                                              imageUrl: prev[key]?.imageUrl ?? imagem,
+                                                              color: event.target.value,
+                                                          },
+                                                      }))
+                                                  }
+                                                  className="h-9 w-14 cursor-pointer rounded border border-zinc-700 bg-transparent"
+                                              />
                                           </div>
                                       </div>
                                       <div className="mt-2 flex gap-2">

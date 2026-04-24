@@ -21,6 +21,7 @@ import { QRCodeSVG } from "qrcode.react";
 import SharkLoader from "@/app/components/SharkLoader";
 import { getTurmaImage } from "@/constants/turmaImages";
 import { resolvePlanTheme, resolveUserPlanIcon } from "@/constants/planVisuals";
+import { buildUserIdentityQrPayload } from "@/lib/qrPayloads";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 export default function CarteirinhaPage() {
@@ -30,6 +31,15 @@ export default function CarteirinhaPage() {
   const [config, setConfig] = useState<CarteirinhaConfig | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [showQrModal, setShowQrModal] = useState(false);
+  const qrPayload = user?.uid
+    ? buildUserIdentityQrPayload({
+        userId: user.uid,
+        tenantId: tenantId || user.tenant_id || "",
+        userName: user.nome,
+        userTurma: user.turma,
+        userAvatar: user.foto,
+      })
+    : "";
 
   // 1. Buscar Configuração Visual do Admin
   useEffect(() => {
@@ -234,7 +244,7 @@ export default function CarteirinhaPage() {
                         Escaneie para<br/>validar acesso
                     </span>
                     <div className="bg-white p-1 rounded shadow-lg">
-                        <QRCodeSVG value={user.uid} size={36} />
+                        <QRCodeSVG value={qrPayload || user.uid} size={36} />
                     </div>
                 </div>
             </div>
@@ -305,7 +315,7 @@ export default function CarteirinhaPage() {
                   </div>
 
                   <div className="p-4 border-[6px] border-black rounded-3xl mb-6 shadow-xl">
-                      <QRCodeSVG value={user.uid} size={220} />
+                      <QRCodeSVG value={qrPayload || user.uid} size={220} />
                   </div>
 
                   <div className="w-full bg-zinc-50 border border-zinc-200 py-3 rounded-xl">

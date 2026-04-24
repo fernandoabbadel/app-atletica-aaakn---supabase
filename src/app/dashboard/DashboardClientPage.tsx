@@ -7,7 +7,7 @@ import {
   CheckCircle, ChevronRight, ChevronLeft, ShoppingBag, 
   Star, Crown, Wallet, Dumbbell, ExternalLink, MessageCircle, Lightbulb, MapPin,
   Lock,
-  ScanBarcode, Crosshair
+  Crosshair, QrCode
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext'; 
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -305,7 +305,7 @@ const EventCardItem = ({
                     : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:border-brand-strong hover:text-white'
               }`}
             >
-                {isLocked ? <Lock size={14}/> : isGoing ? <CheckCircle size={14}/> : null} {isLocked ? 'Area Restrita' : isGoing ? 'Confirmado' : 'Ver Detalhes'}
+                {isLocked ? <Lock size={14}/> : isGoing ? <CheckCircle size={14}/> : null} {isLocked ? 'Área Restrita' : isGoing ? 'Confirmado' : 'Ver Detalhes'}
             </DashboardNavLink>
         </div>
       </div>
@@ -393,7 +393,7 @@ const ProductCard = ({
                               : 'border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500 hover:text-white'
                           }`}
                         >
-                            {isLocked ? 'Area Restrita' : 'Comprar'}
+                            {isLocked ? 'Área Restrita' : 'Comprar'}
                         </DashboardNavLink>
                     </div>
 
@@ -1037,9 +1037,18 @@ export default function DashboardClientPage({
                         </h3>
                         <p className="text-zinc-500 text-[10px] font-bold tracking-[0.2em] uppercase mt-1">Status: Em Operação</p>
                     </div>
-                    <div className="bg-brand-primary/10 p-2 rounded-lg border border-brand animate-pulse">
-                        <ScanBarcode className="text-brand" size={20}/>
-                    </div>
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            router.push(isGuestRestricted ? semPermissaoPath : tenantPath("/album?qr=1"));
+                        }}
+                        className="bg-brand-primary/10 p-2 rounded-lg border border-brand transition hover:bg-brand-primary/20"
+                        aria-label="Abrir meu QR do álbum"
+                    >
+                        {isGuestRestricted ? <Lock className="text-brand" size={20}/> : <QrCode className="text-brand" size={20}/>}
+                    </button>
                 </div>
 
                 <div className="flex items-end justify-between">
@@ -1057,7 +1066,7 @@ export default function DashboardClientPage({
                         <span className="text-xs text-zinc-400 font-bold uppercase tracking-wider block mt-0.5">Encontrados</span>
                     </div>
                     <div className="flex items-center gap-1 text-brand text-[10px] font-bold uppercase tracking-wider bg-brand-primary/10 px-3 py-1.5 rounded-full border border-brand">
-                        {isGuestRestricted ? <Lock size={10}/> : <ChevronRight size={10}/>} {isGuestRestricted ? "Area Restrita" : "Ver Ranking"}
+                        {isGuestRestricted ? <Lock size={10}/> : <ChevronRight size={10}/>} {isGuestRestricted ? "Área Restrita" : "Abrir Álbum"}
                     </div>
                 </div>
             </div>

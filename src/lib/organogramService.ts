@@ -19,6 +19,9 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
 
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+
 const asNumber = (value: unknown, fallback = 0): number => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -87,12 +90,30 @@ export interface OrganogramConfig {
   tituloPagina: string;
   subtituloPagina: string;
   membros: OrganogramMemberRecord[];
+  ordemSecoes: string[];
 }
 
 const DEFAULT_ORGANOGRAM_CONFIG: OrganogramConfig = {
   tituloPagina: "Organograma da Atlética",
   subtituloPagina: "Presidencia, vice-presidencia e diretorias em um painel vivo.",
   membros: [],
+  ordemSecoes: [],
+};
+
+const normalizeSectionName = (value: unknown): string =>
+  asString(value, "Diretoria").trim().replace(/\s+/g, " ").slice(0, 60) || "Diretoria";
+
+const buildSectionOrder = (
+  rawOrder: unknown,
+  members: OrganogramMemberRecord[]
+): string[] => {
+  const configuredOrder = Array.from(
+    new Set(asStringArray(rawOrder).map((entry) => normalizeSectionName(entry)).filter(Boolean))
+  );
+  const missingSections = Array.from(
+    new Set(members.map((member) => normalizeSectionName(member.secao)).filter(Boolean))
+  ).filter((section) => !configuredOrder.includes(section));
+  return [...configuredOrder, ...missingSections];
 };
 
 const normalizeMember = (raw: unknown, index: number): OrganogramMemberRecord | null => {
@@ -100,7 +121,7 @@ const normalizeMember = (raw: unknown, index: number): OrganogramMemberRecord | 
   if (!data) return null;
 
   const cargo = asString(data.cargo).trim().slice(0, 80);
-  const secao = asString(data.secao, "Diretoria").trim().slice(0, 60) || "Diretoria";
+  const secao = normalizeSectionName(data.secao);
   if (!cargo) return null;
 
   const id =
@@ -136,14 +157,26 @@ const normalizeConfig = (raw: unknown): OrganogramConfig => {
     : Array.isArray(nested.membros)
       ? nested.membros
       : [];
+  const normalizedMembers = membersSource
+    .map((member, index) => normalizeMember(member, index))
+    .filter((member): member is OrganogramMemberRecord => member !== null);
+  const ordemSecoes = buildSectionOrder(
+    data.ordemSecoes ?? nested.ordemSecoes ?? data.sectionOrder ?? nested.sectionOrder,
+    normalizedMembers
+  );
+  const sectionOrderIndex = new Map(ordemSecoes.map((section, index) => [section, index]));
 
   return {
     tituloPagina: title.slice(0, 120),
     subtituloPagina: subtitle.slice(0, 240),
-    membros: membersSource
-      .map((member, index) => normalizeMember(member, index))
-      .filter((member): member is OrganogramMemberRecord => member !== null)
-      .sort((left, right) => left.ordem - right.ordem || left.cargo.localeCompare(right.cargo, "pt-BR")),
+    membros: normalizedMembers.sort(
+      (left, right) =>
+        (sectionOrderIndex.get(normalizeSectionName(left.secao)) ?? Number.MAX_SAFE_INTEGER) -
+          (sectionOrderIndex.get(normalizeSectionName(right.secao)) ?? Number.MAX_SAFE_INTEGER) ||
+        left.ordem - right.ordem ||
+        left.cargo.localeCompare(right.cargo, "pt-BR")
+    ),
+    ordemSecoes,
   };
 };
 
@@ -199,10 +232,12 @@ export async function saveOrganogramConfig(
     tituloPagina: normalized.tituloPagina,
     subtituloPagina: normalized.subtituloPagina,
     membros: normalized.membros,
+    ordemSecoes: normalized.ordemSecoes,
     data: {
       tituloPagina: normalized.tituloPagina,
       subtituloPagina: normalized.subtituloPagina,
       membros: normalized.membros,
+      ordemSecoes: normalized.ordemSecoes,
     },
     updatedAt: nowIso(),
   };
@@ -237,6 +272,7 @@ export function getDefaultOrganogramConfig(): OrganogramConfig {
     tituloPagina: DEFAULT_ORGANOGRAM_CONFIG.tituloPagina,
     subtituloPagina: DEFAULT_ORGANOGRAM_CONFIG.subtituloPagina,
     membros: [],
+    ordemSecoes: [],
   };
 }
 

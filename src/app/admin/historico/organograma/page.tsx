@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ArrowDown,
+  ArrowUp,
+  ExternalLink,
+  GripVertical,
   Loader2,
   PencilLine,
   RefreshCw,
@@ -44,7 +48,7 @@ type MemberFormState = {
 
 const EMPTY_FORM: MemberFormState = {
   cargo: "",
-  secao: "Presidencia",
+  secao: "Presidência",
   ordem: "0",
   userId: "",
   nome: "",
@@ -53,6 +57,60 @@ const EMPTY_FORM: MemberFormState = {
 
 const createMemberId = (): string =>
   globalThis.crypto?.randomUUID?.() ?? `organograma-${Date.now()}`;
+
+const normalizeSectionName = (value: string): string =>
+  value.trim().replace(/\s+/g, " ").slice(0, 60) || "Diretoria";
+
+const moveListItem = <T,>(items: T[], fromIndex: number, toIndex: number): T[] => {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return items;
+  const next = [...items];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+};
+
+const buildSectionOrder = (
+  configuredSections: string[],
+  members: OrganogramMemberRecord[]
+): string[] => {
+  const orderedSections = Array.from(
+    new Set(configuredSections.map((section) => normalizeSectionName(section)).filter(Boolean))
+  );
+  const missingSections = Array.from(
+    new Set(members.map((member) => normalizeSectionName(member.secao)).filter(Boolean))
+  ).filter((section) => !orderedSections.includes(section));
+  return [...orderedSections, ...missingSections];
+};
+
+const normalizeOrganogramConfigState = (
+  config: OrganogramConfig
+): OrganogramConfig => {
+  const normalizedMembers = config.membros.map((member) => ({
+    ...member,
+    secao: normalizeSectionName(member.secao),
+  }));
+  const ordemSecoes = buildSectionOrder(config.ordemSecoes || [], normalizedMembers);
+  const normalizedMembersBySection = ordemSecoes.flatMap((section) =>
+    normalizedMembers
+      .filter((member) => normalizeSectionName(member.secao) === section)
+      .sort(
+        (left, right) =>
+          left.ordem - right.ordem ||
+          left.cargo.localeCompare(right.cargo, "pt-BR")
+      )
+      .map((member, index) => ({
+        ...member,
+        secao: section,
+        ordem: index,
+      }))
+  );
+
+  return {
+    ...config,
+    membros: normalizedMembersBySection,
+    ordemSecoes,
+  };
+};
 
 export default function AdminHistoricoOrganogramaPage() {
   const { addToast } = useToast();
@@ -90,16 +148,40 @@ export default function AdminHistoricoOrganogramaPage() {
     return segmentUsers.filter((user) => user.nome.toLowerCase().includes(term));
   }, [searchResults, searchTerm, segmentUsers]);
 
-  const sortedMembers = useMemo(
-    () =>
-      [...config.membros].sort(
-        (left, right) =>
-          left.ordem - right.ordem ||
-          left.secao.localeCompare(right.secao, "pt-BR") ||
-          left.cargo.localeCompare(right.cargo, "pt-BR")
-      ),
-    [config.membros]
+  const orderedSections = useMemo(
+    () => buildSectionOrder(config.ordemSecoes || [], config.membros),
+    [config.membros, config.ordemSecoes]
   );
+
+  const sortedMembers = useMemo(() => {
+    const sectionIndex = new Map(orderedSections.map((section, index) => [section, index]));
+    return [...config.membros].sort(
+      (left, right) =>
+        (sectionIndex.get(normalizeSectionName(left.secao)) ?? Number.MAX_SAFE_INTEGER) -
+          (sectionIndex.get(normalizeSectionName(right.secao)) ?? Number.MAX_SAFE_INTEGER) ||
+        left.ordem - right.ordem ||
+        left.cargo.localeCompare(right.cargo, "pt-BR")
+    );
+  }, [config.membros, orderedSections]);
+
+  const groupedMembers = useMemo(
+    () =>
+      orderedSections
+        .map((section) => ({
+          section,
+          members: sortedMembers.filter(
+            (member) => normalizeSectionName(member.secao) === section
+          ),
+        }))
+        .filter((group) => group.members.length > 0),
+    [orderedSections, sortedMembers]
+  );
+  const rawFormSection = form.secao.trim().replace(/\s+/g, " ").slice(0, 60);
+  const normalizedFormSection = rawFormSection
+    ? normalizeSectionName(rawFormSection)
+    : orderedSections[0] || EMPTY_FORM.secao;
+  const isCustomSection =
+    rawFormSection.length === 0 || !orderedSections.includes(normalizedFormSection);
 
   useEffect(() => {
     let mounted = true;
@@ -112,7 +194,7 @@ export default function AdminHistoricoOrganogramaPage() {
           tenantId: activeTenantId || undefined,
         });
         if (!mounted) return;
-        setConfig(nextConfig);
+        setConfig(normalizeOrganogramConfigState(nextConfig));
       } catch (error: unknown) {
         console.error(error);
         if (!mounted) return;
@@ -238,9 +320,29 @@ export default function AdminHistoricoOrganogramaPage() {
     };
   }, [activeTenantId, searchTerm]);
 
+  useEffect(() => {
+    if (editingId) return;
+    if (form.cargo || form.nome || form.userId) return;
+    setForm((current) => {
+      const nextSection =
+        orderedSections[0] && orderedSections[0] !== current.secao
+          ? orderedSections[0]
+          : current.secao || EMPTY_FORM.secao;
+      return nextSection === current.secao
+        ? current
+        : {
+            ...current,
+            secao: nextSection,
+          };
+    });
+  }, [editingId, form.cargo, form.nome, form.userId, orderedSections]);
+
   const resetForm = () => {
     setEditingId(null);
-    setForm(EMPTY_FORM);
+    setForm({
+      ...EMPTY_FORM,
+      secao: orderedSections[0] || EMPTY_FORM.secao,
+    });
   };
 
   const handleSelectUser = (user: TreinoUserDirectoryItem) => {
@@ -273,10 +375,12 @@ export default function AdminHistoricoOrganogramaPage() {
   };
 
   const handleDeleteMember = (memberId: string) => {
-    setConfig((current) => ({
-      ...current,
-      membros: current.membros.filter((member) => member.id !== memberId),
-    }));
+    setConfig((current) =>
+      normalizeOrganogramConfigState({
+        ...current,
+        membros: current.membros.filter((member) => member.id !== memberId),
+      })
+    );
     if (editingId === memberId) {
       resetForm();
     }
@@ -284,7 +388,7 @@ export default function AdminHistoricoOrganogramaPage() {
 
   const handleUpsertMember = () => {
     const cargo = form.cargo.trim();
-    const secao = form.secao.trim() || "Diretoria";
+    const secao = normalizeSectionName(form.secao);
     const nome = form.nome.trim();
 
     if (!cargo) {
@@ -297,30 +401,98 @@ export default function AdminHistoricoOrganogramaPage() {
       return;
     }
 
+    if (isCustomSection && !rawFormSection) {
+      addToast("Informe o nome da nova seção.", "error");
+      return;
+    }
+
     const nextMember: OrganogramMemberRecord = {
       id: editingId || createMemberId(),
       cargo,
       secao,
-      ordem: Math.max(0, Number.parseInt(form.ordem || "0", 10) || 0),
+      ordem: 0,
       ...(form.userId.trim() ? { userId: form.userId.trim() } : {}),
       ...(nome ? { nome } : {}),
       ...(form.foto.trim() && !form.userId.trim() ? { foto: form.foto.trim() } : {}),
     };
 
     setConfig((current) => {
+      const previousMember = editingId
+        ? current.membros.find((member) => member.id === editingId) ?? null
+        : null;
       const remaining = current.membros.filter((member) => member.id !== nextMember.id);
-      return {
+      const shouldPreserveOrder =
+        previousMember && normalizeSectionName(previousMember.secao) === secao;
+      const nextOrder = shouldPreserveOrder
+        ? previousMember.ordem
+        : remaining.filter((member) => normalizeSectionName(member.secao) === secao).length;
+      return normalizeOrganogramConfigState({
         ...current,
-        membros: [...remaining, nextMember],
-      };
+        membros: [...remaining, { ...nextMember, ordem: nextOrder }],
+        ordemSecoes: current.ordemSecoes.includes(secao)
+          ? current.ordemSecoes
+          : [...current.ordemSecoes, secao],
+      });
     });
     resetForm();
+  };
+
+  const handleMoveSection = (section: string, direction: "up" | "down") => {
+    setConfig((current) => {
+      const nextSections = buildSectionOrder(current.ordemSecoes || [], current.membros);
+      const currentIndex = nextSections.indexOf(section);
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      return normalizeOrganogramConfigState({
+        ...current,
+        ordemSecoes: moveListItem(nextSections, currentIndex, targetIndex),
+      });
+    });
+  };
+
+  const handleMoveMember = (memberId: string, direction: "up" | "down") => {
+    setConfig((current) => {
+      const targetMember = current.membros.find((member) => member.id === memberId);
+      if (!targetMember) return current;
+
+      const targetSection = normalizeSectionName(targetMember.secao);
+      const sectionMembers = current.membros
+        .filter((member) => normalizeSectionName(member.secao) === targetSection)
+        .sort(
+          (left, right) =>
+            left.ordem - right.ordem ||
+            left.cargo.localeCompare(right.cargo, "pt-BR")
+        );
+      const currentIndex = sectionMembers.findIndex((member) => member.id === memberId);
+      const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      if (currentIndex < 0 || nextIndex < 0 || nextIndex >= sectionMembers.length) {
+        return current;
+      }
+
+      const reorderedSectionMembers = moveListItem(sectionMembers, currentIndex, nextIndex).map(
+        (member, index) => ({
+          ...member,
+          ordem: index,
+        })
+      );
+      const reorderedMap = new Map(
+        reorderedSectionMembers.map((member) => [member.id, member])
+      );
+
+      return normalizeOrganogramConfigState({
+        ...current,
+        membros: current.membros.map((member) =>
+          reorderedMap.get(member.id) ?? member
+        ),
+      });
+    });
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await saveOrganogramConfig(config, {
+      const normalizedConfig = normalizeOrganogramConfigState(config);
+      setConfig(normalizedConfig);
+      await saveOrganogramConfig(normalizedConfig, {
         tenantId: activeTenantId || undefined,
       });
       addToast("Organograma salvo com sucesso.", "success");
@@ -378,15 +550,15 @@ export default function AdminHistoricoOrganogramaPage() {
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-                  Pagina publica
+                  Página pública
                 </p>
-                <h2 className="text-lg font-black uppercase">Cabecalho</h2>
+                <h2 className="text-lg font-black uppercase">Cabeçalho</h2>
               </div>
             </div>
 
             <div className="grid gap-4">
               <label className="text-xs font-black uppercase text-zinc-500">
-                Titulo
+                Título
                 <input
                   value={config.tituloPagina}
                   onChange={(event) =>
@@ -400,7 +572,7 @@ export default function AdminHistoricoOrganogramaPage() {
               </label>
 
               <label className="text-xs font-black uppercase text-zinc-500">
-                Subtitulo
+                Subtítulo
                 <textarea
                   value={config.subtituloPagina}
                   onChange={(event) =>
@@ -586,15 +758,25 @@ export default function AdminHistoricoOrganogramaPage() {
               </label>
 
               <label className="text-xs font-black uppercase text-zinc-500">
-                Secao
-                <input
-                  value={form.secao}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, secao: event.target.value }))
-                  }
+                Seção
+                <select
+                  value={isCustomSection ? "__custom__" : normalizedFormSection}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setForm((current) => ({
+                      ...current,
+                      secao: value === "__custom__" ? "" : value,
+                    }));
+                  }}
                   className="mt-2 w-full rounded-2xl border border-zinc-700 bg-black px-4 py-3 text-sm text-white outline-none focus:border-emerald-500"
-                  placeholder="Presidencia, Diretoria, Conselho..."
-                />
+                >
+                  {orderedSections.map((section) => (
+                    <option key={section} value={section}>
+                      {section}
+                    </option>
+                  ))}
+                  <option value="__custom__">Criar nova seção</option>
+                </select>
               </label>
 
               <label className="text-xs font-black uppercase text-zinc-500">
@@ -610,15 +792,15 @@ export default function AdminHistoricoOrganogramaPage() {
               </label>
 
               <label className="text-xs font-black uppercase text-zinc-500">
-                Ordem
+                {isCustomSection ? "Nova seção" : "Posição"}
                 <input
-                  value={form.ordem}
+                  value={isCustomSection ? form.secao : "Organizada automaticamente dentro da seção"}
                   onChange={(event) =>
-                    setForm((current) => ({ ...current, ordem: event.target.value }))
+                    setForm((current) => ({ ...current, secao: event.target.value }))
                   }
-                  type="number"
-                  min={0}
                   className="mt-2 w-full rounded-2xl border border-zinc-700 bg-black px-4 py-3 text-sm text-white outline-none focus:border-emerald-500"
+                  placeholder="Ex.: Presidência, Administrativo, Eventos..."
+                  disabled={!isCustomSection}
                 />
               </label>
             </div>
@@ -652,59 +834,165 @@ export default function AdminHistoricoOrganogramaPage() {
               </div>
             </div>
 
-            {sortedMembers.length === 0 ? (
+            <div className="mb-5 rounded-[24px] border border-zinc-800 bg-black/40 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+                    Organizar seções
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Ajuste a ordem das seções por aqui. A posição dos membros dentro de cada seção é independente.
+                  </p>
+                </div>
+              </div>
+
+              {orderedSections.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/80 px-4 py-6 text-center text-sm text-zinc-500">
+                  As seções aparecem aqui depois que você cadastrar o primeiro membro.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {orderedSections.map((section, index) => {
+                    const membersCount = groupedMembers.find((group) => group.section === section)?.members.length || 0;
+                    return (
+                      <div
+                        key={section}
+                        className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/80 px-4 py-3"
+                      >
+                        <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-700 bg-black/40 text-zinc-400">
+                          <GripVertical size={14} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-black uppercase text-white">{section}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+                            {membersCount} membro{membersCount === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleMoveSection(section, "up")}
+                            disabled={index === 0}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-700 bg-black/40 text-zinc-200 disabled:opacity-30"
+                            title="Subir seção"
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleMoveSection(section, "down")}
+                            disabled={index === orderedSections.length - 1}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-700 bg-black/40 text-zinc-200 disabled:opacity-30"
+                            title="Descer seção"
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {groupedMembers.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-zinc-800 bg-black/40 px-4 py-10 text-center text-zinc-500">
                 Nenhum membro adicionado ainda.
               </div>
             ) : (
-              <div className="space-y-3">
-                {sortedMembers.map((member) => (
-                  <article
-                    key={member.id}
-                    className="flex items-center gap-4 rounded-[24px] border border-zinc-800 bg-black/40 px-4 py-4"
-                  >
-                    <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900">
-                      <Image
-                        src={member.foto || tenantLogoUrl || "/logo.png"}
-                        alt={member.nome || member.cargo}
-                        fill
-                        sizes="56px"
-                        className={`object-cover ${
-                          member.userId ? "" : "opacity-70 grayscale"
-                        }`}
-                        unoptimized={Boolean(member.foto && member.foto.startsWith("http"))}
-                      />
+              <div className="space-y-4">
+                {groupedMembers.map((group) => (
+                  <div key={group.section} className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+                          Seção
+                        </p>
+                        <h3 className="text-base font-black uppercase text-white">{group.section}</h3>
+                      </div>
+                      <span className="rounded-full border border-zinc-700 bg-black/40 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-300">
+                        {group.members.length} membro{group.members.length === 1 ? "" : "s"}
+                      </span>
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-black uppercase tracking-[0.25em] text-brand">
-                        {member.secao}
-                      </p>
-                      <h3 className="truncate text-base font-black uppercase text-white">
-                        {member.cargo}
-                      </h3>
-                      <p className="truncate text-xs font-bold uppercase tracking-wide text-zinc-500">
-                        {member.nome || member.userId || "Vinculacao pendente"}
-                      </p>
-                    </div>
+                    {group.members.map((member, index) => {
+                      const profileHref = member.userId
+                        ? tenantSlug
+                          ? withTenantSlug(tenantSlug, `/perfil/${member.userId}`)
+                          : `/perfil/${member.userId}`
+                        : "";
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleEditMember(member)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200"
-                        title="Editar membro"
-                      >
-                        <PencilLine size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteMember(member.id)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-900/40 bg-red-900/20 text-red-300"
-                        title="Remover membro"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </article>
+                      return (
+                        <article
+                          key={member.id}
+                          className="flex items-center gap-4 rounded-[24px] border border-zinc-800 bg-black/40 px-4 py-4"
+                        >
+                          <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900">
+                            <Image
+                              src={member.foto || tenantLogoUrl || "/logo.png"}
+                              alt={member.nome || member.cargo}
+                              fill
+                              sizes="56px"
+                              className={`object-cover ${member.userId ? "" : "opacity-70 grayscale"}`}
+                              unoptimized={Boolean(member.foto && member.foto.startsWith("http"))}
+                            />
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-brand">
+                              {member.cargo}
+                            </p>
+                            <h4 className="truncate text-base font-black uppercase text-white">
+                              {member.nome || member.userId || "Vinculação pendente"}
+                            </h4>
+                            <p className="truncate text-xs font-bold uppercase tracking-wide text-zinc-500">
+                              Posição {index + 1} na seção
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleMoveMember(member.id, "up")}
+                              disabled={index === 0}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 disabled:opacity-30"
+                              title="Subir membro"
+                            >
+                              <ArrowUp size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleMoveMember(member.id, "down")}
+                              disabled={index === group.members.length - 1}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200 disabled:opacity-30"
+                              title="Descer membro"
+                            >
+                              <ArrowDown size={14} />
+                            </button>
+                            {profileHref ? (
+                              <Link
+                                href={profileHref}
+                                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                                title="Abrir perfil"
+                              >
+                                <ExternalLink size={14} />
+                              </Link>
+                            ) : null}
+                            <button
+                              onClick={() => handleEditMember(member)}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-200"
+                              title="Editar membro"
+                            >
+                              <PencilLine size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteMember(member.id)}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-900/40 bg-red-900/20 text-red-300"
+                              title="Remover membro"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
                 ))}
               </div>
             )}
