@@ -137,7 +137,7 @@ export const TENANT_ADMIN_SIDEBAR_ITEMS: TenantAdminSidebarItemDefinition[] = [
   sidebarItem("eventos_encerrados", "Conteúdo", "Eventos - Encerrados", "/admin/eventos/encerrados", "Consulta de eventos encerrados.", ["eventos"]),
   sidebarItem("gestao_eventos", "Comercial", "BI Eventos", "/admin/gestao/eventos", "Análise de vendas, lotes, turmas e scan de eventos.", ["eventos"]),
   sidebarItem("gestao_treinos", "Esportes", "BI Treinos", "/admin/gestao/treinos", "Análise de presença, modalidade, turma e desempenho dos treinos.", ["treinos"]),
-  sidebarItem("gestao_produtos", "Comercial", "BI Produtos", "/admin/gestao/produtos", "Análise de vendas, lotes, turmas e likes dos produtos.", ["loja"]),
+  sidebarItem("gestao_produtos", "Comercial", "BI Loja", "/admin/gestao/loja", "Análise da loja oficial da atlética, sem misturar mini vendors, ligas ou outros players.", ["loja"]),
   sidebarItem("historico", "Conteúdo", "Histórico", "/admin/historico", "Página histórica e memória institucional da atlética."),
   sidebarItem("ligas", "Conteúdo", "Ligas", "/admin/ligas", "Gestão das ligas acadêmicas da tenant."),
   sidebarItem("arena_games", "Esportes", "Arena Games", "/admin/games", "Gestão da área gamer da atlética."),

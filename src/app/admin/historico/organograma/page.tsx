@@ -69,6 +69,12 @@ const moveListItem = <T,>(items: T[], fromIndex: number, toIndex: number): T[] =
   return next;
 };
 
+const sortSectionMembers = (members: OrganogramMemberRecord[]): OrganogramMemberRecord[] =>
+  [...members].sort(
+    (left, right) =>
+      left.ordem - right.ordem || left.cargo.localeCompare(right.cargo, "pt-BR")
+  );
+
 const buildSectionOrder = (
   configuredSections: string[],
   members: OrganogramMemberRecord[]
@@ -449,6 +455,108 @@ export default function AdminHistoricoOrganogramaPage() {
     });
   };
 
+  const handleRenameSection = (section: string) => {
+    const nextRawName = window.prompt("Editar nome da seção", section);
+    if (typeof nextRawName !== "string") return;
+
+    const nextSection = normalizeSectionName(nextRawName);
+    if (!nextSection) {
+      addToast("Informe um nome válido para a seção.", "error");
+      return;
+    }
+    if (nextSection === section) return;
+
+    setConfig((current) => {
+      const targetMembers = sortSectionMembers(
+        current.membros.filter((member) => normalizeSectionName(member.secao) === nextSection)
+      );
+      let movingIndex = 0;
+
+      const nextMembers = current.membros.map((member) => {
+        if (normalizeSectionName(member.secao) !== section) return member;
+        return {
+          ...member,
+          secao: nextSection,
+          ordem: targetMembers.length + movingIndex++,
+        };
+      });
+
+      const nextSections = buildSectionOrder(current.ordemSecoes || [], nextMembers);
+      const replacedSections = nextSections.includes(nextSection)
+        ? nextSections.filter((entry) => entry !== section)
+        : nextSections.map((entry) => (entry === section ? nextSection : entry));
+
+      return normalizeOrganogramConfigState({
+        ...current,
+        membros: nextMembers,
+        ordemSecoes: replacedSections,
+      });
+    });
+
+    setForm((current) =>
+      normalizeSectionName(current.secao) === section
+        ? { ...current, secao: nextSection }
+        : current
+    );
+    addToast(
+      `Seção ${section} ${orderedSections.includes(nextSection) ? "mesclada" : "renomeada"} para ${nextSection}.`,
+      "success"
+    );
+  };
+
+  const handleDeleteSection = (section: string) => {
+    const remainingSections = orderedSections.filter((entry) => entry !== section);
+    const fallbackSection = remainingSections[0] || "Diretoria";
+    const membersInSection = sortSectionMembers(
+      config.membros.filter((member) => normalizeSectionName(member.secao) === section)
+    );
+    const confirmationMessage =
+      membersInSection.length > 0
+        ? `Excluir a seção ${section}? Os ${membersInSection.length} membro(s) serão movidos para ${fallbackSection}.`
+        : `Excluir a seção ${section}?`;
+
+    if (!window.confirm(confirmationMessage)) return;
+
+    setConfig((current) => {
+      const currentMembersInSection = sortSectionMembers(
+        current.membros.filter((member) => normalizeSectionName(member.secao) === section)
+      );
+      const targetMembers = sortSectionMembers(
+        current.membros.filter((member) => normalizeSectionName(member.secao) === fallbackSection)
+      );
+      let movingIndex = 0;
+
+      const nextMembers =
+        currentMembersInSection.length === 0
+          ? current.membros
+          : current.membros.map((member) => {
+              if (normalizeSectionName(member.secao) !== section) return member;
+              return {
+                ...member,
+                secao: fallbackSection,
+                ordem: targetMembers.length + movingIndex++,
+              };
+            });
+
+      const nextSections = buildSectionOrder(current.ordemSecoes || [], nextMembers).filter(
+        (entry) => entry !== section
+      );
+
+      return normalizeOrganogramConfigState({
+        ...current,
+        membros: nextMembers,
+        ordemSecoes: nextSections,
+      });
+    });
+
+    setForm((current) =>
+      normalizeSectionName(current.secao) === section
+        ? { ...current, secao: fallbackSection }
+        : current
+    );
+    addToast(`Seção ${section} removida.`, "success");
+  };
+
   const handleMoveMember = (memberId: string, direction: "up" | "down") => {
     setConfig((current) => {
       const targetMember = current.membros.find((member) => member.id === memberId);
@@ -525,7 +633,7 @@ export default function AdminHistoricoOrganogramaPage() {
             </Link>
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-                Memoria institucional
+                Memória institucional
               </p>
               <h1 className="text-2xl font-black uppercase tracking-tight">
                 Organograma
@@ -870,6 +978,13 @@ export default function AdminHistoricoOrganogramaPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <button
+                            onClick={() => handleRenameSection(section)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-700 bg-black/40 text-zinc-200"
+                            title="Editar seção"
+                          >
+                            <PencilLine size={14} />
+                          </button>
+                          <button
                             onClick={() => handleMoveSection(section, "up")}
                             disabled={index === 0}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-700 bg-black/40 text-zinc-200 disabled:opacity-30"
@@ -884,6 +999,13 @@ export default function AdminHistoricoOrganogramaPage() {
                             title="Descer seção"
                           >
                             <ArrowDown size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSection(section)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-red-900/40 bg-red-900/20 text-red-300"
+                            title="Excluir seção"
+                          >
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </div>

@@ -23,6 +23,7 @@ import {
   toLegacyTenantRole,
   type TenantScopedRole,
 } from "./roles";
+import { normalizeTenantAreaLabel } from "@/constants/tenantAreas";
 
 export type TenantPaletteKey =
   | "green"
@@ -337,7 +338,7 @@ const parseTenant = (row: unknown): TenantSummary | null => {
     faculdade: asString(raw.faculdade).trim(),
     cidade: asString(raw.cidade).trim(),
     curso: asString(raw.curso).trim(),
-    area: asString(raw.area).trim(),
+    area: normalizeTenantAreaLabel(asString(raw.area).trim()),
     cnpj: asString(raw.cnpj).trim(),
     contatoEmail: asString(raw.contato_email).trim(),
     contatoTelefone: asString(raw.contato_telefone).trim(),
@@ -444,7 +445,7 @@ const parseOnboardingRequest = (row: unknown): TenantOnboardingRequest | null =>
     cidade: asString(raw.cidade).trim(),
     faculdade: asString(raw.faculdade).trim(),
     curso: asString(raw.curso).trim(),
-    area: asString(raw.area).trim(),
+    area: normalizeTenantAreaLabel(asString(raw.area).trim()),
     cnpj: asString(raw.cnpj).trim(),
     contatoEmail: asString(raw.contato_email).trim(),
     contatoTelefone: asString(raw.contato_telefone).trim(),
@@ -942,6 +943,7 @@ export async function createTenantWithMaster(
   payload: TenantCreatePayload
 ): Promise<string> {
   const supabase = getSupabaseClient();
+  const normalizedArea = normalizeTenantAreaLabel(payload.area ?? "");
   const payloadV2 = {
     p_nome: payload.nome,
     p_sigla: payload.sigla,
@@ -949,7 +951,7 @@ export async function createTenantWithMaster(
     p_cidade: payload.cidade ?? null,
     p_faculdade: payload.faculdade,
     p_curso: payload.curso ?? null,
-    p_area: payload.area ?? null,
+    p_area: normalizedArea || null,
     p_cnpj: payload.cnpj ?? null,
     p_contato_email: payload.contatoEmail ?? null,
     p_contato_telefone: payload.contatoTelefone ?? null,
@@ -963,7 +965,7 @@ export async function createTenantWithMaster(
     p_cidade: payload.cidade ?? null,
     p_faculdade: payload.faculdade,
     p_curso: payload.curso ?? null,
-    p_area: payload.area ?? null,
+    p_area: normalizedArea || null,
     p_cnpj: payload.cnpj ?? null,
     p_palette_key: payload.paletteKey ?? "green",
     p_allow_public_signup: payload.allowPublicSignup ?? true,
@@ -989,6 +991,7 @@ export async function submitTenantOnboardingRequest(
   payload: TenantCreatePayload
 ): Promise<string> {
   const supabase = getSupabaseClient();
+  const normalizedArea = normalizeTenantAreaLabel(payload.area ?? "");
   const payloadV2 = {
     p_nome: payload.nome,
     p_sigla: payload.sigla,
@@ -996,7 +999,7 @@ export async function submitTenantOnboardingRequest(
     p_cidade: payload.cidade ?? null,
     p_faculdade: payload.faculdade,
     p_curso: payload.curso ?? null,
-    p_area: payload.area ?? null,
+    p_area: normalizedArea || null,
     p_cnpj: payload.cnpj ?? null,
     p_contato_email: payload.contatoEmail ?? null,
     p_contato_telefone: payload.contatoTelefone ?? null,
@@ -1010,7 +1013,7 @@ export async function submitTenantOnboardingRequest(
     p_cidade: payload.cidade ?? null,
     p_faculdade: payload.faculdade,
     p_curso: payload.curso ?? null,
-    p_area: payload.area ?? null,
+    p_area: normalizedArea || null,
     p_cnpj: payload.cnpj ?? null,
     p_palette_key: payload.paletteKey ?? "green",
     p_allow_public_signup: payload.allowPublicSignup ?? true,
@@ -2020,7 +2023,9 @@ export async function updateTenantProfile(payload: {
   setTrimmed("cidade", payload.cidade);
   setTrimmed("faculdade", payload.faculdade);
   setTrimmed("curso", payload.curso);
-  setTrimmed("area", payload.area);
+  if (typeof payload.area === "string") {
+    patch.area = normalizeTenantAreaLabel(payload.area);
+  }
   setTrimmed("cnpj", payload.cnpj);
   setTrimmed("contato_email", payload.contatoEmail);
   setTrimmed("contato_telefone", payload.contatoTelefone);

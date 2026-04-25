@@ -56,7 +56,17 @@ type Kpi = {
   tone: string;
 };
 
-type EventRow = Row & { id?: unknown; titulo?: unknown; data?: unknown; hora?: unknown };
+type EventRow = Row & {
+  id?: unknown;
+  titulo?: unknown;
+  data?: unknown;
+  hora?: unknown;
+  stats?: unknown;
+  leagueId?: unknown;
+  leagueEventVisibility?: unknown;
+  tipo?: unknown;
+  categoria?: unknown;
+};
 type TicketRow = Row & {
   eventoId?: unknown;
   eventoNome?: unknown;
@@ -269,6 +279,21 @@ const parseDate = (value: unknown): Date | null => {
 
 const statusKey = (value: unknown): string => asString(value).trim().toLowerCase();
 
+const normalizeSellerType = (value: unknown): string =>
+  asString(value).trim().toLowerCase();
+
+const getLeagueIdFromEventRow = (event: EventRow): string =>
+  asString(event.leagueId || asObject(event.stats)?.leagueId).trim();
+
+const isLeagueEventRow = (event: EventRow): boolean => {
+  const leagueId = getLeagueIdFromEventRow(event);
+  if (leagueId) return true;
+
+  const tipo = asString(event.tipo).trim().toLowerCase();
+  const categoria = asString(event.categoria).trim().toLowerCase();
+  return tipo === "league" || tipo === "liga" || categoria === "league" || categoria === "liga";
+};
+
 const isApprovedStatus = (value: unknown): boolean =>
   ["aprovado", "approved", "pago", "paid", "entregue", "presente"].includes(statusKey(value));
 
@@ -450,7 +475,13 @@ async function queryRowsOptional(
 async function loadDashboardData(mode: DashboardMode, tenantId: string): Promise<LoadedData> {
   if (mode === "eventos") {
     const [events, eventSales, eventCheckins, tickets] = await Promise.all([
-      queryRows("eventos", "id,titulo,data,hora,lotes,stats,tenant_id,createdAt", tenantId, "data", 160),
+      queryRows(
+        "eventos",
+        "id,titulo,data,hora,lotes,stats,leagueId,leagueEventVisibility,tipo,categoria,tenant_id,createdAt",
+        tenantId,
+        "data",
+        160
+      ),
       queryRowsOptional(
         "bi_eventos_vendas_dimensoes",
         "tenant_id,evento_id,evento_nome,dimension_type,dimension_value,pedidos,quantidade,valor,ticket_medio",
@@ -713,9 +744,21 @@ function LineMetric({ data }: { data: MetricRow[] }) {
 }
 
 function EventsBi({ data }: { data: LoadedData }) {
+  const tenantEvents = data.events.filter((event) => !isLeagueEventRow(event));
+  const tenantEventIds = new Set(
+    tenantEvents.map((event) => asString(event.id).trim()).filter(Boolean)
+  );
+  const tenantTickets = data.tickets.filter((ticket) =>
+    tenantEventIds.has(asString(ticket.eventoId).trim())
+  );
+
   return (
     <DashboardShell title="Gestão de Eventos" subtitle="Vendas, funil, lotes, aprovadores e leitura de entrada" mode="eventos">
-      <EventManagementAnalytics events={data.events} tickets={data.tickets} allLabel="Todos os eventos" />
+      <EventManagementAnalytics
+        events={tenantEvents}
+        tickets={tenantTickets}
+        allLabel="Todos os eventos da atlética"
+      />
     </DashboardShell>
   );
 }
@@ -1348,25 +1391,36 @@ function TrainingsBiEnhanced({ data }: { data: LoadedData }) {
 }
 
 function ProductsBi({ data }: { data: LoadedData }) {
+  const { tenantId } = useTenantTheme();
+  const cleanTenantId = tenantId.trim();
   const tenantProducts = data.products.filter((product) => {
-    const sellerType = asString(product.seller_type).trim().toLowerCase();
-    return !["mini_vendor", "league", "liga"].includes(sellerType);
+    const sellerType = normalizeSellerType(product.seller_type);
+    const sellerId = asString(product.seller_id).trim();
+    if (["mini_vendor", "league", "liga"].includes(sellerType)) return false;
+    if (!sellerId) return true;
+    return !cleanTenantId || sellerId === cleanTenantId;
   });
-  const tenantProductIds = new Set(tenantProducts.map((product) => asString(product.id)).filter(Boolean));
+  const tenantProductIds = new Set(
+    tenantProducts.map((product) => asString(product.id)).filter(Boolean)
+  );
   const tenantOrders = data.orders.filter((order) => {
-    const sellerType = asString(order.seller_type).trim().toLowerCase();
-    return tenantProductIds.has(asString(order.productId)) || (!sellerType || sellerType === "tenant");
+    const sellerType = normalizeSellerType(order.seller_type);
+    const sellerId = asString(order.seller_id).trim();
+    if (tenantProductIds.has(asString(order.productId))) return true;
+    if (["mini_vendor", "league", "liga"].includes(sellerType)) return false;
+    if (!sellerId) return true;
+    return !cleanTenantId || sellerId === cleanTenantId;
   });
 
   return (
-    <DashboardShell title="Gestão de Produtos" subtitle="Produtos oficiais da atlética, sem misturar mini-vendors ou ligas" mode="produtos">
+    <DashboardShell title="BI Loja" subtitle="Produtos oficiais da loja da atlética, sem misturar mini vendors, ligas ou outros players" mode="produtos">
       <ProductManagementAnalytics
         products={tenantProducts}
         orders={tenantOrders}
         users={data.users}
-        title="Produtos da atlética"
-        subtitle="Receita, compradores únicos, valor médio, conversão por produto, estoque, recompra e curva ABC apenas dos produtos oficiais."
-        allLabel="Todos os produtos da atlética"
+        title="Produtos oficiais da loja"
+        subtitle="Receita, compradores únicos, valor médio, conversão por produto, estoque, recompra e curva ABC apenas da loja oficial da atlética."
+        allLabel="Todos os produtos oficiais"
       />
     </DashboardShell>
   );
@@ -1590,7 +1644,7 @@ function DashboardShell({
   const links = [
     { id: "eventos", label: "Eventos", href: tenantSlug ? withTenantSlug(tenantSlug, "/admin/gestao/eventos") : "/admin/gestao/eventos" },
     { id: "treinos", label: "Treinos", href: tenantSlug ? withTenantSlug(tenantSlug, "/admin/gestao/treinos") : "/admin/gestao/treinos" },
-    { id: "produtos", label: "Produtos", href: tenantSlug ? withTenantSlug(tenantSlug, "/admin/gestao/produtos") : "/admin/gestao/produtos" },
+    { id: "produtos", label: "BI Loja", href: tenantSlug ? withTenantSlug(tenantSlug, "/admin/gestao/loja") : "/admin/gestao/loja" },
   ];
 
   return (
@@ -1630,7 +1684,7 @@ function DashboardShell({
 }
 
 const modeTitle = (mode: DashboardMode): string =>
-  mode === "eventos" ? "Gestão de Eventos" : mode === "treinos" ? "Gestão de Treinos" : "Gestão de Produtos";
+  mode === "eventos" ? "Gestão de Eventos" : mode === "treinos" ? "Gestão de Treinos" : "BI Loja";
 
 export default function AdminBiDashboard({ mode }: { mode: DashboardMode }) {
   const { tenantId } = useTenantTheme();

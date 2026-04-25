@@ -199,7 +199,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { group: "Conteúdo", name: "Eventos", path: "/admin/eventos", icon: <Calendar size={18} /> },
     { group: "Comercial", name: "BI Eventos", path: "/admin/gestao/eventos", icon: <BarChart3 size={18} /> },
     { group: "Esportes", name: "BI Treinos", path: "/admin/gestao/treinos", icon: <BarChart3 size={18} /> },
-    { group: "Comercial", name: "BI Produtos", path: "/admin/gestao/produtos", icon: <BarChart3 size={18} /> },
+    { group: "Comercial", name: "BI Loja", path: "/admin/gestao/loja", icon: <BarChart3 size={18} /> },
     { group: "Conteúdo", name: "Apadrinhamento", path: "/admin/apadrinhamento", icon: <HeartHandshake size={18} /> },
     { group: "Comercial", name: "Fidelidade", path: "/admin/fidelidade", icon: <Star size={18} /> },
     { group: "Base", name: "Guia do App", path: "/admin/guia", icon: <BookOpen size={18} /> },

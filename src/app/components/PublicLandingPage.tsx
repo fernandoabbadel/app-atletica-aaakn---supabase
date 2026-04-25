@@ -310,6 +310,15 @@ export default function PublicLandingPage({
     return "/dashboard";
   }, [isTenantLanding, normalizedActiveTenantSlug, tenantSlug, user]);
 
+  const publicEntryPath = useMemo(() => {
+    if (isTenantLanding) {
+      return withTenantSlug(tenantSlug, "/");
+    }
+    return normalizedActiveTenantSlug
+      ? withTenantSlug(normalizedActiveTenantSlug, "/")
+      : "/visitante";
+  }, [isTenantLanding, normalizedActiveTenantSlug, tenantSlug]);
+
   const adminTenantSlug = isTenantLanding ? tenantSlug : normalizedActiveTenantSlug;
   const adminPath = useMemo(() => {
     if (adminTenantSlug) {
@@ -684,6 +693,14 @@ export default function PublicLandingPage({
                   <LayoutDashboard size={18} />
                   {authenticatedActionLabel}
                 </button>
+                {!isTenantLanding && (
+                  <button
+                    onClick={() => router.push(publicEntryPath)}
+                    className="brand-button-soft flex w-full"
+                  >
+                    <Globe size={16} /> Abrir página pública
+                  </button>
+                )}
                 {canOpenAdmin && (
                   <button
                     onClick={() => router.push(adminPath)}

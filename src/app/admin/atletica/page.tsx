@@ -395,7 +395,7 @@ export default function AdminAtleticaPage() {
               </div>
               <div>
                 <label className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
-                  Area
+                  Área
                 </label>
                 <select
                   value={form.area}

@@ -21,6 +21,8 @@ import {
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
+import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
+import { fetchLeagueSummaries, type LeagueRecord } from "@/lib/leaguesService";
 import {
   fetchTenantMiniVendors,
   setMiniVendorCategoryVisibility,
@@ -76,7 +78,7 @@ type DisplayCategory = {
   logoUrl: string;
   buttonColor: string;
   displayOrder: number | null;
-  sellerType: "tenant" | "mini_vendor";
+  sellerType: "tenant" | "mini_vendor" | "league";
   sellerId: string;
   derivedOnly: boolean;
   categoryVisible: boolean;
@@ -85,6 +87,7 @@ type DisplayCategory = {
 const CATEGORY_NAME_MAX_LENGTH = 80;
 const CATEGORY_COLOR_DEFAULT = "#10b981";
 const MINI_VENDOR_COLOR_DEFAULT = "#2563eb";
+const LEAGUE_COLOR_DEFAULT = "#6366f1";
 const buildEmptyForm = (buttonColor: string): CategoryFormState => ({
   nome: "",
   coverImg: "",
@@ -114,11 +117,15 @@ const moveListItem = <T,>(items: T[], fromIndex: number, toIndex: number): T[] =
   return next;
 };
 
-const resolveSellerType = (value: unknown): "tenant" | "mini_vendor" =>
-  asString(value).trim().toLowerCase() === "mini_vendor" ? "mini_vendor" : "tenant";
+const resolveSellerType = (value: unknown): "tenant" | "mini_vendor" | "league" => {
+  const normalized = asString(value).trim().toLowerCase();
+  if (normalized === "mini_vendor") return "mini_vendor";
+  if (normalized === "league" || normalized === "liga") return "league";
+  return "tenant";
+};
 
 const resolveSellerId = (
-  sellerType: "tenant" | "mini_vendor",
+  sellerType: "tenant" | "mini_vendor" | "league",
   sellerId: unknown,
   tenantId: string
 ): string => {
@@ -131,7 +138,7 @@ const resolveSellerId = (
 
 const buildCategoryKey = (
   categoryName: string,
-  sellerType: "tenant" | "mini_vendor",
+  sellerType: "tenant" | "mini_vendor" | "league",
   sellerId: string
 ): string => `${sellerType}:${sellerId || "_"}:${categoryName.trim().toLowerCase()}`;
 
@@ -147,6 +154,7 @@ export default function AdminLojaCategoriasPage() {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [miniVendors, setMiniVendors] = useState<MiniVendorProfile[]>([]);
+  const [leagues, setLeagues] = useState<LeagueRecord[]>([]);
   const [editingCategoryKey, setEditingCategoryKey] = useState<string | null>(null);
   const [orderedCategoryKeys, setOrderedCategoryKeys] = useState<string[]>([]);
   const [draggingCategoryKey, setDraggingCategoryKey] = useState<string | null>(null);
@@ -173,9 +181,12 @@ export default function AdminLojaCategoriasPage() {
   const miniVendorAdminHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/admin/mini-vendors/cadastros")
     : "/admin/mini-vendors/cadastros";
+  const leaguesAdminHref = tenantSlug
+    ? withTenantSlug(tenantSlug, "/admin/ligas")
+    : "/admin/ligas";
 
   const loadData = useCallback(async (forceRefresh = true) => {
-    const [bundle, tenantMiniVendors] = await Promise.all([
+    const [bundle, tenantMiniVendors, tenantLeagues] = await Promise.all([
       fetchAdminStoreBundle({
         productsLimit: 240,
         categoriesLimit: 240,
@@ -189,11 +200,19 @@ export default function AdminLojaCategoriasPage() {
             forceRefresh,
           })
         : Promise.resolve([]),
+      activeTenantId.trim()
+        ? fetchLeagueSummaries({
+            tenantId: activeTenantId,
+            forceRefresh,
+            maxResults: 80,
+          })
+        : Promise.resolve([]),
     ]);
 
     setCategories(bundle.categorias as CategoryRow[]);
     setProducts(bundle.produtos as ProductRow[]);
     setMiniVendors(tenantMiniVendors);
+    setLeagues(tenantLeagues);
   }, [activeTenantId]);
 
   useEffect(() => {
@@ -222,6 +241,7 @@ export default function AdminLojaCategoriasPage() {
     const miniVendorVisibilityMap = new Map(
       miniVendors.map((vendor) => [vendor.id, vendor.categoryVisible] as const)
     );
+    const leagueMap = new Map(leagues.map((league) => [league.id, league] as const));
 
     categories.forEach((row) => {
       const nome = asString(row.nome).trim();
@@ -230,6 +250,10 @@ export default function AdminLojaCategoriasPage() {
       const sellerType = resolveSellerType(row.seller_type);
       const sellerId = resolveSellerId(sellerType, row.seller_id, cleanTenantId);
       const key = buildCategoryKey(nome, sellerType, sellerId);
+      const leagueLogoUrl =
+        sellerType === "league"
+          ? resolveLeagueLogoSrc(leagueMap.get(sellerId) ?? null)
+          : "";
 
       rows.set(key, {
         key,
@@ -239,10 +263,16 @@ export default function AdminLojaCategoriasPage() {
         logoUrl:
           sellerType === "tenant"
             ? cleanTenantLogoUrl || asString(row.logo_url).trim()
-            : asString(row.logo_url).trim(),
+            : sellerType === "league"
+              ? leagueLogoUrl || asString(row.logo_url).trim()
+              : asString(row.logo_url).trim(),
         buttonColor:
           asString(row.button_color).trim() ||
-          (sellerType === "mini_vendor" ? MINI_VENDOR_COLOR_DEFAULT : tenantCategoryColor),
+          (sellerType === "mini_vendor"
+            ? MINI_VENDOR_COLOR_DEFAULT
+            : sellerType === "league"
+              ? LEAGUE_COLOR_DEFAULT
+              : tenantCategoryColor),
         displayOrder: asInt(row.display_order),
         sellerType,
         sellerId,
@@ -264,7 +294,12 @@ export default function AdminLojaCategoriasPage() {
       const sellerId = resolveSellerId(sellerType, row.seller_id, cleanTenantId);
       const key = buildCategoryKey(nome, sellerType, sellerId);
       const productLogoUrl =
-        sellerType === "tenant" ? cleanTenantLogoUrl : asString(row.seller_logo_url).trim();
+        sellerType === "tenant"
+          ? cleanTenantLogoUrl
+          : sellerType === "league"
+            ? resolveLeagueLogoSrc(leagueMap.get(sellerId) ?? null) ||
+              asString(row.seller_logo_url).trim()
+            : asString(row.seller_logo_url).trim();
       const current = rows.get(key);
 
       if (current) {
@@ -284,8 +319,12 @@ export default function AdminLojaCategoriasPage() {
         nome,
         coverImg: productLogoUrl,
         logoUrl: productLogoUrl,
-          buttonColor:
-          sellerType === "mini_vendor" ? MINI_VENDOR_COLOR_DEFAULT : tenantCategoryColor,
+        buttonColor:
+          sellerType === "mini_vendor"
+            ? MINI_VENDOR_COLOR_DEFAULT
+            : sellerType === "league"
+              ? LEAGUE_COLOR_DEFAULT
+              : tenantCategoryColor,
         displayOrder: null,
         sellerType,
         sellerId,
@@ -310,7 +349,7 @@ export default function AdminLojaCategoriasPage() {
       }
       return left.nome.localeCompare(right.nome, "pt-BR", { sensitivity: "base" });
     });
-  }, [activeTenantId, categories, miniVendors, products, tenantCategoryColor, tenantLogoUrl]);
+  }, [activeTenantId, categories, leagues, miniVendors, products, tenantCategoryColor, tenantLogoUrl]);
 
   const productCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -333,6 +372,10 @@ export default function AdminLojaCategoriasPage() {
   );
   const miniVendorCategories = useMemo(
     () => displayedCategories.filter((row) => row.sellerType === "mini_vendor"),
+    [displayedCategories]
+  );
+  const leagueCategories = useMemo(
+    () => displayedCategories.filter((row) => row.sellerType === "league"),
     [displayedCategories]
   );
   const editingCategory = useMemo(
@@ -398,8 +441,13 @@ export default function AdminLojaCategoriasPage() {
   };
 
   const handleEditCategory = (row: DisplayCategory) => {
-    if (row.sellerType === "mini_vendor") {
-      addToast("A logo e a categoria da lojinha continuam no cadastro do mini vendor.", "info");
+    if (row.sellerType !== "tenant") {
+      addToast(
+        row.sellerType === "league"
+          ? "A logo e a categoria da liga continuam no cadastro da própria liga."
+          : "A logo e a categoria da lojinha continuam no cadastro do mini vendor.",
+        "info"
+      );
       return;
     }
 
@@ -454,7 +502,7 @@ export default function AdminLojaCategoriasPage() {
   const handleSave = async () => {
     const nome = form.nome.trim();
     if (!nome) {
-      addToast("Nome da categoria obrigatorio.", "error");
+      addToast("Nome da categoria obrigatório.", "error");
       return;
     }
 
@@ -510,7 +558,7 @@ export default function AdminLojaCategoriasPage() {
       .filter((row): row is string => Boolean(row));
 
     if (!tenantId) {
-      addToast("Abra um tenant valido antes de salvar a ordem.", "error");
+      addToast("Abra um tenant válido antes de salvar a ordem.", "error");
       return;
     }
     if (orderedCategoryIds.length === 0) {
@@ -598,7 +646,7 @@ export default function AdminLojaCategoriasPage() {
             <div>
               <h1 className="text-xl font-black uppercase tracking-tight">Categorias da Loja</h1>
               <p className="text-[11px] font-bold text-zinc-500">
-                Tenant, categorias detectadas nos produtos e visao das lojinhas.
+                Tenant, categorias detectadas nos produtos e visão das lojinhas.
               </p>
             </div>
           </div>
@@ -623,7 +671,7 @@ export default function AdminLojaCategoriasPage() {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-5 px-6 py-6">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-4">
           <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
               Total
@@ -648,7 +696,16 @@ export default function AdminLojaCategoriasPage() {
             </p>
             <p className="mt-2 text-2xl font-black text-blue-300">{miniVendorCategories.length}</p>
             <p className="mt-1 text-[11px] text-zinc-500">
-              Visiveis aqui e com logo editada no cadastro da lojinha.
+              Visíveis aqui e com logo editada no cadastro da lojinha.
+            </p>
+          </article>
+          <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
+              Ligas
+            </p>
+            <p className="mt-2 text-2xl font-black text-indigo-300">{leagueCategories.length}</p>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Categorias de liga usando a logo oficial da própria liga.
             </p>
           </article>
         </div>
@@ -741,16 +798,24 @@ export default function AdminLojaCategoriasPage() {
                                 className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${
                                   row.sellerType === "mini_vendor"
                                     ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
+                                    : row.sellerType === "league"
+                                      ? "border-indigo-500/30 bg-indigo-500/10 text-indigo-300"
                                     : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                                 }`}
                               >
-                                {row.sellerType === "mini_vendor" ? "Mini Vendor" : "Tenant"}
+                                {row.sellerType === "mini_vendor"
+                                  ? "Mini Vendor"
+                                  : row.sellerType === "league"
+                                    ? "Liga"
+                                    : "Tenant"}
                               </span>
                             </div>
                             <p className="mt-1 text-[11px] text-zinc-500">
                               {row.sellerType === "mini_vendor"
-                                ? "Categoria publica da lojinha aprovada."
-                                : "Categoria publica do tenant."}
+                                ? "Categoria pública da lojinha aprovada."
+                                : row.sellerType === "league"
+                                  ? "Categoria pública da liga."
+                                  : "Categoria pública do tenant."}
                             </p>
                           </div>
                         </div>
@@ -1020,7 +1085,7 @@ export default function AdminLojaCategoriasPage() {
                           </span>
                           {row.derivedOnly ? (
                             <span className="rounded-full border border-zinc-500/30 bg-zinc-500/10 px-2.5 py-1 text-[10px] font-black uppercase text-zinc-300">
-                              So nos produtos
+                              Só nos produtos
                             </span>
                           ) : null}
                         </div>
@@ -1034,12 +1099,18 @@ export default function AdminLojaCategoriasPage() {
                               className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${
                                 row.sellerType === "mini_vendor"
                                   ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
-                                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                  : row.sellerType === "league"
+                                    ? "border-indigo-500/30 bg-indigo-500/10 text-indigo-300"
+                                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                               }`}
                             >
-                              {row.sellerType === "mini_vendor" ? "Mini Vendor" : "Tenant"}
+                              {row.sellerType === "mini_vendor"
+                                ? "Mini Vendor"
+                                : row.sellerType === "league"
+                                  ? "Liga"
+                                  : "Tenant"}
                             </span>
-                            {(row.sellerType === "mini_vendor" || row.categoryId) ? (
+                            {(row.sellerType !== "tenant" || row.categoryId) ? (
                               <span
                                 className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${
                                   row.categoryVisible
@@ -1047,16 +1118,18 @@ export default function AdminLojaCategoriasPage() {
                                     : "border-red-500/30 bg-red-500/10 text-red-200"
                                 }`}
                               >
-                                {row.categoryVisible ? "Categoria visivel" : "Categoria oculta"}
+                                {row.categoryVisible ? "Categoria visível" : "Categoria oculta"}
                               </span>
                             ) : null}
                           </div>
                           <p className="mt-1 text-[11px] text-zinc-500">
                             {row.sellerType === "mini_vendor"
                               ? "A logo continua sendo editada dentro do cadastro da lojinha."
+                              : row.sellerType === "league"
+                              ? "A logo continua sendo editada dentro do cadastro da liga."
                               : row.derivedOnly
                               ? "Categoria detectada nos produtos do tenant e pronta para ser completada."
-                              : "Categoria persistida e editavel no admin da loja."}
+                              : "Categoria persistida e editável no admin da loja."}
                           </p>
                         </div>
 
@@ -1101,6 +1174,30 @@ export default function AdminLojaCategoriasPage() {
                             >
                               <ExternalLink size={14} />
                               Abrir mini vendor
+                            </Link>
+                          </div>
+                        ) : row.sellerType === "league" ? (
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <Link
+                              href={pendingOrdersHref}
+                              className="inline-flex items-center gap-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] font-black uppercase text-yellow-200 hover:bg-yellow-500/20"
+                            >
+                              <ExternalLink size={14} />
+                              Pendentes
+                            </Link>
+                            <Link
+                              href={approvedOrdersHref}
+                              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-500/20"
+                            >
+                              <ExternalLink size={14} />
+                              Aprovados
+                            </Link>
+                            <Link
+                              href={leaguesAdminHref}
+                              className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-[11px] font-black uppercase text-indigo-300 hover:bg-indigo-500/20"
+                            >
+                              <ExternalLink size={14} />
+                              Abrir ligas
                             </Link>
                           </div>
                         ) : (

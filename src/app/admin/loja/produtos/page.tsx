@@ -105,6 +105,9 @@ type ProductRow = {
   plan_visibility?: Array<{ planId?: string; planName?: string; visible?: boolean }>;
   payment_config?: CommercePaymentConfig | null;
   seller_type?: string;
+  seller_id?: string;
+  seller_name?: string;
+  seller_logo_url?: string;
 };
 
 type CategoryRow = {
@@ -198,6 +201,7 @@ const PRODUCT_FEATURES_TEXT_MAX_LENGTH = 1200;
 const PRODUCT_VARIANT_FIELD_MAX_LENGTH = 40;
 
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
+const normalizeSellerType = (value: unknown): string => asString(value).trim().toLowerCase();
 const parseIntSafe = (value: string): number => {
   const digits = value.replace(/[^\d]/g, "");
   return digits ? Number(digits) : 0;
@@ -379,6 +383,17 @@ export default function AdminLojaProdutosPage() {
 
     return ordered;
   }, [categories, form.categoria, selectedCategory]);
+  const knownProducts = useMemo(() => {
+    const merged = new Map<string, ProductRow>();
+    [...rows, ...inactiveRows].forEach((row) => {
+      merged.set(row.id, row);
+    });
+    return Array.from(merged.values());
+  }, [inactiveRows, rows]);
+  const editingProduct = useMemo(
+    () => knownProducts.find((row) => row.id === editingProductId) ?? null,
+    [editingProductId, knownProducts]
+  );
   const backHref = tenantSlug ? withTenantSlug(tenantSlug, "/admin/loja") : "/admin/loja";
   const inactiveProductsHref = tenantSlug
     ? withTenantSlug(tenantSlug, "/admin/loja/produtos-desativados")
@@ -406,7 +421,6 @@ export default function AdminLojaProdutosPage() {
         forceRefresh,
         tenantId: activeTenantId || undefined,
         category: normalizedCategory,
-        sellerType: "tenant",
       });
       setRows(products as ProductRow[]);
     } finally {
@@ -422,7 +436,6 @@ export default function AdminLojaProdutosPage() {
         forceRefresh,
         tenantId: activeTenantId || undefined,
         active: false,
-        sellerType: "tenant",
       });
       setInactiveRows(products as ProductRow[]);
     } finally {
@@ -439,9 +452,7 @@ export default function AdminLojaProdutosPage() {
       forceRefresh,
     });
     setCategories(
-      (bundle.categorias as CategoryRow[]).filter(
-        (row) => !row.seller_type || row.seller_type === "tenant"
-      )
+      bundle.categorias as CategoryRow[]
     );
   }, []);
 
@@ -494,7 +505,6 @@ export default function AdminLojaProdutosPage() {
           forceRefresh: false,
           tenantId: activeTenantId || undefined,
           category: selectedCategory,
-          sellerType: "tenant",
         });
         if (mounted) {
           setRows(products as ProductRow[]);
@@ -529,7 +539,6 @@ export default function AdminLojaProdutosPage() {
           forceRefresh: false,
           tenantId: activeTenantId || undefined,
           active: false,
-          sellerType: "tenant",
         });
         if (mounted) {
           setInactiveRows(products as ProductRow[]);
@@ -686,7 +695,7 @@ export default function AdminLojaProdutosPage() {
   const handleCreateCategory = async () => {
     const nome = categoryName.trim();
     if (!nome) {
-      addToast("Nome da categoria obrigatorio.", "error");
+      addToast("Nome da categoria obrigatório.", "error");
       return;
     }
     setSavingCategory(true);
@@ -795,7 +804,7 @@ export default function AdminLojaProdutosPage() {
     const preco = parseMoney(form.preco);
     const precoAntigo = form.precoAntigo.trim() ? parseMoney(form.precoAntigo) : 0;
 
-    if (!nome) return void addToast("Nome do produto obrigatorio.", "error");
+    if (!nome) return void addToast("Nome do produto obrigatório.", "error");
     if (!Number.isFinite(preco) || preco < 0) return void addToast("Preço inválido.", "error");
 
     const variants = variantsEnabled
@@ -811,7 +820,7 @@ export default function AdminLojaProdutosPage() {
       : [];
 
     if (variantsEnabled && variants.length === 0) {
-      return void addToast("Adicione pelo menos uma variacao.", "error");
+      return void addToast("Adicione pelo menos uma variação.", "error");
     }
     if (
       form.payment.enabled &&
@@ -824,7 +833,7 @@ export default function AdminLojaProdutosPage() {
       form.payment.whatsapp.trim() &&
       !hasValidPhoneLength(form.payment.whatsapp)
     ) {
-      return void addToast("Informe um WhatsApp valido para o pagamento proprio.", "error");
+      return void addToast("Informe um WhatsApp válido para o pagamento próprio.", "error");
     }
 
     const estoqueTotal = variants.length
@@ -852,6 +861,7 @@ export default function AdminLojaProdutosPage() {
       selectedPaymentRecipients.length > 0 ||
       form.payment.whatsapp.trim().length > 0;
 
+    const sellerType = normalizeSellerType(editingProduct?.seller_type) || "tenant";
     const payload: Record<string, unknown> = {
       nome,
       categoria,
@@ -893,10 +903,15 @@ export default function AdminLojaProdutosPage() {
               : {}),
           }
         : null,
-      seller_type: "tenant",
-      seller_id: activeTenantId || "",
-      seller_name: tenantName || tenantSigla || "Atlética",
-      seller_logo_url: tenantLogoUrl || "/logo.png",
+      seller_type: sellerType,
+      seller_id: asString(editingProduct?.seller_id).trim() || activeTenantId || "",
+      seller_name:
+        asString(editingProduct?.seller_name).trim() ||
+        tenantName ||
+        tenantSigla ||
+        "Atlética",
+      seller_logo_url:
+        asString(editingProduct?.seller_logo_url).trim() || tenantLogoUrl || "/logo.png",
       updatedAt: new Date().toISOString(),
     };
 
@@ -1059,7 +1074,7 @@ export default function AdminLojaProdutosPage() {
           {row.categoria || "Sem categoria"} | Lote: {row.lote || "-"}
         </p>
         {!!row.variantes?.length && (
-          <p className="text-[10px] text-zinc-500 uppercase">Variacoes: {row.variantes.length}</p>
+          <p className="text-[10px] text-zinc-500 uppercase">Variações: {row.variantes.length}</p>
         )}
         {typeof row.cores === "string" && row.cores.trim() && (
           <p className="text-[10px] text-zinc-500 line-clamp-1">Cores: {row.cores}</p>
@@ -1118,7 +1133,7 @@ export default function AdminLojaProdutosPage() {
               <p className="text-[11px] text-zinc-500 font-bold">
                 {isInactiveOnlyPage
                   ? "histórico completo para reativação sem perder dados"
-                  : "criacao completa + categorias + variacoes"}
+                  : "criação completa + categorias + variações"}
               </p>
             </div>
           </div>
@@ -1156,7 +1171,7 @@ export default function AdminLojaProdutosPage() {
           </Link>
           <Link href={reviewHref} className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 hover:bg-emerald-500/10 transition">
             <div className="inline-flex items-center gap-2 text-xs font-black uppercase text-emerald-300"><MessageSquare size={14} /> Reviews</div>
-            <p className="mt-1 text-[11px] text-zinc-400">Avaliacoes continuam moderadas apos compra.</p>
+            <p className="mt-1 text-[11px] text-zinc-400">Avaliações continuam moderadas após compra.</p>
           </Link>
         </div>
 
@@ -1166,7 +1181,7 @@ export default function AdminLojaProdutosPage() {
               <div>
                 <h2 className="text-sm font-black uppercase text-white">Histórico dos Produtos Desativados</h2>
                 <p className="text-[11px] text-zinc-500">
-                  Imagem, categoria, lote, variacoes e preco continuam salvos aqui para reativacao segura.
+                  Imagem, categoria, lote, variações e preço continuam salvos aqui para reativação segura.
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-black/30 px-3 py-2">
@@ -1305,7 +1320,7 @@ export default function AdminLojaProdutosPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-black uppercase">{editingProductId ? "Editar Produto" : "Criar Produto"}</h2>
-                <p className="text-[11px] text-zinc-500">Suporta tamanhos/variacoes, badge promocional, lote, cores e caracteristicas.</p>
+                <p className="text-[11px] text-zinc-500">Suporta tamanhos/variações, badge promocional, lote, cores e características.</p>
               </div>
               <button
                 onClick={() => {
@@ -1329,7 +1344,7 @@ export default function AdminLojaProdutosPage() {
               </div>
               <input value={form.preco} onChange={(e) => setForm((prev) => ({ ...prev, preco: e.target.value }))} placeholder="Preço" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
               <input value={form.precoAntigo} onChange={(e) => setForm((prev) => ({ ...prev, precoAntigo: e.target.value }))} placeholder="Preço antigo (promo)" inputMode="decimal" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
-              <input value={form.estoque} onChange={(e) => setForm((prev) => ({ ...prev, estoque: e.target.value.replace(/[^\d]/g, "") }))} disabled={variantsEnabled} placeholder="Estoque total (sem variacoes)" inputMode="numeric" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
+              <input value={form.estoque} onChange={(e) => setForm((prev) => ({ ...prev, estoque: e.target.value.replace(/[^\d]/g, "") }))} disabled={variantsEnabled} placeholder="Estoque total (sem variações)" inputMode="numeric" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:opacity-50" />
               <LotNameSelector value={form.lote} maxLength={PRODUCT_LOTE_MAX_LENGTH} onChange={(value) => setForm((prev) => ({ ...prev, lote: value }))} />
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
                 <input value={form.img} maxLength={URL_MAX_LENGTH} onChange={(e) => setForm((prev) => ({ ...prev, img: e.target.value.slice(0, URL_MAX_LENGTH) }))} placeholder="URL da imagem (opcional)" className="rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" />
@@ -1524,8 +1539,8 @@ export default function AdminLojaProdutosPage() {
             <div className="rounded-xl border border-zinc-800 bg-black/20 p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-black uppercase text-white">Variacoes / Tamanhos</p>
-                  <p className="text-[11px] text-zinc-500">Categorias de roupa ativam variacoes automaticamente.</p>
+                  <p className="text-xs font-black uppercase text-white">Variações / Tamanhos</p>
+                  <p className="text-[11px] text-zinc-500">Categorias de roupa ativam variações automaticamente.</p>
                 </div>
                 <label className="inline-flex items-center gap-2 text-[11px] text-zinc-400 font-bold">
                   <input type="checkbox" checked={variantsEnabled} disabled={isWearCategory(form.categoria)} onChange={(e) => setForm((prev) => ({ ...prev, usarVariantes: e.target.checked }))} className="accent-emerald-500" />
@@ -1581,7 +1596,7 @@ export default function AdminLojaProdutosPage() {
                 Cancelar
               </button>
               <button onClick={() => void handleSaveProduct()} disabled={savingProduct || uploadingProductImage} className="px-4 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/15 text-xs font-black uppercase text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-60 inline-flex items-center justify-center gap-2">
-                {savingProduct ? <Loader2 size={14} className="animate-spin" /> : editingProductId ? <Pencil size={14} /> : <Plus size={14} />} {savingProduct ? "Salvando..." : (uploadingProductImage ? "Aguardando upload..." : (editingProductId ? "Salvar Alteracoes" : "Criar Produto"))}
+                {savingProduct ? <Loader2 size={14} className="animate-spin" /> : editingProductId ? <Pencil size={14} /> : <Plus size={14} />} {savingProduct ? "Salvando..." : (uploadingProductImage ? "Aguardando upload..." : (editingProductId ? "Salvar Alterações" : "Criar Produto"))}
               </button>
             </div>
           </section>
@@ -1594,7 +1609,7 @@ export default function AdminLojaProdutosPage() {
                 <div>
                   <h3 className="text-sm font-black uppercase text-white">Preço e Visibilidade por Plano</h3>
                   <p className="text-[11px] text-zinc-500">
-                    So preencha quem tiver preco especial. Em branco, o plano usa o preco geral do produto.
+                    Só preencha quem tiver preço especial. Em branco, o plano usa o preço geral do produto.
                   </p>
                 </div>
                 <button
@@ -1612,7 +1627,7 @@ export default function AdminLojaProdutosPage() {
                     <div>
                       <p className="text-sm font-bold text-white">{entry.planName}</p>
                       <p className="text-[10px] text-zinc-500">
-                        Em branco: usa o preco geral
+                        Em branco: usa o preço geral
                         {form.preco.trim() ? ` (R$ ${form.preco.trim()})` : "."}
                       </p>
                     </div>
@@ -1670,10 +1685,10 @@ export default function AdminLojaProdutosPage() {
             </h2>
             <p className="text-[11px] text-zinc-500">
               {isInactiveOnlyPage ? (
-                "Aqui ficam os produtos fora do ar, com todos os dados preservados para auditoria e reativacao."
+                "Aqui ficam os produtos fora do ar, com todos os dados preservados para auditoria e reativação."
               ) : (
                 <>
-                  So os itens de <span className="text-zinc-300">{selectedCategoryLabel}</span> sao consultados agora.
+                  Só os itens de <span className="text-zinc-300">{selectedCategoryLabel}</span> são consultados agora.
                 </>
               )}
             </p>
@@ -1705,7 +1720,22 @@ export default function AdminLojaProdutosPage() {
             </div>
           ) : (
             <div className="space-y-3">
-            {rows.map((row) => (
+                {rows.map((row) => {
+                  const sellerType = normalizeSellerType(row.seller_type) || "tenant";
+                  const sellerLabel =
+                    sellerType === "mini_vendor"
+                      ? row.seller_name || "Mini Vendor"
+                      : sellerType === "league" || sellerType === "liga"
+                        ? row.seller_name || "Liga"
+                        : row.seller_name || "Tenant";
+                  const sellerBadgeClass =
+                    sellerType === "mini_vendor"
+                      ? "border-blue-500/30 text-blue-300 bg-blue-500/5"
+                      : sellerType === "league" || sellerType === "liga"
+                        ? "border-indigo-500/30 text-indigo-300 bg-indigo-500/5"
+                        : "border-emerald-500/30 text-emerald-300 bg-emerald-500/5";
+
+                  return (
               <article key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center gap-4">
                 <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-black border border-zinc-700">
                   <Image src={row.img || "https://placehold.co/200x200/111/333?text=Produto"} alt={row.nome || "Produto"} fill  className="object-cover" />
@@ -1714,6 +1744,9 @@ export default function AdminLojaProdutosPage() {
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="text-sm font-bold truncate">{row.nome || "Produto"}</p>
                     {row.tagLabel && <span className="px-2 py-0.5 rounded border border-zinc-700 text-[9px] font-black uppercase text-zinc-300">{row.tagLabel}</span>}
+                    <span className={`px-2 py-0.5 rounded border text-[9px] font-black uppercase ${sellerBadgeClass}`}>
+                      {sellerLabel}
+                    </span>
                     {row.status && row.status !== "ativo" && (
                       <span className={`px-2 py-0.5 rounded border text-[9px] font-black uppercase ${getStatusClasses(row.status)}`}>
                         {row.status === "em_breve" ? "Em-breve" : "Esgotado"}
@@ -1730,7 +1763,7 @@ export default function AdminLojaProdutosPage() {
                     </span>
                   </div>
                   <p className="text-[11px] text-zinc-400 uppercase">{row.categoria || "Sem categoria"} • Lote: {row.lote || "-"}</p>
-                  {!!row.variantes?.length && <p className="text-[10px] text-zinc-500 uppercase">Variacoes: {row.variantes.length}</p>}
+                  {!!row.variantes?.length && <p className="text-[10px] text-zinc-500 uppercase">Variações: {row.variantes.length}</p>}
                   {typeof row.cores === "string" && row.cores.trim() && (
                     <p className="text-[10px] text-zinc-500 line-clamp-1">Cores: {row.cores}</p>
                   )}
@@ -1764,7 +1797,7 @@ export default function AdminLojaProdutosPage() {
                   <ExternalLink size={15} />
                 </Link>
               </article>
-            ))}
+            )})}
             </div>
           )}
         </section>
@@ -1792,8 +1825,8 @@ export default function AdminLojaProdutosPage() {
         <div className="mt-5 text-[11px] text-zinc-600 flex items-center gap-2">
           <Package size={13} />
           {isInactiveOnlyPage
-            ? "Os desativados ficam separados do catalogo ativo, mas continuam completos para futuras reativacoes."
-            : "Cada abertura consulta so a categoria ativa. Pedidos e reviews continuam em modulos separados para manter leve."}
+            ? "Os desativados ficam separados do catálogo ativo, mas continuam completos para futuras reativações."
+            : "Cada abertura consulta só a categoria ativa. Pedidos e reviews continuam em módulos separados para manter leve."}
         </div>
       </main>
       <PaymentReceiversManager

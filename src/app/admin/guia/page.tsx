@@ -54,10 +54,10 @@ type LoadedMap = Record<GuideCategory, boolean>;
 
 const INITIAL_GUIA_DATA: Array<Record<string, unknown>> = [
   { categoria: "academico", titulo: "Portal do Aluno (EVA)", url: "https://eva.unitau.br", ordem: 1 },
-  { categoria: "academico", titulo: "Calendario Academico 2026", url: "https://unitau.br/calendario", ordem: 2 },
-  { categoria: "academico", titulo: "Cardapio do RU", url: "https://unitau.br/ru", ordem: 3 },
+  { categoria: "academico", titulo: "Calendário Acadêmico 2026", url: "https://unitau.br/calendario", ordem: 2 },
+  { categoria: "academico", titulo: "Cardápio do RU", url: "https://unitau.br/ru", ordem: 3 },
 
-  { categoria: "transporte", nome: "Circular (Intercampi)", horario: "07:10, 12:30 | 11:50, 17:50", detalhe: "Saida Terminal <-> Campus", ordem: 1 },
+  { categoria: "transporte", nome: "Circular (Intercampi)", horario: "07:10, 12:30 | 11:50, 17:50", detalhe: "Saída Terminal <-> Campus", ordem: 1 },
 
   { categoria: "turismo", nome: "Praia Martim de Sá", descricao: "O point da galera", foto: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80", ordem: 1 },
   { categoria: "turismo", nome: "Pedra da Freira", descricao: "Pôr do sol top", foto: "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=800&q=80", ordem: 2 },
@@ -66,14 +66,14 @@ const INITIAL_GUIA_DATA: Array<Record<string, unknown>> = [
   { categoria: "emergencia", nome: "Polícia", numero: "190", cor: "red", ordem: 2 },
 
   { categoria: "grupos", titulo: "Grupo Oficial dos Calouros", url: "https://chat.whatsapp.com/", ordem: 1 },
-  { categoria: "grupos", titulo: "Plantao de Duvidas", url: "https://chat.whatsapp.com/", ordem: 2 },
+  { categoria: "grupos", titulo: "Plantão de Dúvidas", url: "https://chat.whatsapp.com/", ordem: 2 },
 ];
 
 const CATEGORIES: Array<{ key: GuideCategory; label: string; icon: React.ElementType }> = [
-  { key: "academico", label: "Academico", icon: BookOpen },
+  { key: "academico", label: "Acadêmico", icon: BookOpen },
   { key: "transporte", label: "Transporte", icon: Bus },
   { key: "turismo", label: "Turismo", icon: Map },
-  { key: "emergencia", label: "Emergencia", icon: Phone },
+  { key: "emergencia", label: "Emergência", icon: Phone },
   { key: "grupos", label: "Grupos", icon: Users },
 ];
 
@@ -187,11 +187,11 @@ export default function AdminGuiaPage() {
 
   const handleSeedGuia = async () => {
     if (process.env.NODE_ENV === "production") {
-      addToast("Restauracao bloqueada em producao.", "error");
+      addToast("Restauração bloqueada em produção.", "error");
       return;
     }
 
-    if (!confirm("Confirmar restauracao do guia padrao?")) return;
+    if (!confirm("Confirmar restauração do guia padrão?")) return;
 
     setIsSaving(true);
     try {
@@ -385,7 +385,7 @@ export default function AdminGuiaPage() {
             <h1 className="text-xl font-black uppercase flex items-center gap-2">
               <BookOpen className="text-emerald-500" /> Editor do Guia
             </h1>
-            <p className="text-[10px] text-zinc-500 uppercase font-bold">Com ordenacao por arrastar e soltar</p>
+            <p className="text-[10px] text-zinc-500 uppercase font-bold">Com ordenação por arrastar e soltar</p>
           </div>
         </div>
         <button
@@ -472,17 +472,17 @@ export default function AdminGuiaPage() {
 
             {currentRows.length === 0 && (
               <div className="text-center py-10 flex flex-col items-center gap-6">
-                <p className="text-zinc-600 text-sm font-bold uppercase">Nenhum item nesta secao.</p>
+                <p className="text-zinc-600 text-sm font-bold uppercase">Nenhum item nesta seção.</p>
                 <div className="w-full max-w-md bg-zinc-900 border border-dashed border-zinc-800 rounded-2xl p-6 flex flex-col items-center gap-3">
                   <Database className="text-emerald-500" size={24} />
-                  <p className="text-xs text-zinc-400">Banco vazio? Restaure o guia padrao.</p>
+                  <p className="text-xs text-zinc-400">Banco vazio? Restaure o guia padrão.</p>
                   <button
                     onClick={() => void handleSeedGuia()}
                     disabled={isSaving}
                     className="bg-zinc-800 hover:bg-emerald-500/10 hover:text-emerald-500 border border-zinc-700 hover:border-emerald-500 text-white px-6 py-3 rounded-xl text-xs font-bold uppercase flex items-center gap-2 transition"
                   >
                     {isSaving ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
-                    Restaurar Guia Padrao
+                    Restaurar Guia Padrão
                   </button>
                 </div>
               </div>
@@ -497,8 +497,8 @@ export default function AdminGuiaPage() {
             <button onClick={() => setIsModalOpen(false)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
               <X size={24} />
             </button>
-            <h2 className="font-bold text-white text-xl mb-6 flex items-center gap-2 capitalize">
-              {editingItem.id ? "Editar Item" : "Novo Item"}
+              <h2 className="font-bold text-white text-xl mb-6 flex items-center gap-2 capitalize">
+              {editingItem.id ? "Editar item" : "Novo item"}
               <span className="text-emerald-500">({activeTab})</span>
             </h2>
 
@@ -506,7 +506,7 @@ export default function AdminGuiaPage() {
               {(activeTab === "academico" || activeTab === "grupos") && (
                 <>
                   <div>
-                    <label className="label-admin">Titulo do link</label>
+                    <label className="label-admin">Título do link</label>
                     <input
                       type="text"
                       className="input-admin"
@@ -541,7 +541,7 @@ export default function AdminGuiaPage() {
                     />
                   </div>
                   <div>
-                    <label className="label-admin">Horarios</label>
+                    <label className="label-admin">Horários</label>
                     <input
                       type="text"
                       className="input-admin"
@@ -607,7 +607,7 @@ export default function AdminGuiaPage() {
               {activeTab === "emergencia" && (
                 <>
                   <div>
-                    <label className="label-admin">Nome do servico</label>
+                    <label className="label-admin">Nome do serviço</label>
                     <input
                       type="text"
                       className="input-admin"
@@ -627,15 +627,15 @@ export default function AdminGuiaPage() {
                     />
                   </div>
                   <div>
-                    <label className="label-admin">Cor do icone</label>
+                    <label className="label-admin">Cor do ícone</label>
                     <select
                       className="input-admin"
                       value={editingItem.cor || "red"}
                       onChange={(event) => setEditingItem({ ...editingItem, cor: event.target.value })}
                     >
-                      <option value="red">Vermelho (emergencia)</option>
+                      <option value="red">Vermelho (emergência)</option>
                       <option value="zinc">Cinza (geral)</option>
-                      <option value="blue">Azul (servicos)</option>
+                      <option value="blue">Azul (serviços)</option>
                     </select>
                   </div>
                 </>

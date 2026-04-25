@@ -29,6 +29,19 @@ import { useTenantTheme } from "@/context/TenantThemeContext";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 const PAGE_SIZE = 20;
+type LetterGroupId = "todos" | "a-f" | "g-l" | "m-r" | "s-z";
+
+const LETTER_GROUP_OPTIONS: Array<{
+  id: LetterGroupId;
+  label: string;
+  letters: string[];
+}> = [
+  { id: "todos", label: "Todos", letters: [] },
+  { id: "a-f", label: "A-F", letters: ["A", "B", "C", "D", "E", "F"] },
+  { id: "g-l", label: "G-L", letters: ["G", "H", "I", "J", "K", "L"] },
+  { id: "m-r", label: "M-R", letters: ["M", "N", "O", "P", "Q", "R"] },
+  { id: "s-z", label: "S-Z", letters: ["S", "T", "U", "V", "W", "X", "Y", "Z"] },
+];
 
 const mergeUniqueUsers = (
   current: AdminUserListItem[],
@@ -74,6 +87,7 @@ export default function AdminUsuariosPage() {
 
   const [search, setSearch] = useState("");
   const [planFilter, setPlanFilter] = useState<"todos" | AdminUserListItem["plano"]>("todos");
+  const [letterGroup, setLetterGroup] = useState<LetterGroupId>("todos");
   const [recountingFollows, setRecountingFollows] = useState(false);
 
   const loadUsers = useCallback(
@@ -90,6 +104,8 @@ export default function AdminUsuariosPage() {
           cursorId: reset ? null : cursorId,
           forceRefresh: false,
           tenantId: activeTenantId || undefined,
+          letters:
+            LETTER_GROUP_OPTIONS.find((option) => option.id === letterGroup)?.letters || [],
         });
 
         if (reset) setRows(page.users);
@@ -105,7 +121,7 @@ export default function AdminUsuariosPage() {
         else setLoadingMore(false);
       }
     },
-    [activeTenantId, addToast]
+    [activeTenantId, addToast, letterGroup]
   );
 
   useEffect(() => {
@@ -246,7 +262,7 @@ export default function AdminUsuariosPage() {
                 Admin Usuários
               </h1>
               <p className="text-[11px] text-zinc-500 font-bold">
-                Paginacao 20 em 20 para reduzir leituras
+                Paginação 20 em 20 para reduzir leituras
               </p>
             </div>
           </div>
@@ -281,12 +297,26 @@ export default function AdminUsuariosPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por nome, email, turma ou matricula"
+              placeholder="Buscar por nome, email, turma ou matrícula"
               className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-3 text-sm text-white outline-none focus:border-emerald-500"
             />
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {LETTER_GROUP_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                onClick={() => setLetterGroup(option.id)}
+                className={`px-3 py-2 rounded-lg text-[11px] font-black uppercase border transition ${
+                  letterGroup === option.id
+                    ? "bg-emerald-400 text-black border-emerald-300"
+                    : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white"
+                }`}
+                title={`Filtrar usuários pelos grupos ${option.label}`}
+              >
+                {option.label}
+              </button>
+            ))}
             <button
               onClick={() => void handleRecountFollows()}
               disabled={recountingFollows}
@@ -359,7 +389,7 @@ export default function AdminUsuariosPage() {
                       </td>
                       <td className="p-4">
                         <p>{row.turma || "-"}</p>
-                        <p className="text-zinc-500">Matricula (RA): {row.matricula || "-"}</p>
+                        <p className="text-zinc-500">Matrícula (RA): {row.matricula || "-"}</p>
                       </td>
                       <td className="p-4 uppercase font-black text-[11px]">{row.plano}</td>
                       <td className="p-4">
