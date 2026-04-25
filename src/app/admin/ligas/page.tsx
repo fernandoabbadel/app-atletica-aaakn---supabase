@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { 
   ArrowLeft, Plus, Edit, Edit3, Trash2, X, Search, 
-  Shield, Key, UploadCloud, Eye, EyeOff, 
+  Shield, UploadCloud, Eye, EyeOff, 
   Loader2, Calendar, UserPlus, MonitorPlay, Clock3, CheckCircle2
 } from "lucide-react";
 import Link from "next/link";
@@ -78,6 +78,9 @@ type UserData = LeagueUserRecord;
 const getLeagueLogoSrc = (liga?: Partial<Liga> | null) =>
   resolveLeagueLogoSrc(liga);
 
+const buildLeagueInternalPassword = (): string =>
+  `liga-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
 export default function AdminLigasPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
@@ -94,7 +97,6 @@ export default function AdminLigasPage() {
   const tabs: Array<typeof activeTab> = ['info', 'membros', 'eventos', 'shark'];
   
   // Estado para visualização de senha
-  const [showPassword, setShowPassword] = useState<Record<string, boolean>>({});
 
   // Busca de Usuários
   const [searchUserModal, setSearchUserModal] = useState(false);
@@ -162,7 +164,7 @@ export default function AdminLigasPage() {
 
   const handleOpenCreate = () => {
     setFormData({ 
-        nome: "", sigla: "", presidente: "", descricao: "", visaoGeral: "", senha: "", foto: "", visivel: false, ativa: false,
+        nome: "", sigla: "", presidente: "", descricao: "", visaoGeral: "", senha: buildLeagueInternalPassword(), foto: "", visivel: false, ativa: false,
         membros: [], eventos: [], perguntas: [], bizu: "", likes: 0, status: "pending_approval"
     });
     setIsEditing(false);
@@ -243,7 +245,7 @@ export default function AdminLigasPage() {
   };
 
   const handleSave = async () => {
-    if (!formData.nome || !formData.senha) return addToast("Nome e Senha são obrigatórios!", "error");
+    if (!formData.nome) return addToast("Nome da liga é obrigatório.", "error");
 
     setLoading(true);
     try {
@@ -251,6 +253,7 @@ export default function AdminLigasPage() {
         id: isEditing ? editingId || undefined : undefined,
         data: {
           ...formData,
+          senha: String(formData.senha || buildLeagueInternalPassword()),
           status: isEditing ? formData.status || "approved" : "pending_approval",
           visivel: isEditing ? formData.visivel : false,
           ativa: isEditing ? formData.ativa : false,
@@ -305,9 +308,6 @@ export default function AdminLigasPage() {
     }
   };
 
-  const togglePasswordVisibility = (id: string) => {
-    setShowPassword(prev => ({ ...prev, [id]: !prev[id] }));
-  };
 
   // --- GESTÃO DE MEMBROS ---
   const addMemberFromSearch = (u: UserData) => {
@@ -487,19 +487,6 @@ export default function AdminLigasPage() {
                   <button onClick={() => handleDelete(liga.id)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-red-500 transition"><Trash2 size={16}/></button>
               </div>
 
-              {/* Senha */}
-              <div className="flex justify-between items-center bg-black/30 p-2 rounded-lg border border-zinc-800/50">
-                <div className="flex items-center gap-2 text-[10px] text-zinc-500">
-                    <Key size={10}/>
-                    <span className="font-mono tracking-wider">
-                        {showPassword[liga.id] ? liga.senha : "••••••"}
-                    </span>
-                </div>
-                <button onClick={() => togglePasswordVisibility(liga.id)} className="text-zinc-600 hover:text-zinc-300">
-                    {showPassword[liga.id] ? <EyeOff size={12}/> : <Eye size={12}/>}
-                </button>
-              </div>
-
             </div>
           ))}
         </div>
@@ -566,10 +553,7 @@ export default function AdminLigasPage() {
                             </label>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
-                            <input type="text" placeholder="Presidente" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none" value={formData.presidente} onChange={e => setFormData({...formData, presidente: e.target.value})}/>
-                            <input type="text" placeholder="Senha de Acesso" className="w-full bg-zinc-900 border border-emerald-500/30 p-3 rounded-xl text-sm text-white outline-none" value={formData.senha} onChange={e => setFormData({...formData, senha: e.target.value})}/>
-                        </div>
+                        <input type="text" placeholder="Presidente" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none" value={formData.presidente} onChange={e => setFormData({...formData, presidente: e.target.value})}/>
                         <textarea rows={3} placeholder="Descrição..." className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-sm text-white outline-none resize-none" value={formData.descricao} onChange={e => setFormData({...formData, descricao: e.target.value.slice(0, LEAGUE_DESCRIPTION_MAX_LENGTH)})} maxLength={LEAGUE_DESCRIPTION_MAX_LENGTH}/>
                         <p className="text-[10px] text-zinc-500">
                             Descrição: {String(formData.descricao || "").length}/{LEAGUE_DESCRIPTION_MAX_LENGTH} caracteres.

@@ -1832,74 +1832,38 @@ export default function LigasAdminPageContent({
           ? "SALVAR BOARD ROUND"
           : "SALVAR INFORMAÇÕES";
   if (!isLoggedIn) {
-      const requestedLeagueWithoutAccess =
-          Boolean(routeLeagueId) &&
-          !isLoadingLeagueAccess &&
-          !isPlatformMasterUser &&
-          !ligasComAcesso.some((league) => league.id === routeLeagueId);
-
       return (
-          <div className="min-h-screen bg-[#050505] px-4 py-10 font-sans text-white">
-              <div className="mx-auto max-w-6xl">
-                  <div className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(12,18,18,0.96),rgba(5,5,5,0.98))] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)] sm:p-8">
-                      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="max-w-3xl">
-                              <div className="flex items-center gap-3">
-                                  <div className="flex h-14 w-14 items-center justify-center rounded-[1.4rem] border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">
-                                      <ShieldCheck size={28} />
-                                  </div>
-                                  <div>
-                                      <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-300">Gestão de ligas</p>
-                                      <h1 className="mt-2 text-3xl font-black uppercase tracking-tight text-white sm:text-4xl">
-                                          Escolha uma liga para gerenciar
-                                      </h1>
-                                  </div>
-                              </div>
-                              <p className="mt-5 max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
-                                  Agora o acesso acontece pelos cards das ligas em que você faz parte e tem cargo de
-                                  gestão. Não é mais necessário selecionar a liga em uma lista nem informar senha para
-                                  entrar.
-                              </p>
-                          </div>
-
-                          <div className="rounded-[1.5rem] border border-cyan-500/20 bg-cyan-500/10 px-5 py-4 text-right">
-                              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200">
-                                  Cargos com acesso
-                              </p>
-                              <p className="mt-3 text-sm font-semibold leading-6 text-cyan-50/90">
-                                  Presidente, Vice-Presidente, Diretoria, Tesouraria, Secretaria e Master da
-                                  Plataforma.
-                              </p>
-                          </div>
+          <div className="min-h-screen bg-[#050505] px-4 py-6 font-sans text-white">
+              <div className="mx-auto max-w-5xl">
+                  <div className="flex items-center justify-between gap-3">
+                      <button
+                          type="button"
+                          onClick={() => router.push(tenantPath("/ligas_usc"))}
+                          className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/80 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-zinc-300 transition hover:bg-zinc-900"
+                      >
+                          Voltar
+                      </button>
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">
+                          <ShieldCheck size={20} />
                       </div>
+                  </div>
 
-                      {requestedLeagueWithoutAccess ? (
-                          <div className="mt-6 rounded-[1.5rem] border border-amber-500/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-50">
-                              Você não tem permissão para gerenciar a liga solicitada nesta rota. Escolha uma das ligas
-                              liberadas abaixo.
-                          </div>
-                      ) : null}
+                  <div className="mt-4 rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(12,18,18,0.96),rgba(5,5,5,0.98))] p-4 shadow-[0_30px_80px_rgba(0,0,0,0.45)] sm:p-6">
+                      <h1 className="text-2xl font-black uppercase tracking-tight text-white sm:text-3xl">
+                          Gestão da Liga
+                      </h1>
 
                       {isLoadingLeagueAccess ? (
-                          <div className="mt-8 flex items-center gap-3 rounded-[1.5rem] border border-zinc-800 bg-zinc-950/70 px-5 py-4 text-sm font-bold text-zinc-300">
+                          <div className="mt-5 flex items-center gap-3 rounded-[1.4rem] border border-zinc-800 bg-zinc-950/70 px-4 py-4 text-sm font-bold text-zinc-300">
                               <Loader2 size={18} className="animate-spin text-emerald-400" />
-                              Carregando suas ligas com acesso de gestão...
+                              Carregando ligas...
                           </div>
                       ) : ligasComAcesso.length === 0 ? (
-                          <div className="mt-8 rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center">
-                              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
-                                  Nenhuma liga disponível
-                              </p>
-                              <h2 className="mt-3 text-2xl font-black text-white">
-                                  Seu perfil ainda não possui acesso à gestão de ligas
-                              </h2>
-                              <p className="mt-3 text-sm leading-7 text-zinc-400">
-                                  Para entrar aqui, você precisa estar cadastrado como Presidente,
-                                  Vice-Presidente, Diretoria, Tesouraria, Secretaria ou Master da Plataforma.
-                              </p>
+                          <div className="mt-5 rounded-[1.4rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-6 text-center">
+                              <p className="text-sm font-bold text-zinc-400">Nenhuma liga disponível.</p>
                           </div>
                       ) : (
-                          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                               {ligasComAcesso.map((league) => {
                                   const logoSrc = resolveLeagueLogoSrc(league, "/placeholder_liga.png");
                                   return (
@@ -1908,51 +1872,28 @@ export default function LigasAdminPageContent({
                                           type="button"
                                           onClick={() => void handleOpenLeague(league)}
                                           disabled={loading}
-                                          className="group rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] p-5 text-left shadow-[0_20px_60px_rgba(0,0,0,0.35)] transition hover:-translate-y-1 hover:border-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                          aria-label={`Abrir gestão da liga ${league.nome}`}
+                                          className="rounded-[1.5rem] border border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] p-4 transition hover:border-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                                       >
-                                          <div className="flex items-start justify-between gap-4">
-                                              <div className="flex min-w-0 items-center gap-4">
-                                                  <div className="relative h-16 w-16 overflow-hidden rounded-[1.25rem] border border-white/10 bg-black/40">
-                                                      <Image
-                                                          src={logoSrc}
-                                                          alt={league.nome}
-                                                          fill
-                                                          sizes="64px"
-                                                          className="object-cover"
-                                                      />
-                                                  </div>
-                                                  <div className="min-w-0">
-                                                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">
-                                                          {league.managementRole}
-                                                      </p>
-                                                      <h2 className="mt-2 truncate text-lg font-black text-white">
-                                                          {league.nome}
-                                                      </h2>
-                                                      <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
-                                                          {league.sigla || "Liga"}
-                                                      </p>
-                                                  </div>
+                                          <div className="flex flex-col items-center gap-4 text-center">
+                                              <div className="relative h-24 w-24 overflow-hidden rounded-[1.6rem] border border-white/10 bg-black/40 sm:h-28 sm:w-28">
+                                                  <Image
+                                                      src={logoSrc}
+                                                      alt={league.nome}
+                                                      fill
+                                                      sizes="112px"
+                                                      className="object-cover"
+                                                  />
                                               </div>
-                                              <div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">
-                                                  Gestão liberada
-                                              </div>
-                                          </div>
-
-                                          <p className="mt-5 min-h-[3.5rem] text-sm leading-6 text-zinc-400">
-                                              {league.descricao?.trim() || "Abra este card para entrar no painel de informações, membros, eventos e board da liga."}
-                                          </p>
-
-                                          <div className="mt-5 flex items-center justify-between">
-                                              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-300">
-                                                  {league.membersCount ?? league.membros?.length ?? 0} membros
-                                              </span>
-                                              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100 transition group-hover:bg-emerald-400/20">
+                                              <p className="text-sm font-black uppercase tracking-[0.22em] text-emerald-200">
+                                                  {league.sigla || "Liga"}
+                                              </p>
+                                              <span className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100">
                                                   {loading && selectedLigaId === league.id ? (
                                                       <Loader2 size={14} className="animate-spin" />
                                                   ) : (
-                                                      <ShieldCheck size={14} />
+                                                      "Abrir gestão"
                                                   )}
-                                                  Abrir gestão
                                               </span>
                                           </div>
                                       </button>
