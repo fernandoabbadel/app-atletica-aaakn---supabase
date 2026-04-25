@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
     const { effectiveTenantId } = await resolveEventTenantContext(request, {
       eventId,
       requestedTenantId,
-      eventSelect: "id,tenant_id",
+      eventSelect: "id,tenant_id,stats",
     });
 
     const pollId = await insertPollWithSchemaFallback({
@@ -179,7 +179,7 @@ export async function DELETE(request: NextRequest) {
     await resolveEventTenantContext(request, {
       eventId,
       requestedTenantId,
-      eventSelect: "id,tenant_id",
+      eventSelect: "id,tenant_id,stats",
     });
 
     const { error } = await supabaseAdmin
@@ -220,7 +220,7 @@ export async function PATCH(request: NextRequest) {
     await resolveEventTenantContext(request, {
       eventId,
       requestedTenantId,
-      eventSelect: "id,tenant_id",
+      eventSelect: "id,tenant_id,stats",
     });
 
     await updatePollWithSchemaFallback(eventId, pollId, {

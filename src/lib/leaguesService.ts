@@ -10,6 +10,7 @@ import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
 import { hydrateEventPollRows, isMissingRelationError } from "./hotPathRelations";
 import { resolveLeagueLogoSrc } from "./leagueMedia";
 import {
+  canManageLeagueRole,
   DEFAULT_LEAGUE_ROLE,
   resolveLeagueRoleLabel,
   sortLeagueMembersByRole,
@@ -506,7 +507,7 @@ const normalizeLeaguePartialPatch = (
     normalized.membersCount = normalized.membros.length;
   }
   if (hasOwn("status")) {
-    normalized.status = asString(patch.status).trim();
+    normalized.status = normalizeLeagueApprovalStatus(patch.status);
   }
   if (hasOwn("createdAt")) {
     normalized.createdAt = asString(patch.createdAt).trim();
@@ -1213,8 +1214,37 @@ export interface LeagueRecord {
   membrosIds?: string[];
   membersCount?: number;
   memberRequests?: LeagueMemberJoinRequestRecord[];
+  status?: string;
   updatedAt?: string;
 }
+
+export type ManagedLeagueRecord = LeagueRecord & {
+  managementRole?: string;
+};
+
+export const normalizeLeagueApprovalStatus = (
+  value: unknown
+): "approved" | "pending_approval" => {
+  const raw = asString(value).trim().toLowerCase();
+  if (
+    raw === "pending_approval" ||
+    raw === "pending-approval" ||
+    raw === "pendente_aprovacao" ||
+    raw === "pendente-aprovacao" ||
+    raw === "pendente" ||
+    raw === "aguardando_aprovacao" ||
+    raw === "aguardando-aprovacao"
+  ) {
+    return "pending_approval";
+  }
+  return "approved";
+};
+
+export const isLeaguePendingApproval = (value: unknown): boolean =>
+  normalizeLeagueApprovalStatus(value) === "pending_approval";
+
+export const isLeagueApproved = (value: unknown): boolean =>
+  normalizeLeagueApprovalStatus(value) === "approved";
 
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1676,6 +1706,7 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
       )
     ),
     memberRequests,
+    status: normalizeLeagueApprovalStatus(readLeagueField(data, "status")),
     updatedAt: asString(readLeagueField(data, "updatedAt")) || undefined,
   };
 };
@@ -1811,6 +1842,7 @@ const normalizeLeaguePayload = (
     bizu: asString(payload.bizu).slice(0, 500),
     likes: Math.max(0, asNumber(payload.likes, 0)),
     membersCount,
+    status: normalizeLeagueApprovalStatus(payload.status),
   };
   const compatData = mergeLeagueCompatData({}, normalizedPayload);
 
@@ -2120,6 +2152,103 @@ export async function fetchLeagueUsers(options?: {
 
   setCacheValue(usersCache, cacheKey, users);
   return users;
+}
+
+export async function fetchManagedLeagueSummaries(payload: {
+  userId?: string | null;
+  tenantId?: string | null;
+  isPlatformMaster?: boolean;
+  forceRefresh?: boolean;
+}): Promise<ManagedLeagueRecord[]> {
+  const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
+  const forceRefresh = payload.forceRefresh ?? false;
+
+  if (payload.isPlatformMaster) {
+    const leagues = await fetchLeagueSummaries({
+      orderByField: "nome",
+      orderDirection: "asc",
+      maxResults: MAX_LEAGUE_RESULTS,
+      forceRefresh,
+      tenantId: scopedTenantId || undefined,
+    });
+    return leagues.map((league) => ({
+      ...league,
+      managementRole: "Master da Plataforma",
+    }));
+  }
+
+  const userId = asString(payload.userId).trim();
+  if (!userId) return [];
+
+  const supabase = getSupabaseClient();
+  let membershipQuery = supabase
+    .from("ligas_membros")
+    .select("ligaId,cargo")
+    .eq("userId", userId);
+  if (scopedTenantId) {
+    membershipQuery = membershipQuery.eq("tenant_id", scopedTenantId);
+  }
+
+  try {
+    const { data, error } = await membershipQuery;
+    if (error) throw error;
+
+    const managementRolesByLeagueId = new Map<string, string>();
+    (Array.isArray(data) ? data : []).forEach((entry) => {
+      const row = asObject(entry);
+      const leagueId = asString(row?.ligaId).trim();
+      const role = resolveLeagueRoleLabel(row?.cargo);
+      if (!leagueId || !canManageLeagueRole(role)) return;
+      if (!managementRolesByLeagueId.has(leagueId)) {
+        managementRolesByLeagueId.set(leagueId, role);
+      }
+    });
+
+    if (!managementRolesByLeagueId.size) return [];
+
+    const leagues = await fetchLeagueSummaries({
+      orderByField: "nome",
+      orderDirection: "asc",
+      maxResults: MAX_LEAGUE_RESULTS,
+      forceRefresh,
+      tenantId: scopedTenantId || undefined,
+    });
+
+    return leagues.reduce<ManagedLeagueRecord[]>((acc, league) => {
+      const managementRole = managementRolesByLeagueId.get(league.id);
+      if (!managementRole) return acc;
+      acc.push({
+        ...league,
+        managementRole,
+      });
+      return acc;
+    }, []);
+  } catch (error: unknown) {
+    if (!isMissingRelationError(error)) {
+      throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+    }
+
+    const leagues = await fetchLeagues({
+      orderByField: "nome",
+      orderDirection: "asc",
+      maxResults: MAX_LEAGUE_RESULTS,
+      forceRefresh,
+      tenantId: scopedTenantId || undefined,
+    });
+
+    return leagues.reduce<ManagedLeagueRecord[]>((acc, league) => {
+      const matchingMember = (league.membros || []).find(
+        (member) => member.id.trim() === userId && canManageLeagueRole(member.cargo)
+      );
+      if (!matchingMember) return acc;
+
+      acc.push({
+        ...league,
+        managementRole: resolveLeagueRoleLabel(matchingMember.cargo),
+      });
+      return acc;
+    }, []);
+  }
 }
 
 export async function updateLeagueConfigPatch(payload: {

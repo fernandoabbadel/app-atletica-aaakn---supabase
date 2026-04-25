@@ -7,6 +7,14 @@ export const LEAGUE_ROLE_OPTIONS = [
   "Membro",
 ] as const;
 
+export const LEAGUE_MANAGEMENT_ROLE_OPTIONS = [
+  "Presidente",
+  "Vice-Presidente",
+  "Secretaria",
+  "Tesouraria",
+  "Diretoria",
+] as const;
+
 export type LeagueRoleOption = (typeof LEAGUE_ROLE_OPTIONS)[number];
 
 export const DEFAULT_LEAGUE_ROLE: LeagueRoleOption = "Membro";
@@ -58,6 +66,11 @@ export const getLeagueRoleImportance = (value: unknown): number => {
   const normalized = normalizeRoleText(label).replace(/\s+/g, "-");
   return LEAGUE_ROLE_IMPORTANCE.get(normalized) ?? Number.MAX_SAFE_INTEGER;
 };
+
+export const canManageLeagueRole = (value: unknown): boolean =>
+  LEAGUE_MANAGEMENT_ROLE_OPTIONS.includes(
+    resolveLeagueRoleLabel(value) as (typeof LEAGUE_MANAGEMENT_ROLE_OPTIONS)[number]
+  );
 
 export const sortLeagueMembersByRole = <T extends { cargo?: string; nome?: string }>(
   members: T[]

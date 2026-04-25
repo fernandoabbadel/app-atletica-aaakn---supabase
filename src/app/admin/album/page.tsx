@@ -15,21 +15,21 @@ import {
 const menuItems = [
   {
     href: "/admin/album/caca_calouro",
-    title: "Caca Calouro",
+    title: "Caça Calouro",
     description: "Predadores de bixos T8",
     icon: ShieldCheck,
     color: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10",
   },
   {
     href: "/admin/album/pontua_calouro",
-    title: "Pontua Calouro",
+    title: "Pontuação Calouro",
     description: "Ranking interno dos calouros",
     icon: Medal,
     color: "text-blue-400 border-blue-500/30 bg-blue-500/10",
   },
   {
     href: "/admin/album/pontua_geral",
-    title: "Pontua Geral",
+    title: "Pontuação Geral",
     description: "Top geral de capturas",
     icon: Trophy,
     color: "text-brand-accent border-brand bg-brand-soft",
@@ -37,7 +37,7 @@ const menuItems = [
   {
     href: "/admin/album/customizacao",
     title: "Customização",
-    description: "Editar por turma e layout avancado",
+    description: "Editar por turma e layout avançado",
     icon: Palette,
     color: "text-fuchsia-400 border-fuchsia-500/30 bg-fuchsia-500/10",
   },
@@ -45,7 +45,7 @@ const menuItems = [
 
 const DEFAULT_GLOBAL: AlbumUiConfig = {
   capa: "/capa_t8.jpg",
-  titulo: "Album da Galera",
+  titulo: "Álbum da Galera",
   subtitulo: "Escolha a turma para abrir somente o que você precisa",
 };
 
@@ -67,7 +67,7 @@ export default function AdminAlbumMenuPage() {
         if (!mounted) return;
         setGlobalConfig(config || DEFAULT_GLOBAL);
       } catch {
-        if (mounted) addToast("Erro ao carregar capa do album.", "error");
+        if (mounted) addToast("Erro ao carregar capa do álbum.", "error");
       } finally {
         if (mounted) setLoadingConfig(false);
       }
@@ -104,7 +104,7 @@ export default function AdminAlbumMenuPage() {
             <ArrowLeft size={18} className="text-zinc-300" />
           </Link>
           <div>
-            <h1 className="text-xl font-black uppercase tracking-tight">Admin Album</h1>
+            <h1 className="text-xl font-black uppercase tracking-tight">Admin Álbum</h1>
             <p className="text-[11px] text-zinc-500 font-bold">
               Integrado com a capa da página /album
             </p>
@@ -120,7 +120,7 @@ export default function AdminAlbumMenuPage() {
                 Capa da Página /album
               </h2>
               <p className="text-[11px] text-zinc-500 font-bold">
-                Edita em tempo real titulo, subtitulo e imagem da home do album.
+                Edita em tempo real título, subtítulo e imagem da home do álbum.
               </p>
               <Link
                 href="/admin/turma"
@@ -142,7 +142,7 @@ export default function AdminAlbumMenuPage() {
 
           <div className="grid md:grid-cols-2 gap-3">
             <div>
-              <label className="text-[11px] text-zinc-400 font-bold uppercase">Titulo</label>
+              <label className="text-[11px] text-zinc-400 font-bold uppercase">Título</label>
               <input
                 value={globalConfig.titulo}
                 onChange={(event) =>
@@ -152,7 +152,7 @@ export default function AdminAlbumMenuPage() {
               />
             </div>
             <div>
-              <label className="text-[11px] text-zinc-400 font-bold uppercase">Subtitulo</label>
+              <label className="text-[11px] text-zinc-400 font-bold uppercase">Subtítulo</label>
               <input
                 value={globalConfig.subtitulo}
                 onChange={(event) =>

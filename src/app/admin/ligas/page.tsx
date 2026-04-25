@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { 
   ArrowLeft, Plus, Edit, Edit3, Trash2, X, Search, 
   Shield, Key, UploadCloud, Eye, EyeOff, 
-  Loader2, Calendar, UserPlus, MonitorPlay
+  Loader2, Calendar, UserPlus, MonitorPlay, Clock3, CheckCircle2
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -17,11 +17,13 @@ import {
   fetchLeagueById,
   fetchLeagueUsers,
   fetchLeagues,
+  isLeaguePendingApproval,
   LEAGUE_NAME_MAX_LENGTH,
   LEAGUE_OVERVIEW_MAX_LENGTH,
   LEAGUE_SIGLA_MAX_LENGTH,
   saveLeagueConfig,
   setLeagueVisibility,
+  updateLeagueConfigPatch,
   uploadLeagueImageToStorage,
   type LeagueRecord,
   type LeagueUserRecord,
@@ -102,7 +104,7 @@ export default function AdminLigasPage() {
   // Form State Principal
   const [formData, setFormData] = useState<LigaFormState>({
     nome: "", sigla: "", presidente: "", descricao: "", visaoGeral: "", senha: "", foto: "", visivel: false, ativa: false,
-    membros: [], eventos: [], perguntas: [], bizu: "", likes: 0
+    membros: [], eventos: [], perguntas: [], bizu: "", likes: 0, status: "pending_approval"
   });
 
   // Estado Evento
@@ -110,6 +112,7 @@ export default function AdminLigasPage() {
   const [currentEvent, setCurrentEvent] = useState<Partial<LeagueEvent>>({});
   const [editingEventIdx, setEditingEventIdx] = useState<number | null>(null);
   const formLogoSrc = getLeagueLogoSrc(formData);
+  const pendingApprovalCount = ligas.filter((liga) => isLeaguePendingApproval(liga.status)).length;
 
   const loadLigas = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -160,7 +163,7 @@ export default function AdminLigasPage() {
   const handleOpenCreate = () => {
     setFormData({ 
         nome: "", sigla: "", presidente: "", descricao: "", visaoGeral: "", senha: "", foto: "", visivel: false, ativa: false,
-        membros: [], eventos: [], perguntas: [], bizu: "", likes: 0 
+        membros: [], eventos: [], perguntas: [], bizu: "", likes: 0, status: "pending_approval"
     });
     setIsEditing(false);
     setShowModal(true);
@@ -220,6 +223,25 @@ export default function AdminLigasPage() {
       }
   };
 
+  const approveLeague = async (liga: Liga) => {
+      try {
+          await updateLeagueConfigPatch({
+            id: liga.id,
+            patch: { status: "approved" },
+            tenantId: tenantId || undefined,
+          });
+          setLigas((prev) =>
+            prev.map((item) =>
+              item.id === liga.id ? { ...item, status: "approved" } : item
+            )
+          );
+          addToast("Liga aprovada com sucesso.", "success");
+      } catch (error: unknown) {
+          console.error(error);
+          addToast("Erro ao aprovar a liga.", "error");
+      }
+  };
+
   const handleSave = async () => {
     if (!formData.nome || !formData.senha) return addToast("Nome e Senha são obrigatórios!", "error");
 
@@ -227,13 +249,23 @@ export default function AdminLigasPage() {
     try {
       const result = await saveLeagueConfig({
         id: isEditing ? editingId || undefined : undefined,
-        data: formData,
+        data: {
+          ...formData,
+          status: isEditing ? formData.status || "approved" : "pending_approval",
+          visivel: isEditing ? formData.visivel : false,
+          ativa: isEditing ? formData.ativa : false,
+        },
         actorUserId: user?.uid,
         tenantId: tenantId || undefined,
       });
       await loadLigas(true);
       setShowModal(false);
-      addToast(isEditing ? "Liga atualizada!" : `Liga criada! (${result.id.slice(0, 6)}...)`, "success");
+      addToast(
+        isEditing
+          ? "Liga atualizada com sucesso."
+          : `Liga criada e enviada para aprovação. (${result.id.slice(0, 6)}...)`,
+        "success"
+      );
     } catch (error: unknown) {
       console.error(error);
       addToast("Erro ao salvar.", "error");
@@ -369,27 +401,49 @@ export default function AdminLigasPage() {
             <Edit3 size={16} /> Customizar Vitrine
           </Link>
           <button onClick={handleOpenCreate} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-2 hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20">
-            <Plus size={16} /> Nova Liga
+            <Plus size={16} /> Criar nova liga
           </button>
         </div>
       </header>
 
       <main className="p-6 max-w-7xl mx-auto">
+        {pendingApprovalCount > 0 ? (
+          <div className="mb-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-200">
+                  Aprovação pendente
+                </p>
+                <p className="mt-2 text-sm text-amber-50/90">
+                  {pendingApprovalCount} liga{pendingApprovalCount > 1 ? "s aguardam" : " aguarda"} aprovação dos admins antes de aparecer no app.
+                </p>
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/20 bg-black/30 px-3 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-amber-200">
+                <Clock3 size={14} />
+                {pendingApprovalCount} pendente{pendingApprovalCount > 1 ? "s" : ""}
+              </div>
+            </div>
+          </div>
+        ) : null}
         {/* LISTA DE LIGAS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {ligas.map(liga => (
-            <div key={liga.id} className={`bg-zinc-900 border rounded-2xl p-5 flex flex-col gap-4 group transition relative overflow-hidden ${liga.visivel ? 'border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'border-zinc-800 opacity-90'}`}>
+            <div key={liga.id} className={`bg-zinc-900 border rounded-2xl p-5 flex flex-col gap-4 group transition relative overflow-hidden ${isLeaguePendingApproval(liga.status) ? 'border-amber-500/40 shadow-[0_0_24px_rgba(245,158,11,0.08)]' : liga.visivel ? 'border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'border-zinc-800 opacity-90'}`}>
               
               {/* Badge de Visibilidade */}
-              {liga.visivel && (
-                  <div className="absolute top-0 right-0 bg-emerald-600 text-white text-[9px] font-bold px-2 py-1 rounded-bl-xl uppercase flex items-center gap-1">
-                      <MonitorPlay size={10}/> No Dashboard
+              {isLeaguePendingApproval(liga.status) ? (
+                  <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-bold px-2 py-1 rounded-bl-xl uppercase flex items-center gap-1">
+                      <Clock3 size={10}/> Aguardando aprovação
                   </div>
-              )}
+              ) : liga.visivel ? (
+                  <div className="absolute top-0 right-0 bg-emerald-600 text-white text-[9px] font-bold px-2 py-1 rounded-bl-xl uppercase flex items-center gap-1">
+                      <MonitorPlay size={10}/> No dashboard
+                  </div>
+              ) : null}
 
               <div className="flex items-start justify-between mt-2">
                 <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-full overflow-hidden border-2 ${liga.visivel ? 'border-emerald-500' : 'border-zinc-800'} relative`}>
+                  <div className={`w-12 h-12 rounded-full overflow-hidden border-2 ${isLeaguePendingApproval(liga.status) ? 'border-amber-500' : liga.visivel ? 'border-emerald-500' : 'border-zinc-800'} relative`}>
                     <Image 
                       src={getLeagueLogoSrc(liga) || "https://github.com/shadcn.png"} 
                       alt={liga.nome}
@@ -405,6 +459,12 @@ export default function AdminLigasPage() {
                 </div>
               </div>
 
+              <div className={`rounded-xl border px-3 py-2 text-[11px] font-bold ${isLeaguePendingApproval(liga.status) ? 'border-amber-500/20 bg-amber-500/10 text-amber-100' : 'border-zinc-800 bg-black/30 text-zinc-400'}`}>
+                {isLeaguePendingApproval(liga.status)
+                  ? "Essa liga foi criada e agora precisa de aprovação para ser liberada no app."
+                  : "Liga aprovada e pronta para edição."}
+              </div>
+
               {/* Botões de Ação */}
               <div className="flex gap-2 border-t border-zinc-800 pt-3 mt-1">
                   {/* Botão de Visibilidade */}
@@ -416,6 +476,12 @@ export default function AdminLigasPage() {
                       {liga.visivel ? <Eye size={16}/> : <EyeOff size={16}/>}
                       <span className="text-[10px] font-bold uppercase">{liga.visivel ? "Visível" : "Oculto"}</span>
                   </button>
+
+                  {isLeaguePendingApproval(liga.status) ? (
+                    <button onClick={() => void approveLeague(liga)} className="px-3 py-2 rounded-lg bg-amber-500/15 text-amber-100 hover:bg-amber-500/25 transition inline-flex items-center gap-2" title="Aprovar liga">
+                      <CheckCircle2 size={15}/>
+                    </button>
+                  ) : null}
 
                   <button onClick={() => handleOpenEdit(liga)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition"><Edit size={16}/></button>
                   <button onClick={() => handleDelete(liga.id)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-red-500 transition"><Trash2 size={16}/></button>
@@ -444,7 +510,7 @@ export default function AdminLigasPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-zinc-950 w-full max-w-2xl rounded-2xl border border-zinc-800 p-6 space-y-4 animate-in zoom-in-95 my-10">
             <div className="flex justify-between items-center mb-4">
-                <h2 className="font-bold text-white text-lg">{isEditing ? "Editar Liga" : "Nova Liga"}</h2>
+                <h2 className="font-bold text-white text-lg">{isEditing ? "Editar liga" : "Criar nova liga"}</h2>
                 <button onClick={() => setShowModal(false)}><X size={20} className="text-zinc-500 hover:text-white"/></button>
             </div>
 
@@ -455,7 +521,7 @@ export default function AdminLigasPage() {
                         onClick={() => setActiveTab(tab)}
                         className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition ${activeTab === tab ? 'text-emerald-500 border-emerald-500' : 'text-zinc-500 border-transparent hover:text-white'}`}
                     >
-                        {tab === 'info' ? 'Informações' : tab}
+                        {tab === 'info' ? 'Informações' : tab === 'membros' ? 'Membros' : tab === 'eventos' ? 'Eventos' : 'Board'}
                     </button>
                 ))}
             </div>
@@ -463,6 +529,11 @@ export default function AdminLigasPage() {
             <div className="space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar p-1">
                 {activeTab === 'info' && (
                     <div className="space-y-3">
+                        {!isEditing ? (
+                          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-100">
+                            Ao salvar, a nova liga ficará aguardando aprovação dos admins antes de ser liberada no app.
+                          </div>
+                        ) : null}
                         <div className="flex justify-center mb-4">
                             <label className="relative w-24 h-24 rounded-full bg-zinc-900 border-2 border-dashed border-zinc-700 flex items-center justify-center cursor-pointer hover:border-emerald-500 overflow-hidden group">
                                 {formLogoSrc ? <Image src={formLogoSrc} alt="Logo" fill className="object-cover" /> : <UploadCloud className="text-zinc-500 group-hover:text-emerald-500"/>}

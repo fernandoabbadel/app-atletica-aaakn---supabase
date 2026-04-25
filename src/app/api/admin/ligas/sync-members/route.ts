@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { DEFAULT_LEAGUE_ROLE, resolveLeagueRoleLabel } from "@/lib/leagueRoles";
+import {
+  canManageLeagueRole,
+  DEFAULT_LEAGUE_ROLE,
+  resolveLeagueRoleLabel,
+} from "@/lib/leagueRoles";
 
 export const runtime = "nodejs";
 
@@ -156,7 +160,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!scope.isPlatformMaster) {
-      if (!scope.canManageTenant || scope.tenantStatus !== "approved" || !scope.userTenantId) {
+      if (scope.tenantStatus !== "approved" || !scope.userTenantId) {
         return NextResponse.json({ error: "Sem permissão para gerenciar esta liga." }, { status: 403 });
       }
       if (requestedTenantId && requestedTenantId !== scope.userTenantId) {
@@ -199,6 +203,28 @@ export async function POST(request: NextRequest) {
         { error: "O tenant informado não confere com a liga selecionada." },
         { status: 403 }
       );
+    }
+
+    if (!scope.isPlatformMaster) {
+      let membershipQuery = supabaseAdmin
+        .from("ligas_membros")
+        .select("cargo")
+        .eq("ligaId", leagueId)
+        .eq("userId", scope.userId)
+        .limit(1);
+      if (effectiveTenantId) {
+        membershipQuery = membershipQuery.eq("tenant_id", effectiveTenantId);
+      }
+
+      const { data: membershipRow, error: membershipError } = await membershipQuery.maybeSingle();
+      if (membershipError) {
+        return NextResponse.json({ error: membershipError.message }, { status: 400 });
+      }
+
+      const membershipRole = resolveLeagueRoleLabel(asString(asObject(membershipRow)?.cargo));
+      if (!canManageLeagueRole(membershipRole)) {
+        return NextResponse.json({ error: "Sem permissão para gerenciar esta liga." }, { status: 403 });
+      }
     }
 
     const { data: existingRows, error: existingError } = await supabaseAdmin

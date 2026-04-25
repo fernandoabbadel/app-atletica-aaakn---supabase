@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 
+import { canManageLeagueRole, resolveLeagueRoleLabel } from "@/lib/leagueRoles";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const MANAGER_TENANT_ROLES = new Set([
@@ -30,6 +31,60 @@ export type LeagueAdminAuthScope = {
   userTenantId: string;
   isPlatformMaster: boolean;
   canManageTenant: boolean;
+};
+
+const resolveLeagueManagerMembershipRole = async (payload: {
+  userId: string;
+  leagueId: string;
+  tenantId: string;
+}): Promise<string> => {
+  let query = supabaseAdmin
+    .from("ligas_membros")
+    .select("cargo")
+    .eq("ligaId", payload.leagueId)
+    .eq("userId", payload.userId)
+    .limit(1);
+  if (payload.tenantId) {
+    query = query.eq("tenant_id", payload.tenantId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    throw new LeagueAdminApiError(error.message || "Falha ao validar a gestão da liga.", 400);
+  }
+
+  return resolveLeagueRoleLabel(asString(asObject(data)?.cargo));
+};
+
+const ensureLeagueManagementAccess = async (payload: {
+  scope: LeagueAdminAuthScope;
+  leagueId: string;
+  effectiveTenantId: string;
+}): Promise<string> => {
+  const { scope, leagueId, effectiveTenantId } = payload;
+
+  if (scope.isPlatformMaster) {
+    return "Master da Plataforma";
+  }
+
+  if (!scope.userTenantId || scope.tenantStatus !== "approved") {
+    throw new LeagueAdminApiError("Sem permissão para gerenciar esta liga.", 403);
+  }
+
+  if (scope.userTenantId !== effectiveTenantId) {
+    throw new LeagueAdminApiError("Liga fora do seu tenant.", 403);
+  }
+
+  const membershipRole = await resolveLeagueManagerMembershipRole({
+    userId: scope.userId,
+    leagueId,
+    tenantId: effectiveTenantId,
+  });
+  if (!canManageLeagueRole(membershipRole)) {
+    throw new LeagueAdminApiError("Sem permissão para gerenciar esta liga.", 403);
+  }
+
+  return membershipRole;
 };
 
 export const asObject = (value: unknown): Record<string, unknown> | null =>
@@ -136,7 +191,7 @@ const validateRequestedTenantId = (
 ): void => {
   if (scope.isPlatformMaster) return;
 
-  if (!scope.canManageTenant || scope.tenantStatus !== "approved" || !scope.userTenantId) {
+  if (scope.tenantStatus !== "approved" || !scope.userTenantId) {
     throw new LeagueAdminApiError("Sem permissão para gerenciar este tenant.", 403);
   }
 
@@ -160,6 +215,7 @@ export const resolveLeagueTenantContext = async <TRow extends Record<string, unk
   effectiveTenantId: string;
   leagueTenantId: string;
   leagueRow: TRow;
+  managementRole: string;
 }> => {
   const leagueId = payload.leagueId.trim();
   if (!leagueId) {
@@ -195,10 +251,6 @@ export const resolveLeagueTenantContext = async <TRow extends Record<string, unk
     );
   }
 
-  if (!scope.isPlatformMaster && scope.userTenantId !== effectiveTenantId) {
-    throw new LeagueAdminApiError("Liga fora do seu tenant.", 403);
-  }
-
   if (leagueTenantId && leagueTenantId !== effectiveTenantId) {
     throw new LeagueAdminApiError(
       "O tenant informado não confere com a liga selecionada.",
@@ -206,11 +258,18 @@ export const resolveLeagueTenantContext = async <TRow extends Record<string, unk
     );
   }
 
+  const managementRole = await ensureLeagueManagementAccess({
+    scope,
+    leagueId,
+    effectiveTenantId,
+  });
+
   return {
     scope,
     effectiveTenantId,
     leagueTenantId,
     leagueRow,
+    managementRole,
   };
 };
 
@@ -226,6 +285,7 @@ export const resolveEventTenantContext = async <TRow extends Record<string, unkn
   effectiveTenantId: string;
   eventTenantId: string;
   eventRow: TRow;
+  managementRole: string;
 }> => {
   const eventId = payload.eventId.trim();
   if (!eventId) {
@@ -261,10 +321,6 @@ export const resolveEventTenantContext = async <TRow extends Record<string, unkn
     );
   }
 
-  if (!scope.isPlatformMaster && scope.userTenantId !== effectiveTenantId) {
-    throw new LeagueAdminApiError("Evento fora do seu tenant.", 403);
-  }
-
   if (eventTenantId && eventTenantId !== effectiveTenantId) {
     throw new LeagueAdminApiError(
       "O tenant informado não confere com o evento selecionado.",
@@ -272,10 +328,36 @@ export const resolveEventTenantContext = async <TRow extends Record<string, unkn
     );
   }
 
+  const eventStats = asObject(eventRow.stats);
+  const linkedLeagueId = asString(eventStats?.leagueId).trim();
+  if (!linkedLeagueId) {
+    if (!scope.isPlatformMaster && !scope.canManageTenant) {
+      throw new LeagueAdminApiError(
+        "Sem permissão para gerenciar eventos sem vínculo de liga.",
+        403
+      );
+    }
+
+    return {
+      scope,
+      effectiveTenantId,
+      eventTenantId,
+      eventRow,
+      managementRole: scope.isPlatformMaster ? "Master da Plataforma" : scope.tenantRole || scope.userRole,
+    };
+  }
+
+  const managementRole = await ensureLeagueManagementAccess({
+    scope,
+    leagueId: linkedLeagueId,
+    effectiveTenantId,
+  });
+
   return {
     scope,
     effectiveTenantId,
     eventTenantId,
     eventRow,
+    managementRole,
   };
 };

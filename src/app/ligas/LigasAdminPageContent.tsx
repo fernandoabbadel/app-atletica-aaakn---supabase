@@ -1,13 +1,13 @@
 // src/app/ligas/page.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { 
-  Lock, ArrowRight, Upload, Plus, Trash2, Save, LogOut, 
+  Upload, Plus, Trash2, Save, LogOut, Lock,
   Image as ImageIcon, Layout, Edit3, Bell, 
   Calendar, UserPlus, Search, X, Users, ShoppingBag,
-  Loader2, MessageCircle, LayoutGrid, MoveVertical, Wallet, Link2
+  Loader2, MessageCircle, LayoutGrid, MoveVertical, Wallet, Link2, ShieldCheck
 } from 'lucide-react';
 import Image from "next/image";
 import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
@@ -34,7 +34,7 @@ import {
   deleteEventPoll,
   fetchEventPolls,
   fetchLeagueById,
-  fetchLeagueSummaries,
+  fetchManagedLeagueSummaries,
   fetchLeagueUsers,
   LEAGUE_DESCRIPTION_MAX_LENGTH,
   LEAGUE_NAME_MAX_LENGTH,
@@ -47,15 +47,18 @@ import {
   updateEventPollOptions,
   type LeagueExternalLinkRecord,
   type LeagueMemberJoinRequestRecord,
+  type ManagedLeagueRecord,
   type LeaguePollRecord,
 } from "../../lib/leaguesService";
 import { resolveLeagueLogoSrc } from "../../lib/leagueMedia";
 import {
+  canManageLeagueRole,
   DEFAULT_LEAGUE_ROLE,
   LEAGUE_ROLE_OPTIONS,
   resolveLeagueRoleLabel,
   sortLeagueMembersByRole,
 } from "../../lib/leagueRoles";
+import { isPlatformMaster } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import {
   hasValidPhoneLength,
@@ -166,13 +169,17 @@ interface LigaData {
     membrosIds?: string[];
     membersCount?: number;
     memberRequests?: LeagueMemberJoinRequestRecord[];
+    status?: string;
     updatedAt?: string;
+}
+
+interface LigaAccessCard extends ManagedLeagueRecord {
+    managementRole: string;
 }
 
 interface LigaEditorDraftSnapshot {
     version: 1;
     savedAt: number;
-    ligaSenha: string;
     activeTab: LigaAdminTab;
     savedMemberIds?: string[];
     sendNotification: boolean;
@@ -435,7 +442,6 @@ const readLigaEditorDraft = (ligaId: string, tenantScopeId?: string | null): Lig
         return {
             version: LIGA_EDITOR_DRAFT_VERSION,
             savedAt: snapshot.savedAt,
-            ligaSenha: typeof snapshot.ligaSenha === "string" ? snapshot.ligaSenha : "",
             activeTab: snapshot.activeTab,
             savedMemberIds: Array.isArray(snapshot.savedMemberIds)
                 ? snapshot.savedMemberIds.filter((entry): entry is string => typeof entry === "string")
@@ -582,6 +588,29 @@ const extractErrorMessage = (error: unknown): string => {
     return "Erro inesperado.";
 };
 
+const buildLigaDataFromLeague = (target: LigaAccessCard | ManagedLeagueRecord | LigaData): LigaData => ({
+    id: target.id,
+    nome: target.nome,
+    sigla: target.sigla || "",
+    descricao: target.descricao || "",
+    visaoGeral: target.visaoGeral || "",
+    bizu: target.bizu || "",
+    likes: target.likes || 0,
+    senha: target.senha,
+    foto: target.foto || resolveLeagueLogoSrc(target) || "",
+    logoUrl: resolveLeagueLogoSrc(target) || undefined,
+    ativa: target.ativa,
+    perguntas: sanitizeQuestionDrafts((target.perguntas || []) as PerguntaLiga[]),
+    membros: (target.membros || []) as Member[],
+    eventos: (target.eventos || []) as LeagueEvent[],
+    links: normalizeLeagueLinkDrafts(target.links),
+    paymentConfig: normalizeLeaguePaymentDraft(target.paymentConfig),
+    memberRequests: target.memberRequests || [],
+    membersCount: target.membersCount,
+    status: target.status,
+    updatedAt: target.updatedAt,
+});
+
 export default function LigasAdminPageContent({
     pageVariant = "editor",
     lockedTab,
@@ -599,6 +628,8 @@ export default function LigasAdminPageContent({
     typeof params?.leagueId === "string" ? params.leagueId.trim() : "";
   const tenantScopeId =
     tenantId || (typeof user?.tenant_id === "string" ? user.tenant_id.trim() : "");
+  const isPlatformMasterUser = isPlatformMaster(user);
+  const cleanTenantSlug = typeof tenantSlug === "string" ? tenantSlug.trim() : "";
   const lastSelectedStorageKey = buildLigaEditorLastSelectedKey(tenantScopeId);
   const routeTab = resolveLeagueTabFromPathname(pathname);
   
@@ -608,11 +639,10 @@ export default function LigasAdminPageContent({
   const [activeTab, setActiveTab] = useState<LigaAdminTab>(lockedTab || routeTab);
   const [saveActionLabel, setSaveActionLabel] = useState("");
   
-  // Login
-  const [ligasDisponiveis, setLigasDisponiveis] = useState<{id: string, nome: string}[]>([]);
+  // Acesso por cargo
+  const [ligasComAcesso, setLigasComAcesso] = useState<LigaAccessCard[]>([]);
   const [selectedLigaId, setSelectedLigaId] = useState("");
-  const [senhaInput, setSenhaInput] = useState("");
-  const [isLoadingList, setIsLoadingList] = useState(true);
+  const [isLoadingLeagueAccess, setIsLoadingLeagueAccess] = useState(true);
 
   // Dados da Liga Logada
   const [ligaData, setLigaData] = useState<LigaData | null>(null);
@@ -646,6 +676,121 @@ export default function LigasAdminPageContent({
   const [novaEnquete, setNovaEnquete] = useState({ question: "", allowUserOptions: true });
   const [pollDraftOptions, setPollDraftOptions] = useState<string[]>(["", ""]);
 
+  const loadSelectedLeague = useCallback(async (leagueId: string, options?: { silent?: boolean }) => {
+      const cleanLeagueId = leagueId.trim();
+      if (!cleanLeagueId) return false;
+
+      setLoading(true);
+      try {
+          const target = await fetchLeagueById(cleanLeagueId, {
+              forceRefresh: true,
+              tenantId: tenantScopeId || undefined,
+          });
+          if (!target) {
+              if (!options?.silent) addToast("Liga não encontrada.", "error");
+              return false;
+          }
+
+          const hasDirectAccess =
+              isPlatformMasterUser ||
+              ligasComAcesso.some((league) => league.id === cleanLeagueId) ||
+              Boolean(
+                  user?.uid &&
+                  (target.membros || []).some(
+                      (member) =>
+                          member.id.trim() === user.uid.trim() &&
+                          canManageLeagueRole(member.cargo)
+                  )
+              );
+          if (!hasDirectAccess) {
+              if (!options?.silent) {
+                  addToast("Você não tem permissão para gerenciar essa liga.", "error");
+              }
+              return false;
+          }
+
+          const baseLigaData = buildLigaDataFromLeague(target);
+          const persistedMemberIds = extractMemberIds(baseLigaData.membros);
+          const restoredDraft = readLigaEditorDraft(target.id, tenantScopeId);
+          const persistedUpdatedAtMs = parseDateMs(baseLigaData.updatedAt);
+          const shouldApplyDraft =
+              Boolean(restoredDraft) &&
+              (
+                  persistedUpdatedAtMs <= 0 ||
+                  (restoredDraft?.savedAt || 0) >= persistedUpdatedAtMs
+              );
+          const mergedLigaData: LigaData = restoredDraft && shouldApplyDraft
+              ? {
+                  ...baseLigaData,
+                  ...restoredDraft.ligaDraft,
+                  eventos: baseLigaData.eventos,
+                  id: baseLigaData.id,
+                  senha: baseLigaData.senha,
+                  updatedAt: baseLigaData.updatedAt,
+              }
+              : baseLigaData;
+
+          setLigaData(mergedLigaData);
+          setSelectedLigaId(cleanLeagueId);
+          setActiveTab(lockedTab || routeTab);
+          setSavedMemberIds(
+              Array.isArray(restoredDraft?.savedMemberIds)
+                  ? restoredDraft.savedMemberIds
+                  : persistedMemberIds
+          );
+          setSendNotification(restoredDraft?.sendNotification ?? false);
+          setEventModal(false);
+          setEditingEventIdx(null);
+          setCurrentEvent({});
+          setNovoLote(createEmptyLoteDraft());
+          setIsLoggedIn(true);
+
+          if (restoredDraft && shouldApplyDraft && !options?.silent) {
+              addToast("Rascunho recuperado.", "info");
+          }
+          if (restoredDraft && !shouldApplyDraft && !options?.silent) {
+              addToast("Rascunho local mais antigo que a base salva. Exibindo a versão publicada.", "info");
+          }
+
+          const landingPath = resolveLeagueLandingPath({
+              pageVariant,
+              routeLeagueId,
+              routeTab,
+              lockedTab,
+              leagueId: cleanLeagueId,
+          });
+          const nextPath = cleanTenantSlug
+              ? withTenantSlug(cleanTenantSlug, landingPath)
+              : landingPath;
+          if (nextPath !== pathname) {
+              router.replace(nextPath);
+          }
+
+          return true;
+      } catch (error: unknown) {
+          console.error(error);
+          if (!options?.silent) {
+              addToast("Erro ao abrir a gestão da liga.", "error");
+          }
+          return false;
+      } finally {
+          setLoading(false);
+      }
+  }, [
+      addToast,
+      cleanTenantSlug,
+      isPlatformMasterUser,
+      ligasComAcesso,
+      lockedTab,
+      pageVariant,
+      pathname,
+      routeLeagueId,
+      routeTab,
+      router,
+      tenantScopeId,
+      user?.uid,
+  ]);
+
   useEffect(() => {
       setActiveTab(lockedTab || routeTab);
   }, [lockedTab, routeTab]);
@@ -658,99 +803,57 @@ export default function LigasAdminPageContent({
   }, [lastSelectedStorageKey, routeLeagueId]);
 
   useEffect(() => {
+      let mounted = true;
+      const loadManagedLeagues = async () => {
+          try {
+              const leagues = await fetchManagedLeagueSummaries({
+                  userId: user?.uid,
+                  tenantId: tenantScopeId || undefined,
+                  isPlatformMaster: isPlatformMasterUser,
+                  forceRefresh: true,
+              });
+              if (!mounted) return;
+              setLigasComAcesso(
+                  leagues
+                      .filter((league): league is LigaAccessCard => Boolean(league.id && league.managementRole))
+                      .sort((left, right) => left.nome.localeCompare(right.nome, "pt-BR"))
+              );
+          } catch (error: unknown) {
+              console.error(error);
+              if (mounted) addToast("Erro ao carregar as ligas que você pode gerenciar.", "error");
+          } finally {
+              if (mounted) setIsLoadingLeagueAccess(false);
+          }
+      };
+
+      void loadManagedLeagues();
+      return () => {
+          mounted = false;
+      };
+  }, [addToast, isPlatformMasterUser, tenantScopeId, user?.uid]);
+
+  useEffect(() => {
       if (isLoggingOutRef.current) return;
+      if (isLoadingLeagueAccess) return;
       if (isLoggedIn || ligaData) return;
 
       const preferredLeagueId = routeLeagueId || readSessionStorageValue(lastSelectedStorageKey);
       if (!preferredLeagueId) return;
-      const restoredDraft = readLigaEditorDraft(preferredLeagueId, tenantScopeId);
-      if (!restoredDraft || !restoredDraft.ligaSenha) return;
+      if (!ligasComAcesso.some((league) => league.id === preferredLeagueId) && !isPlatformMasterUser) {
+          return;
+      }
 
-      let mounted = true;
-      const restoreSession = async () => {
-          try {
-              const target = await fetchLeagueById(preferredLeagueId, {
-                  forceRefresh: true,
-                  tenantId: tenantScopeId || undefined,
-              });
-              if (!mounted || !target || target.senha !== restoredDraft.ligaSenha) return;
-
-              const baseLigaData: LigaData = {
-                  id: target.id,
-                  nome: target.nome,
-                  sigla: target.sigla || "",
-                  descricao: target.descricao || "",
-                  visaoGeral: target.visaoGeral || "",
-                  bizu: target.bizu || "",
-                  likes: target.likes || 0,
-                  senha: target.senha,
-                  foto: target.foto || resolveLeagueLogoSrc(target) || "",
-                  logoUrl: resolveLeagueLogoSrc(target) || undefined,
-                  ativa: target.ativa,
-                  perguntas: sanitizeQuestionDrafts((target.perguntas || []) as PerguntaLiga[]),
-                  membros: (target.membros || []) as Member[],
-                  eventos: (target.eventos || []) as LeagueEvent[],
-                  links: normalizeLeagueLinkDrafts(target.links),
-                  paymentConfig: normalizeLeaguePaymentDraft(target.paymentConfig),
-                  memberRequests: target.memberRequests || [],
-                  membersCount: target.membersCount,
-                  updatedAt: target.updatedAt,
-              };
-              const persistedMemberIds = extractMemberIds(baseLigaData.membros);
-              const persistedUpdatedAtMs = parseDateMs(baseLigaData.updatedAt);
-              const shouldApplyDraft =
-                  persistedUpdatedAtMs <= 0 ||
-                  (restoredDraft.savedAt || 0) >= persistedUpdatedAtMs;
-              const mergedLigaData: LigaData = shouldApplyDraft
-                  ? {
-                      ...baseLigaData,
-                      ...restoredDraft.ligaDraft,
-                      eventos: baseLigaData.eventos,
-                      id: baseLigaData.id,
-                      senha: baseLigaData.senha,
-                      updatedAt: baseLigaData.updatedAt,
-                  }
-                  : baseLigaData;
-
-              setLigaData(mergedLigaData);
-              setSelectedLigaId(preferredLeagueId);
-              setSenhaInput(restoredDraft.ligaSenha);
-              setActiveTab(lockedTab || routeTab);
-              setSavedMemberIds(
-                  Array.isArray(restoredDraft.savedMemberIds)
-                      ? restoredDraft.savedMemberIds
-                      : persistedMemberIds
-              );
-              setSendNotification(restoredDraft.sendNotification);
-              setEventModal(false);
-              setEditingEventIdx(null);
-              setCurrentEvent({});
-              setNovoLote(createEmptyLoteDraft());
-              setIsLoggedIn(true);
-              addToast("Sessao da liga restaurada.", "info");
-              if (preferredLeagueId && preferredLeagueId !== routeLeagueId) {
-                  const targetPath = resolveLeagueLandingPath({
-                      pageVariant,
-                      routeLeagueId,
-                      routeTab,
-                      lockedTab,
-                      leagueId: preferredLeagueId,
-                  });
-                  const nextPath = tenantSlug
-                      ? withTenantSlug(tenantSlug, targetPath)
-                      : targetPath;
-                  router.replace(nextPath);
-              }
-          } catch (error: unknown) {
-              console.error(error);
-          }
-      };
-
-      void restoreSession();
-      return () => {
-          mounted = false;
-      };
-  }, [addToast, isLoggedIn, lastSelectedStorageKey, ligaData, lockedTab, pageVariant, routeLeagueId, routeTab, router, tenantScopeId, tenantSlug]);
+      void loadSelectedLeague(preferredLeagueId, { silent: true });
+  }, [
+      isLoadingLeagueAccess,
+      isLoggedIn,
+      isPlatformMasterUser,
+      lastSelectedStorageKey,
+      ligasComAcesso,
+      ligaData,
+      loadSelectedLeague,
+      routeLeagueId,
+  ]);
 
   useEffect(() => {
       if (!selectedLigaId) return;
@@ -767,7 +870,6 @@ export default function LigasAdminPageContent({
           writeLigaEditorDraft(ligaData.id, {
               version: LIGA_EDITOR_DRAFT_VERSION,
               savedAt: Date.now(),
-              ligaSenha: ligaData.senha,
               activeTab,
               savedMemberIds,
               sendNotification,
@@ -832,33 +934,7 @@ export default function LigasAdminPageContent({
       };
   }, [activeTab, eventModal, isLoggedIn, ligaData?.id, tenantScopeId]);
 
-  // 1. CARREGAMENTO INICIAL
-  useEffect(() => {
-      let mounted = true;
-      const fetchData = async () => {
-          try {
-              const leagues = await fetchLeagueSummaries({
-                  orderByField: "nome",
-                  orderDirection: "asc",
-                  maxResults: 40,
-                  tenantId: tenantScopeId || undefined,
-              });
-              if (!mounted) return;
-              setLigasDisponiveis(leagues.map((league) => ({ id: league.id, nome: league.nome })));
-          } catch (error: unknown) {
-              console.error(error);
-              if (mounted) addToast("Erro ao carregar ligas.", "error");
-          } finally {
-              if (mounted) setIsLoadingList(false);
-          }
-      };
-      void fetchData();
-      return () => {
-          mounted = false;
-      };
-  }, [addToast, tenantScopeId]);
-
-  // 2. BUSCA DE USUÁRIOS SOB DEMANDA
+  // 1. BUSCA DE USUÁRIOS SOB DEMANDA
   useEffect(() => {
       if (!searchUserModal) return;
       let mounted = true;
@@ -907,114 +983,19 @@ export default function LigasAdminPageContent({
       setPollDraftOptions(["", ""]);
   }, [pollModal]);
 
-  // 4. FUNÇÃO DE LOGIN
-  const handleLogin = async () => {
-      if (!selectedLigaId || !senhaInput) return addToast("Preencha todos os campos!", "error");
-      setLoading(true);
-      try {
-          const target = await fetchLeagueById(selectedLigaId, { forceRefresh: true, tenantId: tenantScopeId || undefined });
-          
-          if (target && target.senha === senhaInput) {
-              const baseLigaData: LigaData = {
-                  id: target.id,
-                  nome: target.nome,
-                  sigla: target.sigla || "",
-                  descricao: target.descricao || "",
-                  visaoGeral: target.visaoGeral || "",
-                  bizu: target.bizu || "",
-                  likes: target.likes || 0,
-                  senha: target.senha,
-                  foto: target.foto || resolveLeagueLogoSrc(target) || "",
-                  logoUrl: resolveLeagueLogoSrc(target) || undefined,
-                  ativa: target.ativa,
-                  perguntas: sanitizeQuestionDrafts((target.perguntas || []) as PerguntaLiga[]),
-                  membros: (target.membros || []) as Member[],
-                  eventos: (target.eventos || []) as LeagueEvent[],
-                  links: normalizeLeagueLinkDrafts(target.links),
-                  paymentConfig: normalizeLeaguePaymentDraft(target.paymentConfig),
-                  memberRequests: target.memberRequests || [],
-                  membersCount: target.membersCount,
-                  updatedAt: target.updatedAt,
-              };
-              const persistedMemberIds = extractMemberIds(baseLigaData.membros);
-              const restoredDraft = readLigaEditorDraft(target.id, tenantScopeId);
-              const persistedUpdatedAtMs = parseDateMs(baseLigaData.updatedAt);
-              const shouldApplyDraft =
-                  Boolean(restoredDraft) &&
-                  (
-                      persistedUpdatedAtMs <= 0 ||
-                      (restoredDraft?.savedAt || 0) >= persistedUpdatedAtMs
-                  );
-              const mergedLigaData: LigaData = restoredDraft
-                  ? shouldApplyDraft
-                  ? {
-                      ...baseLigaData,
-                      ...restoredDraft.ligaDraft,
-                      eventos: baseLigaData.eventos,
-                      id: baseLigaData.id,
-                      senha: baseLigaData.senha,
-                      updatedAt: baseLigaData.updatedAt,
-                  }
-                  : baseLigaData
-                  : baseLigaData;
+  // 4. ABERTURA DA GESTÃO
+  const handleOpenLeague = async (league: LigaAccessCard) => {
+      const opened = await loadSelectedLeague(league.id);
+      if (!opened) return;
 
-              setLigaData(mergedLigaData);
-              if (restoredDraft) {
-                  setActiveTab(lockedTab || routeTab);
-                  setSavedMemberIds(
-                      Array.isArray(restoredDraft.savedMemberIds)
-                          ? restoredDraft.savedMemberIds
-                          : persistedMemberIds
-                  );
-                  setSendNotification(restoredDraft.sendNotification);
-                  setEventModal(false);
-                  setEditingEventIdx(null);
-                  setCurrentEvent({});
-                  setNovoLote(createEmptyLoteDraft());
-                  if (!shouldApplyDraft) {
-                      addToast("Rascunho local mais antigo que a base salva. Exibindo a versao publicada.", "info");
-                  }
-              } else {
-                  setActiveTab(lockedTab || routeTab);
-                  setSavedMemberIds(persistedMemberIds);
-                  setSendNotification(false);
-                  setEventModal(false);
-                  setEditingEventIdx(null);
-                  setCurrentEvent({});
-                  setNovoLote(createEmptyLoteDraft());
-              }
-              setIsLoggedIn(true);
-              addToast("Acesso autorizado!", "success");
-              if (restoredDraft && shouldApplyDraft) {
-                  addToast("Rascunho recuperado.", "info");
-              }
-              
-              // LOG CORRIGIDO: ORDEM (ID, NOME, AÇÃO, RECURSO, DETALHES)
-              const landingPath = resolveLeagueLandingPath({
-                  pageVariant,
-                  routeLeagueId,
-                  routeTab,
-                  lockedTab,
-                  leagueId: target.id,
-              });
-              router.replace(tenantPath(landingPath));
-              logActivity(
-                  target.id, 
-                  target.nome,
-                  "LOGIN",
-                  "ligas_config", 
-                  "Acessou o painel de gestão"
-              );
-
-          } else { 
-              addToast("Senha incorreta.", "error"); 
-          }
-      } catch (error: unknown) {
-          console.error(error);
-          addToast("Erro de conexão.", "error"); 
-      } finally { 
-          setLoading(false); 
-      }
+      addToast("Gestão da liga liberada.", "success");
+      void logActivity(
+          league.id,
+          league.nome,
+          "LOGIN",
+          "ligas_config",
+          "Acessou o painel de gestão"
+      );
   };
 
   const handleLeaguePanelLogout = () => {
@@ -1030,11 +1011,10 @@ export default function LigasAdminPageContent({
       setNovoLote(createEmptyLoteDraft());
       resetPasswordForm();
       setSendNotification(false);
-      setSenhaInput("");
       setSelectedLigaId("");
       setLigaData(null);
       setIsLoggedIn(false);
-      addToast("Sessao da liga encerrada.", "info");
+      addToast("Sessão da liga encerrada.", "info");
       window.setTimeout(() => {
           isLoggingOutRef.current = false;
       }, 0);
@@ -1052,23 +1032,23 @@ export default function LigasAdminPageContent({
       const normalized = message.toLowerCase();
 
       if (!message) {
-          return { message: "Deu ruim no plantao! Erro na imagem.", type: "error" };
+          return { message: "Deu ruim no plantão! Erro na imagem.", type: "error" };
       }
       if (
           normalized.includes("excede") &&
           (normalized.includes("mb") || normalized.includes("kb") || normalized.includes("byte"))
       ) {
-          return { message: "Atualizacao informativa: " + message, type: "info" };
+          return { message: "Atualização informativa: " + message, type: "info" };
       }
       if (
           normalized.includes("resolucao maxima") ||
           normalized.includes("resolução máxima") ||
           normalized.includes("imagem muito grande")
       ) {
-          return { message: "Atualizacao informativa: " + message, type: "info" };
+          return { message: "Atualização informativa: " + message, type: "info" };
       }
 
-      return { message: "Deu ruim no plantao! " + message, type: "error" };
+      return { message: "Deu ruim no plantão! " + message, type: "error" };
   };
   // --- UPLOADS ---
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'pergunta' | 'membro', index?: number) => {
@@ -1378,7 +1358,7 @@ export default function LigasAdminPageContent({
           String(currentEvent.contatoComprovante || "").trim() &&
           !hasValidPhoneLength(String(currentEvent.contatoComprovante || ""))
       ) {
-          return addToast("Informe um WhatsApp valido para comprovante.", "error");
+          return addToast("Informe um WhatsApp válido para comprovante.", "error");
       }
       const leaguePaymentFallback = compactLeaguePaymentDraft(ligaData.paymentConfig);
       const eventWhatsapp = normalizePhoneToBrE164(
@@ -1557,7 +1537,7 @@ export default function LigasAdminPageContent({
   const handleSaveVisualSection = async () => {
       if (!ligaData) return;
 
-      await runSectionSave("SALVANDO INFORMACOES...", async () => {
+      await runSectionSave("SALVANDO INFORMAÇÕES...", async () => {
           const supabase = getSupabaseClient();
           const timestamp = nowIso();
           const leagueLogoUrl = resolveLeagueLogoSrc(ligaData) || "";
@@ -1568,7 +1548,7 @@ export default function LigasAdminPageContent({
               paymentConfig?.whatsapp &&
               !hasValidPhoneLength(paymentConfig.whatsapp)
           ) {
-              throw new Error("Informe um WhatsApp valido para as informacoes de pagamento.");
+              throw new Error("Informe um WhatsApp válido para as informações de pagamento.");
           }
 
           await persistLeagueConfigPatch({
@@ -1658,7 +1638,6 @@ export default function LigasAdminPageContent({
           });
 
           setLigaData((prev) => (prev ? { ...prev, senha: nextPassword.slice(0, 120) } : prev));
-          setSenhaInput(nextPassword.slice(0, 120));
           setChangePasswordModal(false);
           resetPasswordForm();
           addToast("Senha da liga atualizada.", "success");
@@ -1668,7 +1647,7 @@ export default function LigasAdminPageContent({
               ligaData.nome,
               "UPDATE",
               "ligas_config",
-              "Atualizacao da senha de acesso da liga"
+              "Atualização da senha de acesso da liga"
           );
       });
   };
@@ -1851,34 +1830,141 @@ export default function LigasAdminPageContent({
           ? "PUBLICAR EVENTOS"
           : activeTab === "shark"
           ? "SALVAR BOARD ROUND"
-          : "SALVAR INFORMACOES";
-  if (!isLoggedIn) return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4 font-sans text-white">
-          <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 p-8 rounded-3xl shadow-2xl space-y-4">
-              <div className="text-center mb-8">
-                  <div className="w-16 h-16 bg-emerald-600 rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                      <Lock className="text-white" size={32}/>
+          : "SALVAR INFORMAÇÕES";
+  if (!isLoggedIn) {
+      const requestedLeagueWithoutAccess =
+          Boolean(routeLeagueId) &&
+          !isLoadingLeagueAccess &&
+          !isPlatformMasterUser &&
+          !ligasComAcesso.some((league) => league.id === routeLeagueId);
+
+      return (
+          <div className="min-h-screen bg-[#050505] px-4 py-10 font-sans text-white">
+              <div className="mx-auto max-w-6xl">
+                  <div className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(12,18,18,0.96),rgba(5,5,5,0.98))] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)] sm:p-8">
+                      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="max-w-3xl">
+                              <div className="flex items-center gap-3">
+                                  <div className="flex h-14 w-14 items-center justify-center rounded-[1.4rem] border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">
+                                      <ShieldCheck size={28} />
+                                  </div>
+                                  <div>
+                                      <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-300">Gestão de ligas</p>
+                                      <h1 className="mt-2 text-3xl font-black uppercase tracking-tight text-white sm:text-4xl">
+                                          Escolha uma liga para gerenciar
+                                      </h1>
+                                  </div>
+                              </div>
+                              <p className="mt-5 max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
+                                  Agora o acesso acontece pelos cards das ligas em que você faz parte e tem cargo de
+                                  gestão. Não é mais necessário selecionar a liga em uma lista nem informar senha para
+                                  entrar.
+                              </p>
+                          </div>
+
+                          <div className="rounded-[1.5rem] border border-cyan-500/20 bg-cyan-500/10 px-5 py-4 text-right">
+                              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200">
+                                  Cargos com acesso
+                              </p>
+                              <p className="mt-3 text-sm font-semibold leading-6 text-cyan-50/90">
+                                  Presidente, Vice-Presidente, Diretoria, Tesouraria, Secretaria e Master da
+                                  Plataforma.
+                              </p>
+                          </div>
+                      </div>
+
+                      {requestedLeagueWithoutAccess ? (
+                          <div className="mt-6 rounded-[1.5rem] border border-amber-500/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-50">
+                              Você não tem permissão para gerenciar a liga solicitada nesta rota. Escolha uma das ligas
+                              liberadas abaixo.
+                          </div>
+                      ) : null}
+
+                      {isLoadingLeagueAccess ? (
+                          <div className="mt-8 flex items-center gap-3 rounded-[1.5rem] border border-zinc-800 bg-zinc-950/70 px-5 py-4 text-sm font-bold text-zinc-300">
+                              <Loader2 size={18} className="animate-spin text-emerald-400" />
+                              Carregando suas ligas com acesso de gestão...
+                          </div>
+                      ) : ligasComAcesso.length === 0 ? (
+                          <div className="mt-8 rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center">
+                              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
+                                  Nenhuma liga disponível
+                              </p>
+                              <h2 className="mt-3 text-2xl font-black text-white">
+                                  Seu perfil ainda não possui acesso à gestão de ligas
+                              </h2>
+                              <p className="mt-3 text-sm leading-7 text-zinc-400">
+                                  Para entrar aqui, você precisa estar cadastrado como Presidente,
+                                  Vice-Presidente, Diretoria, Tesouraria, Secretaria ou Master da Plataforma.
+                              </p>
+                          </div>
+                      ) : (
+                          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                              {ligasComAcesso.map((league) => {
+                                  const logoSrc = resolveLeagueLogoSrc(league, "/placeholder_liga.png");
+                                  return (
+                                      <button
+                                          key={league.id}
+                                          type="button"
+                                          onClick={() => void handleOpenLeague(league)}
+                                          disabled={loading}
+                                          className="group rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] p-5 text-left shadow-[0_20px_60px_rgba(0,0,0,0.35)] transition hover:-translate-y-1 hover:border-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                          <div className="flex items-start justify-between gap-4">
+                                              <div className="flex min-w-0 items-center gap-4">
+                                                  <div className="relative h-16 w-16 overflow-hidden rounded-[1.25rem] border border-white/10 bg-black/40">
+                                                      <Image
+                                                          src={logoSrc}
+                                                          alt={league.nome}
+                                                          fill
+                                                          sizes="64px"
+                                                          className="object-cover"
+                                                      />
+                                                  </div>
+                                                  <div className="min-w-0">
+                                                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">
+                                                          {league.managementRole}
+                                                      </p>
+                                                      <h2 className="mt-2 truncate text-lg font-black text-white">
+                                                          {league.nome}
+                                                      </h2>
+                                                      <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+                                                          {league.sigla || "Liga"}
+                                                      </p>
+                                                  </div>
+                                              </div>
+                                              <div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">
+                                                  Gestão liberada
+                                              </div>
+                                          </div>
+
+                                          <p className="mt-5 min-h-[3.5rem] text-sm leading-6 text-zinc-400">
+                                              {league.descricao?.trim() || "Abra este card para entrar no painel de informações, membros, eventos e board da liga."}
+                                          </p>
+
+                                          <div className="mt-5 flex items-center justify-between">
+                                              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-300">
+                                                  {league.membersCount ?? league.membros?.length ?? 0} membros
+                                              </span>
+                                              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100 transition group-hover:bg-emerald-400/20">
+                                                  {loading && selectedLigaId === league.id ? (
+                                                      <Loader2 size={14} className="animate-spin" />
+                                                  ) : (
+                                                      <ShieldCheck size={14} />
+                                                  )}
+                                                  Abrir gestão
+                                              </span>
+                                          </div>
+                                      </button>
+                                  );
+                              })}
+                          </div>
+                      )}
                   </div>
-                  <h1 className="text-2xl font-black italic uppercase tracking-tighter">Portal das Ligas</h1>
-                  <p className="text-sm text-zinc-500">Acesso Restrito à Diretoria</p>
               </div>
-              <div className="space-y-1">
-                  <label htmlFor="liga-select" className="text-xs font-bold text-zinc-500 uppercase ml-1">Selecione sua Liga</label>
-                  <select id="liga-select" name="ligaSelect" className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-white focus:border-emerald-500 outline-none transition-colors" value={selectedLigaId} onChange={(e) => setSelectedLigaId(e.target.value)} disabled={isLoadingList}>
-                      <option value="">{isLoadingList ? "Carregando Ligas..." : "Selecione..."}</option>
-                      {ligasDisponiveis.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
-                  </select>
-              </div>
-              <div className="space-y-1">
-                  <label htmlFor="liga-password" className="text-xs font-bold text-zinc-500 uppercase ml-1">Senha de Acesso</label>
-                  <input type="password" value={senhaInput} onChange={e => setSenhaInput(e.target.value)} className="w-full bg-black border border-zinc-700 rounded-xl p-3 text-white focus:border-emerald-500 outline-none transition-colors" placeholder="••••••"/>
-              </div>
-              <button onClick={handleLogin} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-emerald-900/20 flex items-center justify-center gap-2">
-                  {loading ? <Loader2 className="animate-spin"/> : <>Acessar Painel <ArrowRight size={18}/></>}
-              </button>
           </div>
-      </div>
-  );
+      );
+  }
 
   if (pageVariant === "hub" && ligaData) {
       return (
@@ -1908,7 +1994,7 @@ export default function LigasAdminPageContent({
                   />
 
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Acesso rapido</p>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Acesso rápido</p>
                       <h2 className="mt-2 text-2xl font-black text-white">Escolha a área que você quer editar</h2>
                       <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                           <button onClick={() => navigateToSection("visual")} className="rounded-2xl border border-zinc-800 bg-black/40 p-5 text-left transition hover:border-emerald-500/30 hover:bg-zinc-900">
@@ -2025,7 +2111,7 @@ export default function LigasAdminPageContent({
                           maxLength={LEAGUE_NAME_MAX_LENGTH}
                         />
                         <p className="mt-1 text-[10px] text-zinc-500">
-                          Maximo de {LEAGUE_NAME_MAX_LENGTH} caracteres para o nome caber melhor nos cards.
+                          Máximo de {LEAGUE_NAME_MAX_LENGTH} caracteres para o nome caber melhor nos cards.
                         </p>
                       </div>
                   </div>
@@ -2059,8 +2145,8 @@ export default function LigasAdminPageContent({
                   <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/10 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div>
-                              <p className="flex items-center gap-2 text-[10px] font-bold uppercase text-cyan-300"><Link2 size={14}/> Links publicos</p>
-                              <p className="mt-1 text-xs text-zinc-500">Esses links aparecem no perfil publico da liga.</p>
+                              <p className="flex items-center gap-2 text-[10px] font-bold uppercase text-cyan-300"><Link2 size={14}/> Links públicos</p>
+                              <p className="mt-1 text-xs text-zinc-500">Esses links aparecem no perfil público da liga.</p>
                           </div>
                           <button type="button" onClick={handleAddLeagueLink} className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-black uppercase text-cyan-100 hover:bg-cyan-500/20">
                               <Plus size={14}/>
@@ -2075,7 +2161,7 @@ export default function LigasAdminPageContent({
                                           <option key={option.value} value={option.value}>{option.label}</option>
                                       ))}
                                   </select>
-                                  <input type="text" value={link.label} maxLength={LEAGUE_LINK_LABEL_MAX_LENGTH} onChange={(event) => handleUpdateLeagueLink(link.id, { label: event.target.value })} placeholder="Nome do botao" className="min-h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-xs font-bold text-white outline-none focus:border-cyan-400" />
+                                  <input type="text" value={link.label} maxLength={LEAGUE_LINK_LABEL_MAX_LENGTH} onChange={(event) => handleUpdateLeagueLink(link.id, { label: event.target.value })} placeholder="Nome do botão" className="min-h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-xs font-bold text-white outline-none focus:border-cyan-400" />
                                   <input type="url" value={link.url} maxLength={LEAGUE_LINK_URL_MAX_LENGTH} onChange={(event) => handleUpdateLeagueLink(link.id, { url: event.target.value })} placeholder="https://..." className="min-h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-xs font-bold text-white outline-none focus:border-cyan-400" />
                                   <button type="button" onClick={() => handleRemoveLeagueLink(link.id)} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-red-500/20 bg-red-500/10 px-3 text-red-200 hover:bg-red-500/20" aria-label="Remover link">
                                       <Trash2 size={14}/>
@@ -2091,8 +2177,8 @@ export default function LigasAdminPageContent({
                   </div>
                   <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-4">
                       <div className="mb-3">
-                          <p className="flex items-center gap-2 text-[10px] font-bold uppercase text-emerald-300"><Wallet size={14}/> Informacoes de pagamento da liga</p>
-                          <p className="mt-1 text-xs text-zinc-500">Usado no perfil publico e como fallback para eventos da liga.</p>
+                          <p className="flex items-center gap-2 text-[10px] font-bold uppercase text-emerald-300"><Wallet size={14}/> Informações de pagamento da liga</p>
+                          <p className="mt-1 text-xs text-zinc-500">Usado no perfil público e como fallback para eventos da liga.</p>
                       </div>
                       <div className="grid gap-2 md:grid-cols-3">
                           <input type="text" maxLength={EVENT_PIX_FIELD_MAX_LENGTH} placeholder="Chave PIX" className="rounded-lg border border-zinc-700 bg-black p-3 text-xs text-white outline-none focus:border-emerald-400" value={normalizeLeaguePaymentDraft(ligaData.paymentConfig).chave} onChange={(event) => handleUpdateLeaguePayment("chave", event.target.value)} />
@@ -2145,7 +2231,7 @@ export default function LigasAdminPageContent({
                   <div className="rounded-2xl border border-amber-500/20 bg-amber-950/10 p-4">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <div>
-                              <h4 className="text-xs font-black uppercase text-amber-300">Solicitacoes pendentes</h4>
+                              <h4 className="text-xs font-black uppercase text-amber-300">Solicitações pendentes</h4>
                               <p className="mt-1 text-[10px] uppercase text-zinc-500">Aprove ou rejeite no rascunho e depois clique em salvar membros para persistir.</p>
                           </div>
                           <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-200">
@@ -2349,7 +2435,7 @@ export default function LigasAdminPageContent({
                                                   ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
                                                   : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                                           }`}>
-                                              {normalizeEventVisibility(ev.visibility) === "internal" ? "Evento interno" : "Aberto ao publico"}
+                                              {normalizeEventVisibility(ev.visibility) === "internal" ? "Evento interno" : "Aberto ao público"}
                                           </span>
                                           <button onClick={() => handleOpenEventModal(idx)} className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1"><Edit3 size={10}/> Editar Evento</button>
                                           {ev.globalEventId && (
@@ -2689,7 +2775,7 @@ export default function LigasAdminPageContent({
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                               {([
-                                  { value: "public" as EventVisibility, label: "Aberto ao publico" },
+                                  { value: "public" as EventVisibility, label: "Aberto ao público" },
                                   { value: "internal" as EventVisibility, label: "Evento interno" },
                               ]).map((option) => (
                                   <button
@@ -2765,7 +2851,7 @@ export default function LigasAdminPageContent({
                               className="w-full bg-black border border-purple-900/50 rounded-lg p-3 text-sm outline-none focus:border-purple-500"
                               value={currentEvent.pollQuestion || ""}
                               onChange={e => setCurrentEvent({ ...normalizeEditableLeagueEvent(currentEvent), pollQuestion: e.target.value.slice(0, EVENT_POLL_QUESTION_MAX_CHARS) })}
-                              placeholder="Ex: Qual tema voces preferem?"
+                              placeholder="Ex: Qual tema vocês preferem?"
                           />
                       </div>
 

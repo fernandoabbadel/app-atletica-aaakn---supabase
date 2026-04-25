@@ -3,7 +3,24 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Heart, Lightbulb, Link2, Loader2, ShoppingBag, Users, Wallet } from "lucide-react";
+import {
+  ArrowLeft,
+  ExternalLink,
+  Globe2,
+  Heart,
+  Instagram,
+  Lightbulb,
+  Link2,
+  Linkedin,
+  Loader2,
+  MessageCircleMore,
+  Music4,
+  Settings2,
+  ShoppingBag,
+  Users,
+  Wallet,
+  Youtube,
+} from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
@@ -23,6 +40,7 @@ import { fetchStoreProductsBySeller } from "@/lib/storePublicService";
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import {
+  canManageLeagueRole,
   DEFAULT_LEAGUE_ROLE,
   LEAGUE_ROLE_OPTIONS,
   resolveLeagueRoleLabel,
@@ -32,6 +50,7 @@ import {
   DEFAULT_LIGAS_USC_UI_CONFIG,
   fetchLigasUscUiConfig,
 } from "@/lib/ligasUscUiService";
+import { isPlatformMaster } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 type LeaguePublicTab = "overview" | "membros" | "agenda" | "loja";
@@ -62,7 +81,7 @@ const isInternalLeagueEvent = (event: LeagueRecord["eventos"][number]): boolean 
   String(event.visibility || "").trim().toLowerCase() === "internal";
 
 const getVisibilityLabel = (event: LeagueRecord["eventos"][number]): string =>
-  isInternalLeagueEvent(event) ? "Evento interno" : "Aberto ao publico";
+  isInternalLeagueEvent(event) ? "Evento interno" : "Aberto ao público";
 
 const getEventBadge = (value: string) => {
   const parsedMs = parseEventDateTimeMs(value, "00:00");
@@ -96,6 +115,25 @@ const LEAGUE_LINK_TYPE_LABELS: Record<string, string> = {
 
 const getLeagueLinkTypeLabel = (type: unknown): string =>
   LEAGUE_LINK_TYPE_LABELS[String(type || "").trim().toLowerCase()] || "Link";
+
+const getLeagueLinkIcon = (type: unknown) => {
+  switch (String(type || "").trim().toLowerCase()) {
+    case "instagram":
+      return Instagram;
+    case "tiktok":
+      return Music4;
+    case "youtube":
+      return Youtube;
+    case "site":
+      return Globe2;
+    case "whatsapp":
+      return MessageCircleMore;
+    case "linkedin":
+      return Linkedin;
+    default:
+      return Link2;
+  }
+};
 
 const hasPaymentInfo = (paymentConfig: LeagueRecord["paymentConfig"]): boolean =>
   Boolean(
@@ -298,6 +336,13 @@ export function LeaguePublicDetailClient({
     [league?.links]
   );
   const paymentInfo = league?.paymentConfig || null;
+  const canManageCurrentLeague = useMemo(() => {
+    if (!user?.uid || !league) return false;
+    if (isPlatformMaster(user)) return true;
+    return sortedMembers.some(
+      (member) => member.id.trim() === user.uid.trim() && canManageLeagueRole(member.cargo)
+    );
+  }, [league, sortedMembers, user]);
 
   useEffect(() => {
     if (!currentMemberRequest) return;
@@ -456,6 +501,7 @@ export function LeaguePublicDetailClient({
   const membersHref = tenantPath(`/ligas_usc/${league.id}/membros`);
   const agendaHref = tenantPath(`/ligas_usc/${league.id}/agenda`);
   const storeTabHref = tenantPath(`/ligas_usc/${league.id}/loja`);
+  const managementHref = tenantPath(`/ligas/${league.id}`);
   const storeHref = tenantPath("/loja");
   const eventsFeedHref = tenantPath("/eventos");
   const imageSrc = getLeagueImage(league);
@@ -476,7 +522,17 @@ export function LeaguePublicDetailClient({
                 <ArrowLeft size={14} />
                 Voltar
               </Link>
-              <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">
+              <div className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">
+                {canManageCurrentLeague ? (
+                  <Link
+                    href={managementHref}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/12 text-emerald-200 transition hover:bg-emerald-500/22"
+                    aria-label="Abrir gestão da liga"
+                    title="Abrir gestão da liga"
+                  >
+                    <Settings2 size={16} />
+                  </Link>
+                ) : null}
                 <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{uiConfig.rotuloCard || DEFAULT_LIGAS_USC_UI_CONFIG.rotuloCard}</span>
                 <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-cyan-200">{league.sigla || league.nome}</span>
               </div>
@@ -531,7 +587,7 @@ export function LeaguePublicDetailClient({
                   </p>
                   <p className="mt-2 text-sm leading-6 text-emerald-50/90">
                     {isOfficialMember
-                      ? "Seu perfil ja esta na equipe oficial desta liga."
+                      ? "Seu perfil já está na equipe oficial desta liga."
                       : currentMemberRequest
                         ? `Solicitação enviada como ${resolveLeagueRoleLabel(currentMemberRequest.requestedRole)}. A diretoria pode aprovar e ajustar o cargo na gestão da liga.`
                         : "Escolha o cargo desejado e envie sua solicitação para a diretoria analisar."}
@@ -624,7 +680,7 @@ export function LeaguePublicDetailClient({
               </article>
             ) : null}
             <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,24,0.96),rgba(10,10,10,0.98))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.32)]">
-              <div className="flex items-center gap-3"><div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-200"><Lightbulb size={18} /></div><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Visao geral da liga</p><h2 className="mt-2 text-2xl font-black text-white">O que a liga faz</h2></div></div>
+              <div className="flex items-center gap-3"><div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-200"><Lightbulb size={18} /></div><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Visão geral da liga</p><h2 className="mt-2 text-2xl font-black text-white">O que a liga faz</h2></div></div>
               <div className="mt-5 space-y-3">
                 {overviewHighlights.length > 0 ? overviewHighlights.map((entry, index) => (
                   <div key={`${entry}-${index}`} className="rounded-[1.5rem] border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm font-semibold leading-6 text-cyan-50">
@@ -646,21 +702,31 @@ export function LeaguePublicDetailClient({
                   </div>
                 </div>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {publicLinks.map((link) => (
-                    <a
-                      key={link.id}
-                      href={link.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex min-h-[68px] items-center justify-between gap-3 rounded-[1.25rem] border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-black text-cyan-50 transition hover:border-cyan-300/40 hover:bg-cyan-500/20"
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate">{link.label || getLeagueLinkTypeLabel(link.type)}</span>
-                        <span className="mt-1 block text-[10px] uppercase tracking-[0.18em] text-cyan-200/70">{getLeagueLinkTypeLabel(link.type)}</span>
-                      </span>
-                      <ExternalLink size={16} className="shrink-0" />
-                    </a>
-                  ))}
+                  {publicLinks.map((link) => {
+                    const Icon = getLeagueLinkIcon(link.type);
+                    return (
+                      <a
+                        key={link.id}
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group flex min-h-[84px] items-center justify-between gap-3 rounded-[1.4rem] border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(8,34,42,0.96),rgba(6,18,24,0.94))] px-4 py-3 text-sm font-black text-cyan-50 transition hover:-translate-y-1 hover:border-cyan-300/40 hover:bg-[linear-gradient(135deg,rgba(10,44,54,0.98),rgba(8,24,32,0.96))]"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-cyan-100 shadow-[0_12px_30px_rgba(34,211,238,0.12)]">
+                            <Icon size={18} />
+                          </div>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm">{link.label || getLeagueLinkTypeLabel(link.type)}</span>
+                            <span className="mt-1 block text-[10px] uppercase tracking-[0.18em] text-cyan-200/70">{getLeagueLinkTypeLabel(link.type)}</span>
+                          </span>
+                        </div>
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-cyan-100 transition group-hover:border-cyan-300/30 group-hover:bg-cyan-400/10">
+                          <ExternalLink size={16} />
+                        </div>
+                      </a>
+                    );
+                  })}
                 </div>
               </article>
             ) : null}
@@ -711,7 +777,7 @@ export function LeaguePublicDetailClient({
               <p className="mt-3 text-sm leading-7 text-zinc-400">{"Tudo que a liga publicou para a comunidade acompanhar em um s\u00f3 lugar."}</p>
             </div>
             {[
-              { title: "Aberto ao publico", events: publicAgendaEvents },
+              { title: "Aberto ao público", events: publicAgendaEvents },
               { title: "Evento interno", events: internalAgendaEvents },
             ].map((section) => (
               <div key={section.title} className="space-y-3">
