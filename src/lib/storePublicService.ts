@@ -2,7 +2,6 @@
 
 import { getSupabasePublicClient } from "./supabase";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
-import { ClientCache } from "./clientCache";
 import {
   canAccessCommerceItem,
   normalizeAvailabilityStatus,
@@ -44,6 +43,7 @@ const categoriesCache = new Map<string, CacheEntry<Row[]>>();
 const productDetailCache = new Map<string, CacheEntry<StoreProductDetailBundle>>();
 const productReviewsPageCache = new Map<string, CacheEntry<StoreProductReviewsPageResult>>();
 const productUserReviewCountCache = new Map<string, CacheEntry<number>>();
+const CLIENT_CACHE_PREFIX = "aaakn_";
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -128,12 +128,29 @@ const invalidateStoreCaches = (productId?: string): void => {
   });
 };
 
+const invalidateClientStoreCachePattern = (pattern: string): void => {
+  if (typeof window === "undefined") return;
+
+  const regex = new RegExp(`^${pattern.replace(/\*/g, ".*")}$`);
+  const keysToDelete: string[] = [];
+
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (!key?.startsWith(CLIENT_CACHE_PREFIX)) continue;
+
+    const shortKey = key.slice(CLIENT_CACHE_PREFIX.length);
+    if (regex.test(shortKey)) {
+      keysToDelete.push(key);
+    }
+  }
+
+  keysToDelete.forEach((key) => window.localStorage.removeItem(key));
+};
+
 export const clearStorePublicCaches = (productId?: string): void => {
   invalidateStoreCaches(productId);
-  if (typeof window !== "undefined") {
-    ClientCache.invalidatePattern("store:categories:*");
-    ClientCache.invalidatePattern("store:products:*");
-  }
+  invalidateClientStoreCachePattern("store:categories:*");
+  invalidateClientStoreCachePattern("store:products:*");
 };
 
 const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
