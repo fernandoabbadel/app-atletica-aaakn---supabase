@@ -223,6 +223,7 @@ const normalizeLeagueLinks = (value: unknown): LeagueExternalLinkRecord[] => {
 };
 
 export type LeagueEventVisibility = "public" | "internal";
+export type LeagueCategory = "liga" | "comissao" | "diretorio";
 
 export const normalizeLeagueEventVisibility = (
   value: unknown,
@@ -508,6 +509,30 @@ const normalizeLeaguePartialPatch = (
   }
   if (hasOwn("status")) {
     normalized.status = normalizeLeagueApprovalStatus(patch.status);
+  }
+  if (hasOwn("category")) {
+    normalized.category = normalizeLeagueCategory(patch.category);
+  }
+  if (hasOwn("sidebarLabel")) {
+    normalized.sidebarLabel = asString(patch.sidebarLabel).trim().slice(0, 80);
+  }
+  if (hasOwn("customCss")) {
+    normalized.customCss = asString(patch.customCss).slice(0, 24_000);
+  }
+  if (hasOwn("managerUserIds")) {
+    normalized.managerUserIds = Array.isArray(patch.managerUserIds)
+      ? Array.from(
+          new Set(
+            patch.managerUserIds
+              .filter((entry): entry is string => typeof entry === "string")
+              .map((entry) => entry.trim())
+              .filter((entry) => entry.length > 0)
+          )
+        )
+      : [];
+  }
+  if (hasOwn("turmaId")) {
+    normalized.turmaId = asString(patch.turmaId).trim().toUpperCase().slice(0, 12);
   }
   if (hasOwn("createdAt")) {
     normalized.createdAt = asString(patch.createdAt).trim();
@@ -1216,6 +1241,11 @@ export interface LeagueRecord {
   memberRequests?: LeagueMemberJoinRequestRecord[];
   status?: string;
   updatedAt?: string;
+  category?: LeagueCategory;
+  sidebarLabel?: string;
+  customCss?: string;
+  managerUserIds?: string[];
+  turmaId?: string;
 }
 
 export type ManagedLeagueRecord = LeagueRecord & {
@@ -1245,6 +1275,50 @@ export const isLeaguePendingApproval = (value: unknown): boolean =>
 
 export const isLeagueApproved = (value: unknown): boolean =>
   normalizeLeagueApprovalStatus(value) === "approved";
+
+export const normalizeLeagueCategory = (
+  value: unknown,
+  fallback: LeagueCategory = "liga"
+): LeagueCategory => {
+  const raw = asString(value).trim().toLowerCase();
+  const fallbackCategory = fallback || "liga";
+  if (raw === "comissao" || raw === "comissões" || raw === "comissaoes") {
+    return "comissao";
+  }
+  if (raw === "diretorio" || raw === "diretório") {
+    return "diretorio";
+  }
+  return fallbackCategory;
+};
+
+const normalizeLeagueCategoryFilter = (
+  value?: LeagueCategory | LeagueCategory[] | null
+): LeagueCategory[] => {
+  if (Array.isArray(value)) {
+    return Array.from(new Set(value.map((entry) => normalizeLeagueCategory(entry)).filter(Boolean)));
+  }
+  if (!value) return [];
+  return [normalizeLeagueCategory(value)];
+};
+
+export const isLeagueCategory = (
+  league: Pick<LeagueRecord, "category"> | null | undefined,
+  category: LeagueCategory
+): boolean => normalizeLeagueCategory(league?.category, "liga") === normalizeLeagueCategory(category);
+
+const filterLeaguesByCategory = (
+  leagues: LeagueRecord[],
+  category?: LeagueCategory | LeagueCategory[] | null
+): LeagueRecord[] => {
+  const categories = normalizeLeagueCategoryFilter(category);
+  if (!categories.length) return leagues;
+  return leagues.filter((league) => categories.includes(normalizeLeagueCategory(league.category, "liga")));
+};
+
+const categoryFilterCacheKey = (category?: LeagueCategory | LeagueCategory[] | null): string => {
+  const categories = normalizeLeagueCategoryFilter(category);
+  return categories.length ? categories.join("|") : "all";
+};
 
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1677,6 +1751,12 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
   const memberRequests = normalizeLeagueMemberRequests(memberRequestsSource);
+  const managerUserIds = Array.isArray(readLeagueField(data, "managerUserIds"))
+    ? (readLeagueField(data, "managerUserIds") as unknown[])
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+    : [];
 
   return {
     id,
@@ -1708,6 +1788,11 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     memberRequests,
     status: normalizeLeagueApprovalStatus(readLeagueField(data, "status")),
     updatedAt: asString(readLeagueField(data, "updatedAt")) || undefined,
+    category: normalizeLeagueCategory(readLeagueField(data, "category"), "liga"),
+    sidebarLabel: asString(readLeagueField(data, "sidebarLabel")) || undefined,
+    customCss: asString(readLeagueField(data, "customCss")) || undefined,
+    managerUserIds,
+    turmaId: asString(readLeagueField(data, "turmaId")).trim().toUpperCase() || undefined,
   };
 };
 
@@ -1813,6 +1898,18 @@ const normalizeLeaguePayload = (
   const memberRequests = normalizeLeagueMemberRequests(payload.memberRequests);
   const links = normalizeLeagueLinks(payload.links);
   const paymentConfig = normalizePaymentConfig(payload.paymentConfig);
+  const category = normalizeLeagueCategory(payload.category, "liga");
+  const sidebarLabel = asString(payload.sidebarLabel).trim().slice(0, 80);
+  const customCss = asString(payload.customCss).slice(0, 24_000);
+  const managerUserIds = Array.from(
+    new Set(
+      (Array.isArray(payload.managerUserIds) ? payload.managerUserIds : [])
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+    )
+  );
+  const turmaId = asString(payload.turmaId).trim().toUpperCase().slice(0, 12);
   const membersCount = Math.max(
     0,
     asNumber(
@@ -1843,6 +1940,11 @@ const normalizeLeaguePayload = (
     likes: Math.max(0, asNumber(payload.likes, 0)),
     membersCount,
     status: normalizeLeagueApprovalStatus(payload.status),
+    category,
+    ...(sidebarLabel ? { sidebarLabel } : {}),
+    ...(customCss ? { customCss } : {}),
+    managerUserIds,
+    ...(turmaId ? { turmaId } : {}),
   };
   const compatData = mergeLeagueCompatData({}, normalizedPayload);
 
@@ -1944,13 +2046,14 @@ export async function fetchLeagues(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
   tenantId?: string | null;
+  category?: LeagueCategory | LeagueCategory[] | null;
 }): Promise<LeagueRecord[]> {
   const orderByField = options?.orderByField ?? "nome";
   const orderDirection = options?.orderDirection ?? "asc";
   const maxResults = boundedLimit(options?.maxResults ?? 40, MAX_LEAGUE_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const scopedTenantId = resolveLeagueTenantId(options?.tenantId);
-  const cacheKey = `${scopedTenantId || "global"}:${orderByField}:${orderDirection}:${maxResults}`;
+  const cacheKey = `${scopedTenantId || "global"}:${orderByField}:${orderDirection}:${maxResults}:${categoryFilterCacheKey(options?.category)}`;
 
   if (!forceRefresh) {
     const cached = getCacheValue(leaguesCache, cacheKey);
@@ -1985,8 +2088,9 @@ export async function fetchLeagues(options?: {
     selectColumns = nextColumns;
   }
 
-  setCacheValue(leaguesCache, cacheKey, leagues);
-  return leagues;
+  const filteredLeagues = filterLeaguesByCategory(leagues, options?.category);
+  setCacheValue(leaguesCache, cacheKey, filteredLeagues);
+  return filteredLeagues;
 }
 
 export async function fetchLeagueSummaries(options?: {
@@ -1995,13 +2099,14 @@ export async function fetchLeagueSummaries(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
   tenantId?: string | null;
+  category?: LeagueCategory | LeagueCategory[] | null;
 }): Promise<LeagueRecord[]> {
   const orderByField = options?.orderByField ?? "nome";
   const orderDirection = options?.orderDirection ?? "asc";
   const maxResults = boundedLimit(options?.maxResults ?? 40, MAX_LEAGUE_RESULTS);
   const forceRefresh = options?.forceRefresh ?? false;
   const scopedTenantId = resolveLeagueTenantId(options?.tenantId);
-  const cacheKey = `${scopedTenantId || "global"}:${orderByField}:${orderDirection}:${maxResults}`;
+  const cacheKey = `${scopedTenantId || "global"}:${orderByField}:${orderDirection}:${maxResults}:${categoryFilterCacheKey(options?.category)}`;
 
   if (!forceRefresh) {
     const cached = getCacheValue(leagueSummariesCache, cacheKey);
@@ -2037,8 +2142,9 @@ export async function fetchLeagueSummaries(options?: {
     selectColumns = nextColumns;
   }
 
-  setCacheValue(leagueSummariesCache, cacheKey, leagues);
-  return leagues;
+  const filteredLeagues = filterLeaguesByCategory(leagues, options?.category);
+  setCacheValue(leagueSummariesCache, cacheKey, filteredLeagues);
+  return filteredLeagues;
 }
 
 export async function fetchLeagueById(
@@ -2100,6 +2206,33 @@ export async function fetchLeagueById(
   return league;
 }
 
+export async function fetchLeagueByTurmaId(payload: {
+  turmaId?: string | null;
+  category?: LeagueCategory | null;
+  tenantId?: string | null;
+  forceRefresh?: boolean;
+}): Promise<LeagueRecord | null> {
+  const cleanTurmaId = asString(payload.turmaId).trim().toUpperCase();
+  if (!cleanTurmaId) return null;
+
+  const leagues = await fetchLeagues({
+    orderByField: "nome",
+    orderDirection: "asc",
+    maxResults: MAX_LEAGUE_RESULTS,
+    forceRefresh: payload.forceRefresh ?? false,
+    tenantId: payload.tenantId,
+    category: payload.category || undefined,
+  });
+
+  return (
+    leagues.find(
+      (league) =>
+        asString(league.turmaId).trim().toUpperCase() === cleanTurmaId &&
+        (!payload.category || isLeagueCategory(league, payload.category))
+    ) || null
+  );
+}
+
 export async function fetchLeagueUsers(options?: {
   maxResults?: number;
   forceRefresh?: boolean;
@@ -2159,6 +2292,7 @@ export async function fetchManagedLeagueSummaries(payload: {
   tenantId?: string | null;
   isPlatformMaster?: boolean;
   forceRefresh?: boolean;
+  category?: LeagueCategory | LeagueCategory[] | null;
 }): Promise<ManagedLeagueRecord[]> {
   const scopedTenantId = resolveLeagueTenantId(payload.tenantId);
   const forceRefresh = payload.forceRefresh ?? false;
@@ -2170,6 +2304,7 @@ export async function fetchManagedLeagueSummaries(payload: {
       maxResults: MAX_LEAGUE_RESULTS,
       forceRefresh,
       tenantId: scopedTenantId || undefined,
+      category: payload.category,
     });
     return leagues.map((league) => ({
       ...league,
@@ -2181,19 +2316,20 @@ export async function fetchManagedLeagueSummaries(payload: {
   if (!userId) return [];
 
   const supabase = getSupabaseClient();
-  let membershipQuery = supabase
-    .from("ligas_membros")
-    .select("ligaId,cargo")
-    .eq("userId", userId);
-  if (scopedTenantId) {
-    membershipQuery = membershipQuery.eq("tenant_id", scopedTenantId);
-  }
+  const managementRolesByLeagueId = new Map<string, string>();
 
   try {
+    let membershipQuery = supabase
+      .from("ligas_membros")
+      .select("ligaId,cargo")
+      .eq("userId", userId);
+    if (scopedTenantId) {
+      membershipQuery = membershipQuery.eq("tenant_id", scopedTenantId);
+    }
+
     const { data, error } = await membershipQuery;
     if (error) throw error;
 
-    const managementRolesByLeagueId = new Map<string, string>();
     (Array.isArray(data) ? data : []).forEach((entry) => {
       const row = asObject(entry);
       const leagueId = asString(row?.ligaId).trim();
@@ -2203,52 +2339,37 @@ export async function fetchManagedLeagueSummaries(payload: {
         managementRolesByLeagueId.set(leagueId, role);
       }
     });
-
-    if (!managementRolesByLeagueId.size) return [];
-
-    const leagues = await fetchLeagueSummaries({
-      orderByField: "nome",
-      orderDirection: "asc",
-      maxResults: MAX_LEAGUE_RESULTS,
-      forceRefresh,
-      tenantId: scopedTenantId || undefined,
-    });
-
-    return leagues.reduce<ManagedLeagueRecord[]>((acc, league) => {
-      const managementRole = managementRolesByLeagueId.get(league.id);
-      if (!managementRole) return acc;
-      acc.push({
-        ...league,
-        managementRole,
-      });
-      return acc;
-    }, []);
   } catch (error: unknown) {
     if (!isMissingRelationError(error)) {
-      throwSupabaseError(error as { message: string; code?: string | null; name?: string | null });
+      console.warn("Ligas: falha ao consultar ligas_membros. Aplicando fallback pelos membros da liga.", error);
     }
-
-    const leagues = await fetchLeagues({
-      orderByField: "nome",
-      orderDirection: "asc",
-      maxResults: MAX_LEAGUE_RESULTS,
-      forceRefresh,
-      tenantId: scopedTenantId || undefined,
-    });
-
-    return leagues.reduce<ManagedLeagueRecord[]>((acc, league) => {
-      const matchingMember = (league.membros || []).find(
-        (member) => member.id.trim() === userId && canManageLeagueRole(member.cargo)
-      );
-      if (!matchingMember) return acc;
-
-      acc.push({
-        ...league,
-        managementRole: resolveLeagueRoleLabel(matchingMember.cargo),
-      });
-      return acc;
-    }, []);
   }
+
+  const leagues = await fetchLeagues({
+    orderByField: "nome",
+    orderDirection: "asc",
+    maxResults: MAX_LEAGUE_RESULTS,
+    forceRefresh,
+    tenantId: scopedTenantId || undefined,
+    category: payload.category,
+  });
+
+  return leagues.reduce<ManagedLeagueRecord[]>((acc, league) => {
+    const embeddedMember = (league.membros || []).find(
+      (member) => member.id.trim() === userId && canManageLeagueRole(member.cargo)
+    );
+    const managementRole =
+      managementRolesByLeagueId.get(league.id) ||
+      (embeddedMember ? resolveLeagueRoleLabel(embeddedMember.cargo) : "");
+
+    if (!managementRole) return acc;
+
+    acc.push({
+      ...league,
+      managementRole,
+    });
+    return acc;
+  }, []);
 }
 
 export async function updateLeagueConfigPatch(payload: {

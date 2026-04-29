@@ -50,6 +50,7 @@ import {
   isPermissionError,
 } from "@/lib/backendErrors";
 import { getSportPresentation } from "@/lib/cadastroOptions";
+import { fetchLeagueByTurmaId, type LeagueRecord } from "@/lib/leaguesService";
 import { buildUserIdentityQrPayload } from "@/lib/qrPayloads";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
@@ -158,6 +159,7 @@ export default function AlbumTurmaPage() {
   const { tenantId: activeTenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
   const effectiveTenantId = activeTenantId || user?.tenant_id || "";
+  const cleanTenantSlug = typeof tenantSlug === "string" ? tenantSlug.trim() : "";
 
   const userUid = user?.uid;
   const [usuarios, setUsuarios] = useState<UserData[]>([]);
@@ -168,6 +170,7 @@ export default function AlbumTurmaPage() {
   const [turmaConfig, setTurmaConfig] = useState<AlbumCmsData | null>(null);
   const [albumUiConfig, setAlbumUiConfig] = useState<AlbumUiConfig | null>(null);
   const [cadastroConfig, setCadastroConfig] = useState<CadastroConfig>(getDefaultCadastroConfig);
+  const [turmaCommission, setTurmaCommission] = useState<LeagueRecord | null>(null);
   const [coverSrc, setCoverSrc] = useState<string>("");
   const [showMyQr, setShowMyQr] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
@@ -266,6 +269,34 @@ export default function AlbumTurmaPage() {
       mounted = false;
     };
   }, [authLoading, userUid, turma, addToast, effectiveTenantId]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadTurmaCommission = async () => {
+      try {
+        const record = await fetchLeagueByTurmaId({
+          turmaId: turma,
+          category: "comissao",
+          tenantId: effectiveTenantId || undefined,
+          forceRefresh: true,
+        });
+        if (mounted) {
+          setTurmaCommission(record);
+        }
+      } catch (error) {
+        console.error(error);
+        if (mounted) {
+          setTurmaCommission(null);
+        }
+      }
+    };
+
+    void loadTurmaCommission();
+    return () => {
+      mounted = false;
+    };
+  }, [effectiveTenantId, turma]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -613,6 +644,13 @@ export default function AlbumTurmaPage() {
   const turmaTitle = turmaConfig?.titulo?.trim() || turmaMeta.nome;
   const turmaSubtitle = turmaConfig?.subtitulo?.trim() || turmaMeta.mascote || "Album Oficial";
   const pageTitle = albumUiConfig?.titulo?.trim() || "Caca aos Bixos";
+  const turmaCommissionHref = turmaCommission?.id
+    ? cleanTenantSlug
+      ? withTenantSlug(cleanTenantSlug, `/comissoes/${turmaCommission.id}`)
+      : `/comissoes/${turmaCommission.id}`
+    : cleanTenantSlug
+      ? withTenantSlug(cleanTenantSlug, "/comissoes")
+      : "/comissoes";
 
   useEffect(() => {
     setCoverSrc(turmaCover);
@@ -637,6 +675,12 @@ export default function AlbumTurmaPage() {
             <h1 className="text-base sm:text-xl font-black uppercase italic truncate">{pageTitle}</h1>
           </div>
           <div className="flex items-center gap-2 ml-auto">
+            <Link
+              href={turmaCommissionHref}
+              className="rounded-2xl border border-brand/30 bg-brand-soft px-3 py-2 text-[11px] font-black uppercase tracking-wide text-brand-accent shadow-lg transition hover:opacity-90"
+            >
+              Comissão da turma
+            </Link>
             <button
               onClick={() => setShowMyQr(true)}
               className="bg-white text-black px-3 py-2 rounded-2xl shadow-lg active:scale-95 transition text-[11px] font-black uppercase tracking-wide inline-flex items-center gap-2"

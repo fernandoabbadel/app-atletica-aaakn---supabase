@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { 
-  Upload, Plus, Trash2, Save, LogOut, Lock,
+  Upload, Plus, Trash2, Save, LogOut,
   Image as ImageIcon, Layout, Edit3, Bell, 
   Calendar, UserPlus, Search, X, Users, ShoppingBag,
   Loader2, MessageCircle, LayoutGrid, MoveVertical, Wallet, Link2, ShieldCheck
@@ -647,12 +647,6 @@ export default function LigasAdminPageContent({
   // Dados da Liga Logada
   const [ligaData, setLigaData] = useState<LigaData | null>(null);
   const [sendNotification, setSendNotification] = useState(false);
-  const [changePasswordModal, setChangePasswordModal] = useState(false);
-  const [passwordForm, setPasswordForm] = useState({
-      currentPassword: "",
-      nextPassword: "",
-      confirmPassword: "",
-  });
 
   // --- MODAL DE BUSCA DE USUÁRIOS ---
   const [searchUserModal, setSearchUserModal] = useState(false);
@@ -811,6 +805,7 @@ export default function LigasAdminPageContent({
                   tenantId: tenantScopeId || undefined,
                   isPlatformMaster: isPlatformMasterUser,
                   forceRefresh: true,
+                  category: "liga",
               });
               if (!mounted) return;
               setLigasComAcesso(
@@ -1005,11 +1000,9 @@ export default function LigasAdminPageContent({
       }
       removeSessionStorageValue(lastSelectedStorageKey);
       setEventModal(false);
-      setChangePasswordModal(false);
       setEditingEventIdx(null);
       setCurrentEvent({});
       setNovoLote(createEmptyLoteDraft());
-      resetPasswordForm();
       setSendNotification(false);
       setSelectedLigaId("");
       setLigaData(null);
@@ -1018,13 +1011,6 @@ export default function LigasAdminPageContent({
       window.setTimeout(() => {
           isLoggingOutRef.current = false;
       }, 0);
-  };
-  const resetPasswordForm = () => {
-      setPasswordForm({
-          currentPassword: "",
-          nextPassword: "",
-          confirmPassword: "",
-      });
   };
   const classifyUploadError = (error: unknown): { message: string; type: "info" | "error" } => {
       const rawMessage = error instanceof Error ? error.message : String(error || "");
@@ -1604,6 +1590,7 @@ export default function LigasAdminPageContent({
       });
   };
 
+  /*
   const handleChangeLeaguePassword = async () => {
       if (!ligaData) return;
 
@@ -1651,6 +1638,9 @@ export default function LigasAdminPageContent({
           );
       });
   };
+
+  };
+  */
 
   const handleSaveMembersSection = async () => {
       if (!ligaData) return;
@@ -1814,6 +1804,14 @@ export default function LigasAdminPageContent({
           ? `/ligas/${encodeURIComponent(scopedLeagueId)}/eventos/lista/${encodeURIComponent(cleanEventId)}`
           : `/ligas/eventos/lista/${encodeURIComponent(cleanEventId)}`;
       router.push(tenantPath(path));
+  };
+  const openAdminEventWorkspace = (
+      eventId: string,
+      targetSection: "extrato" | "edicao" | "enquetes" | "checkins" | "recebedores" = "edicao"
+  ) => {
+      const cleanEventId = eventId.trim();
+      if (!cleanEventId) return;
+      router.push(tenantPath(`/admin/eventos/${encodeURIComponent(cleanEventId)}/${targetSection}`));
   };
   const savedMemberIdSet = new Set(savedMemberIds);
   const allLeagueMembers = ligaData?.membros || [];
@@ -2128,18 +2126,6 @@ export default function LigasAdminPageContent({
                       </div>
                       <input type="text" maxLength={PHONE_MAX_LENGTH} inputMode="tel" placeholder="WhatsApp para comprovantes" className="mt-2 w-full rounded-lg border border-zinc-700 bg-black p-3 text-xs text-white outline-none focus:border-emerald-400" value={normalizeLeaguePaymentDraft(ligaData.paymentConfig).whatsapp || ""} onChange={(event) => handleUpdateLeaguePayment("whatsapp", event.target.value)} />
                   </div>
-                  <div className="rounded-xl border border-blue-500/20 bg-blue-950/10 p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                          <div>
-                              <p className="text-[10px] font-bold uppercase text-blue-400">Senha de acesso da liga</p>
-                              <p className="mt-2 text-sm text-zinc-300">Troque a senha por aqui informando a senha atual e confirmando a nova senha.</p>
-                          </div>
-                          <button onClick={() => setChangePasswordModal(true)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-xs font-black uppercase text-blue-200 transition hover:bg-blue-500/20">
-                              <Lock size={14}/>
-                              Trocar senha
-                          </button>
-                      </div>
-                  </div>
                   <div className="bg-yellow-900/10 border border-yellow-500/20 p-4 rounded-xl">
                       <div className="flex justify-between items-center mb-2">
                           <label className="text-[10px] font-bold text-yellow-500 uppercase">Destaque da Semana</label>
@@ -2342,8 +2328,8 @@ export default function LigasAdminPageContent({
           {activeTab === 'events' && ligaData && (
               <div className="space-y-6">
                   <div className="flex justify-between items-center bg-zinc-900 p-4 rounded-xl border border-zinc-800">
-                      <div><h3 className="text-sm font-bold uppercase text-white">Eventos da Liga</h3><p className="text-[10px] text-zinc-500">Ao salvar no modal, o evento já sincroniza com a agenda pública e com a página de eventos.</p></div>
-                      <button onClick={() => handleOpenEventModal(null)} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition"><Calendar size={14}/> Criar Evento</button>
+                      <div><h3 className="text-sm font-bold uppercase text-white">Eventos da Liga</h3><p className="text-[10px] text-zinc-500">Crie o evento por aqui e, depois da sincronização, use o painel dedicado para extrato, lotes, ingressos, cupons, check-ins, enquetes e recebedores.</p></div>
+                      <button onClick={() => handleOpenEventModal(null)} className="brand-button-solid px-4 py-2 text-xs"><Calendar size={14}/> Criar Evento</button>
                   </div>
                   <div className="space-y-3">
                       {ligaData.eventos?.map((ev, idx) => {
@@ -2378,12 +2364,22 @@ export default function LigasAdminPageContent({
                                           }`}>
                                               {normalizeEventVisibility(ev.visibility) === "internal" ? "Evento interno" : "Aberto ao público"}
                                           </span>
-                                          <button onClick={() => handleOpenEventModal(idx)} className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1"><Edit3 size={10}/> Editar Evento</button>
+                                          <button
+                                              onClick={() =>
+                                                  ev.globalEventId
+                                                      ? openAdminEventWorkspace(ev.globalEventId || "", "edicao")
+                                                      : handleOpenEventModal(idx)
+                                              }
+                                              className="text-[10px] text-brand hover:underline flex items-center gap-1 font-bold"
+                                          >
+                                              <Edit3 size={10}/>
+                                              {ev.globalEventId ? "Abrir Painel" : "Editar Evento"}
+                                          </button>
                                           {ev.globalEventId && (
                                               <button onClick={() => openEventPresenceList(ev.globalEventId || "")} className="text-[10px] text-cyan-400 hover:underline flex items-center gap-1"><Users size={10}/> Lista Presença</button>
                                           )}
                                           {ev.globalEventId && (
-                                              <button onClick={() => setPollModal(ev.globalEventId || null)} className="text-[10px] text-purple-400 hover:underline flex items-center gap-1"><MessageCircle size={10}/> Gerenciar Enquetes</button>
+                                              <button onClick={() => openAdminEventWorkspace(ev.globalEventId || "", "enquetes")} className="text-[10px] text-brand-accent hover:underline flex items-center gap-1 font-bold"><MessageCircle size={10}/> Enquetes</button>
                                           )}
                                       </div>
                                   </div>
@@ -2424,44 +2420,6 @@ export default function LigasAdminPageContent({
           )}
 
           {/* --- MODAIS DE SUPORTE --- */}
-
-          {changePasswordModal && (
-              <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
-                  <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
-                      <div className="flex items-center justify-between gap-3">
-                          <div>
-                              <h3 className="text-lg font-black text-white">Trocar senha da liga</h3>
-                              <p className="mt-1 text-xs text-zinc-500">Confirme a senha atual e digite a nova senha duas vezes.</p>
-                          </div>
-                          <button onClick={() => { setChangePasswordModal(false); resetPasswordForm(); }} className="rounded-lg border border-zinc-700 bg-zinc-900 p-2 hover:bg-zinc-800">
-                              <X size={16} className="text-zinc-400"/>
-                          </button>
-                      </div>
-
-                      <div className="mt-5 space-y-3">
-                          <div className="space-y-1">
-                              <label className="text-[10px] font-bold uppercase text-zinc-500">Senha atual</label>
-                              <input type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))} className="w-full rounded-xl border border-zinc-700 bg-black px-4 py-3 text-sm text-white outline-none focus:border-emerald-500" placeholder="Digite a senha atual"/>
-                          </div>
-                          <div className="space-y-1">
-                              <label className="text-[10px] font-bold uppercase text-zinc-500">Nova senha</label>
-                              <input type="password" value={passwordForm.nextPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, nextPassword: e.target.value }))} className="w-full rounded-xl border border-zinc-700 bg-black px-4 py-3 text-sm text-white outline-none focus:border-emerald-500" placeholder="Digite a nova senha"/>
-                          </div>
-                          <div className="space-y-1">
-                              <label className="text-[10px] font-bold uppercase text-zinc-500">Confirmar nova senha</label>
-                              <input type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} className="w-full rounded-xl border border-zinc-700 bg-black px-4 py-3 text-sm text-white outline-none focus:border-emerald-500" placeholder="Digite a nova senha novamente"/>
-                          </div>
-                      </div>
-
-                      <div className="mt-6 flex gap-3">
-                          <button onClick={() => { setChangePasswordModal(false); resetPasswordForm(); }} className="flex-1 rounded-xl border border-zinc-700 px-4 py-3 text-xs font-black uppercase text-zinc-400 hover:bg-zinc-900">Cancelar</button>
-                          <button onClick={() => void handleChangeLeaguePassword()} disabled={loading} className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-black uppercase text-white hover:bg-emerald-500 disabled:opacity-50">
-                              {loading ? "Salvando..." : "Atualizar senha"}
-                          </button>
-                      </div>
-                  </div>
-              </div>
-          )}
 
           {/* MODAL SEARCH USER (Busca Local) */}
           {searchUserModal && (

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { 
   ArrowLeft, Plus, Edit, Edit3, Trash2, X, Search, 
   Shield, UploadCloud, Eye, EyeOff, 
@@ -34,6 +35,7 @@ import {
   LEAGUE_ROLE_OPTIONS,
   resolveLeagueRoleLabel,
 } from "../../../lib/leagueRoles";
+import { withTenantSlug } from "@/lib/tenantRouting";
 
 // --- TIPAGEM ---
 interface Member { 
@@ -82,9 +84,10 @@ const buildLeagueInternalPassword = (): string =>
   `liga-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 export default function AdminLigasPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const { addToast } = useToast();
-  const { tenantId } = useTenantTheme();
+  const { tenantId, tenantSlug } = useTenantTheme();
   const [ligas, setLigas] = useState<Liga[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -105,7 +108,7 @@ export default function AdminLigasPage() {
 
   // Form State Principal
   const [formData, setFormData] = useState<LigaFormState>({
-    nome: "", sigla: "", presidente: "", descricao: "", visaoGeral: "", senha: "", foto: "", visivel: false, ativa: false,
+    nome: "", sigla: "", presidente: "", descricao: "", visaoGeral: "", senha: buildLeagueInternalPassword(), foto: "", visivel: false, ativa: false,
     membros: [], eventos: [], perguntas: [], bizu: "", likes: 0, status: "pending_approval"
   });
 
@@ -115,6 +118,18 @@ export default function AdminLigasPage() {
   const [editingEventIdx, setEditingEventIdx] = useState<number | null>(null);
   const formLogoSrc = getLeagueLogoSrc(formData);
   const pendingApprovalCount = ligas.filter((liga) => isLeaguePendingApproval(liga.status)).length;
+  const scopedPath = useCallback(
+    (path: string) => (tenantSlug ? withTenantSlug(tenantSlug, path) : path),
+    [tenantSlug]
+  );
+  const openAdminEventWorkspace = useCallback(
+    (eventId: string, targetSection: "extrato" | "edicao" | "enquetes" = "edicao") => {
+      const cleanEventId = eventId.trim();
+      if (!cleanEventId) return;
+      router.push(scopedPath(`/admin/eventos/${encodeURIComponent(cleanEventId)}/${targetSection}`));
+    },
+    [router, scopedPath]
+  );
 
   const loadLigas = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -125,6 +140,7 @@ export default function AdminLigasPage() {
         maxResults: 40,
         forceRefresh,
         tenantId: tenantId || undefined,
+        category: "liga",
       });
       setLigas(data);
     } catch (error: unknown) {
@@ -618,7 +634,14 @@ export default function AdminLigasPage() {
                                             <span>{ev.local || "Local a definir"}</span>
                                         </div>
                                         <div className="flex gap-3 mt-3">
-                                            <button onClick={() => handleOpenEventModal(idx)} className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1 font-bold uppercase tracking-wide">
+                                            <button
+                                                onClick={() =>
+                                                    ev.globalEventId
+                                                        ? openAdminEventWorkspace(ev.globalEventId || "", "edicao")
+                                                        : handleOpenEventModal(idx)
+                                                }
+                                                className="text-[10px] text-brand hover:underline flex items-center gap-1 font-bold uppercase tracking-wide"
+                                            >
                                                 <Edit3 size={10}/> Editar Evento
                                             </button>
                                         </div>

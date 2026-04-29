@@ -691,6 +691,7 @@ export default function AdminEventosPage() {
     };
 
     try {
+        let createdEventId = "";
         if (isEditing && editingId) {
             await upsertAdminEvent({
                 eventId: editingId,
@@ -700,7 +701,7 @@ export default function AdminEventosPage() {
             });
             addToast("Evento atualizado!", "success");
         } else {
-            await upsertAdminEvent({
+            const createdEvent = await upsertAdminEvent({
                 data: {
                     ...eventoPayload,
                     stats: { confirmados: 0, talvez: 0, likes: 0 },
@@ -709,6 +710,7 @@ export default function AdminEventosPage() {
                 actorUserId: currentUser?.uid,
                 tenantId: activeTenantId || undefined,
             });
+            createdEventId = String(createdEvent?.id || "").trim();
             if (currentUser?.uid) {
                 await logActivity(
                     currentUser.uid,
@@ -723,6 +725,13 @@ export default function AdminEventosPage() {
 
         setShowModal(false);
         clearEventModalQuery();
+        if (createdEventId) {
+            const targetPath = tenantSlug
+                ? withTenantSlug(tenantSlug, `/admin/eventos/${encodeURIComponent(createdEventId)}/edicao`)
+                : `/admin/eventos/${encodeURIComponent(createdEventId)}/edicao`;
+            router.push(targetPath);
+            return;
+        }
         await loadEventos(true);
       } catch (error: unknown) {
           console.error(error);
@@ -1109,9 +1118,10 @@ export default function AdminEventosPage() {
                             ))}
                         </div>
                         <div className="flex gap-2 pt-3 border-t border-white/5 mt-auto">
-                              <Link href={`${adminEventosHref}/lista/${evento.id}`} className="flex-1 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-black transition flex justify-center items-center gap-2 text-xs font-bold uppercase"><Users size={14}/> Lista</Link>
-                            <button onClick={() => setShowPollModal(evento)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-purple-400 transition" title="Enquetes"><MessageCircle size={16}/></button>
-                            <button onClick={() => handleOpenEdit(evento)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition"><Edit size={16}/></button>
+                              <Link href={`${adminEventosHref}/${evento.id}/extrato`} className="flex-1 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-black transition flex justify-center items-center gap-2 text-xs font-bold uppercase"><Users size={14}/> Painel</Link>
+                            <Link href={`${adminEventosHref}/lista/${evento.id}`} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-emerald-300 transition" title="Lista antiga"><Users size={16}/></Link>
+                            <Link href={`${adminEventosHref}/${evento.id}/enquetes`} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-purple-400 transition" title="Enquetes"><MessageCircle size={16}/></Link>
+                            <Link href={`${adminEventosHref}/${evento.id}/edicao`} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition" title="Editar evento"><Edit size={16}/></Link>
                             <button onClick={() => toggleEventoStatus(evento)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-yellow-500 transition" title={evento.status === 'ativo' ? 'Encerrar' : 'Reativar'}>{evento.status === 'ativo' ? <Lock size={16}/> : <CheckCircle size={16}/>}</button>
                             <button onClick={() => handleDelete(evento.id)} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-red-500 transition"><Trash2 size={16}/></button>
                         </div>

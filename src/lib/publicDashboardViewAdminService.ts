@@ -29,7 +29,7 @@ const ADMIN_SIDEBAR_ASSIGNMENT_DOC_ID = "tenant_admin_sidebar_profile_assignment
 const APP_MODULES_DOC_ID = "app_modules";
 const DASHBOARD_HOME_BUNDLE_RPC = "dashboard_public_home_bundle";
 const DASHBOARD_LIGAS_SELECT =
-  "id,nome,sigla,foto,logoUrl,logo,descricao,bizu,ativa,visivel,status,likes,createdAt,updatedAt";
+  "id,nome,sigla,foto,logoUrl,logo,descricao,bizu,ativa,visivel,status,likes,createdAt,updatedAt,category";
 const DASHBOARD_LIGAS_LIMIT = 2;
 const DASHBOARD_LIGAS_QUERY_WINDOW = 6;
 
@@ -170,11 +170,15 @@ const normalizeLeague = (raw: unknown): DashboardLiga | null => {
     ativa: asBoolean(data.ativa, false),
     visivel: asBoolean(data.visivel, false),
     status: asString(data.status) || undefined,
+    category: asString(data.category || data.categoria || data.tipo) || undefined,
     likes: asInteger(data.likes, 0),
     createdAt: data.createdAt ?? null,
     updatedAt: data.updatedAt ?? null,
   };
 };
+
+const isPrimaryLeaguePreview = (league: DashboardLiga): boolean =>
+  (league.category || "liga").trim().toLowerCase() === "liga";
 
 const normalizeEvent = (raw: unknown): DashboardEvent | null => {
   const data = asObject(raw);
@@ -288,6 +292,7 @@ const fetchLeaguePreviewWithAdmin = async (
     rows
       .map((entry) => normalizeLeague(entry))
       .filter((entry): entry is DashboardLiga => entry !== null)
+      .filter((entry) => isPrimaryLeaguePreview(entry))
       .filter((entry) => entry.visivel === true),
     `${tenantId}:${new Date().toISOString().slice(0, 10)}:public-ligas`
   )
@@ -397,6 +402,7 @@ export async function fetchPublicDashboardViewWithAdmin(options?: {
     const rpcLigas = asArray(payload.ligas)
       .map((entry) => normalizeLeague(entry))
       .filter((entry): entry is DashboardLiga => entry !== null)
+      .filter((entry) => isPrimaryLeaguePreview(entry))
       .filter((entry) => entry.visivel === true);
 
     const response: PublicDashboardViewPayload = {

@@ -242,6 +242,7 @@ export default function LigasUscPage() {
           orderDirection: "desc",
           maxResults: 60,
           tenantId: tenantId || undefined,
+          category: "liga",
         });
         if (!mounted) return;
         setLeagues(data as League[]);

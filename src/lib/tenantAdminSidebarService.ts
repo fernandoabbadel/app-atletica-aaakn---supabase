@@ -140,6 +140,8 @@ export const TENANT_ADMIN_SIDEBAR_ITEMS: TenantAdminSidebarItemDefinition[] = [
   sidebarItem("gestao_produtos", "Comercial", "BI Loja", "/admin/gestao/loja", "Análise da loja oficial da atlética, sem misturar mini vendors, ligas ou outros players.", ["loja"]),
   sidebarItem("historico", "Conteúdo", "Histórico", "/admin/historico", "Página histórica e memória institucional da atlética."),
   sidebarItem("ligas", "Conteúdo", "Ligas", "/admin/ligas", "Gestão das ligas acadêmicas da tenant."),
+  sidebarItem("comissoes", "Conteúdo", "Comissões", "/admin/comissoes", "Gestão das comissões, identidade visual e sincronização por turma."),
+  sidebarItem("diretorio", "Conteúdo", "Diretório", "/admin/diretorio", "Gestão do diretório, identidade visual e acessos administrativos."),
   sidebarItem("arena_games", "Esportes", "Arena Games", "/admin/games", "Gestão da área gamer da atlética."),
   sidebarItem("gym", "Esportes", "Gym Champ", "/admin/gym", "Programas, ranking e painel esportivo da academia."),
   sidebarItem("sharkround", "Esportes", "BoardRound", "/admin/boardround", "Gestão do BoardRound e sua configuração."),

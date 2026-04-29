@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!scope.isPlatformMaster) {
+    if (!scope.isPlatformMaster && !scope.canManageTenant) {
       let membershipQuery = supabaseAdmin
         .from("ligas_membros")
         .select("cargo")

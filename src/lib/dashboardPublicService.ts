@@ -37,7 +37,7 @@ const DASHBOARD_MINI_VENDORS_SELECT = "id,status,category_visible,products_visib
 const DASHBOARD_PARTNERS_SELECT =
   "id,nome,imgLogo,imgCapa,categoria,tier,status";
 const DASHBOARD_LIGAS_SELECT =
-  "id,nome,sigla,foto,logoUrl,logo,descricao,bizu,ativa,visivel,status,likes,createdAt,updatedAt";
+  "id,nome,sigla,foto,logoUrl,logo,descricao,bizu,ativa,visivel,status,likes,createdAt,updatedAt,category";
 const DASHBOARD_POSTS_SELECT =
   "id,userId,userName,avatar,createdAt,texto,likes,tenant_id";
 const DASHBOARD_TREINOS_SELECT = "id,modalidade,imagem,dia,horario,createdAt,status,tenant_id";
@@ -958,11 +958,15 @@ const normalizeLiga = (id: string, raw: unknown): DashboardLiga | null => {
     ativa: asBoolean(data.ativa, false),
     visivel: asBoolean(data.visivel, false),
     status: asString(data.status) || undefined,
+    category: asString(data.category || data.categoria || data.tipo) || undefined,
     likes: asNumber(data.likes, 0),
     createdAt: data.createdAt ?? null,
     updatedAt: data.updatedAt ?? null,
   };
 };
+
+const isDashboardPrimaryLeague = (liga: DashboardLiga): boolean =>
+  (liga.category || "liga").trim().toLowerCase() === "liga";
 
 const normalizePost = (
   id: string,
@@ -1044,12 +1048,14 @@ async function fetchDashboardBundleViaRpc(options: {
   let ligasBase = asArray(payload.ligas)
     .map((entry) => normalizeLiga(asString(asObject(entry)?.id), entry))
     .filter((entry): entry is DashboardLiga => entry !== null)
+    .filter((liga) => isDashboardPrimaryLeague(liga))
     .filter((liga) => liga.visivel === true)
     .sort((left, right) => (right.likes || 0) - (left.likes || 0));
   if (!ligasBase.length && !cleanUserId) {
     ligasBase = (await fetchDashboardLeaguePreviewRows(cleanTenantId || undefined))
       .map((entry) => normalizeLiga(asString(asObject(entry)?.id), entry))
       .filter((entry): entry is DashboardLiga => entry !== null)
+      .filter((liga) => isDashboardPrimaryLeague(liga))
       .filter((liga) => liga.visivel === true)
       .sort((left, right) => (right.likes || 0) - (left.likes || 0));
   }
@@ -1237,6 +1243,7 @@ async function fetchDashboardLegacyFallbackBundle(options: {
   const ligasBase = ligaRows
     .map((row) => normalizeLiga(asString(row.id), row))
     .filter((row): row is DashboardLiga => row !== null)
+    .filter((liga) => isDashboardPrimaryLeague(liga))
     .filter((liga) => liga.visivel === true)
     .sort((left, right) => (right.likes || 0) - (left.likes || 0));
   const ligas =
@@ -1410,6 +1417,7 @@ export interface DashboardLiga {
   ativa?: boolean;
   visivel?: boolean;
   status?: string;
+  category?: string;
   likes: number;
   createdAt?: unknown;
   updatedAt?: unknown;

@@ -42,9 +42,9 @@ export const EVENT_POLL_QUESTION_MAX_CHARS = 280;
 export const EVENT_POLL_OPTION_MAX_CHARS = 60;
 export const EVENT_POLL_OPTION_MAX_COUNT = 20;
 const EVENTOS_FEED_SELECT_COLUMNS =
-  "id,titulo,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,status,sale_status,isLowStock,stats,lotes,tenant_id,createdAt,updatedAt";
+  "id,titulo,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,status,sale_status,isLowStock,stats,lotes,data_extra,tenant_id,createdAt,updatedAt";
 const EVENTOS_SELECT_COLUMNS =
-  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,isLowStock,stats,lotes,tenant_id,createdAt,updatedAt";
+  "id,titulo,descricao,data,hora,local,imagem,imagePositionY,tipo,categoria,destaque,mapsUrl,status,sale_status,payment_config,pixChave,pixBanco,pixTitular,contatoComprovante,isLowStock,stats,lotes,data_extra,tenant_id,createdAt,updatedAt";
 const EVENTOS_RSVPS_SELECT_COLUMNS =
   "id,eventoId,userId,status,userName,userAvatar,userTurma,timestamp";
 const EVENTOS_COMENTARIOS_SELECT_COLUMNS =
@@ -264,6 +264,7 @@ const normalizeEventRow = (row: Row): Row => {
     ),
     sale_status: normalizeAvailabilityStatus(normalized.sale_status, "ativo"),
     payment_config: normalizePaymentConfig(normalized.payment_config),
+    data_extra: asObject(normalized.data_extra) ?? {},
     lotes: Array.isArray(normalized.lotes)
       ? normalized.lotes.map((entry) => {
           const lote = asObject(entry) ?? {};
@@ -1008,6 +1009,15 @@ export async function fetchAdminEventPolls(options: {
   const hydratedRows = await hydrateEventPollRows(rows, { tenantId: scopedTenantId });
   setCache(adminPollsCache, cacheKey, hydratedRows);
   return hydratedRows;
+}
+
+export async function fetchAdminEventById(options: {
+  eventId: string;
+  tenantId?: string | null;
+}): Promise<Row | null> {
+  const eventId = options.eventId.trim();
+  if (!eventId) return null;
+  return selectEventById(eventId, resolveEventsTenantId(options.tenantId) || undefined);
 }
 
 export interface EventDetailsBundle {

@@ -29,6 +29,7 @@ import { logActivity } from "@/lib/logger";
 import {
   fetchUserLeagueInteractionState,
   fetchLeagueById,
+  isLeagueCategory,
   resolveFollowedLeagueIdsFromUserExtra,
   resolveLikedLeagueIdsFromUserExtra,
   submitLeagueMemberRequest,
@@ -40,7 +41,6 @@ import { fetchStoreProductsBySeller } from "@/lib/storePublicService";
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import {
-  canManageLeagueRole,
   DEFAULT_LEAGUE_ROLE,
   LEAGUE_ROLE_OPTIONS,
   resolveLeagueRoleLabel,
@@ -50,7 +50,6 @@ import {
   DEFAULT_LIGAS_USC_UI_CONFIG,
   fetchLigasUscUiConfig,
 } from "@/lib/ligasUscUiService";
-import { isPlatformMaster } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 
 type LeaguePublicTab = "overview" | "membros" | "agenda" | "loja";
@@ -185,7 +184,7 @@ export function LeaguePublicDetailClient({
           forceRefresh: true,
           tenantId: tenantId || undefined,
         });
-        if (mounted) setLeague(nextLeague);
+        if (mounted) setLeague(nextLeague && isLeagueCategory(nextLeague, "liga") ? nextLeague : null);
       } catch (error: unknown) {
         console.error(error);
         if (mounted) setLeague(null);
@@ -336,13 +335,6 @@ export function LeaguePublicDetailClient({
     [league?.links]
   );
   const paymentInfo = league?.paymentConfig || null;
-  const canManageCurrentLeague = useMemo(() => {
-    if (!user?.uid || !league) return false;
-    if (isPlatformMaster(user)) return true;
-    return sortedMembers.some(
-      (member) => member.id.trim() === user.uid.trim() && canManageLeagueRole(member.cargo)
-    );
-  }, [league, sortedMembers, user]);
 
   useEffect(() => {
     if (!currentMemberRequest) return;
@@ -501,7 +493,7 @@ export function LeaguePublicDetailClient({
   const membersHref = tenantPath(`/ligas_usc/${league.id}/membros`);
   const agendaHref = tenantPath(`/ligas_usc/${league.id}/agenda`);
   const storeTabHref = tenantPath(`/ligas_usc/${league.id}/loja`);
-  const managementHref = tenantPath(`/ligas/${league.id}`);
+  const managementHref = tenantPath("/ligas");
   const storeHref = tenantPath("/loja");
   const eventsFeedHref = tenantPath("/eventos");
   const imageSrc = getLeagueImage(league);
@@ -523,7 +515,6 @@ export function LeaguePublicDetailClient({
                 Voltar
               </Link>
               <div className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">
-                {canManageCurrentLeague ? (
                   <Link
                     href={managementHref}
                     className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/12 text-emerald-200 transition hover:bg-emerald-500/22"
@@ -532,7 +523,6 @@ export function LeaguePublicDetailClient({
                   >
                     <Settings2 size={16} />
                   </Link>
-                ) : null}
                 <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{uiConfig.rotuloCard || DEFAULT_LIGAS_USC_UI_CONFIG.rotuloCard}</span>
                 <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-cyan-200">{league.sigla || league.nome}</span>
               </div>

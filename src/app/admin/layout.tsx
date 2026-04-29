@@ -206,6 +206,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { group: "Esportes", name: "Gym Champ", path: "/admin/gym", icon: <Dumbbell size={18} />, badge: "Em Breve" },
     { group: "Conteúdo", name: "Histórico", path: "/admin/historico", icon: <History size={18} /> },
     { group: "Conteúdo", name: "Ligas", path: "/admin/ligas", icon: <Users size={18} /> },
+    { group: "Conteúdo", name: "Comissões", path: "/admin/comissoes", icon: <Users size={18} /> },
+    { group: "Conteúdo", name: "Diretório", path: "/admin/diretorio", icon: <BookOpen size={18} /> },
     {
       group: "Plataforma",
       name: "Painel Master",

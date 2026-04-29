@@ -27,6 +27,7 @@ import {
   isTenantAppModuleVisible,
   type TenantAppModuleKey,
 } from "@/lib/tenantAppModulesService";
+import { fetchCollectiveAreaUiConfig } from "@/lib/collectiveAreaUiService";
 import {
   fetchBoardroundAppConfig,
   getBoardroundDisplayName,
@@ -176,6 +177,10 @@ export default function BottomNavbar() {
   const canAccessBannedAppeals = canAccess("/admin/denuncias/banidos");
   const [hasApprovedMiniVendor, setHasApprovedMiniVendor] = useState(false);
   const [boardroundDisplayName, setBoardroundDisplayName] = useState("BoardRound");
+  const [collectiveLabels, setCollectiveLabels] = useState({
+    comissoes: "Comissões",
+    diretorio: "Diretório",
+  });
   const isHiddenRoute =
     ["/", "/login", "/cadastro", "/banned", "/aguardando-aprovacao", "/visitante", "/convite-necessario"].includes(normalizedPathname) ||
     normalizedPathname.startsWith("/empresa") ||
@@ -291,6 +296,52 @@ export default function BottomNavbar() {
       mounted = false;
     };
   }, [activeTenantId, isHiddenRoute]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCollectiveLabels = async () => {
+      if (isHiddenRoute) {
+        if (mounted) {
+          setCollectiveLabels({
+            comissoes: "Comissões",
+            diretorio: "Diretório",
+          });
+        }
+        return;
+      }
+
+      try {
+        const [comissoesConfig, diretorioConfig] = await Promise.all([
+          fetchCollectiveAreaUiConfig({
+            area: "comissoes",
+            tenantId: activeTenantId || user?.tenant_id || undefined,
+          }),
+          fetchCollectiveAreaUiConfig({
+            area: "diretorio",
+            tenantId: activeTenantId || user?.tenant_id || undefined,
+          }),
+        ]);
+
+        if (!mounted) return;
+        setCollectiveLabels({
+          comissoes: comissoesConfig.sidebarLabel || "Comissões",
+          diretorio: diretorioConfig.sidebarLabel || "Diretório",
+        });
+      } catch {
+        if (!mounted) return;
+        setCollectiveLabels({
+          comissoes: "Comissões",
+          diretorio: "Diretório",
+        });
+      }
+    };
+
+    void loadCollectiveLabels();
+    return () => {
+      mounted = false;
+    };
+  }, [activeTenantId, isHiddenRoute, user?.tenant_id]);
 
   const loadNotifications = useCallback(async (forceRefresh = false) => {
       if (!canLoadNotifications) {
@@ -482,6 +533,8 @@ export default function BottomNavbar() {
 
   const sidebarItemsInfoBase: NavItemProps[] = [
       { id: 'ligas', label: 'Área das Ligas', icon: <Users size={18} />, path: '/ligas_usc', moduleKey: 'ligas' },
+      { id: 'comissoes', label: collectiveLabels.comissoes, icon: <Users size={18} />, path: '/comissoes', moduleKey: 'comissoes' },
+      { id: 'diretorio', label: collectiveLabels.diretorio, icon: <GraduationCap size={18} />, path: '/diretorio', moduleKey: 'diretorio' },
       { id: 'avaliacao', label: 'Avaliação Profs', icon: <GraduationCap size={18} />, path: '/avaliacao', isComingSoon: true, moduleKey: 'avaliacao' },
       { id: 'conquistas', label: 'Conquistas', icon: <Medal size={18} />, path: '/conquistas', isComingSoon: true, moduleKey: 'conquistas' },
       { id: 'fidelidade', label: 'Fidelidade', icon: <Star size={18} />, path: '/fidelidade', isComingSoon: true, moduleKey: 'fidelidade' },

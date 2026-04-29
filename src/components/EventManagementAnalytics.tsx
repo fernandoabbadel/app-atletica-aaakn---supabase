@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -35,6 +35,11 @@ type EventManagementAnalyticsProps = {
   events: Row[];
   tickets: Row[];
   allLabel?: string;
+  hideEventSelector?: boolean;
+  initialEventId?: string;
+  headerLabel?: string;
+  headerTitle?: string;
+  headerDescription?: string;
 };
 
 type MetricRow = {
@@ -58,6 +63,11 @@ type MutableMetric = {
   lastPurchase?: number;
 };
 
+type AnalyticsInfo = {
+  title: string;
+  description: string;
+};
+
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
@@ -77,7 +87,7 @@ const percentFormatter = new Intl.NumberFormat("pt-BR", {
   maximumFractionDigits: 1,
 });
 
-const PERIODS = ["Madrugada", "Manha", "Tarde", "Noite"];
+const PERIODS = ["Madrugada", "Manhã", "Tarde", "Noite"];
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"];
 const COLORS = ["#12d18e", "#38bdf8", "#facc15", "#f97316", "#f472b6", "#a78bfa", "#fb7185", "#22c55e"];
 const chartTooltipStyle = {
@@ -323,7 +333,7 @@ function periodFromDate(date: Date | null) {
   }
   const hour = date.getHours();
   if (hour < 6) return "Madrugada";
-  if (hour < 12) return "Manha";
+  if (hour < 12) return "Manhã";
   if (hour < 18) return "Tarde";
   return "Noite";
 }
@@ -477,20 +487,37 @@ function KpiCard({
   value,
   hint,
   icon,
+  info,
+  onInfoClick,
 }: {
   label: string;
   value: string;
   hint: string;
   icon: ReactNode;
+  info?: AnalyticsInfo;
+  onInfoClick?: (info: AnalyticsInfo) => void;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.18)]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">{label}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">{label}</p>
+            {info && onInfoClick ? (
+              <button
+                type="button"
+                onClick={() => onInfoClick(info)}
+                className="text-sm leading-none text-brand-accent transition hover:text-white"
+                aria-label={`Explicar ${label}`}
+                title={`O que significa ${label}`}
+              >
+                ℹ️
+              </button>
+            ) : null}
+          </div>
           <strong className="mt-2 block text-2xl font-black text-white">{value}</strong>
         </div>
-        <span className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-2 text-emerald-200">{icon}</span>
+        <span className="rounded-xl border border-brand/20 bg-brand-soft p-2 text-brand-accent">{icon}</span>
       </div>
       <p className="mt-2 text-xs font-semibold text-white/50">{hint}</p>
     </div>
@@ -504,18 +531,43 @@ function KpiGrid({ children }: { children: ReactNode }) {
 function SectionTitle({ label, title, description }: { label: string; title: string; description: string }) {
   return (
     <div className="space-y-1">
-      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">{label}</p>
+      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-brand-accent">{label}</p>
       <h3 className="text-xl font-black uppercase tracking-tight text-white">{title}</h3>
       <p className="max-w-4xl text-sm font-semibold text-white/55">{description}</p>
     </div>
   );
 }
 
-function ChartPanel({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
+function ChartPanel({
+  title,
+  subtitle,
+  children,
+  info,
+  onInfoClick,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  info?: AnalyticsInfo;
+  onInfoClick?: (info: AnalyticsInfo) => void;
+}) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
       <div className="mb-4">
-        <h4 className="text-sm font-black uppercase tracking-[0.16em] text-white">{title}</h4>
+        <div className="flex items-center gap-2">
+          <h4 className="text-sm font-black uppercase tracking-[0.16em] text-white">{title}</h4>
+          {info && onInfoClick ? (
+            <button
+              type="button"
+              onClick={() => onInfoClick(info)}
+              className="text-sm leading-none text-brand-accent transition hover:text-white"
+              aria-label={`Explicar ${title}`}
+              title={`O que significa ${title}`}
+            >
+              ℹ️
+            </button>
+          ) : null}
+        </div>
         {subtitle ? <p className="mt-1 text-xs font-semibold text-white/45">{subtitle}</p> : null}
       </div>
       <div className="h-72">{children}</div>
@@ -616,15 +668,32 @@ function DetailTable({
   title,
   rows,
   columns,
+  info,
+  onInfoClick,
 }: {
   title: string;
   rows: MetricRow[];
   columns: Array<{ key: keyof MetricRow; label: string; format?: "currency" | "percent" | "decimal" | "number" }>;
+  info?: AnalyticsInfo;
+  onInfoClick?: (info: AnalyticsInfo) => void;
 }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035]">
       <div className="border-b border-white/10 px-4 py-3">
-        <h4 className="text-sm font-black uppercase tracking-[0.16em] text-white">{title}</h4>
+        <div className="flex items-center gap-2">
+          <h4 className="text-sm font-black uppercase tracking-[0.16em] text-white">{title}</h4>
+          {info && onInfoClick ? (
+            <button
+              type="button"
+              onClick={() => onInfoClick(info)}
+              className="text-sm leading-none text-brand-accent transition hover:text-white"
+              aria-label={`Explicar ${title}`}
+              title={`O que significa ${title}`}
+            >
+              ℹ️
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full text-left text-sm">
@@ -675,8 +744,22 @@ function DetailTable({
   );
 }
 
-export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os eventos" }: EventManagementAnalyticsProps) {
-  const [eventId, setEventId] = useState("all");
+export function EventManagementAnalytics({
+  events,
+  tickets,
+  allLabel = "Todos os eventos",
+  hideEventSelector = false,
+  initialEventId = "all",
+  headerLabel = "Gestão de eventos",
+  headerTitle = "Painel de decisão",
+  headerDescription = "Comercial, aprovação, portaria e estratégia no mesmo recorte para mostrar onde vende, onde trava e o que vale repetir.",
+}: EventManagementAnalyticsProps) {
+  const [eventId, setEventId] = useState(initialEventId || "all");
+  const [openInfo, setOpenInfo] = useState<AnalyticsInfo | null>(null);
+
+  useEffect(() => {
+    setEventId(initialEventId || "all");
+  }, [initialEventId]);
 
   const eventOptions = useMemo(
     () =>
@@ -967,31 +1050,158 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
     };
   }, [eventId, events, tickets]);
 
+  const analyticsInfo = {
+    receitaBruta: {
+      title: "Receita bruta",
+      description: "Soma de todo o valor aprovado neste recorte. Ela mostra o faturamento bruto do evento antes de custos, taxas extras ou qualquer análise de margem.",
+    },
+    valorMedioExato: {
+      title: "Valor médio exato",
+      description: "É a receita bruta dividida pela quantidade de ingressos aprovados. Ajuda a entender quanto cada ingresso está gerando, em média.",
+    },
+    taxaAprovacao: {
+      title: "Taxa de aprovação",
+      description: "Percentual de pedidos com comprovante enviado que realmente foram aprovados. Quanto menor essa taxa, maior tende a ser o atrito no financeiro.",
+    },
+    cliqueParaPedido: {
+      title: "Clique para pedido",
+      description: "Compara cliques em comprar com pedidos efetivamente criados. Se cair demais, o problema costuma estar no checkout, no interesse ou na comunicação da oferta.",
+    },
+    funilCompleto: {
+      title: "Funil completo do evento",
+      description: "Mostra a jornada da venda do começo ao fim: publicação, clique, pedido, envio de comprovante, aprovação, emissão e entrada validada.",
+    },
+    lotesPorRetorno: {
+      title: "Lotes por retorno",
+      description: "Compara cada lote por quantidade vendida e receita gerada. É útil para identificar quais faixas de preço sustentam melhor o evento.",
+    },
+    turmasPorVenda: {
+      title: "Turmas por venda",
+      description: "Mostra quais turmas mais compram, quanto geram de receita e qual é o ticket médio de cada grupo.",
+    },
+    alunoNaoAluno: {
+      title: "Aluno x não aluno",
+      description: "Faz uma leitura do mix de público a partir do nome dos lotes para mostrar se o evento está vendendo mais para alunos, convidados ou público externo.",
+    },
+    comprasDiaSemana: {
+      title: "Compras por dia da semana",
+      description: "Ajuda a identificar os melhores dias para abrir vendas, reforçar divulgação e lançar viradas de lote.",
+    },
+    comprasPeriodo: {
+      title: "Compras por período",
+      description: "Mostra em quais períodos do dia as compras acontecem com mais força: madrugada, manhã, tarde ou noite.",
+    },
+    detalheLotes: {
+      title: "Detalhe de lotes",
+      description: "Tabela resumida com volume, receita, ticket médio e velocidade de venda de cada lote para facilitar comparação direta.",
+    },
+    prazoMedio: {
+      title: "Prazo médio",
+      description: "Tempo médio entre o pedido e a aprovação. É um indicador operacional importante para acompanhar agilidade no financeiro.",
+    },
+    taxaReprovacao: {
+      title: "Taxa de reprovação",
+      description: "Percentual de comprovantes recusados no recorte. Uma taxa alta costuma sinalizar problema na comunicação de pagamento ou na conferência manual.",
+    },
+    dependenciaTop1: {
+      title: "Dependência top 1",
+      description: "Mostra quanto das aprovações ficou concentrado em um único aprovador. Se a dependência estiver alta, existe risco operacional de gargalo.",
+    },
+    filaAtraso: {
+      title: "Fila e atraso",
+      description: "Soma pedidos ainda pendentes com aprovações que passaram de 24 horas. Serve para mostrar carga represada no financeiro.",
+    },
+    aprovacoesAprovador: {
+      title: "Aprovações por aprovador",
+      description: "Exibe volume e receita processada por cada aprovador, ajudando a distribuir melhor a operação.",
+    },
+    prazoAprovador: {
+      title: "Prazo por aprovador",
+      description: "Compara o tempo médio de aprovação entre os responsáveis para identificar onde o fluxo está mais lento.",
+    },
+    taxaPresenca: {
+      title: "Taxa de presença",
+      description: "Percentual de ingressos aprovados que realmente viraram leitura de QR na entrada. Mostra conversão real de compra em presença.",
+    },
+    taxaAusencia: {
+      title: "Taxa de ausência",
+      description: "Percentual de aprovados que não geraram entrada validada. Ajuda a medir no-show e desperdício de capacidade.",
+    },
+    receitaPorPresente: {
+      title: "Receita por presente",
+      description: "Divide a receita pelas entradas realmente validadas. É um jeito rápido de medir quanto cada presença trouxe de retorno financeiro.",
+    },
+    leituraDuplicadaInvalida: {
+      title: "Leitura duplicada ou inválida",
+      description: "Soma tentativas repetidas ou inválidas no QR code. É importante para enxergar ruído na portaria e possíveis falhas de operação.",
+    },
+    leiturasHorario: {
+      title: "Leituras por horário",
+      description: "Mostra os horários de maior pico de entrada. Serve para dimensionar equipe, filas e comunicação de portaria.",
+    },
+    ausenciaTurma: {
+      title: "Ausência por turma",
+      description: "Aponta quais turmas mais aprovaram ingresso, mas menos compareceram na prática.",
+    },
+    ausenciaLote: {
+      title: "Ausência por lote",
+      description: "Mostra os tipos de ingresso com maior taxa de atrito entre aprovação e presença real.",
+    },
+    compradoresUnicos: {
+      title: "Compradores únicos",
+      description: "Quantidade de pessoas diferentes que compraram no recorte. Ajuda a separar volume real de comprador de compras repetidas.",
+    },
+    previsaoFinal: {
+      title: "Previsão final",
+      description: "Estimativa simples baseada no ritmo atual de vendas até a data do evento. É uma projeção operacional, não uma garantia.",
+    },
+    resultadoEstimado: {
+      title: "Resultado estimado",
+      description: "Mostra a receita atual do recorte. Como os custos ainda não entram aqui, este valor não representa lucro líquido.",
+    },
+    statusRecorte: {
+      title: "Status do recorte",
+      description: "Informa se o evento está futuro, em andamento ou encerrado, para contextualizar as demais análises.",
+    },
+    antecedenciaCompra: {
+      title: "Antecedência da compra",
+      description: "Distribui as compras por distância em dias até o evento. Ajuda a entender se o público compra cedo ou deixa para cima da hora.",
+    },
+    novosRecorrentes: {
+      title: "Novos x recorrentes",
+      description: "Compara primeira compra com compras repetidas para mostrar o quanto o evento está retendo público.",
+    },
+    repetirOuAjustar: {
+      title: "Eventos para repetir ou ajustar",
+      description: "Resume desempenho por evento para indicar quais formatos merecem repetição, reforço comercial ou ajuste operacional.",
+    },
+  };
+
   return (
     <section className="space-y-5">
       <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">Gestão de eventos</p>
-          <h2 className="text-2xl font-black uppercase tracking-tight text-white">Painel de decisão</h2>
-          <p className="mt-1 max-w-3xl text-sm font-semibold text-white/55">
-            Comercial, aprovação, portaria e estratégia no mesmo recorte para mostrar onde vende, onde trava e o que vale repetir.
-          </p>
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-brand-accent">{headerLabel}</p>
+          <h2 className="text-2xl font-black uppercase tracking-tight text-white">{headerTitle}</h2>
+          <p className="mt-1 max-w-3xl text-sm font-semibold text-white/55">{headerDescription}</p>
         </div>
-        <label className="flex flex-col gap-1 text-xs font-black uppercase tracking-[0.18em] text-white/45">
-          Evento
-          <select
-            value={eventId}
-            onChange={(event) => setEventId(event.target.value)}
-            className="min-w-[240px] rounded-xl border border-white/10 bg-[#090a0d] px-3 py-2 text-sm font-black normal-case tracking-normal text-white outline-none focus:border-emerald-400"
-          >
-            <option value="all">{allLabel}</option>
-            {eventOptions.map((event) => (
-              <option key={event.id} value={event.id}>
-                {event.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!hideEventSelector ? (
+          <label className="flex flex-col gap-1 text-xs font-black uppercase tracking-[0.18em] text-white/45">
+            Evento
+            <select
+              value={eventId}
+              onChange={(event) => setEventId(event.target.value)}
+              className="min-w-[240px] rounded-xl border border-white/10 bg-[#090a0d] px-3 py-2 text-sm font-black normal-case tracking-normal text-white outline-none focus:border-brand"
+            >
+              <option value="all">{allLabel}</option>
+              {eventOptions.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {event.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
 
       <SectionTitle
@@ -1000,28 +1210,28 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
         description="Mostra da publicação até a entrada validada, com receita, valor médio exato, lotes, turma, dia e período."
       />
       <KpiGrid>
-        <KpiCard label="Receita bruta" value={formatCurrency(analytics.revenue)} hint={`${formatNumber(analytics.approvedQuantity)} ingressos aprovados`} icon={<DollarSign className="h-4 w-4" />} />
-        <KpiCard label="Valor médio exato" value={formatCurrency(analytics.avgTicket)} hint="receita / ingressos aprovados" icon={<Ticket className="h-4 w-4" />} />
-        <KpiCard label="Taxa de aprovação" value={formatPercent(analytics.approvalRate)} hint={`${formatNumber(analytics.approvedOrders)} aprovados de ${formatNumber(analytics.paymentSent)} enviados`} icon={<CheckCircle2 className="h-4 w-4" />} />
-        <KpiCard label="Clique para pedido" value={formatPercent(safeDivide(analytics.createdOrders, analytics.buyClicks) * 100)} hint="pedidos criados / cliques em comprar" icon={<Target className="h-4 w-4" />} />
+        <KpiCard label="Receita bruta" value={formatCurrency(analytics.revenue)} hint={`${formatNumber(analytics.approvedQuantity)} ingressos aprovados`} icon={<DollarSign className="h-4 w-4" />} info={analyticsInfo.receitaBruta} onInfoClick={setOpenInfo} />
+        <KpiCard label="Valor médio exato" value={formatCurrency(analytics.avgTicket)} hint="Receita / ingressos aprovados" icon={<Ticket className="h-4 w-4" />} info={analyticsInfo.valorMedioExato} onInfoClick={setOpenInfo} />
+        <KpiCard label="Taxa de aprovação" value={formatPercent(analytics.approvalRate)} hint={`${formatNumber(analytics.approvedOrders)} aprovados de ${formatNumber(analytics.paymentSent)} enviados`} icon={<CheckCircle2 className="h-4 w-4" />} info={analyticsInfo.taxaAprovacao} onInfoClick={setOpenInfo} />
+        <KpiCard label="Clique para pedido" value={formatPercent(safeDivide(analytics.createdOrders, analytics.buyClicks) * 100)} hint="Pedidos criados / cliques em comprar" icon={<Target className="h-4 w-4" />} info={analyticsInfo.cliqueParaPedido} onInfoClick={setOpenInfo} />
       </KpiGrid>
       <div className="grid gap-4 xl:grid-cols-2">
-        <ChartPanel title="Funil completo do evento" subtitle="Publicado -> clique -> pedido -> comprovante -> aprovação -> ingresso -> entrada">
+        <ChartPanel title="Funil completo do evento" subtitle="Publicado -> clique -> pedido -> comprovante -> aprovação -> ingresso -> entrada" info={analyticsInfo.funilCompleto} onInfoClick={setOpenInfo}>
           <Bars data={analytics.funnelRows} />
         </ChartPanel>
-        <ChartPanel title="Lotes por retorno" subtitle="Quantidade e receita por lote">
+        <ChartPanel title="Lotes por retorno" subtitle="Quantidade e receita por lote" info={analyticsInfo.lotesPorRetorno} onInfoClick={setOpenInfo}>
           <BarsDual data={analytics.lotRows} />
         </ChartPanel>
-        <ChartPanel title="Turmas por venda" subtitle="Quem compra, receita e valor médio">
+        <ChartPanel title="Turmas por venda" subtitle="Quem compra, receita e valor médio" info={analyticsInfo.turmasPorVenda} onInfoClick={setOpenInfo}>
           <BarsDual data={analytics.classRows} />
         </ChartPanel>
-        <ChartPanel title="Aluno x não aluno" subtitle="Mix de público inferido pelo nome do lote">
+        <ChartPanel title="Aluno x não aluno" subtitle="Mix de público inferido pelo nome do lote" info={analyticsInfo.alunoNaoAluno} onInfoClick={setOpenInfo}>
           <PieMetric data={analytics.audienceRows} />
         </ChartPanel>
-        <ChartPanel title="Compras por dia da semana" subtitle="Quantidade, receita e valor médio">
+        <ChartPanel title="Compras por dia da semana" subtitle="Quantidade, receita e valor médio" info={analyticsInfo.comprasDiaSemana} onInfoClick={setOpenInfo}>
           <BarsDual data={analytics.weekdayRows} />
         </ChartPanel>
-        <ChartPanel title="Compras por periodo" subtitle="Manha, tarde, noite e madrugada">
+        <ChartPanel title="Compras por período" subtitle="Manhã, tarde, noite e madrugada" info={analyticsInfo.comprasPeriodo} onInfoClick={setOpenInfo}>
           <BarsDual data={analytics.periodRows} />
         </ChartPanel>
       </div>
@@ -1035,6 +1245,8 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
           { key: "average", label: "Ticket", format: "currency" },
           { key: "secondary", label: "Venda/vel.", format: "decimal" },
         ]}
+        info={analyticsInfo.detalheLotes}
+        onInfoClick={setOpenInfo}
       />
 
       <SectionTitle
@@ -1043,16 +1255,16 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
         description="Controla prazo médio, reprovação, fila pendente e dependência do aprovador principal para achar gargalos antes do evento."
       />
       <KpiGrid>
-        <KpiCard label="Prazo médio" value={`${formatDecimal(analytics.avgSlaHours)}h`} hint="tempo entre pedido e aprovação" icon={<Clock3 className="h-4 w-4" />} />
-        <KpiCard label="Taxa de reprovação" value={formatPercent(analytics.rejectionRate)} hint={`${formatNumber(analytics.rejectedTickets.length)} comprovantes recusados`} icon={<AlertTriangle className="h-4 w-4" />} />
-        <KpiCard label="Dependencia top 1" value={formatPercent(analytics.topApproverDependency)} hint={`top 3 concentram ${formatPercent(analytics.top3ApproverDependency)}`} icon={<Users className="h-4 w-4" />} />
-        <KpiCard label="Fila/atraso" value={formatNumber(analytics.pendingTickets.length + analytics.slowApprovals)} hint={`${formatNumber(analytics.pendingTickets.length)} pendentes, ${formatNumber(analytics.slowApprovals)} acima de 24h`} icon={<TrendingUp className="h-4 w-4" />} />
+        <KpiCard label="Prazo médio" value={`${formatDecimal(analytics.avgSlaHours)}h`} hint="Tempo entre pedido e aprovação" icon={<Clock3 className="h-4 w-4" />} info={analyticsInfo.prazoMedio} onInfoClick={setOpenInfo} />
+        <KpiCard label="Taxa de reprovação" value={formatPercent(analytics.rejectionRate)} hint={`${formatNumber(analytics.rejectedTickets.length)} comprovantes recusados`} icon={<AlertTriangle className="h-4 w-4" />} info={analyticsInfo.taxaReprovacao} onInfoClick={setOpenInfo} />
+        <KpiCard label="Dependência top 1" value={formatPercent(analytics.topApproverDependency)} hint={`Top 3 concentram ${formatPercent(analytics.top3ApproverDependency)}`} icon={<Users className="h-4 w-4" />} info={analyticsInfo.dependenciaTop1} onInfoClick={setOpenInfo} />
+        <KpiCard label="Fila/atraso" value={formatNumber(analytics.pendingTickets.length + analytics.slowApprovals)} hint={`${formatNumber(analytics.pendingTickets.length)} pendentes, ${formatNumber(analytics.slowApprovals)} acima de 24h`} icon={<TrendingUp className="h-4 w-4" />} info={analyticsInfo.filaAtraso} onInfoClick={setOpenInfo} />
       </KpiGrid>
       <div className="grid gap-4 xl:grid-cols-2">
-        <ChartPanel title="Aprovacoes por aprovador" subtitle="Volume e receita processada">
+        <ChartPanel title="Aprovações por aprovador" subtitle="Volume e receita processada" info={analyticsInfo.aprovacoesAprovador} onInfoClick={setOpenInfo}>
           <BarsDual data={analytics.approverRows} />
         </ChartPanel>
-        <ChartPanel title="Prazo por aprovador" subtitle="Tempo médio de aprovação em horas">
+        <ChartPanel title="Prazo por aprovador" subtitle="Tempo médio de aprovação em horas" info={analyticsInfo.prazoAprovador} onInfoClick={setOpenInfo}>
           <Bars data={analytics.approverRows} dataKey="average" />
         </ChartPanel>
       </div>
@@ -1063,19 +1275,19 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
         description="Compara ingressos aprovados com leitura real de QR para apontar ausência, duplicidade, leitura inválida e horário de pico."
       />
       <KpiGrid>
-        <KpiCard label="Taxa de presença" value={formatPercent(analytics.showRate)} hint={`${formatNumber(analytics.scanned)} leituras QR de ${formatNumber(analytics.approvedQuantity)} aprovados`} icon={<QrCode className="h-4 w-4" />} />
-        <KpiCard label="Taxa de ausência" value={formatPercent(analytics.noShowRate)} hint={`${formatNumber(analytics.noShow)} aprovados sem entrada`} icon={<AlertTriangle className="h-4 w-4" />} />
-        <KpiCard label="Receita por presente" value={formatCurrency(analytics.revenuePerPresent)} hint="receita / leituras QR" icon={<DollarSign className="h-4 w-4" />} />
-        <KpiCard label="Leitura duplicada/inválida" value={formatNumber(analytics.duplicateScans + analytics.invalidScans)} hint={`${formatNumber(analytics.duplicateScans)} duplicadas, ${formatNumber(analytics.invalidScans)} inválidas`} icon={<QrCode className="h-4 w-4" />} />
+        <KpiCard label="Taxa de presença" value={formatPercent(analytics.showRate)} hint={`${formatNumber(analytics.scanned)} leituras QR de ${formatNumber(analytics.approvedQuantity)} aprovados`} icon={<QrCode className="h-4 w-4" />} info={analyticsInfo.taxaPresenca} onInfoClick={setOpenInfo} />
+        <KpiCard label="Taxa de ausência" value={formatPercent(analytics.noShowRate)} hint={`${formatNumber(analytics.noShow)} aprovados sem entrada`} icon={<AlertTriangle className="h-4 w-4" />} info={analyticsInfo.taxaAusencia} onInfoClick={setOpenInfo} />
+        <KpiCard label="Receita por presente" value={formatCurrency(analytics.revenuePerPresent)} hint="Receita / leituras QR" icon={<DollarSign className="h-4 w-4" />} info={analyticsInfo.receitaPorPresente} onInfoClick={setOpenInfo} />
+        <KpiCard label="Leitura duplicada/inválida" value={formatNumber(analytics.duplicateScans + analytics.invalidScans)} hint={`${formatNumber(analytics.duplicateScans)} duplicadas, ${formatNumber(analytics.invalidScans)} inválidas`} icon={<QrCode className="h-4 w-4" />} info={analyticsInfo.leituraDuplicadaInvalida} onInfoClick={setOpenInfo} />
       </KpiGrid>
       <div className="grid gap-4 xl:grid-cols-3">
-        <ChartPanel title="Leituras por horário" subtitle="Pico de entrada">
+        <ChartPanel title="Leituras por horário" subtitle="Pico de entrada" info={analyticsInfo.leiturasHorario} onInfoClick={setOpenInfo}>
           <LineMetric data={analytics.scanHourRows} />
         </ChartPanel>
-        <ChartPanel title="Ausência por turma" subtitle="Aprovados sem leitura QR">
+        <ChartPanel title="Ausência por turma" subtitle="Aprovados sem leitura QR" info={analyticsInfo.ausenciaTurma} onInfoClick={setOpenInfo}>
           <Bars data={analytics.noShowClassRows} />
         </ChartPanel>
-        <ChartPanel title="Ausência por lote" subtitle="Atrito por tipo de ingresso">
+        <ChartPanel title="Ausência por lote" subtitle="Atrito por tipo de ingresso" info={analyticsInfo.ausenciaLote} onInfoClick={setOpenInfo}>
           <Bars data={analytics.noShowLotRows} />
         </ChartPanel>
       </div>
@@ -1083,19 +1295,19 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
       <SectionTitle
         label="Bloco estratégico"
         title="Recorrência, antecedência e repetição"
-        description="Ajuda presidencia e financeiro a entender quem volta, quando compra e quais eventos merecem repeticao ou ajuste de formato."
+        description="Ajuda presidência e financeiro a entender quem volta, quando compra e quais eventos merecem repetição ou ajuste de formato."
       />
       <KpiGrid>
-        <KpiCard label="Compradores únicos" value={formatNumber(analytics.uniqueBuyers)} hint={`${formatPercent(analytics.recurringRate)} recorrentes`} icon={<Users className="h-4 w-4" />} />
-        <KpiCard label="Previsão final" value={analytics.projectedTickets ? formatNumber(analytics.projectedTickets) : "Sem ritmo"} hint="estimativa simples pelo ritmo atual" icon={<TrendingUp className="h-4 w-4" />} />
-        <KpiCard label="Resultado estimado" value={formatCurrency(analytics.revenue)} hint="custos ainda não cadastrados" icon={<DollarSign className="h-4 w-4" />} />
-        <KpiCard label="Status do recorte" value={analytics.eventStatus} hint={`${formatNumber(analytics.createdOrders)} pedidos criados`} icon={<BarChart3 className="h-4 w-4" />} />
+        <KpiCard label="Compradores únicos" value={formatNumber(analytics.uniqueBuyers)} hint={`${formatPercent(analytics.recurringRate)} recorrentes`} icon={<Users className="h-4 w-4" />} info={analyticsInfo.compradoresUnicos} onInfoClick={setOpenInfo} />
+        <KpiCard label="Previsão final" value={analytics.projectedTickets ? formatNumber(analytics.projectedTickets) : "Sem ritmo"} hint="Estimativa simples pelo ritmo atual" icon={<TrendingUp className="h-4 w-4" />} info={analyticsInfo.previsaoFinal} onInfoClick={setOpenInfo} />
+        <KpiCard label="Resultado estimado" value={formatCurrency(analytics.revenue)} hint="Custos ainda não cadastrados" icon={<DollarSign className="h-4 w-4" />} info={analyticsInfo.resultadoEstimado} onInfoClick={setOpenInfo} />
+        <KpiCard label="Status do recorte" value={analytics.eventStatus} hint={`${formatNumber(analytics.createdOrders)} pedidos criados`} icon={<BarChart3 className="h-4 w-4" />} info={analyticsInfo.statusRecorte} onInfoClick={setOpenInfo} />
       </KpiGrid>
       <div className="grid gap-4 xl:grid-cols-2">
-        <ChartPanel title="Antecedencia da compra" subtitle="Dias antes do evento">
+        <ChartPanel title="Antecedência da compra" subtitle="Dias antes do evento" info={analyticsInfo.antecedenciaCompra} onInfoClick={setOpenInfo}>
           <Bars data={analytics.leadRows} />
         </ChartPanel>
-        <ChartPanel title="Novos x recorrentes" subtitle="Primeira compra comparada com compras repetidas">
+        <ChartPanel title="Novos x recorrentes" subtitle="Primeira compra comparada com compras repetidas" info={analyticsInfo.novosRecorrentes} onInfoClick={setOpenInfo}>
           <PieMetric data={analytics.recurrenceRows} />
         </ChartPanel>
       </div>
@@ -1107,7 +1319,33 @@ export function EventManagementAnalytics({ events, tickets, allLabel = "Todos os
           { key: "value", label: "Receita", format: "currency" },
           { key: "average", label: "Ticket", format: "currency" },
         ]}
+        info={analyticsInfo.repetirOuAjustar}
+        onInfoClick={setOpenInfo}
       />
+
+      {openInfo ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={() => setOpenInfo(null)}>
+          <div
+            className="w-full max-w-lg rounded-3xl border border-brand/20 bg-[#090a0d] p-5 shadow-[0_28px_80px_rgba(0,0,0,0.45)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.26em] text-brand-accent">Explicação do BI</p>
+                <h3 className="mt-2 text-xl font-black text-white">{openInfo.title}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenInfo(null)}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-white/70 transition hover:border-brand/30 hover:text-white"
+              >
+                Fechar
+              </button>
+            </div>
+            <p className="mt-4 text-sm font-semibold leading-6 text-white/70">{openInfo.description}</p>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

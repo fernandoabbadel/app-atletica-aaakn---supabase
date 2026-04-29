@@ -437,6 +437,24 @@ export const TENANT_APP_MODULE_DEFINITIONS: TenantAppModuleDefinition[] = [
     ["ligas"]
   ),
   moduleItem(
+    "comissoes",
+    "Comissões",
+    "Exibe a área de comissões no menu lateral e libera suas rotas públicas e administrativas.",
+    ["sidebar", "route"],
+    "/comissoes",
+    "info",
+    ["/comissoes"]
+  ),
+  moduleItem(
+    "diretorio",
+    "Diretório",
+    "Exibe a área de diretório no menu lateral e libera suas rotas públicas e administrativas.",
+    ["sidebar", "route"],
+    "/diretorio",
+    "info",
+    ["/diretorio"]
+  ),
+  moduleItem(
     "planos",
     "Planos",
     "Catálogo de planos e assinaturas do tenant.",
