@@ -99,7 +99,9 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 text-white">
-      {uiConfig.customCss ? <style jsx global>{uiConfig.customCss}</style> : null}
+      {uiConfig.customCss ? (
+        <style dangerouslySetInnerHTML={{ __html: uiConfig.customCss }} />
+      ) : null}
 
       <section className="relative overflow-hidden border-b border-white/5 px-6 py-8">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_32%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.15),transparent_28%)]" />

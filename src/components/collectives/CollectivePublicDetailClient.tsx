@@ -495,7 +495,9 @@ export function CollectivePublicDetailClient({
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 font-sans text-white">
-      {uiConfig.customCss ? <style jsx global>{uiConfig.customCss}</style> : null}
+      {uiConfig.customCss ? (
+        <style dangerouslySetInnerHTML={{ __html: uiConfig.customCss }} />
+      ) : null}
 
       <section className="relative overflow-hidden border-b border-white/5">
         <div className="relative h-[300px] sm:h-[360px]">
