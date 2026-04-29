@@ -2,6 +2,7 @@
 
 import { getSupabasePublicClient } from "./supabase";
 import { resolveStoredTenantScopeId } from "./activeTenantSnapshot";
+import { ClientCache } from "./clientCache";
 import {
   canAccessCommerceItem,
   normalizeAvailabilityStatus,
@@ -129,6 +130,10 @@ const invalidateStoreCaches = (productId?: string): void => {
 
 export const clearStorePublicCaches = (productId?: string): void => {
   invalidateStoreCaches(productId);
+  if (typeof window !== "undefined") {
+    ClientCache.invalidatePattern("store:categories:*");
+    ClientCache.invalidatePattern("store:products:*");
+  }
 };
 
 const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {

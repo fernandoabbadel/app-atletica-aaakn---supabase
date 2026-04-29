@@ -39,7 +39,7 @@ import {
   type LeagueCategory,
   type LeagueRecord,
 } from "@/lib/leaguesService";
-import { fetchStoreProductsBySeller } from "@/lib/storePublicService";
+import { fetchStoreCategories, fetchStoreProductsBySeller } from "@/lib/storePublicService";
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import {
@@ -50,6 +50,7 @@ import {
   sortLeagueMembersByRole,
 } from "@/lib/leagueRoles";
 import { withTenantSlug } from "@/lib/tenantRouting";
+import { fetchTurmaMemberCounts } from "@/lib/turmasService";
 
 type CollectivePublicTab = "overview" | "membros" | "agenda" | "loja";
 
@@ -60,6 +61,14 @@ type CollectiveStoreProduct = {
   preco?: number;
   categoria?: string;
   tagLabel?: string;
+};
+
+type CollectiveStoreCategory = {
+  cover_img?: string;
+  logo_url?: string;
+  visible?: boolean;
+  seller_type?: string;
+  seller_id?: string;
 };
 
 type CollectivePageConfig = {
@@ -95,6 +104,15 @@ const PAGE_CONFIG: Record<CollectiveAreaKey, CollectivePageConfig> = {
 
 const getCollectiveImage = (league?: LeagueRecord | null) =>
   league?.foto?.trim() || resolveLeagueLogoSrc(league, "/placeholder_liga.png");
+
+const isLeagueStoreCategory = (
+  row: CollectiveStoreCategory | null | undefined,
+  leagueId: string
+): boolean => {
+  const sellerId = String(row?.seller_id || "").trim();
+  const sellerType = String(row?.seller_type || "").trim().toLowerCase();
+  return sellerId === leagueId && (sellerType === "tenant" || sellerType === "league" || !sellerType);
+};
 
 const sortEvents = (events: LeagueRecord["eventos"]) =>
   [...events].sort((left, right) => {
@@ -189,9 +207,11 @@ export function CollectivePublicDetailClient({
   const [followedIds, setFollowedIds] = useState<string[]>([]);
   const [uiConfig, setUiConfig] = useState(() => getDefaultCollectiveAreaUiConfig(area));
   const [leagueProducts, setLeagueProducts] = useState<CollectiveStoreProduct[]>([]);
+  const [storeCategory, setStoreCategory] = useState<CollectiveStoreCategory | null>(null);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [requestRole, setRequestRole] = useState<string>(DEFAULT_LEAGUE_ROLE);
   const [submittingMemberRequest, setSubmittingMemberRequest] = useState(false);
+  const [turmaMemberCount, setTurmaMemberCount] = useState<number | null>(null);
 
   const tenantPath = (path: string) => (cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path);
 
@@ -216,7 +236,12 @@ export function CollectivePublicDetailClient({
           tenantId: tenantId || undefined,
         });
         if (!mounted) return;
-        setLeague(nextLeague && isLeagueCategory(nextLeague, config.category) ? nextLeague : null);
+        const matchesRequestedArea = Boolean(
+          nextLeague &&
+            (isLeagueCategory(nextLeague, config.category) ||
+              (area === "comissoes" && Boolean(nextLeague.turmaId)))
+        );
+        setLeague(matchesRequestedArea ? nextLeague : null);
       } catch (error: unknown) {
         console.error(error);
         if (mounted) setLeague(null);
@@ -228,7 +253,7 @@ export function CollectivePublicDetailClient({
     return () => {
       mounted = false;
     };
-  }, [cleanLeagueId, config.category, tenantId]);
+  }, [area, cleanLeagueId, config.category, tenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -257,7 +282,39 @@ export function CollectivePublicDetailClient({
   useEffect(() => {
     let mounted = true;
     const leagueProductId = league?.id?.trim() || "";
-    if (!leagueProductId || activeTab !== "loja") {
+    if (!leagueProductId) {
+      setStoreCategory(null);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    fetchStoreCategories({
+      maxResults: 300,
+      forceRefresh: true,
+      tenantId: tenantId || undefined,
+    })
+      .then((rows) => {
+        if (!mounted) return;
+        const nextCategory =
+          (rows as CollectiveStoreCategory[]).find((row) => isLeagueStoreCategory(row, leagueProductId)) || null;
+        setStoreCategory(nextCategory);
+      })
+      .catch((error: unknown) => {
+        console.error(error);
+        if (!mounted) return;
+        setStoreCategory(null);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [league?.id, tenantId]);
+
+  useEffect(() => {
+    let mounted = true;
+    const leagueProductId = league?.id?.trim() || "";
+    if (!leagueProductId || activeTab !== "loja" || storeCategory?.visible === false) {
       setLeagueProducts([]);
       setLoadingProducts(false);
       return () => {
@@ -288,7 +345,36 @@ export function CollectivePublicDetailClient({
     return () => {
       mounted = false;
     };
-  }, [activeTab, league?.id, tenantId]);
+  }, [activeTab, league?.id, storeCategory?.visible, tenantId]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (area !== "comissoes" || !league?.turmaId) {
+      setTurmaMemberCount(null);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    fetchTurmaMemberCounts({
+      tenantId: tenantId || undefined,
+      forceRefresh: true,
+      turmaIds: [league.turmaId],
+    })
+      .then((counts) => {
+        if (!mounted) return;
+        setTurmaMemberCount(counts[league.turmaId || ""] ?? 0);
+      })
+      .catch((error: unknown) => {
+        console.error(error);
+        if (!mounted) return;
+        setTurmaMemberCount(null);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [area, league?.turmaId, tenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -373,6 +459,12 @@ export function CollectivePublicDetailClient({
     [isOfficialMember, sortedEvents]
   );
   const visibleAgendaCount = publicAgendaEvents.length + internalAgendaEvents.length;
+  const displayMembersCount =
+    area === "comissoes"
+      ? turmaMemberCount ?? league?.membersCount ?? sortedMembers.length
+      : league?.membersCount ?? sortedMembers.length;
+  const entityLabel = area === "diretorio" ? "diretório" : area === "comissoes" ? "comissão" : "página";
+  const entityArticle = area === "comissoes" ? "da" : "do";
   const publicLinks = useMemo(
     () => (league?.links || []).filter((link) => String(link.url || "").trim()),
     [league?.links]
@@ -510,16 +602,18 @@ export function CollectivePublicDetailClient({
   const managementHref = tenantPath(managementHrefOverride || config.adminPath);
   const backHref = tenantPath(backHrefOverride || config.basePath);
   const imageSrc = getCollectiveImage(league);
+  const storeEnabled = storeCategory ? storeCategory.visible !== false : true;
+  const storeCoverImage =
+    String(storeCategory?.cover_img || "").trim() ||
+    String(storeCategory?.logo_url || "").trim() ||
+    imageSrc;
+  const heroImageSrc = activeTab === "loja" && storeEnabled ? storeCoverImage : imageSrc;
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 font-sans text-white">
-      {area === "comissoes" && uiConfig.customCss ? (
-        <style dangerouslySetInnerHTML={{ __html: uiConfig.customCss }} />
-      ) : null}
-
       <section className="relative overflow-hidden border-b border-white/5">
         <div className="relative h-[300px] sm:h-[360px]">
-          <Image src={imageSrc} alt={league.nome} fill sizes="100vw" priority className="object-cover" />
+          <Image src={heroImageSrc} alt={league.nome} fill sizes="100vw" priority className="object-cover" />
           <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.2),rgba(5,5,5,0.92))]" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.22),transparent_28%),radial-gradient(circle_at_left,rgba(52,211,153,0.2),transparent_32%)]" />
         </div>
@@ -570,7 +664,7 @@ export function CollectivePublicDetailClient({
                       {league.sigla || uiConfig.rotuloCard}
                     </span>
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300">
-                      {league.membersCount ?? sortedMembers.length} membros
+                      {displayMembersCount} membros
                     </span>
                     {presidentName ? (
                       <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-amber-200">
@@ -678,7 +772,9 @@ export function CollectivePublicDetailClient({
             { href: membersHref, label: "Membros", tab: "membros" as const },
             { href: agendaHref, label: "Agenda", tab: "agenda" as const },
             { href: storeTabHref, label: "Loja", tab: "loja" as const },
-          ].map((item) => (
+          ]
+            .filter((item) => item.tab !== "loja" || storeEnabled || activeTab === "loja")
+            .map((item) => (
             <Link key={item.href} href={item.href} className={`flex min-h-[76px] items-center justify-center rounded-[1.5rem] border px-5 py-4 text-center text-[12px] font-black uppercase tracking-[0.24em] transition ${activeTab === item.tab ? "border-brand/30 bg-brand-soft text-brand-accent shadow-brand" : "border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-white"}`}>
               {item.label}
             </Link>
@@ -785,7 +881,7 @@ export function CollectivePublicDetailClient({
                       <div className="min-w-0 flex-1">
                         <p className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-accent">{member.cargo}</p>
                         <h3 className="mt-2 truncate text-lg font-black text-white">{member.nome}</h3>
-                        <p className="mt-2 text-sm text-zinc-400">Membro oficial desta equipe.</p>
+                        <p className="mt-2 text-sm text-zinc-400">{`Membro oficial ${entityArticle} ${entityLabel}.`}</p>
                       </div>
                     </div>
                   </article>
@@ -844,13 +940,27 @@ export function CollectivePublicDetailClient({
                   <ShoppingBag size={18} />
                 </div>
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-accent">Loja publicada</p>
-                  <h2 className="mt-2 text-2xl font-black text-white">Produtos desta equipe</h2>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-accent">
+                    {storeEnabled ? "Loja publicada" : "Loja oculta"}
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black text-white">
+                    {storeEnabled
+                      ? area === "diretorio"
+                        ? "Produtos do diretório"
+                        : area === "comissoes"
+                          ? "Produtos da comissão"
+                          : "Produtos publicados"
+                      : "Loja temporariamente indisponível"}
+                  </h2>
                 </div>
               </div>
             </div>
 
-            {loadingProducts ? (
+            {!storeEnabled ? (
+              <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">
+                {`A loja ${entityArticle} ${entityLabel} está oculta no momento.`}
+              </p>
+            ) : loadingProducts ? (
               <div className="flex items-center justify-center rounded-[2rem] border border-zinc-800 bg-zinc-950/80 p-10">
                 <Loader2 className="animate-spin text-brand" size={20} />
               </div>

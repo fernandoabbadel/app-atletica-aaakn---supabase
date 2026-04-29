@@ -14,6 +14,7 @@ const TURMAS_CONFIG_SELECT_COLUMNS = "id,data,updatedAt,createdAt";
 const ACTIVE_TURMAS_SNAPSHOT_STORAGE_KEY = "usc_active_turmas_config";
 
 const turmasCache = new Map<string, CacheEntry<TurmaConfig[]>>();
+const turmaMemberCountsCache = new Map<string, CacheEntry<Record<string, number>>>();
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -235,6 +236,19 @@ const resolveTurmasCacheKey = (tenantId?: string): string => {
   return cleanTenantId || "default";
 };
 
+const buildTurmaMemberCountsCacheKey = (tenantId?: string, turmaIds?: string[]): string => {
+  const cleanTenantId = resolveTurmasTenantId(tenantId);
+  const normalizedTurmas = Array.from(
+    new Set(
+      (Array.isArray(turmaIds) ? turmaIds : [])
+        .map((entry) => normalizeTurmaId(asString(entry)))
+        .filter((entry) => entry.length > 0)
+    )
+  ).sort((left, right) => left.localeCompare(right, "pt-BR"));
+
+  return `${cleanTenantId || "default"}:${normalizedTurmas.join("|") || "all"}`;
+};
+
 const resolveTurmasDocIds = (tenantId?: string): string[] => {
   const cleanTenantId = resolveTurmasTenantId(tenantId);
   if (!cleanTenantId) return [TURMAS_CONFIG_DOC_ID];
@@ -392,6 +406,56 @@ export async function fetchTurmasConfig(options?: {
   return resolved;
 }
 
+export async function fetchTurmaMemberCounts(options?: {
+  tenantId?: string;
+  turmaIds?: string[];
+  forceRefresh?: boolean;
+}): Promise<Record<string, number>> {
+  const normalizedTurmas = Array.from(
+    new Set(
+      (Array.isArray(options?.turmaIds) ? options?.turmaIds : [])
+        .map((entry) => normalizeTurmaId(asString(entry)))
+        .filter((entry) => entry.length > 0)
+    )
+  );
+
+  if (normalizedTurmas.length === 0) {
+    return {};
+  }
+
+  const cacheKey = buildTurmaMemberCountsCacheKey(options?.tenantId, normalizedTurmas);
+  const forceRefresh = options?.forceRefresh ?? false;
+  if (!forceRefresh) {
+    const cached = getCachedValue(turmaMemberCountsCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const supabase = getSupabaseClient();
+  const scopedTenantId = resolveTurmasTenantId(options?.tenantId);
+  const counts = Object.fromEntries(
+    await Promise.all(
+      normalizedTurmas.map(async (turmaId) => {
+        const turmaCandidates = Array.from(new Set([turmaId, turmaId.toLowerCase()]));
+        let query = supabase
+          .from("users")
+          .select("uid", { count: "exact", head: true })
+          .in("turma", turmaCandidates);
+        if (scopedTenantId) {
+          query = query.eq("tenant_id", scopedTenantId);
+        }
+
+        const { count, error } = await query;
+        if (error) throwSupabaseError(error);
+
+        return [turmaId, Math.max(0, count ?? 0)] as const;
+      })
+    )
+  );
+
+  setCachedValue(turmaMemberCountsCache, cacheKey, counts);
+  return counts;
+}
+
 export async function saveTurmasConfig(
   turmas: TurmaConfig[],
   options?: { tenantId?: string }
@@ -520,4 +584,5 @@ export async function deleteTurmaConfig(
 
 export function clearTurmasCache(): void {
   turmasCache.clear();
+  turmaMemberCountsCache.clear();
 }

@@ -37,7 +37,7 @@ import {
   toggleUserLeagueFollow,
   type LeagueRecord,
 } from "@/lib/leaguesService";
-import { fetchStoreProductsBySeller } from "@/lib/storePublicService";
+import { fetchStoreCategories, fetchStoreProductsBySeller } from "@/lib/storePublicService";
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import {
@@ -63,8 +63,25 @@ type LeagueStoreProduct = {
   tagLabel?: string;
 };
 
+type LeagueStoreCategory = {
+  cover_img?: string;
+  logo_url?: string;
+  visible?: boolean;
+  seller_type?: string;
+  seller_id?: string;
+};
+
 const getLeagueImage = (league?: LeagueRecord | null) =>
   league?.foto?.trim() || resolveLeagueLogoSrc(league, "/placeholder_liga.png");
+
+const isLeagueStoreCategory = (
+  row: LeagueStoreCategory | null | undefined,
+  leagueId: string
+): boolean => {
+  const sellerId = String(row?.seller_id || "").trim();
+  const sellerType = String(row?.seller_type || "").trim().toLowerCase();
+  return sellerId === leagueId && (sellerType === "tenant" || sellerType === "league" || !sellerType);
+};
 
 const sortEvents = (events: LeagueRecord["eventos"]) =>
   [...events].sort((left, right) => {
@@ -162,6 +179,7 @@ export function LeaguePublicDetailClient({
   const [followedIds, setFollowedIds] = useState<string[]>([]);
   const [uiConfig, setUiConfig] = useState(DEFAULT_LIGAS_USC_UI_CONFIG);
   const [leagueProducts, setLeagueProducts] = useState<LeagueStoreProduct[]>([]);
+  const [storeCategory, setStoreCategory] = useState<LeagueStoreCategory | null>(null);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [requestRole, setRequestRole] = useState<string>(DEFAULT_LEAGUE_ROLE);
   const [submittingMemberRequest, setSubmittingMemberRequest] = useState(false);
@@ -201,7 +219,39 @@ export function LeaguePublicDetailClient({
   useEffect(() => {
     let mounted = true;
     const leagueProductId = league?.id?.trim() || "";
-    if (!leagueProductId || activeTab !== "loja") {
+    if (!leagueProductId) {
+      setStoreCategory(null);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    fetchStoreCategories({
+      maxResults: 300,
+      forceRefresh: true,
+      tenantId: tenantId || undefined,
+    })
+      .then((rows) => {
+        if (!mounted) return;
+        const nextCategory =
+          (rows as LeagueStoreCategory[]).find((row) => isLeagueStoreCategory(row, leagueProductId)) || null;
+        setStoreCategory(nextCategory);
+      })
+      .catch((error: unknown) => {
+        console.error(error);
+        if (!mounted) return;
+        setStoreCategory(null);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [league?.id, tenantId]);
+
+  useEffect(() => {
+    let mounted = true;
+    const leagueProductId = league?.id?.trim() || "";
+    if (!leagueProductId || activeTab !== "loja" || storeCategory?.visible === false) {
       setLeagueProducts([]);
       setLoadingProducts(false);
       return () => {
@@ -232,7 +282,7 @@ export function LeaguePublicDetailClient({
     return () => {
       mounted = false;
     };
-  }, [activeTab, league?.id, tenantId]);
+  }, [activeTab, league?.id, storeCategory?.visible, tenantId]);
 
   useEffect(() => {
     let mounted = true;
@@ -497,12 +547,18 @@ export function LeaguePublicDetailClient({
   const storeHref = tenantPath("/loja");
   const eventsFeedHref = tenantPath("/eventos");
   const imageSrc = getLeagueImage(league);
+  const storeEnabled = storeCategory ? storeCategory.visible !== false : true;
+  const storeCoverImage =
+    String(storeCategory?.cover_img || "").trim() ||
+    String(storeCategory?.logo_url || "").trim() ||
+    imageSrc;
+  const heroImageSrc = activeTab === "loja" && storeEnabled ? storeCoverImage : imageSrc;
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 font-sans text-white">
       <section className="relative overflow-hidden border-b border-white/5">
         <div className="relative h-[300px] sm:h-[360px]">
-          <Image src={imageSrc} alt={league.nome} fill sizes="100vw" priority className="object-cover" />
+          <Image src={heroImageSrc} alt={league.nome} fill sizes="100vw" priority className="object-cover" />
           <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.2),rgba(5,5,5,0.92))]" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.22),transparent_28%),radial-gradient(circle_at_left,rgba(52,211,153,0.2),transparent_32%)]" />
         </div>
@@ -640,7 +696,9 @@ export function LeaguePublicDetailClient({
             { href: membersHref, label: "Membros", tab: "membros" as const },
             { href: agendaHref, label: "Agenda", tab: "agenda" as const },
             { href: storeTabHref, label: "Loja", tab: "loja" as const },
-          ].map((item) => (
+          ]
+            .filter((item) => item.tab !== "loja" || storeEnabled || activeTab === "loja")
+            .map((item) => (
             <Link key={item.href} href={item.href} className={`flex min-h-[76px] items-center justify-center rounded-[1.5rem] border px-5 py-4 text-center text-[12px] font-black uppercase tracking-[0.24em] transition ${activeTab === item.tab ? "border-emerald-500/30 bg-[linear-gradient(135deg,rgba(16,185,129,0.18),rgba(6,182,212,0.14))] text-emerald-200 shadow-[0_20px_40px_rgba(16,185,129,0.12)]" : "border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-white"}`}>
               {item.label}
             </Link>
@@ -803,9 +861,11 @@ export function LeaguePublicDetailClient({
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">
-                    Loja da liga
+                    {storeEnabled ? "Loja da liga" : "Loja oculta"}
                   </p>
-                  <h2 className="mt-3 text-2xl font-black text-white">Produtos da {league.sigla || league.nome}</h2>
+                  <h2 className="mt-3 text-2xl font-black text-white">
+                    {storeEnabled ? `Produtos da ${league.sigla || league.nome}` : "Loja temporariamente indisponível"}
+                  </h2>
                   <p className="mt-3 text-sm leading-7 text-zinc-400">
                     Os cards mostram os produtos vinculados à liga. Ao abrir qualquer item, você vai para a loja do tenant.
                   </p>
@@ -817,7 +877,11 @@ export function LeaguePublicDetailClient({
               </div>
             </div>
 
-            {loadingProducts ? (
+            {!storeEnabled ? (
+              <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">
+                A loja desta liga está oculta no momento.
+              </p>
+            ) : loadingProducts ? (
               <div className="flex items-center gap-3 rounded-[1.75rem] border border-zinc-800 bg-zinc-950/70 p-5 text-sm font-bold text-zinc-400">
                 <Loader2 size={18} className="animate-spin text-emerald-400" />
                 Carregando produtos

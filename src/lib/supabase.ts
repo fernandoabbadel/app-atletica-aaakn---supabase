@@ -177,9 +177,11 @@ const createSupabaseBrowserClient = (): SupabaseClient => {
 
 const createSupabasePublicClient = (): SupabaseClient => {
   const { url, anonKey } = getSupabaseEnv();
+  const publicStorageKey = `${getSupabaseAuthStorageKey(url)}-public`;
 
   return createClient(url, anonKey, {
     auth: {
+      storageKey: publicStorageKey,
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
