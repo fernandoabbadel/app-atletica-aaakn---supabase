@@ -394,12 +394,21 @@ function MetricCard({
   );
 }
 
-export function LeagueFrequencyPage() {
+export function LeagueFrequencyPage({
+  basePath,
+  leagueIdOverride,
+  showBoard = true,
+}: {
+  basePath?: string;
+  leagueIdOverride?: string;
+  showBoard?: boolean;
+}) {
   const params = useParams<{ leagueId?: string }>();
   const router = useRouter();
   const { tenantId, tenantSlug } = useTenantTheme();
   const { addToast } = useToast();
-  const leagueId = typeof params?.leagueId === "string" ? params.leagueId : "";
+  const routeLeagueId = typeof params?.leagueId === "string" ? params.leagueId : "";
+  const leagueId = leagueIdOverride?.trim() || routeLeagueId;
   const [data, setData] = useState<LeagueFrequencyData>(emptyFrequencyData);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -701,7 +710,9 @@ export function LeagueFrequencyPage() {
   const league = data.league;
   const leagueName = league?.sigla?.trim() || league?.nome?.trim() || "Liga";
   const leagueLogo = (league ? resolveLeagueLogoSrc(league) : "") || "/logo.png";
-  const leagueBaseHref = tenantPath(`/ligas/${encodeURIComponent(leagueId)}`);
+  const leagueBaseHref = tenantPath(
+    basePath || `/ligas/${encodeURIComponent(leagueId)}`
+  );
   const leagueHomeHref = leagueBaseHref;
   const leagueInformationHref = `${leagueBaseHref}/informacoes`;
   const leagueMembersHref = `${leagueBaseHref}/membros`;
@@ -762,6 +773,7 @@ export function LeagueFrequencyPage() {
             storeHref={leagueStoreHref}
             financeHref={leagueFinanceHref}
             boardHref={leagueBoardHref}
+            showBoard={showBoard}
           />
         </div>
       </header>

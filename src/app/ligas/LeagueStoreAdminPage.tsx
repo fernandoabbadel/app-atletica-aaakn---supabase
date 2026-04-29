@@ -256,13 +256,24 @@ const formatDateTime = (value: unknown): string => {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
 };
 
-export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStoreMode }) {
+export function LeagueStoreAdminPage({
+  mode = "overview",
+  basePath,
+  leagueIdOverride,
+  showBoard = true,
+}: {
+  mode?: LeagueStoreMode;
+  basePath?: string;
+  leagueIdOverride?: string;
+  showBoard?: boolean;
+}) {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
   const { addToast } = useToast();
   const { tenantId, tenantSlug, palette } = useTenantTheme();
-  const leagueId = typeof params?.leagueId === "string" ? params.leagueId : "";
+  const routeLeagueId = typeof params?.leagueId === "string" ? params.leagueId : "";
+  const leagueId = leagueIdOverride?.trim() || routeLeagueId;
   const storeCoverInputRef = useRef<HTMLInputElement | null>(null);
   const productImageInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -299,9 +310,13 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
       ).sort((a, b) => a.localeCompare(b, "pt-BR")),
     [products]
   );
-  const leagueBaseHref = tenantSlug
-    ? withTenantSlug(tenantSlug, `/ligas/${encodeURIComponent(leagueId)}`)
-    : `/ligas/${encodeURIComponent(leagueId)}`;
+  const leagueBaseHref = basePath
+    ? tenantSlug
+      ? withTenantSlug(tenantSlug, basePath)
+      : basePath
+    : tenantSlug
+      ? withTenantSlug(tenantSlug, `/ligas/${encodeURIComponent(leagueId)}`)
+      : `/ligas/${encodeURIComponent(leagueId)}`;
   const storeHref = `${leagueBaseHref}/loja`;
   const leagueHomeHref = leagueBaseHref;
   const leagueInformationHref = `${leagueBaseHref}/informacoes`;
@@ -778,6 +793,7 @@ export function LeagueStoreAdminPage({ mode = "overview" }: { mode?: LeagueStore
             storeHref={storeHref}
             financeHref={leagueFinanceHref}
             boardHref={leagueBoardHref}
+            showBoard={showBoard}
           />
         </div>
       </header>

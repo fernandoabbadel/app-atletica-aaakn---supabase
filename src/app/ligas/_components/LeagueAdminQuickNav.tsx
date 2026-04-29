@@ -21,6 +21,7 @@ interface LeagueAdminQuickNavProps {
   storeHref: string;
   financeHref: string;
   boardHref: string;
+  showBoard?: boolean;
   className?: string;
 }
 
@@ -43,6 +44,7 @@ export function LeagueAdminQuickNav({
   storeHref,
   financeHref,
   boardHref,
+  showBoard = true,
   className = "",
 }: LeagueAdminQuickNavProps) {
   const hrefByKey: Record<LeagueAdminQuickNavKey, string> = {
@@ -60,7 +62,9 @@ export function LeagueAdminQuickNav({
       aria-label="Navegação da liga"
       className={`flex flex-wrap gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-2 ${className}`}
     >
-      {navItems.map((item) => {
+      {navItems
+        .filter((item) => showBoard || item.key !== "board")
+        .map((item) => {
         const Icon = item.icon;
         const isActive = active === item.key;
         return (

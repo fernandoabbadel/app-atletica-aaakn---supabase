@@ -43,6 +43,7 @@ import { fetchStoreProductsBySeller } from "@/lib/storePublicService";
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import {
+  canManageLeagueRole,
   DEFAULT_LEAGUE_ROLE,
   LEAGUE_ROLE_OPTIONS,
   resolveLeagueRoleLabel,
@@ -164,10 +165,16 @@ export function CollectivePublicDetailClient({
   area,
   leagueId,
   activeTab,
+  pathMode = "record",
+  managementHrefOverride,
+  backHrefOverride,
 }: {
   area: CollectiveAreaKey;
   leagueId: string;
   activeTab: CollectivePublicTab;
+  pathMode?: "record" | "root";
+  managementHrefOverride?: string;
+  backHrefOverride?: string;
 }) {
   const config = PAGE_CONFIG[area];
   const { user } = useAuth();
@@ -350,7 +357,12 @@ export function CollectivePublicDetailClient({
   const canManagePage = Boolean(
     user?.uid &&
       (league?.managerUserIds?.includes(user.uid) ||
-        isOfficialMember)
+        uiConfig.managerUserIds.includes(user.uid) ||
+        (area === "diretorio"
+          ? sortedMembers.some(
+              (member) => member.id.trim() === user.uid.trim() && canManageLeagueRole(member.cargo)
+            )
+          : isOfficialMember))
   );
   const publicAgendaEvents = useMemo(
     () => sortedEvents.filter((event) => !isInternalLeagueEvent(event)),
@@ -486,16 +498,22 @@ export function CollectivePublicDetailClient({
     );
   }
 
-  const overviewHref = tenantPath(`${config.basePath}/${league.id}`);
-  const membersHref = tenantPath(`${config.basePath}/${league.id}/membros`);
-  const agendaHref = tenantPath(`${config.basePath}/${league.id}/agenda`);
-  const storeTabHref = tenantPath(`${config.basePath}/${league.id}/loja`);
-  const managementHref = tenantPath(config.adminPath);
+  const rootBaseHref = tenantPath(config.basePath);
+  const overviewHref =
+    pathMode === "root" ? rootBaseHref : tenantPath(`${config.basePath}/${league.id}`);
+  const membersHref =
+    pathMode === "root" ? tenantPath(`${config.basePath}/membros`) : tenantPath(`${config.basePath}/${league.id}/membros`);
+  const agendaHref =
+    pathMode === "root" ? tenantPath(`${config.basePath}/agenda`) : tenantPath(`${config.basePath}/${league.id}/agenda`);
+  const storeTabHref =
+    pathMode === "root" ? tenantPath(`${config.basePath}/loja`) : tenantPath(`${config.basePath}/${league.id}/loja`);
+  const managementHref = tenantPath(managementHrefOverride || config.adminPath);
+  const backHref = tenantPath(backHrefOverride || config.basePath);
   const imageSrc = getCollectiveImage(league);
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 font-sans text-white">
-      {uiConfig.customCss ? (
+      {area === "comissoes" && uiConfig.customCss ? (
         <style dangerouslySetInnerHTML={{ __html: uiConfig.customCss }} />
       ) : null}
 
@@ -509,7 +527,7 @@ export function CollectivePublicDetailClient({
         <div className="relative z-10 -mt-24 px-6 pb-6">
           <div className="mx-auto max-w-6xl rounded-[2rem] border border-white/10 bg-[#050505]/88 p-5 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <Link href={tenantPath(config.basePath)} className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/80 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-zinc-300 hover:bg-zinc-900">
+              <Link href={backHref} className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/80 px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-zinc-300 hover:bg-zinc-900">
                 <ArrowLeft size={14} />
                 Voltar
               </Link>

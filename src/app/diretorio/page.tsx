@@ -1,5 +1,5 @@
-import { CollectiveCatalogPage } from "@/components/collectives/CollectiveCatalogPage";
+import { PrimaryDirectoryPage } from "@/components/collectives/PrimaryDirectoryPage";
 
 export default function DiretorioPage() {
-  return <CollectiveCatalogPage area="diretorio" />;
+  return <PrimaryDirectoryPage activeTab="overview" />;
 }

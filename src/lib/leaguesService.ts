@@ -2147,6 +2147,24 @@ export async function fetchLeagueSummaries(options?: {
   return filteredLeagues;
 }
 
+export async function fetchPrimaryLeagueRecord(options?: {
+  forceRefresh?: boolean;
+  tenantId?: string | null;
+  category?: LeagueCategory | LeagueCategory[] | null;
+}): Promise<LeagueRecord | null> {
+  const leagues = await fetchLeagueSummaries({
+    orderByField: "nome",
+    orderDirection: "asc",
+    maxResults: MAX_LEAGUE_RESULTS,
+    forceRefresh: options?.forceRefresh,
+    tenantId: options?.tenantId,
+    category: options?.category,
+  });
+
+  if (leagues.length === 0) return null;
+  return leagues.find((league) => league.ativa !== false) || leagues[0] || null;
+}
+
 export async function fetchLeagueById(
   leagueId: string | null | undefined,
   options?: { forceRefresh?: boolean; tenantId?: string | null }
@@ -2358,9 +2376,13 @@ export async function fetchManagedLeagueSummaries(payload: {
     const embeddedMember = (league.membros || []).find(
       (member) => member.id.trim() === userId && canManageLeagueRole(member.cargo)
     );
+    const hasExtraManagerAccess = Array.isArray(league.managerUserIds)
+      ? league.managerUserIds.some((entry) => asString(entry).trim() === userId)
+      : false;
     const managementRole =
       managementRolesByLeagueId.get(league.id) ||
-      (embeddedMember ? resolveLeagueRoleLabel(embeddedMember.cargo) : "");
+      (embeddedMember ? resolveLeagueRoleLabel(embeddedMember.cargo) : "") ||
+      (hasExtraManagerAccess ? "Gestor da página" : "");
 
     if (!managementRole) return acc;
 

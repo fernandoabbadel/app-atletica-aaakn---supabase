@@ -1,5 +1,5 @@
-import { CollectiveAdminPage } from "@/components/collectives/CollectiveAdminPage";
+import { DirectoryAdminPage } from "@/components/collectives/DirectoryAdminPage";
 
 export default function AdminDiretorioPage() {
-  return <CollectiveAdminPage area="diretorio" />;
+  return <DirectoryAdminPage />;
 }

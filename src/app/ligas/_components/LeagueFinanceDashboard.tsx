@@ -391,12 +391,27 @@ function ChartPanel({
   );
 }
 
-export function LeagueFinanceDashboard({ view = "hub" }: { view?: "hub" | "eventos" | "produtos" }) {
+export function LeagueFinanceDashboard({
+  view = "hub",
+  basePath,
+  leagueIdOverride,
+  showBoard = true,
+  entityLabel = "liga",
+  entityArticle = "da",
+}: {
+  view?: "hub" | "eventos" | "produtos";
+  basePath?: string;
+  leagueIdOverride?: string;
+  showBoard?: boolean;
+  entityLabel?: string;
+  entityArticle?: "da" | "do";
+}) {
   const params = useParams<{ leagueId?: string }>();
   const router = useRouter();
   const { user } = useAuth();
   const { tenantId, tenantSlug } = useTenantTheme();
-  const leagueId = typeof params?.leagueId === "string" ? params.leagueId : "";
+  const routeLeagueId = typeof params?.leagueId === "string" ? params.leagueId : "";
+  const leagueId = leagueIdOverride?.trim() || routeLeagueId;
   const [data, setData] = useState<LeagueFinanceData>(emptyFinanceData);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -532,7 +547,9 @@ export function LeagueFinanceDashboard({ view = "hub" }: { view?: "hub" | "event
   const league = data.league;
   const leagueName = league?.sigla?.trim() || league?.nome?.trim() || "Liga";
   const leagueLogo = (league ? resolveLeagueLogoSrc(league) : "") || "/logo.png";
-  const leagueBaseHref = tenantPath(`/ligas/${encodeURIComponent(leagueId)}`);
+  const leagueBaseHref = tenantPath(
+    basePath || `/ligas/${encodeURIComponent(leagueId)}`
+  );
   const leagueHomeHref = leagueBaseHref;
   const leagueInformationHref = `${leagueBaseHref}/informacoes`;
   const leagueMembersHref = `${leagueBaseHref}/membros`;
@@ -647,6 +664,7 @@ export function LeagueFinanceDashboard({ view = "hub" }: { view?: "hub" | "event
             storeHref={leagueStoreHref}
             financeHref={leagueFinanceHref}
             boardHref={leagueBoardHref}
+            showBoard={showBoard}
           />
         </div>
       </header>
@@ -680,7 +698,7 @@ export function LeagueFinanceDashboard({ view = "hub" }: { view?: "hub" | "event
           <MetricCard
             label="Catálogo"
             value={formatNumber(data.products.length)}
-            hint="produtos cadastrados pela liga"
+            hint={`produtos cadastrados ${entityArticle} ${entityLabel}`}
             icon={<BarChart3 size={18} />}
           />
         </section>
@@ -737,7 +755,7 @@ export function LeagueFinanceDashboard({ view = "hub" }: { view?: "hub" | "event
           <EventManagementAnalytics
             events={(data.league?.eventos || []) as unknown as Row[]}
             tickets={data.eventTickets}
-            allLabel="Todos os eventos da liga"
+            allLabel={`Todos os eventos ${entityArticle} ${entityLabel}`}
           />
         ) : null}
 
@@ -746,9 +764,9 @@ export function LeagueFinanceDashboard({ view = "hub" }: { view?: "hub" | "event
             products={data.products}
             orders={data.productOrders}
             users={data.leagueUsers as unknown as Row[]}
-            title="Produtos da liga"
+            title={`Produtos ${entityArticle} ${entityLabel}`}
             subtitle="Receita, compradores únicos, valor médio, conversão por produto, estoque, recompra e curva ABC apenas desta liga."
-            allLabel="Todos os produtos da liga"
+            allLabel={`Todos os produtos ${entityArticle} ${entityLabel}`}
           />
         ) : null}
 
