@@ -30,6 +30,7 @@ import { logActivity } from "@/lib/logger";
 import {
   fetchUserLeagueInteractionState,
   fetchLeagueById,
+  fetchLeagueUsers,
   isLeagueCategory,
   resolveFollowedLeagueIdsFromUserExtra,
   resolveLikedLeagueIdsFromUserExtra,
@@ -38,6 +39,7 @@ import {
   toggleUserLeagueLike,
   type LeagueCategory,
   type LeagueRecord,
+  type LeagueUserRecord,
 } from "@/lib/leaguesService";
 import { fetchStoreCategories, fetchStoreProductsBySeller } from "@/lib/storePublicService";
 import { parseEventDateTimeMs } from "@/lib/eventDateUtils";
@@ -49,6 +51,7 @@ import {
   resolveLeagueRoleLabel,
   sortLeagueMembersByRole,
 } from "@/lib/leagueRoles";
+import { isPlatformMaster } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { fetchTurmaMemberCounts } from "@/lib/turmasService";
 
@@ -86,7 +89,7 @@ const PAGE_CONFIG: Record<CollectiveAreaKey, CollectivePageConfig> = {
     area: "comissoes",
     category: "comissao",
     basePath: "/comissoes",
-    adminPath: "/admin/comissoes",
+    adminPath: "/comissoes/configurar",
     headerLabel: "Representação oficial",
     emptyTitle: "Comissão não encontrada",
     emptyDescription: "A comissão pode ter sido removida ou ainda não estar publicada nesta tenant.",
@@ -179,6 +182,9 @@ const hasPaymentInfo = (paymentConfig: LeagueRecord["paymentConfig"]): boolean =
         paymentConfig.whatsapp?.trim())
   );
 
+const normalizeTurmaCode = (value: unknown): string =>
+  typeof value === "string" ? value.trim().toUpperCase() : "";
+
 export function CollectivePublicDetailClient({
   area,
   leagueId,
@@ -213,6 +219,7 @@ export function CollectivePublicDetailClient({
   const [submittingMemberRequest, setSubmittingMemberRequest] = useState(false);
   const [togglingLike, setTogglingLike] = useState(false);
   const [turmaMemberCount, setTurmaMemberCount] = useState<number | null>(null);
+  const [turmaMembers, setTurmaMembers] = useState<LeagueUserRecord[]>([]);
 
   const tenantPath = (path: string) => (cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path);
 
@@ -352,24 +359,41 @@ export function CollectivePublicDetailClient({
     let mounted = true;
     if (area !== "comissoes" || !league?.turmaId) {
       setTurmaMemberCount(null);
+      setTurmaMembers([]);
       return () => {
         mounted = false;
       };
     }
 
-    fetchTurmaMemberCounts({
-      tenantId: tenantId || undefined,
-      forceRefresh: true,
-      turmaIds: [league.turmaId],
-    })
-      .then((counts) => {
+    Promise.all([
+      fetchTurmaMemberCounts({
+        tenantId: tenantId || undefined,
+        forceRefresh: true,
+        turmaIds: [league.turmaId],
+      }),
+      fetchLeagueUsers({
+        maxResults: 200,
+        forceRefresh: true,
+        tenantId: tenantId || undefined,
+      }),
+    ])
+      .then(([counts, users]) => {
         if (!mounted) return;
+        const commissionTurma = normalizeTurmaCode(league.turmaId);
         setTurmaMemberCount(counts[league.turmaId || ""] ?? 0);
+        setTurmaMembers(
+          users
+            .filter((entry) => normalizeTurmaCode(entry.turma) === commissionTurma)
+            .sort((left, right) =>
+              (left.nome || left.id).localeCompare(right.nome || right.id, "pt-BR")
+            )
+        );
       })
       .catch((error: unknown) => {
         console.error(error);
         if (!mounted) return;
         setTurmaMemberCount(null);
+        setTurmaMembers([]);
       });
 
     return () => {
@@ -423,6 +447,20 @@ export function CollectivePublicDetailClient({
       })),
     [league]
   );
+  const publicMembers = useMemo(() => {
+    if (area !== "comissoes" || turmaMembers.length === 0) return sortedMembers;
+    const managementMemberById = new Map(sortedMembers.map((member) => [member.id.trim(), member]));
+    return turmaMembers.map((member) => {
+      const managementMember = managementMemberById.get(member.id.trim());
+      return {
+        id: member.id,
+        nome: member.nome || managementMember?.nome || "Aluno",
+        cargo: managementMember?.cargo || "Membro",
+        foto: member.foto || managementMember?.foto || "",
+        linkPerfil: `/perfil/${member.id}`,
+      };
+    });
+  }, [area, sortedMembers, turmaMembers]);
   const sortedEvents = useMemo(() => sortEvents(league?.eventos || []), [league]);
   const overviewHighlights = useMemo(
     () =>
@@ -438,18 +476,40 @@ export function CollectivePublicDetailClient({
   const isFollowing = Boolean(league && followedIds.includes(league.id));
   const currentMemberRequest =
     league?.memberRequests?.find((entry) => entry.userId.trim() === (user?.uid || "").trim()) || null;
-  const isOfficialMember = Boolean(
+  const isListedMember = Boolean(
     user?.uid && sortedMembers.some((member) => member.id.trim() === user.uid.trim())
   );
+  const isManagementMember = Boolean(
+    user?.uid &&
+      sortedMembers.some(
+        (member) => member.id.trim() === user.uid.trim() && canManageLeagueRole(member.cargo)
+      )
+  );
+  const isCommissionTurmaMember = Boolean(
+    area === "comissoes" &&
+      user?.uid &&
+      normalizeTurmaCode(league?.turmaId) &&
+      (normalizeTurmaCode(user.turma) === normalizeTurmaCode(league?.turmaId) ||
+        turmaMembers.some((member) => member.id.trim() === user.uid.trim()))
+  );
+  const isOfficialMember = area === "comissoes"
+    ? Boolean(isListedMember || isCommissionTurmaMember)
+    : isListedMember;
   const canManagePage = Boolean(
     user?.uid &&
-      (league?.managerUserIds?.includes(user.uid) ||
+      (isPlatformMaster(user) ||
+        league?.managerUserIds?.includes(user.uid) ||
         uiConfig.managerUserIds.includes(user.uid) ||
-        (area === "diretorio"
-          ? sortedMembers.some(
-              (member) => member.id.trim() === user.uid.trim() && canManageLeagueRole(member.cargo)
-            )
-          : isOfficialMember))
+        isManagementMember)
+  );
+  const requestBlockedByMembership =
+    area === "comissoes" ? isManagementMember : isOfficialMember;
+  const requestRoleOptions = useMemo(
+    () =>
+      area === "comissoes"
+        ? LEAGUE_ROLE_OPTIONS.filter((role) => canManageLeagueRole(role))
+        : [...LEAGUE_ROLE_OPTIONS],
+    [area]
   );
   const publicAgendaEvents = useMemo(
     () => sortedEvents.filter((event) => !isInternalLeagueEvent(event)),
@@ -474,8 +534,18 @@ export function CollectivePublicDetailClient({
 
   useEffect(() => {
     if (!currentMemberRequest) return;
-    setRequestRole(resolveLeagueRoleLabel(currentMemberRequest.requestedRole));
-  }, [currentMemberRequest]);
+    const requestedRole = resolveLeagueRoleLabel(currentMemberRequest.requestedRole);
+    setRequestRole(
+      area === "comissoes" && !canManageLeagueRole(requestedRole)
+        ? "Diretoria"
+        : requestedRole
+    );
+  }, [area, currentMemberRequest]);
+
+  useEffect(() => {
+    if (requestRoleOptions.includes(requestRole as (typeof requestRoleOptions)[number])) return;
+    setRequestRole(requestRoleOptions[0] || DEFAULT_LEAGUE_ROLE);
+  }, [requestRole, requestRoleOptions]);
 
   const handleLike = async () => {
     if (!user || !league || togglingLike) return;
@@ -532,12 +602,21 @@ export function CollectivePublicDetailClient({
 
   const handleSubmitMemberRequest = async () => {
     if (!user?.uid || !league || submittingMemberRequest) return;
-    if (isOfficialMember) {
-      addToast(`Você já faz parte d${area === "comissoes" ? "a" : "o"} ${uiConfig.rotuloCard.toLowerCase()}.`, "info");
+    if (requestBlockedByMembership) {
+      addToast(
+        area === "comissoes"
+          ? "Você já tem acesso à configuração desta comissão."
+          : `Você já faz parte d${entityArticle} ${uiConfig.rotuloCard.toLowerCase()}.`,
+        "info"
+      );
       return;
     }
     if (currentMemberRequest) {
       addToast("Sua solicitação já está pendente de análise.", "info");
+      return;
+    }
+    if (area === "comissoes" && !canManageLeagueRole(requestRole)) {
+      addToast("Escolha um cargo de gestão da comissão.", "error");
       return;
     }
 
@@ -707,14 +786,18 @@ export function CollectivePublicDetailClient({
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-accent">
-                    Participação na página
+                    {area === "comissoes" ? "Acesso à configuração" : "Participação na página"}
                   </p>
                   <p className="mt-2 text-sm leading-6 text-white/85">
-                    {isOfficialMember
-                      ? `Seu perfil já está na equipe oficial d${area === "comissoes" ? "a" : "o"} ${uiConfig.rotuloCard.toLowerCase()}.`
+                    {requestBlockedByMembership
+                      ? area === "comissoes"
+                        ? "Seu perfil já está na equipe de gestão desta comissão."
+                        : `Seu perfil já está na equipe oficial d${entityArticle} ${uiConfig.rotuloCard.toLowerCase()}.`
                       : currentMemberRequest
                         ? `Solicitação enviada como ${resolveLeagueRoleLabel(currentMemberRequest.requestedRole)}.`
-                        : "Escolha o cargo desejado e envie sua solicitação para a equipe analisar."}
+                        : area === "comissoes"
+                          ? "Solicite acesso à configuração escolhendo um cargo da gestão."
+                          : "Escolha o cargo desejado e envie sua solicitação para a equipe analisar."}
                   </p>
                 </div>
 
@@ -722,10 +805,10 @@ export function CollectivePublicDetailClient({
                   <select
                     value={requestRole}
                     onChange={(event) => setRequestRole(resolveLeagueRoleLabel(event.target.value))}
-                    disabled={!user || isOfficialMember || Boolean(currentMemberRequest) || submittingMemberRequest}
+                    disabled={!user || requestBlockedByMembership || Boolean(currentMemberRequest) || submittingMemberRequest}
                     className="rounded-full border border-brand/30 bg-[#050505]/80 px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-white outline-none focus:border-brand disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {LEAGUE_ROLE_OPTIONS.map((role) => (
+                    {requestRoleOptions.map((role) => (
                       <option key={role} value={role} className="bg-zinc-950 text-white">
                         {role}
                       </option>
@@ -734,16 +817,20 @@ export function CollectivePublicDetailClient({
                   <button
                     type="button"
                     onClick={() => void handleSubmitMemberRequest()}
-                    disabled={!user || isOfficialMember || Boolean(currentMemberRequest) || submittingMemberRequest}
+                    disabled={!user || requestBlockedByMembership || Boolean(currentMemberRequest) || submittingMemberRequest}
                     className="inline-flex items-center justify-center gap-2 rounded-full border border-brand/30 bg-brand-soft px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {submittingMemberRequest ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
-                    {isOfficialMember
-                      ? "Você já faz parte"
+                    {requestBlockedByMembership
+                      ? area === "comissoes"
+                        ? "Você já tem acesso"
+                        : "Você já faz parte"
                       : currentMemberRequest
                         ? "Solicitação pendente"
                         : user
-                          ? "Solicitar entrada"
+                          ? area === "comissoes"
+                            ? "Solicitar acesso"
+                            : "Solicitar entrada"
                           : "Entre para solicitar"}
                   </button>
                 </div>
@@ -873,7 +960,7 @@ export function CollectivePublicDetailClient({
               <h2 className="text-2xl font-black text-white">Membros</h2>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {sortedMembers.map((member) => {
+              {publicMembers.map((member) => {
                 const href = member.linkPerfil?.startsWith("/") ? tenantPath(member.linkPerfil) : member.linkPerfil || "";
                 const card = (
                   <article className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.96),rgba(10,10,10,0.98))] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] transition hover:-translate-y-1 hover:border-brand/30">
@@ -892,7 +979,7 @@ export function CollectivePublicDetailClient({
                 );
                 return href ? <Link key={`${member.id}-${member.nome}`} href={href}>{card}</Link> : <div key={`${member.id}-${member.nome}`}>{card}</div>;
               })}
-              {sortedMembers.length === 0 ? <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">Essa página ainda não publicou os membros oficiais.</p> : null}
+              {publicMembers.length === 0 ? <p className="rounded-[1.75rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-8 text-center text-sm text-zinc-500">Essa página ainda não publicou os membros oficiais.</p> : null}
             </div>
           </section>
         ) : activeTab === "agenda" ? (

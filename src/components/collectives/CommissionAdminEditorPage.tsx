@@ -52,6 +52,10 @@ const normalizeMember = (member: LeagueMemberRecord): LeagueMemberRecord => ({
 const COMMISSION_IMAGE_HELP =
   "Use uma imagem horizontal, de preferência 1600x900 px ou maior. Compacte no Squoosh para deixar o arquivo final em até 200 KB antes de enviar.";
 
+const MEMBER_LETTER_FILTERS = ["A-F", "G-L", "M-R", "S-Z", "TODOS"] as const;
+
+type MemberLetterFilter = (typeof MEMBER_LETTER_FILTERS)[number];
+
 type EditableCommissionField =
   | "nome"
   | "sigla"
@@ -61,6 +65,24 @@ type EditableCommissionField =
   | "foto"
   | "visivel"
   | "ativa";
+
+const normalizeComparableText = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+
+const normalizeTurmaCode = (value: unknown): string =>
+  typeof value === "string" ? value.trim().toUpperCase() : "";
+
+const resolveMemberLetterFilter = (name: string): Exclude<MemberLetterFilter, "TODOS"> => {
+  const firstLetter = normalizeComparableText(name).charAt(0);
+  if (firstLetter >= "A" && firstLetter <= "F") return "A-F";
+  if (firstLetter >= "G" && firstLetter <= "L") return "G-L";
+  if (firstLetter >= "M" && firstLetter <= "R") return "M-R";
+  return "S-Z";
+};
 
 export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
   const { user } = useAuth();
@@ -76,6 +98,7 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
   const [users, setUsers] = useState<LeagueUserRecord[]>([]);
   const [members, setMembers] = useState<LeagueMemberRecord[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
+  const [memberLetterFilter, setMemberLetterFilter] = useState<MemberLetterFilter>("A-F");
 
   const tenantPath = useCallback(
     (path: string) => (cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path),
@@ -130,31 +153,60 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
     void loadData();
   }, [loadData]);
 
-  const availableMembers = useMemo(() => {
-    const search = memberSearch.trim().toLowerCase();
-    const selectedIds = new Set(members.map((member) => member.id));
-    const commissionTurma = (commission?.turmaId || "").trim().toUpperCase();
+  const availableMembersBase = useMemo(() => {
+    const selectedIds = new Set(members.map((member) => member.id.trim()));
+    const commissionTurma = normalizeTurmaCode(commission?.turmaId);
 
     return users
-      .filter((entry) => !selectedIds.has(entry.id))
+      .filter((entry) => !selectedIds.has(entry.id.trim()))
+      .filter((entry) => {
+        if (!commissionTurma) return true;
+        return normalizeTurmaCode(entry.turma) === commissionTurma;
+      });
+  }, [commission?.turmaId, members, users]);
+
+  const availableMemberCounts = useMemo(() => {
+    const counts: Record<MemberLetterFilter, number> = {
+      "A-F": 0,
+      "G-L": 0,
+      "M-R": 0,
+      "S-Z": 0,
+      TODOS: 0,
+    };
+
+    availableMembersBase.forEach((entry) => {
+      const group = resolveMemberLetterFilter(entry.nome || "Aluno");
+      counts[group] += 1;
+      counts.TODOS += 1;
+    });
+
+    return counts;
+  }, [availableMembersBase]);
+
+  const availableMembers = useMemo(() => {
+    const search = normalizeComparableText(memberSearch);
+
+    return availableMembersBase
+      .filter((entry) => {
+        if (memberLetterFilter === "TODOS") return true;
+        return resolveMemberLetterFilter(entry.nome || "Aluno") === memberLetterFilter;
+      })
       .filter((entry) => {
         if (!search) return true;
-        const nome = (entry.nome || "").toLowerCase();
-        const turma = (entry.turma || "").toLowerCase();
+        const nome = normalizeComparableText(entry.nome || "");
+        const turma = normalizeComparableText(entry.turma || "");
+        const id = normalizeComparableText(entry.id);
         return (
           nome.includes(search) ||
           turma.includes(search) ||
-          entry.id.toLowerCase().includes(search)
+          id.includes(search)
         );
       })
-      .sort((left, right) => {
-        const leftSameTurma = (left.turma || "").trim().toUpperCase() === commissionTurma;
-        const rightSameTurma = (right.turma || "").trim().toUpperCase() === commissionTurma;
-        if (leftSameTurma !== rightSameTurma) return leftSameTurma ? -1 : 1;
-        return (left.nome || left.id).localeCompare(right.nome || right.id, "pt-BR");
-      })
-      .slice(0, 18);
-  }, [commission?.turmaId, memberSearch, members, users]);
+      .sort((left, right) =>
+        (left.nome || left.id).localeCompare(right.nome || right.id, "pt-BR")
+      )
+      .slice(0, memberLetterFilter === "TODOS" ? 48 : 18);
+  }, [availableMembersBase, memberLetterFilter, memberSearch]);
 
   const canManageCommission = useMemo(() => {
     if (!user?.uid || !commission) return false;
@@ -621,6 +673,33 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
               className="mt-5 w-full rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm outline-none focus:border-brand/40"
             />
 
+            <div className="mt-3 flex flex-wrap gap-2">
+              {MEMBER_LETTER_FILTERS.map((filter) => {
+                const active = memberLetterFilter === filter;
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setMemberLetterFilter(filter)}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] transition ${
+                      active
+                        ? "border-brand/40 bg-brand-soft text-brand-accent"
+                        : "border-zinc-800 bg-black/30 text-zinc-400 hover:border-zinc-700 hover:text-white"
+                    }`}
+                  >
+                    {filter}
+                    <span className="rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-[10px] text-zinc-300">
+                      {availableMemberCounts[filter]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mt-3 text-[11px] font-semibold text-zinc-500">
+              Mostrando apenas alunos da turma {commission.turmaId || "da comissão"}.
+            </p>
+
             <div className="mt-4 space-y-3">
               {availableMembers.length > 0 ? (
                 availableMembers.map((entry) => (
@@ -643,7 +722,7 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
                 ))
               ) : (
                 <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/70 p-6 text-center text-xs text-zinc-500">
-                  Nenhum aluno disponível com esse filtro.
+                  Nenhum aluno disponível nesta divisão.
                 </div>
               )}
             </div>
@@ -660,9 +739,6 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
                     Responsáveis selecionados
                   </p>
                   <h3 className="mt-1 text-lg font-black text-white">Cargos da comissão</h3>
-                  <p className="mt-1 max-w-md text-[11px] leading-5 text-zinc-500">
-                    Presidente, Vice-Presidente, Secretaria, Tesouraria e Diretoria podem acessar este painel. O master da plataforma também tem acesso.
-                  </p>
                 </div>
               </div>
               <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] font-bold text-zinc-300">

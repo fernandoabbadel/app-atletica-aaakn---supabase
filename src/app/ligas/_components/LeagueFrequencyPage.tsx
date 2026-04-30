@@ -398,10 +398,12 @@ export function LeagueFrequencyPage({
   basePath,
   leagueIdOverride,
   showBoard = true,
+  memberScope = "league",
 }: {
   basePath?: string;
   leagueIdOverride?: string;
   showBoard?: boolean;
+  memberScope?: "league" | "turma";
 }) {
   const params = useParams<{ leagueId?: string }>();
   const router = useRouter();
@@ -455,6 +457,9 @@ export function LeagueFrequencyPage({
 
   const presenceData = useMemo(() => {
     const userById = new Map(data.leagueUsers.map((entry) => [entry.id.trim(), entry]));
+    const leagueMemberById = new Map(
+      (data.league?.membros || []).map((member) => [member.id.trim(), member])
+    );
     const events: FrequencyEvent[] = (data.league?.eventos || []).map((event) => {
       const globalId = getLeagueEventGlobalId(event);
       const ids = new Set([asString(event.id), asString(event.globalEventId), globalId].filter(Boolean));
@@ -465,15 +470,39 @@ export function LeagueFrequencyPage({
         ids,
       };
     });
-    const members: FrequencyMember[] = (data.league?.membros || [])
+    const commissionTurma = asString(data.league?.turmaId).toUpperCase();
+    const members: FrequencyMember[] = (
+      memberScope === "turma" && commissionTurma
+        ? data.leagueUsers
+            .filter((entry) => asString(entry.turma).toUpperCase() === commissionTurma)
+            .map((entry) => {
+              const managementMember = leagueMemberById.get(entry.id.trim());
+              return {
+                id: entry.id.trim(),
+                nome: entry.nome || managementMember?.nome || "Aluno",
+                cargo: managementMember?.cargo || "Membro",
+                foto: entry.foto || managementMember?.foto || "",
+                turma: entry.turma || commissionTurma,
+              };
+            })
+        : (data.league?.membros || []).map((member) => {
+            const userRecord = userById.get(member.id.trim());
+            return {
+              id: member.id.trim(),
+              nome: member.nome,
+              cargo: member.cargo,
+              foto: member.foto || userRecord?.foto || "",
+              turma: userRecord?.turma || "Sem turma",
+            };
+          })
+    )
       .map((member) => {
-        const userRecord = userById.get(member.id.trim());
         return {
           id: member.id.trim(),
           nome: member.nome,
           cargo: member.cargo,
-          foto: member.foto || userRecord?.foto || "",
-          turma: userRecord?.turma || "Sem turma",
+          foto: member.foto || "",
+          turma: member.turma || "Sem turma",
         };
       })
       .filter((member) => member.id)
@@ -514,7 +543,7 @@ export function LeagueFrequencyPage({
     });
 
     return { events, members, presence, manualByCell };
-  }, [data]);
+  }, [data, memberScope]);
 
   const firstEventKey = presenceData.events[0]?.key || "";
   const firstMemberId = presenceData.members[0]?.id || "";

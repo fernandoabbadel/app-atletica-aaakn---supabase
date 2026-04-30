@@ -22,6 +22,7 @@ import {
   fetchStoreProductStatsBySellers,
   type StoreSellerProductStats,
 } from "@/lib/storePublicService";
+import { isPlatformMaster } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { fetchTurmaMemberCounts } from "@/lib/turmasService";
 
@@ -37,7 +38,7 @@ const CATALOG_CONFIG: Record<CollectiveAreaKey, CollectiveCatalogConfig> = {
     area: "comissoes",
     category: "comissao",
     basePath: "/comissoes",
-    adminPath: "/admin/comissoes",
+    adminPath: "/comissoes/configurar",
   },
   diretorio: {
     area: "diretorio",
@@ -209,6 +210,19 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
       return (left.nome || "").localeCompare(right.nome || "", "pt-BR");
     });
   }, [area, productStatsBySeller, records]);
+  const canManageCatalog = useMemo(() => {
+    if (!user?.uid) return false;
+    if (area === "diretorio") return true;
+    if (area !== "comissoes") return false;
+    if (isPlatformMaster(user)) return true;
+    return records.some(
+      (record) =>
+        record.managerUserIds?.includes(user.uid) ||
+        (record.membros || []).some(
+          (member) => member.id.trim() === user.uid.trim() && canManageLeagueRole(member.cargo)
+        )
+    );
+  }, [area, records, user]);
 
   const handleCardLike = async (event: MouseEvent<HTMLButtonElement>, record: LeagueRecord) => {
     event.preventDefault();
@@ -282,7 +296,7 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
               <ArrowLeft size={14} />
               Dashboard
             </Link>
-            {area === "diretorio" && user ? (
+            {canManageCatalog ? (
               <Link href={tenantPath(config.adminPath)} className="inline-flex items-center gap-2 rounded-full border border-brand/30 bg-brand-soft px-4 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-brand-accent hover:opacity-90">
                 <Settings2 size={14} />
                 Gerenciar
