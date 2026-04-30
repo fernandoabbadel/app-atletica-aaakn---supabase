@@ -1,14 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Settings2, Sparkles, Users } from "lucide-react";
+import { ArrowLeft, Heart, Loader2, Settings2, Sparkles, Users } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { fetchCollectiveAreaUiConfig, getDefaultCollectiveAreaUiConfig, type CollectiveAreaKey } from "@/lib/collectiveAreaUiService";
-import { fetchLeagueSummaries, type LeagueCategory, type LeagueRecord } from "@/lib/leaguesService";
+import {
+  fetchLeagueSummaries,
+  fetchUserLeagueInteractionState,
+  resolveLikedLeagueIdsFromUserExtra,
+  toggleUserLeagueLike,
+  type LeagueCategory,
+  type LeagueRecord,
+} from "@/lib/leaguesService";
 import { canManageLeagueRole } from "@/lib/leagueRoles";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
 import {
@@ -59,6 +66,8 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
   const [records, setRecords] = useState<LeagueRecord[]>([]);
   const [turmaMemberCounts, setTurmaMemberCounts] = useState<Record<string, number>>({});
   const [productStatsBySeller, setProductStatsBySeller] = useState<Record<string, StoreSellerProductStats>>({});
+  const [likedIds, setLikedIds] = useState<string[]>([]);
+  const [togglingLikeIds, setTogglingLikeIds] = useState<string[]>([]);
   const [uiConfig, setUiConfig] = useState(() => getDefaultCollectiveAreaUiConfig(area));
 
   const tenantPath = (path: string) => (cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path);
