@@ -154,6 +154,39 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
     };
   }, [area, config.category, tenantId]);
 
+  useEffect(() => {
+    let mounted = true;
+    if (!user?.uid) {
+      setLikedIds([]);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    const fallbackLikedIds = resolveLikedLeagueIdsFromUserExtra(user.extra, tenantId);
+    setLikedIds(fallbackLikedIds);
+
+    const syncInteractionState = async () => {
+      try {
+        const state = await fetchUserLeagueInteractionState({
+          userId: user.uid,
+          tenantId: tenantId || undefined,
+        });
+        if (!mounted) return;
+        setLikedIds(state.likedIds);
+      } catch (error) {
+        console.error(error);
+        if (!mounted) return;
+        setLikedIds(fallbackLikedIds);
+      }
+    };
+
+    void syncInteractionState();
+    return () => {
+      mounted = false;
+    };
+  }, [tenantId, user?.uid, user?.extra]);
+
   const publishedCount = useMemo(
     () => records.filter((entry) => entry.visivel !== false).length,
     [records]
@@ -176,6 +209,68 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
       return (left.nome || "").localeCompare(right.nome || "", "pt-BR");
     });
   }, [area, productStatsBySeller, records]);
+
+  const handleCardLike = async (event: MouseEvent<HTMLButtonElement>, record: LeagueRecord) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!user?.uid || togglingLikeIds.includes(record.id)) return;
+
+    const wasLiked = likedIds.includes(record.id);
+    const optimisticDelta = wasLiked ? -1 : 1;
+
+    setTogglingLikeIds((current) => [...current, record.id]);
+    setLikedIds((current) =>
+      wasLiked
+        ? current.filter((entry) => entry !== record.id)
+        : Array.from(new Set([...current, record.id]))
+    );
+    setRecords((current) =>
+      current.map((entry) =>
+        entry.id === record.id
+          ? { ...entry, likes: Math.max(0, (entry.likes || 0) + optimisticDelta) }
+          : entry
+      )
+    );
+
+    try {
+      const result = await toggleUserLeagueLike({
+        leagueId: record.id,
+        userId: user.uid,
+        tenantId: tenantId || undefined,
+      });
+      setLikedIds(result.likedIds);
+
+      if (result.isLiked !== !wasLiked) {
+        const actualDelta = result.isLiked ? 1 : -1;
+        const correction = actualDelta - optimisticDelta;
+        if (correction !== 0) {
+          setRecords((current) =>
+            current.map((entry) =>
+              entry.id === record.id
+                ? { ...entry, likes: Math.max(0, (entry.likes || 0) + correction) }
+                : entry
+            )
+          );
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      setLikedIds((current) =>
+        wasLiked
+          ? Array.from(new Set([...current, record.id]))
+          : current.filter((entry) => entry !== record.id)
+      );
+      setRecords((current) =>
+        current.map((entry) =>
+          entry.id === record.id
+            ? { ...entry, likes: Math.max(0, (entry.likes || 0) + (wasLiked ? 1 : -1)) }
+            : entry
+        )
+      );
+    } finally {
+      setTogglingLikeIds((current) => current.filter((entry) => entry !== record.id));
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 text-white">
@@ -240,7 +335,8 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
             {orderedRecords.map((record) => {
               const href = tenantPath(`${config.basePath}/${record.id}`);
               const imageSrc = getCardImage(record);
-              const productStats = productStatsBySeller[record.id] || EMPTY_PRODUCT_STATS;
+              const isLiked = likedIds.includes(record.id);
+              const isTogglingLike = togglingLikeIds.includes(record.id);
               const displayMembersCount =
                 area === "comissoes" && record.turmaId
                   ? turmaMemberCounts[record.turmaId] ?? record.membersCount ?? record.membros?.length ?? 0
@@ -299,25 +395,32 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
                           Visão geral ativa
                         </span>
                       ) : null}
-                      {area === "comissoes" ? (
-                        <>
-                          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] font-bold text-zinc-300">
-                            {productStats.soldCount} vendidos
-                          </span>
-                          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] font-bold text-zinc-300">
-                            {productStats.exposedCount} expostos
-                          </span>
-                          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] font-bold text-zinc-300">
-                            {record.likes || 0} curtidas
-                          </span>
-                        </>
-                      ) : null}
                     </div>
 
                     <div className="flex gap-3">
                       <Link href={href} className="brand-button-solid flex-1 justify-center">
                         Abrir página
                       </Link>
+                      {area === "comissoes" ? (
+                        <button
+                          type="button"
+                          onClick={(event) => handleCardLike(event, record)}
+                          disabled={!user?.uid || isTogglingLike}
+                          aria-label={isLiked ? "Remover curtida da comissão" : "Curtir comissão"}
+                          title={user?.uid ? (isLiked ? "Remover curtida" : "Curtir") : "Entre para curtir"}
+                          className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border transition active:scale-95 ${
+                            isLiked
+                              ? "border-red-400/40 bg-red-500/15 text-red-300"
+                              : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-red-400/40 hover:text-red-300"
+                          } ${!user?.uid || isTogglingLike ? "cursor-not-allowed opacity-70" : ""}`}
+                        >
+                          {isTogglingLike ? (
+                            <Loader2 size={17} className="animate-spin" />
+                          ) : (
+                            <Heart size={18} className={isLiked ? "fill-current" : ""} />
+                          )}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </article>

@@ -538,9 +538,10 @@ export function CollectiveAdminPage({ area }: { area: CollectiveAreaKey }) {
                       {area === "comissoes" ? (
                         <Link
                           href={tenantPath(`${config.adminPath}/${record.id}`)}
-                          className="inline-flex items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs font-black uppercase text-zinc-300 transition hover:border-brand/30 hover:text-brand-accent"
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs font-black uppercase text-zinc-300 transition hover:border-brand/30 hover:text-brand-accent"
                         >
-                          Diretoria
+                          <Pencil size={16} />
+                          Editar
                         </Link>
                       ) : (
                         <button

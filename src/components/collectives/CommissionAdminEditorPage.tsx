@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
   ExternalLink,
+  ImagePlus,
   Loader2,
   Plus,
   Save,
@@ -18,6 +19,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
+import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import {
   fetchLeagueById,
   fetchLeagueUsers,
@@ -30,11 +32,14 @@ import {
 import {
   DEFAULT_LEAGUE_ROLE,
   LEAGUE_ROLE_OPTIONS,
+  canManageLeagueRole,
   resolveLeagueRoleLabel,
   sortLeagueMembersByRole,
 } from "@/lib/leagueRoles";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
+import { isPlatformMaster } from "@/lib/roles";
 import { withTenantSlug } from "@/lib/tenantRouting";
+import { uploadImage, VERSIONED_PUBLIC_ASSET_CACHE_CONTROL } from "@/lib/upload";
 
 const getCommissionImage = (record?: LeagueRecord | null) =>
   record?.foto?.trim() || resolveLeagueLogoSrc(record, "/placeholder_liga.png");
@@ -43,6 +48,19 @@ const normalizeMember = (member: LeagueMemberRecord): LeagueMemberRecord => ({
   ...member,
   cargo: resolveLeagueRoleLabel(member.cargo || DEFAULT_LEAGUE_ROLE),
 });
+
+const COMMISSION_IMAGE_HELP =
+  "Use uma imagem horizontal, de preferência 1600x900 px ou maior. Compacte no Squoosh para deixar o arquivo final em até 200 KB antes de enviar.";
+
+type EditableCommissionField =
+  | "nome"
+  | "sigla"
+  | "descricao"
+  | "visaoGeral"
+  | "bizu"
+  | "foto"
+  | "visivel"
+  | "ativa";
 
 export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
   const { user } = useAuth();
@@ -53,6 +71,7 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [commission, setCommission] = useState<LeagueRecord | null>(null);
   const [users, setUsers] = useState<LeagueUserRecord[]>([]);
   const [members, setMembers] = useState<LeagueMemberRecord[]>([]);
@@ -137,6 +156,26 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
       .slice(0, 18);
   }, [commission?.turmaId, memberSearch, members, users]);
 
+  const canManageCommission = useMemo(() => {
+    if (!user?.uid || !commission) return false;
+    if (isPlatformMaster(user)) return true;
+    if ((commission.managerUserIds || []).includes(user.uid)) return true;
+    return members.some(
+      (member) => member.id.trim() === user.uid.trim() && canManageLeagueRole(member.cargo)
+    );
+  }, [commission, members, user]);
+
+  const updateCommissionField = (field: EditableCommissionField, value: string | boolean) => {
+    setCommission((current) =>
+      current
+        ? {
+            ...current,
+            [field]: value,
+          }
+        : current
+    );
+  };
+
   const addMember = (entry: LeagueUserRecord) => {
     setMembers((current) => {
       if (current.some((member) => member.id === entry.id)) return current;
@@ -168,8 +207,58 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
     setMembers((current) => current.filter((member) => member.id !== memberId));
   };
 
+  const handleImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || !commission || uploadingImage) {
+      input.value = "";
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      const fileNameBase = commission.turmaId || commission.sigla || commission.id;
+      const { url, error } = await uploadImage(
+        file,
+        `comissoes/${tenantId || "global"}/${commission.id}`,
+        {
+          scopeKey: `admin:comissoes:${commission.id}:imagem`,
+          maxBytes: 3 * 1024 * 1024,
+          maxWidth: 2400,
+          maxHeight: 1800,
+          maxPixels: 4_320_000,
+          compressionMaxWidth: 1600,
+          compressionMaxHeight: 1200,
+          compressionMaxBytes: 200 * 1024,
+          fileName: `${fileNameBase}-capa`,
+          upsert: true,
+          versionStrategy: "file-metadata",
+          cacheControl: VERSIONED_PUBLIC_ASSET_CACHE_CONTROL,
+        }
+      );
+
+      if (error || !url) {
+        addToast(`Imagem inválida: ${error || "falha no upload."}`, "error");
+        return;
+      }
+
+      updateCommissionField("foto", url);
+      addToast("Imagem da comissão enviada e vinculada.", "success");
+    } catch (error: unknown) {
+      console.error(error);
+      addToast("Erro ao enviar a imagem da comissão.", "error");
+    } finally {
+      setUploadingImage(false);
+      input.value = "";
+    }
+  };
+
   const handleSave = async () => {
-    if (!commission || saving) return;
+    if (!commission || saving || !canManageCommission) return;
+    if (!commission.nome.trim()) {
+      addToast("Informe o nome da comissão.", "error");
+      return;
+    }
 
     try {
       setSaving(true);
@@ -205,7 +294,7 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
           turmaId: commission.turmaId || undefined,
           managerUserIds: commission.managerUserIds || [],
           sidebarLabel: commission.sidebarLabel,
-          customCss: commission.customCss,
+          customCss: "",
         },
       });
 
@@ -221,7 +310,7 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
             }
           : current
       );
-      addToast("Diretoria da comissão salva.", "success");
+      addToast("Comissão salva com sucesso.", "success");
     } catch (error: unknown) {
       console.error(error);
       addToast("Erro ao salvar a diretoria da comissão.", "error");
@@ -268,6 +357,31 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
     );
   }
 
+  if (!canManageCommission) {
+    return (
+      <div className="min-h-screen bg-[#050505] px-6 py-10 text-white">
+        <div className="mx-auto max-w-3xl rounded-[2rem] border border-zinc-800 bg-zinc-950/80 p-8 text-center">
+          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-zinc-500">
+            Acesso restrito
+          </p>
+          <h1 className="mt-4 text-3xl font-black uppercase tracking-tight text-white">
+            Esta edição é da diretoria da comissão
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-zinc-400">
+            Podem acessar Presidente, Vice-Presidente, Secretaria, Tesouraria, Diretoria e o master da plataforma.
+          </p>
+          <Link
+            href={tenantPath(`/comissoes/${commission.id}`)}
+            className="mt-6 inline-flex items-center gap-2 rounded-full border border-brand/30 bg-brand-soft px-5 py-3 text-xs font-black uppercase text-brand-accent hover:opacity-90"
+          >
+            <ArrowLeft size={14} />
+            Voltar para a comissão
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   const imageSrc = getCommissionImage(commission);
 
   return (
@@ -284,7 +398,7 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
             </Link>
             <div className="min-w-0">
               <h1 className="truncate text-xl font-black uppercase tracking-tight">
-                Diretoria da comissão
+                Editar comissão
               </h1>
               <p className="truncate text-[11px] font-bold text-zinc-500">
                 {commission.turmaId || commission.sigla} - {commission.nome}
@@ -359,6 +473,133 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
           </div>
         </section>
 
+        <section className="grid gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+          <div className="rounded-[2rem] border border-zinc-800 bg-zinc-950/90 p-5">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-accent">
+                Dados públicos
+              </p>
+              <h3 className="mt-1 text-lg font-black text-white">Informações da comissão</h3>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Nome</label>
+                <input
+                  value={commission.nome}
+                  onChange={(event) => updateCommissionField("nome", event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm outline-none focus:border-brand/40"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Sigla</label>
+                <input
+                  value={commission.sigla || ""}
+                  onChange={(event) => updateCommissionField("sigla", event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm outline-none focus:border-brand/40"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Descrição</label>
+                <textarea
+                  rows={3}
+                  value={commission.descricao || ""}
+                  onChange={(event) => updateCommissionField("descricao", event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm outline-none focus:border-brand/40"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Visão geral</label>
+                <textarea
+                  rows={5}
+                  value={commission.visaoGeral || ""}
+                  onChange={(event) => updateCommissionField("visaoGeral", event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm outline-none focus:border-brand/40"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Bizu</label>
+                <input
+                  value={commission.bizu || ""}
+                  onChange={(event) => updateCommissionField("bizu", event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm outline-none focus:border-brand/40"
+                />
+              </div>
+              <div className="flex items-end gap-4">
+                <label className="inline-flex items-center gap-2 rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm font-bold text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={commission.visivel !== false}
+                    onChange={(event) => updateCommissionField("visivel", event.target.checked)}
+                  />
+                  Publicado
+                </label>
+                <label className="inline-flex items-center gap-2 rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm font-bold text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={commission.ativa !== false}
+                    onChange={(event) => updateCommissionField("ativa", event.target.checked)}
+                  />
+                  Ativo
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-zinc-800 bg-zinc-950/90 p-5">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-accent">
+                Imagem
+              </p>
+              <h3 className="mt-1 text-lg font-black text-white">Capa da comissão</h3>
+              <p className="mt-2 text-xs leading-5 text-zinc-500">{COMMISSION_IMAGE_HELP}</p>
+            </div>
+
+            <div className="mt-5 overflow-hidden rounded-[1.5rem] border border-white/10 bg-black/40">
+              <div className="relative aspect-[16/9] w-full">
+                <Image
+                  src={imageSrc}
+                  alt={commission.nome}
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 520px"
+                  className="object-cover"
+                  unoptimized={imageSrc.startsWith("http")}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Imagem (URL)</label>
+                <ImageResizeHelpLink label="Abrir Squoosh para reduzir a imagem" />
+              </div>
+              <input
+                value={commission.foto || ""}
+                onChange={(event) => updateCommissionField("foto", event.target.value)}
+                placeholder="https://..."
+                className="mt-2 w-full rounded-2xl border border-zinc-800 bg-black/30 px-4 py-3 text-sm outline-none focus:border-brand/40"
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-brand/30 bg-brand-soft px-4 py-3 text-xs font-black uppercase text-brand-accent transition hover:opacity-90">
+                {uploadingImage ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
+                {uploadingImage ? "Enviando..." : "Adicionar imagem"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  disabled={uploadingImage}
+                  onChange={(event) => void handleImageUpload(event)}
+                />
+              </label>
+              <span className="text-[11px] leading-5 text-zinc-500">
+                PNG, JPG ou WEBP. O upload tenta compactar para até 200 KB.
+              </span>
+            </div>
+          </div>
+        </section>
+
         <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="rounded-[2rem] border border-zinc-800 bg-zinc-950/90 p-5">
             <div className="flex items-center gap-3">
@@ -419,6 +660,9 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
                     Responsáveis selecionados
                   </p>
                   <h3 className="mt-1 text-lg font-black text-white">Cargos da comissão</h3>
+                  <p className="mt-1 max-w-md text-[11px] leading-5 text-zinc-500">
+                    Presidente, Vice-Presidente, Secretaria, Tesouraria e Diretoria podem acessar este painel. O master da plataforma também tem acesso.
+                  </p>
                 </div>
               </div>
               <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] font-bold text-zinc-300">
@@ -478,7 +722,7 @@ export function CommissionAdminEditorPage({ leagueId }: { leagueId: string }) {
             className="brand-button-solid"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Salvar diretoria
+            Salvar comissão
           </button>
         </div>
       </main>
