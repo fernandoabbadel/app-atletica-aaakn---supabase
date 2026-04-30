@@ -1,9 +1,11 @@
 import { CollectivePublicDetailClient } from "@/components/collectives/CollectivePublicDetailClient";
 
-export default function DiretorioStorePage({
+export default async function DiretorioStorePage({
   params,
 }: {
-  params: { leagueId: string };
+  params: Promise<{ leagueId: string }>;
 }) {
-  return <CollectivePublicDetailClient area="diretorio" leagueId={decodeURIComponent(params.leagueId)} activeTab="loja" />;
+  const { leagueId } = await params;
+
+  return <CollectivePublicDetailClient area="diretorio" leagueId={decodeURIComponent(leagueId)} activeTab="loja" />;
 }

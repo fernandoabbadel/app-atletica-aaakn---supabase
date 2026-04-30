@@ -18,6 +18,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
+import { ensureCommissionPagesForTurmas } from "@/lib/commissionPagesService";
 import {
   fetchCollectiveAreaUiConfig,
   getDefaultCollectiveAreaUiConfig,
@@ -141,38 +142,21 @@ export function CollectiveAdminPage({ area }: { area: CollectiveAreaKey }) {
     async (currentRecords: LeagueRecord[], currentTurmas: TurmaConfig[]) => {
       if (!config.syncFromTurmas || !user?.uid) return false;
 
-      const existingByTurma = new Set(
+      const existingTurmaIds = new Set(
         currentRecords.map((entry) => (entry.turmaId || "").trim().toUpperCase()).filter(Boolean)
       );
-      const visibleTurmas = currentTurmas.filter((entry) => !entry.hidden);
-      const missingTurmas = visibleTurmas.filter(
-        (entry) => !existingByTurma.has((entry.id || "").trim().toUpperCase())
+      const needsSync = currentTurmas.some(
+        (entry) => !entry.hidden && !existingTurmaIds.has((entry.id || "").trim().toUpperCase())
       );
+      if (!needsSync) return false;
 
-      if (!missingTurmas.length) {
-        return false;
-      }
+      const result = await ensureCommissionPagesForTurmas({
+        turmas: currentTurmas,
+        tenantId: tenantId || undefined,
+        actorUserId: user.uid,
+      });
 
-      for (const turma of missingTurmas) {
-        await saveLeagueConfig({
-          actorUserId: user.uid,
-          tenantId: tenantId || undefined,
-          data: {
-            nome: `Comissão ${turma.nome}`,
-            sigla: turma.id,
-            descricao: `Página oficial da comissão da ${turma.nome}.`,
-            visaoGeral: `Representação da ${turma.nome}.\nMembros oficiais.\nAgenda interna e aberta.\nLoja da comissão.`,
-            foto: turma.capa || turma.logo,
-            visivel: true,
-            ativa: true,
-            status: "approved",
-            category: "comissao",
-            turmaId: turma.id,
-          },
-        });
-      }
-
-      return true;
+      return result.createdCount > 0;
     },
     [config.syncFromTurmas, tenantId, user?.uid]
   );
@@ -551,13 +535,22 @@ export function CollectiveAdminPage({ area }: { area: CollectiveAreaKey }) {
                       <Link href={tenantPath(`${config.basePath}/${record.id}`)} className="brand-button-soft flex-1 justify-center">
                         Abrir
                       </Link>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEdit(record)}
-                        className="inline-flex items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs font-black uppercase text-zinc-300 transition hover:border-brand/30 hover:text-brand-accent"
-                      >
-                        {area === "comissoes" ? "Diretoria" : <Pencil size={16} />}
-                      </button>
+                      {area === "comissoes" ? (
+                        <Link
+                          href={tenantPath(`${config.adminPath}/${record.id}`)}
+                          className="inline-flex items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs font-black uppercase text-zinc-300 transition hover:border-brand/30 hover:text-brand-accent"
+                        >
+                          Diretoria
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEdit(record)}
+                          className="inline-flex items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs font-black uppercase text-zinc-300 transition hover:border-brand/30 hover:text-brand-accent"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                      )}
                       <button type="button" onClick={() => void handleDelete(record)} className="inline-flex items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 px-4 text-zinc-300 transition hover:border-red-500/30 hover:text-red-300">
                         <Trash2 size={16} />
                       </button>
@@ -572,7 +565,7 @@ export function CollectiveAdminPage({ area }: { area: CollectiveAreaKey }) {
 
       {showEditor ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl rounded-[2rem] border border-zinc-800 bg-[#050505] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.5)]">
+          <div className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-[2rem] border border-zinc-800 bg-[#050505] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.5)]">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-black text-white">{draft.id ? "Editar card" : "Criar card"}</h2>

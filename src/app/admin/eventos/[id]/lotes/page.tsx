@@ -1,9 +1,11 @@
 import AdminEventWorkspace from "../../_components/AdminEventWorkspace";
 
-export default function AdminEventLotesPage({
+export default async function AdminEventLotesPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  return <AdminEventWorkspace eventId={decodeURIComponent(params.id)} section="lotes" />;
+  const { id } = await params;
+
+  return <AdminEventWorkspace eventId={decodeURIComponent(id)} section="lotes" />;
 }

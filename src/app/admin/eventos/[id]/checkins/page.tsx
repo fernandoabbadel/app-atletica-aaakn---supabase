@@ -1,9 +1,11 @@
 import AdminEventWorkspace from "../../_components/AdminEventWorkspace";
 
-export default function AdminEventCheckinsPage({
+export default async function AdminEventCheckinsPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  return <AdminEventWorkspace eventId={decodeURIComponent(params.id)} section="checkins" />;
+  const { id } = await params;
+
+  return <AdminEventWorkspace eventId={decodeURIComponent(id)} section="checkins" />;
 }

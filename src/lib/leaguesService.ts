@@ -1755,6 +1755,16 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0)
     : [];
+  const readDataFirstField = (key: string): unknown => {
+    if (
+      Object.prototype.hasOwnProperty.call(dataField, key) &&
+      dataField[key] !== null &&
+      dataField[key] !== undefined
+    ) {
+      return dataField[key];
+    }
+    return readLeagueField(data, key);
+  };
 
   return {
     id,
@@ -1766,8 +1776,8 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
     senha: asString(readLeagueField(data, "senha")),
     foto,
     ...(logoUrl ? { logoUrl } : {}),
-    visivel: asBoolean(readLeagueField(data, "visivel"), false),
-    ativa: asBoolean(readLeagueField(data, "ativa"), false),
+    visivel: asBoolean(readDataFirstField("visivel"), false),
+    ativa: asBoolean(readDataFirstField("ativa"), false),
     membros,
     eventos,
     perguntas,
@@ -1784,13 +1794,13 @@ const normalizeLeague = (id: string, raw: unknown): LeagueRecord | null => {
       )
     ),
     memberRequests,
-    status: normalizeLeagueApprovalStatus(readLeagueField(data, "status")),
+    status: normalizeLeagueApprovalStatus(readDataFirstField("status")),
     updatedAt: asString(readLeagueField(data, "updatedAt")) || undefined,
-    category: normalizeLeagueCategory(readLeagueField(data, "category"), "liga"),
+    category: normalizeLeagueCategory(readDataFirstField("category"), "liga"),
     sidebarLabel: asString(readLeagueField(data, "sidebarLabel")) || undefined,
     customCss: asString(readLeagueField(data, "customCss")) || undefined,
     managerUserIds,
-    turmaId: asString(readLeagueField(data, "turmaId")).trim().toUpperCase() || undefined,
+    turmaId: asString(readDataFirstField("turmaId")).trim().toUpperCase() || undefined,
   };
 };
 

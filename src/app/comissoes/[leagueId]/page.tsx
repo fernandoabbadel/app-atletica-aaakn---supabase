@@ -1,9 +1,11 @@
 import { CollectivePublicDetailClient } from "@/components/collectives/CollectivePublicDetailClient";
 
-export default function ComissaoDetailPage({
+export default async function ComissaoDetailPage({
   params,
 }: {
-  params: { leagueId: string };
+  params: Promise<{ leagueId: string }>;
 }) {
-  return <CollectivePublicDetailClient area="comissoes" leagueId={decodeURIComponent(params.leagueId)} activeTab="overview" />;
+  const { leagueId } = await params;
+
+  return <CollectivePublicDetailClient area="comissoes" leagueId={decodeURIComponent(leagueId)} activeTab="overview" />;
 }

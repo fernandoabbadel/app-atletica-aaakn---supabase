@@ -211,6 +211,7 @@ export function CollectivePublicDetailClient({
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [requestRole, setRequestRole] = useState<string>(DEFAULT_LEAGUE_ROLE);
   const [submittingMemberRequest, setSubmittingMemberRequest] = useState(false);
+  const [togglingLike, setTogglingLike] = useState(false);
   const [turmaMemberCount, setTurmaMemberCount] = useState<number | null>(null);
 
   const tenantPath = (path: string) => (cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path);
@@ -477,9 +478,10 @@ export function CollectivePublicDetailClient({
   }, [currentMemberRequest]);
 
   const handleLike = async () => {
-    if (!user || !league) return;
+    if (!user || !league || togglingLike) return;
     const wasLiked = likedIds.includes(league.id);
     const optimisticDelta = wasLiked ? -1 : 1;
+    setTogglingLike(true);
     setLikedIds((current) => (wasLiked ? current.filter((entry) => entry !== league.id) : [...current, league.id]));
     setLeague((current) =>
       current ? { ...current, likes: Math.max(0, (current.likes || 0) + optimisticDelta) } : current
@@ -501,6 +503,8 @@ export function CollectivePublicDetailClient({
       setLeague((current) =>
         current ? { ...current, likes: Math.max(0, (current.likes || 0) + (wasLiked ? 1 : -1)) } : current
       );
+    } finally {
+      setTogglingLike(false);
     }
   };
 
@@ -684,7 +688,7 @@ export function CollectivePublicDetailClient({
                   <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">Agenda</p>
                   <p className="mt-3 text-2xl font-black text-white">{visibleAgendaCount}</p>
                 </div>
-                <button type="button" onClick={() => void handleLike()} disabled={!user} className={`rounded-[1.5rem] border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${isLiked ? "border-red-500/30 bg-red-500/10 text-red-100" : "border-white/10 bg-white/5 text-zinc-100 hover:border-red-500/30 hover:bg-red-500/10"}`}>
+                <button type="button" onClick={() => void handleLike()} disabled={!user || togglingLike} className={`rounded-[1.5rem] border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${isLiked ? "border-red-500/30 bg-red-500/10 text-red-100" : "border-white/10 bg-white/5 text-zinc-100 hover:border-red-500/30 hover:bg-red-500/10"}`}>
                   <div className="flex items-center justify-between">
                     <Heart size={18} className={isLiked ? "fill-current" : ""} />
                     <span className="text-[10px] font-black uppercase tracking-[0.24em]">{isLiked ? "Curtida" : "Curtir"}</span>

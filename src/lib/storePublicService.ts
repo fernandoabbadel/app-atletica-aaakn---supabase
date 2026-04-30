@@ -39,6 +39,7 @@ const STORE_ORDER_SELECT_COLUMNS =
 const productsFeedCache = new Map<string, CacheEntry<Row[]>>();
 const productsPageCache = new Map<string, CacheEntry<StoreProductsPageResult>>();
 const sellerProductsCache = new Map<string, CacheEntry<Row[]>>();
+const sellerProductStatsCache = new Map<string, CacheEntry<Record<string, StoreSellerProductStats>>>();
 const categoriesCache = new Map<string, CacheEntry<Row[]>>();
 const productDetailCache = new Map<string, CacheEntry<StoreProductDetailBundle>>();
 const productReviewsPageCache = new Map<string, CacheEntry<StoreProductReviewsPageResult>>();
@@ -110,6 +111,7 @@ const invalidateStoreCaches = (productId?: string): void => {
   productsFeedCache.clear();
   productsPageCache.clear();
   sellerProductsCache.clear();
+  sellerProductStatsCache.clear();
   categoriesCache.clear();
   if (!productId) {
     productDetailCache.clear();
@@ -151,6 +153,7 @@ export const clearStorePublicCaches = (productId?: string): void => {
   invalidateStoreCaches(productId);
   invalidateClientStoreCachePattern("store:categories:*");
   invalidateClientStoreCachePattern("store:products:*");
+  sellerProductStatsCache.clear();
 };
 
 const throwSupabaseError = (error: { message: string; code?: string | null; name?: string | null }): never => {
@@ -787,6 +790,83 @@ export async function fetchStoreProductsBySeller(options: {
 
   setCache(sellerProductsCache, cacheKey, normalizedRows);
   return normalizedRows;
+}
+
+export interface StoreSellerProductStats {
+  sellerId: string;
+  soldCount: number;
+  exposedCount: number;
+  likesCount: number;
+}
+
+export async function fetchStoreProductStatsBySellers(options: {
+  seller: { type: "tenant" | "mini_vendor" | "league"; ids: string[] };
+  tenantId?: string | null;
+  forceRefresh?: boolean;
+}): Promise<Record<string, StoreSellerProductStats>> {
+  const scopedTenantId = resolveStoreTenantId(options.tenantId);
+  const sellerType = normalizeStoreSellerType(options.seller?.type);
+  const sellerTypeForQuery = sellerType === "league" ? "tenant" : sellerType;
+  const sellerIds = Array.from(
+    new Set(
+      (Array.isArray(options.seller?.ids) ? options.seller.ids : [])
+        .map((entry) => asString(entry).trim())
+        .filter((entry) => entry.length > 0)
+    )
+  );
+
+  if (!sellerIds.length) return {};
+
+  const cacheKey = `${scopedTenantId || "all"}:${sellerType}:${sellerIds.sort().join("|")}`;
+  if (!options.forceRefresh) {
+    const cached = getCache(sellerProductStatsCache, cacheKey);
+    if (cached) return cached;
+  }
+
+  const emptyStats = Object.fromEntries(
+    sellerIds.map((sellerId) => [
+      sellerId,
+      {
+        sellerId,
+        soldCount: 0,
+        exposedCount: 0,
+        likesCount: 0,
+      } satisfies StoreSellerProductStats,
+    ])
+  );
+
+  const publicSupabase = getSupabasePublicClient();
+  let query = publicSupabase
+    .from("produtos")
+    .select("seller_id,vendidos,likes")
+    .eq("active", true)
+    .eq("aprovado", true)
+    .eq("seller_type", sellerTypeForQuery)
+    .in("seller_id", sellerIds)
+    .range(0, 4999);
+
+  if (scopedTenantId) {
+    query = query.eq("tenant_id", scopedTenantId);
+  }
+
+  const { data, error } = await query;
+  if (error) throwSupabaseError(error);
+
+  const stats = { ...emptyStats };
+  (Array.isArray(data) ? data : []).forEach((row) => {
+    const sellerId = asString(asObject(row)?.seller_id).trim();
+    if (!sellerId || !stats[sellerId]) return;
+
+    stats[sellerId] = {
+      sellerId,
+      soldCount: stats[sellerId].soldCount + asNum(asObject(row)?.vendidos, 0),
+      exposedCount: stats[sellerId].exposedCount + 1,
+      likesCount: stats[sellerId].likesCount + asArray(asObject(row)?.likes).length,
+    };
+  });
+
+  setCache(sellerProductStatsCache, cacheKey, stats);
+  return stats;
 }
 
 export async function fetchStoreProductDetail(options: {

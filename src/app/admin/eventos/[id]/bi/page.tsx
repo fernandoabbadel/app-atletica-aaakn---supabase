@@ -1,9 +1,11 @@
 import AdminEventWorkspace from "../../_components/AdminEventWorkspace";
 
-export default function AdminEventBiPage({
+export default async function AdminEventBiPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  return <AdminEventWorkspace eventId={decodeURIComponent(params.id)} section="bi" />;
+  const { id } = await params;
+
+  return <AdminEventWorkspace eventId={decodeURIComponent(id)} section="bi" />;
 }

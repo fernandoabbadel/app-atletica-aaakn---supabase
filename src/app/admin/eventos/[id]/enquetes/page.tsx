@@ -1,9 +1,11 @@
 import AdminEventWorkspace from "../../_components/AdminEventWorkspace";
 
-export default function AdminEventEnquetesPage({
+export default async function AdminEventEnquetesPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  return <AdminEventWorkspace eventId={decodeURIComponent(params.id)} section="enquetes" />;
+  const { id } = await params;
+
+  return <AdminEventWorkspace eventId={decodeURIComponent(id)} section="enquetes" />;
 }

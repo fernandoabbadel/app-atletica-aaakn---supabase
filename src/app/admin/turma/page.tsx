@@ -22,6 +22,10 @@ import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { useToast } from "@/context/ToastContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import {
+  ensureCommissionPageForTurma,
+  ensureCommissionPagesForTurmas,
+} from "@/lib/commissionPagesService";
+import {
   addTurmaConfig,
   deleteTurmaConfig,
   fetchTurmasConfig,
@@ -171,6 +175,30 @@ export default function AdminTurmaPage() {
     [editingTurmaId, form.id, requestedEditId, resetToCreateMode]
   );
 
+  const syncCommissionPages = useCallback(
+    async (rows: TurmaConfig[]) => {
+      try {
+        const result = await ensureCommissionPagesForTurmas({
+          turmas: rows,
+          tenantId: activeTenantId || undefined,
+        });
+        if (result.createdCount > 0) {
+          addToast(
+            `${result.createdCount} página${result.createdCount === 1 ? "" : "s"} de comissão sincronizada${result.createdCount === 1 ? "" : "s"}.`,
+            "success"
+          );
+        }
+      } catch (error: unknown) {
+        console.error(error);
+        addToast(
+          "As turmas carregaram, mas não consegui sincronizar todas as páginas de comissão agora.",
+          "error"
+        );
+      }
+    },
+    [activeTenantId, addToast]
+  );
+
   const refreshTurmas = async (): Promise<void> => {
     const rows = await fetchTurmasConfig({
       forceRefresh: true,
@@ -178,6 +206,7 @@ export default function AdminTurmaPage() {
     });
     setTurmas(rows);
     syncEditMode(rows);
+    await syncCommissionPages(rows);
   };
 
   useEffect(() => {
@@ -191,6 +220,7 @@ export default function AdminTurmaPage() {
         if (!mounted) return;
         setTurmas(rows);
         syncEditMode(rows);
+        await syncCommissionPages(rows);
       } catch (error: unknown) {
         if (!mounted) return;
         addToast(`Erro ao carregar turmas: ${extractErrorMessage(error)}`, "error");
@@ -203,7 +233,7 @@ export default function AdminTurmaPage() {
     return () => {
       mounted = false;
     };
-  }, [activeTenantId, addToast, syncEditMode]);
+  }, [activeTenantId, addToast, syncCommissionPages, syncEditMode]);
 
   useEffect(() => {
     if (loading) return;
@@ -317,7 +347,27 @@ export default function AdminTurmaPage() {
         }
         addToast(`Turma ${editingTurmaId} atualizada com sucesso.`, "success");
       } else {
-        addToast(`Turma ${normalizedId} criada com sucesso.`, "success");
+        const createdTurma = next.find((turma) => turma.id === normalizedId);
+        if (createdTurma) {
+          try {
+            await ensureCommissionPageForTurma({
+              turma: createdTurma,
+              tenantId: activeTenantId || undefined,
+            });
+            addToast(
+              `Turma ${normalizedId} criada com a página da comissão.`,
+              "success"
+            );
+          } catch (error: unknown) {
+            console.error(error);
+            addToast(
+              `Turma ${normalizedId} criada, mas a página da comissão não foi criada agora.`,
+              "error"
+            );
+          }
+        } else {
+          addToast(`Turma ${normalizedId} criada com sucesso.`, "success");
+        }
         resetToCreateMode(next);
       }
     } catch (error: unknown) {

@@ -11,6 +11,10 @@ import { fetchCollectiveAreaUiConfig, getDefaultCollectiveAreaUiConfig, type Col
 import { fetchLeagueSummaries, type LeagueCategory, type LeagueRecord } from "@/lib/leaguesService";
 import { canManageLeagueRole } from "@/lib/leagueRoles";
 import { resolveLeagueLogoSrc } from "@/lib/leagueMedia";
+import {
+  fetchStoreProductStatsBySellers,
+  type StoreSellerProductStats,
+} from "@/lib/storePublicService";
 import { withTenantSlug } from "@/lib/tenantRouting";
 import { fetchTurmaMemberCounts } from "@/lib/turmasService";
 
@@ -39,6 +43,13 @@ const CATALOG_CONFIG: Record<CollectiveAreaKey, CollectiveCatalogConfig> = {
 const getCardImage = (league?: LeagueRecord | null) =>
   league?.foto?.trim() || resolveLeagueLogoSrc(league, "/placeholder_liga.png");
 
+const EMPTY_PRODUCT_STATS: StoreSellerProductStats = {
+  sellerId: "",
+  soldCount: 0,
+  exposedCount: 0,
+  likesCount: 0,
+};
+
 export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
   const config = CATALOG_CONFIG[area];
   const { user } = useAuth();
@@ -47,6 +58,7 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<LeagueRecord[]>([]);
   const [turmaMemberCounts, setTurmaMemberCounts] = useState<Record<string, number>>({});
+  const [productStatsBySeller, setProductStatsBySeller] = useState<Record<string, StoreSellerProductStats>>({});
   const [uiConfig, setUiConfig] = useState(() => getDefaultCollectiveAreaUiConfig(area));
 
   const tenantPath = (path: string) => (cleanTenantSlug ? withTenantSlug(cleanTenantSlug, path) : path);
@@ -83,30 +95,44 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
 
         if (area === "comissoes") {
           try {
-            const counts = await fetchTurmaMemberCounts({
-              tenantId: tenantId || undefined,
-              forceRefresh: true,
-              turmaIds: visibleRecords
-                .map((item) => item.turmaId || "")
-                .filter((item): item is string => item.trim().length > 0),
-            });
+            const [counts, sellerStats] = await Promise.all([
+              fetchTurmaMemberCounts({
+                tenantId: tenantId || undefined,
+                forceRefresh: true,
+                turmaIds: visibleRecords
+                  .map((item) => item.turmaId || "")
+                  .filter((item): item is string => item.trim().length > 0),
+              }),
+              fetchStoreProductStatsBySellers({
+                tenantId: tenantId || undefined,
+                forceRefresh: true,
+                seller: {
+                  type: "league",
+                  ids: visibleRecords.map((item) => item.id),
+                },
+              }),
+            ]);
             if (mounted) {
               setTurmaMemberCounts(counts);
+              setProductStatsBySeller(sellerStats);
             }
           } catch (error) {
             console.error(error);
             if (mounted) {
               setTurmaMemberCounts({});
+              setProductStatsBySeller({});
             }
           }
         } else if (mounted) {
           setTurmaMemberCounts({});
+          setProductStatsBySeller({});
         }
       } catch (error) {
         console.error(error);
         if (!mounted) return;
         setRecords([]);
         setTurmaMemberCounts({});
+        setProductStatsBySeller({});
         setUiConfig(getDefaultCollectiveAreaUiConfig(area));
       } finally {
         if (mounted) setLoading(false);
@@ -123,6 +149,24 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
     () => records.filter((entry) => entry.visivel !== false).length,
     [records]
   );
+  const orderedRecords = useMemo(() => {
+    if (area !== "comissoes") return records;
+
+    return [...records].sort((left, right) => {
+      const leftStats = productStatsBySeller[left.id] || EMPTY_PRODUCT_STATS;
+      const rightStats = productStatsBySeller[right.id] || EMPTY_PRODUCT_STATS;
+      if (leftStats.soldCount !== rightStats.soldCount) {
+        return rightStats.soldCount - leftStats.soldCount;
+      }
+      if (leftStats.exposedCount !== rightStats.exposedCount) {
+        return rightStats.exposedCount - leftStats.exposedCount;
+      }
+      if ((left.likes || 0) !== (right.likes || 0)) {
+        return (right.likes || 0) - (left.likes || 0);
+      }
+      return (left.nome || "").localeCompare(right.nome || "", "pt-BR");
+    });
+  }, [area, productStatsBySeller, records]);
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 text-white">
@@ -184,9 +228,10 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
           </div>
         ) : (
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {records.map((record) => {
+            {orderedRecords.map((record) => {
               const href = tenantPath(`${config.basePath}/${record.id}`);
               const imageSrc = getCardImage(record);
+              const productStats = productStatsBySeller[record.id] || EMPTY_PRODUCT_STATS;
               const displayMembersCount =
                 area === "comissoes" && record.turmaId
                   ? turmaMemberCounts[record.turmaId] ?? record.membersCount ?? record.membros?.length ?? 0
@@ -244,6 +289,19 @@ export function CollectiveCatalogPage({ area }: { area: CollectiveAreaKey }) {
                           <Sparkles size={14} />
                           Visão geral ativa
                         </span>
+                      ) : null}
+                      {area === "comissoes" ? (
+                        <>
+                          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] font-bold text-zinc-300">
+                            {productStats.soldCount} vendidos
+                          </span>
+                          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] font-bold text-zinc-300">
+                            {productStats.exposedCount} expostos
+                          </span>
+                          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-black/30 px-3 py-2 text-[11px] font-bold text-zinc-300">
+                            {record.likes || 0} curtidas
+                          </span>
+                        </>
                       ) : null}
                     </div>
 
