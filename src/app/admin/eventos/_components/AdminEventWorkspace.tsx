@@ -1,13 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
   Calendar,
+  ChevronLeft,
   Check,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Download,
   Edit3,
   Image as ImageIcon,
@@ -19,6 +30,7 @@ import {
   Percent,
   QrCode,
   RotateCcw,
+  Save,
   ScanLine,
   Search,
   Trash2,
@@ -32,7 +44,6 @@ import { ImageResizeHelpLink } from "@/components/ImageResizeHelpLink";
 import { LotNameSelector } from "@/components/LotNameSelector";
 import { EventManagementAnalytics } from "@/components/EventManagementAnalytics";
 import { PaymentRecipientCheckboxList } from "@/components/PaymentRecipientCheckboxList";
-import { PaymentReceiversManager } from "@/components/PaymentReceiversManager";
 import { useAuth } from "@/context/AuthContext";
 import { useTenantTheme } from "@/context/TenantThemeContext";
 import { useToast } from "@/context/ToastContext";
@@ -178,6 +189,7 @@ interface EventSaleRow {
   valorTotal: string;
   dataSolicitacao: string;
   dataAprovacao: unknown;
+  dataPagamento: unknown;
   aprovadoPor: string;
   paymentConfig: CommercePaymentConfig | null;
 }
@@ -217,6 +229,7 @@ const EVENT_COUPON_TITLE_MAX_LENGTH = 120;
 const EVENT_COUPON_CODE_MAX_LENGTH = 60;
 const EVENT_OPERATOR_NAME_MAX_LENGTH = 120;
 const EVENT_OPERATOR_EMAIL_MAX_LENGTH = 160;
+const SALES_PAGE_SIZE = 25;
 
 const SECTION_LABELS: Record<EventWorkspaceSection, string> = {
   extrato: "Extrato",
@@ -297,6 +310,38 @@ const formatDateTime = (value: unknown): string => {
   }
   return "-";
 };
+
+const getLatestDateTimeValue = (values: unknown[]): unknown => {
+  let latestValue: unknown = null;
+  let latestTime = Number.NEGATIVE_INFINITY;
+
+  values.forEach((value) => {
+    if (!value) return;
+    const parsed =
+      value instanceof Date
+        ? value
+        : typeof value === "string" || typeof value === "number"
+          ? new Date(value)
+          : null;
+    if (!parsed || Number.isNaN(parsed.getTime())) return;
+    if (parsed.getTime() > latestTime) {
+      latestTime = parsed.getTime();
+      latestValue = value;
+    }
+  });
+
+  return latestValue;
+};
+
+const getSalePaymentDate = (row: EventSaleRow): unknown =>
+  row.dataPagamento || row.dataAprovacao || null;
+
+const getSaleLatestCheckinDate = (row: EventSaleRow): unknown =>
+  getLatestDateTimeValue(
+    (row.paymentConfig?.ticketEntries ?? [])
+      .filter((entry) => entry.status === "lido" || Boolean(entry.scannedAt))
+      .map((entry) => entry.scannedAt)
+  );
 
 const getPaymentRecipientIdsFromConfig = (
   paymentConfig?: CommercePaymentConfig | null
@@ -544,22 +589,35 @@ const mapAdminEventRow = (raw: Record<string, unknown>): AdminEvent => {
   };
 };
 
-const mapSaleRow = (raw: Record<string, unknown>): EventSaleRow => ({
-  id: asString(raw.id),
-  userId: asString(raw.userId),
-  userName: asString(raw.userName, "Aluno"),
-  userTurma: asString(raw.userTurma, "-"),
-  status: asString(raw.status, "pendente"),
-  loteId: asString(raw.loteId),
-  loteNome: asString(raw.loteNome, "-"),
-  quantidade: Math.max(1, Math.floor(Number(raw.quantidade ?? 1) || 1)),
-  valorUnitario: asString(raw.valorUnitario, "0,00"),
-  valorTotal: asString(raw.valorTotal, "0,00"),
-  dataSolicitacao: asString(raw.dataSolicitacao),
-  dataAprovacao: raw.dataAprovacao,
-  aprovadoPor: asString(raw.aprovadoPor),
-  paymentConfig: normalizePaymentConfig(raw.payment_config),
-});
+const mapSaleRow = (raw: Record<string, unknown>): EventSaleRow => {
+  const data = asRecord(raw.data) ?? {};
+
+  return {
+    id: asString(raw.id),
+    userId: asString(raw.userId),
+    userName: asString(raw.userName, "Aluno"),
+    userTurma: asString(raw.userTurma, "-"),
+    status: asString(raw.status, "pendente"),
+    loteId: asString(raw.loteId),
+    loteNome: asString(raw.loteNome, "-"),
+    quantidade: Math.max(1, Math.floor(Number(raw.quantidade ?? 1) || 1)),
+    valorUnitario: asString(raw.valorUnitario, "0,00"),
+    valorTotal: asString(raw.valorTotal, "0,00"),
+    dataSolicitacao: asString(raw.dataSolicitacao),
+    dataAprovacao: raw.dataAprovacao,
+    dataPagamento:
+      raw.dataPagamento ??
+      raw.paymentDate ??
+      raw.paidAt ??
+      data.dataPagamento ??
+      data.paymentDate ??
+      data.paidAt ??
+      data.pagoEm ??
+      null,
+    aprovadoPor: asString(raw.aprovadoPor),
+    paymentConfig: normalizePaymentConfig(raw.payment_config),
+  };
+};
 
 const mapPollRow = (raw: Record<string, unknown>): EventPoll => {
   const options = Array.isArray(raw.options) ? raw.options : [];
@@ -675,6 +733,152 @@ function SectionLink({
   );
 }
 
+function PaginationControls({
+  page,
+  totalPages,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalItems <= pageSize) return null;
+
+  const firstItem = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastItem = Math.min(totalItems, page * pageSize);
+  const goTo = (nextPage: number) =>
+    onPageChange(Math.min(totalPages, Math.max(1, nextPage)));
+
+  return (
+    <div className="flex flex-col gap-3 rounded-[1.2rem] border border-zinc-800 bg-black/20 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs font-bold text-zinc-500">
+        {firstItem}-{lastItem} de {totalItems} pedidos
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => goTo(1)}
+          disabled={page <= 1}
+          className="inline-flex items-center gap-1 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 disabled:opacity-40"
+        >
+          <ChevronsLeft size={13} />
+          Primeira
+        </button>
+        <button
+          type="button"
+          onClick={() => goTo(page - 1)}
+          disabled={page <= 1}
+          className="inline-flex items-center gap-1 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 disabled:opacity-40"
+        >
+          <ChevronLeft size={13} />
+          Anterior
+        </button>
+        <span className="rounded-xl border border-brand bg-brand-soft px-3 py-2 text-[11px] font-black uppercase text-brand-accent">
+          Página {page} de {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => goTo(page + 1)}
+          disabled={page >= totalPages}
+          className="inline-flex items-center gap-1 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 disabled:opacity-40"
+        >
+          Próxima
+          <ChevronRight size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => goTo(totalPages)}
+          disabled={page >= totalPages}
+          className="inline-flex items-center gap-1 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-[11px] font-black uppercase text-zinc-300 disabled:opacity-40"
+        >
+          Última
+          <ChevronsRight size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FloatingSaveButton({
+  watchRef,
+  label,
+  icon,
+  disabled = false,
+  onClick,
+}: {
+  watchRef: RefObject<HTMLElement | null>;
+  label: string;
+  icon?: ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const [targetVisible, setTargetVisible] = useState(true);
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    const target = watchRef.current;
+    if (!target || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const isVisible = Boolean(entry?.isIntersecting);
+        setTargetVisible(isVisible);
+        if (isVisible) setActive(false);
+      },
+      { threshold: 0.01 }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [watchRef]);
+
+  useEffect(() => {
+    if (targetVisible) {
+      setActive(false);
+      return;
+    }
+
+    let timeoutId: number | null = null;
+    const reveal = () => {
+      setActive(true);
+      if (timeoutId) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => setActive(false), 3000);
+    };
+
+    reveal();
+    window.addEventListener("scroll", reveal, { passive: true });
+    window.addEventListener("pointermove", reveal, { passive: true });
+    window.addEventListener("touchstart", reveal, { passive: true });
+    window.addEventListener("keydown", reveal);
+
+    return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      window.removeEventListener("scroll", reveal);
+      window.removeEventListener("pointermove", reveal);
+      window.removeEventListener("touchstart", reveal);
+      window.removeEventListener("keydown", reveal);
+    };
+  }, [targetVisible]);
+
+  if (targetVisible || !active) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="fixed bottom-5 right-5 z-[90] inline-flex max-w-[calc(100vw-2rem)] items-center justify-center gap-2 rounded-2xl border border-brand bg-zinc-950/90 px-4 py-3 text-xs font-black uppercase tracking-wide text-brand-accent shadow-brand backdrop-blur-md transition hover:bg-zinc-900 disabled:opacity-50"
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
 export default function AdminEventWorkspace({
   eventId,
   section,
@@ -694,16 +898,15 @@ export default function AdminEventWorkspace({
   const [uploadingImage, setUploadingImage] = useState(false);
 
   const [planCatalog, setPlanCatalog] = useState<PlanRecord[]>([]);
-  const [loadingPlans, setLoadingPlans] = useState(false);
 
   const [paymentRecipients, setPaymentRecipients] = useState<TenantPaymentRecipientOption[]>([]);
   const [loadingRecipients, setLoadingRecipients] = useState(false);
-  const [showReceiversManager, setShowReceiversManager] = useState(false);
 
   const [salesRows, setSalesRows] = useState<EventSaleRow[]>([]);
   const [loadingSales, setLoadingSales] = useState(false);
   const [salesSearch, setSalesSearch] = useState("");
   const [salesStatusFilter, setSalesStatusFilter] = useState("todos");
+  const [salesPage, setSalesPage] = useState(1);
 
   const [polls, setPolls] = useState<EventPoll[]>([]);
   const [loadingPolls, setLoadingPolls] = useState(false);
@@ -719,6 +922,16 @@ export default function AdminEventWorkspace({
 
   const [editingOperatorId, setEditingOperatorId] = useState<string | "new" | null>(null);
   const [operatorDraft, setOperatorDraft] = useState<EventCheckinOperator>(createEmptyCheckinOperator());
+
+  const loadingPlansRef = useRef(false);
+  const loadingRecipientsRef = useRef(false);
+  const loadingSalesRef = useRef(false);
+  const loadingPollsRef = useRef(false);
+  const saveLotButtonRef = useRef<HTMLButtonElement>(null);
+  const saveCouponButtonRef = useRef<HTMLButtonElement>(null);
+  const saveOperatorButtonRef = useRef<HTMLButtonElement>(null);
+  const saveEditButtonRef = useRef<HTMLButtonElement>(null);
+  const saveReceiversButtonRef = useRef<HTMLButtonElement>(null);
 
   const scopedPath = useCallback(
     (path: string) => (tenantSlug ? withTenantSlug(tenantSlug, path) : path),
@@ -767,8 +980,8 @@ export default function AdminEventWorkspace({
 
   const loadPlanCatalog = useCallback(
     async (forceRefresh = false) => {
-      if (loadingPlans) return;
-      setLoadingPlans(true);
+      if (loadingPlansRef.current) return;
+      loadingPlansRef.current = true;
       try {
         const rows = await fetchPlanCatalog({
           tenantId: activeTenantId || undefined,
@@ -779,15 +992,21 @@ export default function AdminEventWorkspace({
       } catch (error: unknown) {
         console.error(error);
       } finally {
-        setLoadingPlans(false);
+        loadingPlansRef.current = false;
       }
     },
-    [activeTenantId, loadingPlans]
+    [activeTenantId]
   );
 
   const loadPaymentRecipients = useCallback(async () => {
     const cleanTenantId = (activeTenantId || "").trim();
-    if (!cleanTenantId || loadingRecipients) return;
+    if (!cleanTenantId) {
+      setPaymentRecipients([]);
+      setLoadingRecipients(false);
+      return;
+    }
+    if (loadingRecipientsRef.current) return;
+    loadingRecipientsRef.current = true;
     setLoadingRecipients(true);
     try {
       const rows = await fetchTenantPaymentRecipients(cleanTenantId, "events");
@@ -797,13 +1016,15 @@ export default function AdminEventWorkspace({
       setPaymentRecipients([]);
       addToast("Erro ao carregar recebedores.", "error");
     } finally {
+      loadingRecipientsRef.current = false;
       setLoadingRecipients(false);
     }
-  }, [activeTenantId, addToast, loadingRecipients]);
+  }, [activeTenantId, addToast]);
 
   const loadSales = useCallback(
     async (forceRefresh = false) => {
-      if (loadingSales) return;
+      if (loadingSalesRef.current) return;
+      loadingSalesRef.current = true;
       setLoadingSales(true);
       try {
         const page = await fetchAdminEventSalesPage({
@@ -816,15 +1037,17 @@ export default function AdminEventWorkspace({
         console.error(error);
         addToast("Erro ao carregar ingressos.", "error");
       } finally {
+        loadingSalesRef.current = false;
         setLoadingSales(false);
       }
     },
-    [addToast, eventId, loadingSales]
+    [addToast, eventId]
   );
 
   const loadPolls = useCallback(
     async (forceRefresh = false) => {
-      if (loadingPolls) return;
+      if (loadingPollsRef.current) return;
+      loadingPollsRef.current = true;
       setLoadingPolls(true);
       try {
         const rows = await fetchAdminEventPolls({
@@ -838,10 +1061,11 @@ export default function AdminEventWorkspace({
         console.error(error);
         addToast("Erro ao carregar enquetes.", "error");
       } finally {
+        loadingPollsRef.current = false;
         setLoadingPolls(false);
       }
     },
-    [activeTenantId, addToast, eventId, loadingPolls]
+    [activeTenantId, addToast, eventId]
   );
 
   useEffect(() => {
@@ -1153,6 +1377,25 @@ export default function AdminEventWorkspace({
     });
   }, [salesRows, salesSearch, salesStatusFilter]);
 
+  const totalSalesPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredSales.length / SALES_PAGE_SIZE)),
+    [filteredSales.length]
+  );
+
+  const paginatedSales = useMemo(() => {
+    const safePage = Math.min(totalSalesPages, Math.max(1, salesPage));
+    const start = (safePage - 1) * SALES_PAGE_SIZE;
+    return filteredSales.slice(start, start + SALES_PAGE_SIZE);
+  }, [filteredSales, salesPage, totalSalesPages]);
+
+  useEffect(() => {
+    setSalesPage(1);
+  }, [salesSearch, salesStatusFilter, section]);
+
+  useEffect(() => {
+    setSalesPage((current) => Math.min(totalSalesPages, Math.max(1, current)));
+  }, [totalSalesPages]);
+
   const checkinRows = useMemo(() => flattenTicketCheckins(salesRows), [salesRows]);
 
   const salesMetrics = useMemo(() => {
@@ -1375,7 +1618,10 @@ export default function AdminEventWorkspace({
       "ID",
       "Cliente",
       "Turma",
-      "Data",
+      "Pedido em",
+      "Aprovado em",
+      "Pagamento em",
+      "Check-in em",
       "Itens",
       "Valor",
       "Status",
@@ -1386,6 +1632,9 @@ export default function AdminEventWorkspace({
       row.userName,
       row.userTurma,
       formatDateTime(row.dataSolicitacao),
+      formatDateTime(row.dataAprovacao),
+      formatDateTime(getSalePaymentDate(row)),
+      formatDateTime(getSaleLatestCheckinDate(row)),
       `${row.quantidade}x ${row.loteNome}`,
       row.valorTotal,
       row.status,
@@ -1588,7 +1837,7 @@ export default function AdminEventWorkspace({
                 <select
                   value={salesStatusFilter}
                   onChange={(event) => setSalesStatusFilter(event.target.value)}
-                  className="rounded-2xl border border-zinc-800 bg-black/20 px-4 py-3 text-sm text-zinc-200 outline-none"
+                  className="admin-dark-select rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none"
                 >
                   <option value="todos">Todos os status</option>
                   <option value="aprovado">Aprovados</option>
@@ -1606,16 +1855,19 @@ export default function AdminEventWorkspace({
 
               <div className="mt-4 overflow-hidden rounded-[1.4rem] border border-zinc-800">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[860px] text-left text-sm">
+                  <table className="w-full min-w-[1180px] text-left text-sm">
                     <thead className="bg-black/40 text-[11px] uppercase tracking-[0.16em] text-zinc-500">
                       <tr>
                         <th className="px-4 py-3">ID</th>
                         <th className="px-4 py-3">Cliente</th>
-                        <th className="px-4 py-3">Data</th>
+                        <th className="px-4 py-3">Pedido</th>
+                        <th className="px-4 py-3">Aprovação</th>
+                        <th className="px-4 py-3">Pagamento</th>
+                        <th className="px-4 py-3">Check-in</th>
                         <th className="px-4 py-3">Itens</th>
                         <th className="px-4 py-3">Valor</th>
                         <th className="px-4 py-3">Desconto</th>
-                        <th className="px-4 py-3">Pagamento</th>
+                        <th className="px-4 py-3">Aprovado por</th>
                         <th className="px-4 py-3">Fonte</th>
                         <th className="px-4 py-3">Status</th>
                       </tr>
@@ -1623,18 +1875,18 @@ export default function AdminEventWorkspace({
                     <tbody className="divide-y divide-zinc-800 bg-zinc-950/70">
                       {loadingSales ? (
                         <tr>
-                          <td colSpan={9} className="px-4 py-10 text-center">
+                          <td colSpan={12} className="px-4 py-10 text-center">
                             <Loader2 size={20} className="mx-auto animate-spin text-brand" />
                           </td>
                         </tr>
                       ) : filteredSales.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="px-4 py-10 text-center text-zinc-500">
+                          <td colSpan={12} className="px-4 py-10 text-center text-zinc-500">
                             Nenhuma transação encontrada.
                           </td>
                         </tr>
                       ) : (
-                        filteredSales.map((row) => (
+                        paginatedSales.map((row) => (
                           <tr key={row.id} className="hover:bg-white/[0.03]">
                             <td className="px-4 py-3 font-mono text-xs text-zinc-400">{row.id.slice(0, 8)}</td>
                             <td className="px-4 py-3">
@@ -1642,12 +1894,15 @@ export default function AdminEventWorkspace({
                               <p className="text-xs text-zinc-500">{row.userTurma || "-"}</p>
                             </td>
                             <td className="px-4 py-3 text-zinc-400">{formatDateTime(row.dataSolicitacao)}</td>
+                            <td className="px-4 py-3 text-zinc-400">{formatDateTime(row.dataAprovacao)}</td>
+                            <td className="px-4 py-3 text-zinc-400">{formatDateTime(getSalePaymentDate(row))}</td>
+                            <td className="px-4 py-3 text-zinc-400">{formatDateTime(getSaleLatestCheckinDate(row))}</td>
                             <td className="px-4 py-3 text-zinc-300">{row.quantidade}x {row.loteNome}</td>
                             <td className="px-4 py-3 font-semibold text-emerald-300">
                               {formatCurrency(parseCurrency(row.valorTotal))}
                             </td>
                             <td className="px-4 py-3 text-zinc-500">R$ 0,00</td>
-                            <td className="px-4 py-3 text-zinc-400">Comprovante</td>
+                            <td className="px-4 py-3 text-zinc-400">{row.aprovadoPor || "-"}</td>
                             <td className="px-4 py-3 text-zinc-400">App USC</td>
                             <td className="px-4 py-3">
                               <span className="rounded-full border border-zinc-700 px-2.5 py-1 text-[10px] font-black uppercase text-zinc-300">
@@ -1660,6 +1915,15 @@ export default function AdminEventWorkspace({
                     </tbody>
                   </table>
                 </div>
+              </div>
+              <div className="mt-4">
+                <PaginationControls
+                  page={salesPage}
+                  totalPages={totalSalesPages}
+                  totalItems={filteredSales.length}
+                  pageSize={SALES_PAGE_SIZE}
+                  onPageChange={setSalesPage}
+                />
               </div>
             </div>
           </section>
@@ -2011,13 +2275,22 @@ export default function AdminEventWorkspace({
                   </button>
                 ) : null}
                 <button
+                  ref={saveLotButtonRef}
                   type="button"
                   onClick={() => void handleSaveLot()}
+                  disabled={savingEvento}
                   className="brand-button-soft"
                 >
                   {editingLotId === "new" ? "Criar lote" : editingLotId ? "Salvar lote" : "Salvar rascunho"}
                 </button>
               </div>
+              <FloatingSaveButton
+                watchRef={saveLotButtonRef}
+                label={editingLotId === "new" ? "Criar lote" : editingLotId ? "Salvar lote" : "Salvar rascunho"}
+                icon={<Save size={14} />}
+                disabled={savingEvento}
+                onClick={() => void handleSaveLot()}
+              />
             </div>
           </section>
         ) : null}
@@ -2075,7 +2348,7 @@ export default function AdminEventWorkspace({
                 <select
                   value={salesStatusFilter}
                   onChange={(event) => setSalesStatusFilter(event.target.value)}
-                  className="rounded-2xl border border-zinc-800 bg-black/20 px-4 py-3 text-sm text-zinc-200 outline-none"
+                  className="admin-dark-select rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none"
                 >
                   <option value="todos">Todos</option>
                   <option value="aprovado">Aprovado</option>
@@ -2101,11 +2374,12 @@ export default function AdminEventWorkspace({
                     Nenhum ingresso encontrado para o filtro atual.
                   </div>
                 ) : (
-                  filteredSales.map((row) => {
+                  paginatedSales.map((row) => {
                     const checkins = row.paymentConfig?.ticketEntries?.filter(
                       (entry) => entry.status === "lido" || Boolean(entry.scannedAt)
                     ).length ?? 0;
                     const approved = row.status.toLowerCase() === "aprovado";
+                    const latestCheckin = getSaleLatestCheckinDate(row);
                     return (
                       <div key={row.id} className="rounded-[1.4rem] border border-zinc-800 bg-black/20 p-4">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -2158,11 +2432,36 @@ export default function AdminEventWorkspace({
                             <p className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">Solicitado em</p>
                             <p className="mt-2 text-sm font-bold text-white">{formatDateTime(row.dataSolicitacao)}</p>
                           </div>
+                          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3">
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">Aprovado em</p>
+                            <p className="mt-2 text-sm font-bold text-white">{formatDateTime(row.dataAprovacao)}</p>
+                          </div>
+                          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3">
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">Aprovado por</p>
+                            <p className="mt-2 text-sm font-bold text-white">{row.aprovadoPor || "-"}</p>
+                          </div>
+                          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3">
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">Pagamento em</p>
+                            <p className="mt-2 text-sm font-bold text-white">{formatDateTime(getSalePaymentDate(row))}</p>
+                          </div>
+                          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3">
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">Check-in em</p>
+                            <p className="mt-2 text-sm font-bold text-white">{formatDateTime(latestCheckin)}</p>
+                          </div>
                         </div>
                       </div>
                     );
                   })
                 )}
+              </div>
+              <div className="mt-4">
+                <PaginationControls
+                  page={salesPage}
+                  totalPages={totalSalesPages}
+                  totalItems={filteredSales.length}
+                  pageSize={SALES_PAGE_SIZE}
+                  onPageChange={setSalesPage}
+                />
               </div>
             </div>
           </section>
@@ -2285,7 +2584,7 @@ export default function AdminEventWorkspace({
                           tipo: event.target.value === "percentual" ? "percentual" : "valor",
                         }))
                       }
-                      className="rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none"
+                      className="admin-dark-select rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none"
                     >
                       <option value="valor">Valor fixo</option>
                       <option value="percentual">Percentual</option>
@@ -2359,13 +2658,22 @@ export default function AdminEventWorkspace({
                   </button>
                 ) : null}
                 <button
+                  ref={saveCouponButtonRef}
                   type="button"
                   onClick={() => void handleSaveCoupon()}
+                  disabled={savingEvento}
                   className="brand-button-soft"
                 >
                   {editingCouponId === "new" ? "Criar cupom" : editingCouponId ? "Salvar cupom" : "Salvar rascunho"}
                 </button>
               </div>
+              <FloatingSaveButton
+                watchRef={saveCouponButtonRef}
+                label={editingCouponId === "new" ? "Criar cupom" : editingCouponId ? "Salvar cupom" : "Salvar rascunho"}
+                icon={<Save size={14} />}
+                disabled={savingEvento}
+                onClick={() => void handleSaveCoupon()}
+              />
             </div>
           </section>
         ) : null}
@@ -2529,14 +2837,23 @@ export default function AdminEventWorkspace({
                     </button>
                   ) : null}
                   <button
+                    ref={saveOperatorButtonRef}
                     type="button"
                     onClick={() => void handleSaveOperator()}
+                    disabled={savingEvento}
                     className="brand-button-soft"
                   >
                     <UserPlus size={14} />
                     {editingOperatorId === "new" ? "Adicionar operador" : editingOperatorId ? "Salvar operador" : "Salvar rascunho"}
                   </button>
                 </div>
+                <FloatingSaveButton
+                  watchRef={saveOperatorButtonRef}
+                  label={editingOperatorId === "new" ? "Adicionar operador" : editingOperatorId ? "Salvar operador" : "Salvar rascunho"}
+                  icon={<Save size={14} />}
+                  disabled={savingEvento}
+                  onClick={() => void handleSaveOperator()}
+                />
               </div>
 
               <div className="rounded-[1.8rem] border border-zinc-800 bg-zinc-950 p-4 sm:p-5">
@@ -2709,7 +3026,7 @@ export default function AdminEventWorkspace({
                           previous ? { ...previous, data: event.target.value } : previous
                         )
                       }
-                      className="rounded-2xl border border-zinc-700 bg-black/30 px-4 py-3 text-sm outline-none"
+                      className="admin-dark-select rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none"
                     />
                     <input
                       type="time"
@@ -2719,7 +3036,7 @@ export default function AdminEventWorkspace({
                           previous ? { ...previous, hora: event.target.value } : previous
                         )
                       }
-                      className="rounded-2xl border border-zinc-700 bg-black/30 px-4 py-3 text-sm outline-none"
+                      className="admin-dark-select rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none"
                     />
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -2735,7 +3052,7 @@ export default function AdminEventWorkspace({
                             : previous
                         )
                       }
-                      className="rounded-2xl border border-zinc-700 bg-black/30 px-4 py-3 text-sm outline-none"
+                      className="admin-dark-select rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none"
                     >
                       <option value="Festa">Festa</option>
                       <option value="Esporte">Esporte</option>
@@ -2946,6 +3263,7 @@ export default function AdminEventWorkspace({
                   Recarregar rascunho
                 </button>
                 <button
+                  ref={saveEditButtonRef}
                   type="button"
                   onClick={() => void handleSaveEdit()}
                   disabled={savingEvento}
@@ -2955,6 +3273,13 @@ export default function AdminEventWorkspace({
                   Atualizar evento
                 </button>
               </div>
+              <FloatingSaveButton
+                watchRef={saveEditButtonRef}
+                label="Atualizar evento"
+                icon={<Save size={14} />}
+                disabled={savingEvento}
+                onClick={() => void handleSaveEdit()}
+              />
             </div>
           </section>
         ) : null}
@@ -3120,15 +3445,10 @@ export default function AdminEventWorkspace({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-xl font-black text-white">Recebedores do evento</h2>
-                  <p className="mt-1 text-sm text-zinc-500">Escolha quem pode receber comprovantes deste evento.</p>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Escolha a partir dos recebedores de eventos já configurados para a tenant.
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowReceiversManager(true)}
-                  className="rounded-xl border border-zinc-700 bg-black/20 px-4 py-3 text-xs font-black uppercase text-zinc-200"
-                >
-                  Gerenciar diretório
-                </button>
               </div>
 
               <div className="mt-5">
@@ -3136,7 +3456,7 @@ export default function AdminEventWorkspace({
                   id="admin-event-workspace-recipients"
                   label="Liberar comprovantes do evento"
                   helperText="Marque quem pode receber o comprovante específico deste evento."
-                  emptyText="Nenhum recebedor de evento cadastrado."
+                  emptyText="Nenhum recebedor de evento cadastrado no diretório."
                   options={paymentRecipients}
                   selectedUserIds={editDraft.recipientUserIds}
                   loading={loadingRecipients}
@@ -3150,6 +3470,7 @@ export default function AdminEventWorkspace({
 
               <div className="mt-5 flex justify-end">
                 <button
+                  ref={saveReceiversButtonRef}
                   type="button"
                   onClick={() => void handleSaveRecebedores(editDraft.recipientUserIds)}
                   disabled={savingEvento}
@@ -3159,6 +3480,13 @@ export default function AdminEventWorkspace({
                   Salvar recebedores
                 </button>
               </div>
+              <FloatingSaveButton
+                watchRef={saveReceiversButtonRef}
+                label="Salvar recebedores"
+                icon={<Save size={14} />}
+                disabled={savingEvento}
+                onClick={() => void handleSaveRecebedores(editDraft.recipientUserIds)}
+              />
             </div>
 
             <div className="space-y-4">
@@ -3205,18 +3533,6 @@ export default function AdminEventWorkspace({
             </div>
           </section>
         ) : null}
-
-        <PaymentReceiversManager
-          tenantId={activeTenantId || ""}
-          scope="events"
-          open={showReceiversManager}
-          recipients={paymentRecipients}
-          title="Recebedores de eventos"
-          description="Lista usada somente pelos comprovantes de eventos."
-          savedMessage="Recebedores de eventos atualizados."
-          onClose={() => setShowReceiversManager(false)}
-          onSaved={setPaymentRecipients}
-        />
       </div>
     </main>
   );

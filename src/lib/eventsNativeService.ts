@@ -53,7 +53,7 @@ const EVENTOS_ENQUETES_SELECT_COLUMNS =
   "id,eventoId,question,allowUserOptions,options,createdAt,updatedAt";
 const PATENTES_SELECT_COLUMNS = "id,titulo,minXp,cor,iconName,bg,border,text";
 const SOLICITACOES_INGRESSOS_SELECT_COLUMNS =
-  "id,eventoId,eventoNome,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,payment_config,dataSolicitacao,dataAprovacao,aprovadoPor";
+  "id,eventoId,eventoNome,userId,userName,userTurma,status,loteId,loteNome,quantidade,valorUnitario,valorTotal,payment_config,data,dataSolicitacao,dataAprovacao,aprovadoPor";
 const FINANCEIRO_CONFIG_SELECT_COLUMNS =
   "id,data,chave,banco,titular,whatsapp,updatedAt,createdAt";
 const EVENTOS_WRITABLE_COLUMNS = new Set([

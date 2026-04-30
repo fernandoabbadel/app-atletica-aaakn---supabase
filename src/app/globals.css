@@ -200,6 +200,20 @@ samp {
     box-shadow: 0 0 0 1px rgb(var(--tenant-primary-rgb) / 0.26);
   }
 
+  .admin-dark-select {
+    color-scheme: dark;
+  }
+
+  .admin-dark-select option {
+    background-color: #09090b;
+    color: #f4f4f5;
+  }
+
+  .admin-dark-select option:checked {
+    background-color: rgb(var(--tenant-primary-rgb) / 0.35);
+    color: #ffffff;
+  }
+
   .qr-reader-surface,
   #reader,
   #partner-reader,
