@@ -102,6 +102,7 @@ export const buildProductReceiptWhatsappMessage = (options: {
   buyerPhone?: string | null;
   quantity?: number | string | null;
   color?: string | null;
+  variant?: string | null;
   totalValue?: string | number | null;
   orderCode?: string | null;
   recipientName?: string | null;
@@ -117,6 +118,7 @@ export const buildProductReceiptWhatsappMessage = (options: {
       ? String(Math.max(1, Math.floor(options.quantity)))
       : cleanString(String(options.quantity ?? "")) || "1";
   const color = cleanString(options.color);
+  const variant = cleanString(options.variant);
   const totalValue =
     typeof options.totalValue === "number"
       ? options.totalValue.toFixed(2)
@@ -131,6 +133,7 @@ export const buildProductReceiptWhatsappMessage = (options: {
     `*CONTATO:* ${buyerPhone}`,
     `*PRODUTO:* ${productName}`,
     `*QTD:* ${quantity}`,
+    ...(variant ? [`*VARIAÇÃO:* ${variant}`] : []),
     ...(color ? [`*COR:* ${color}`] : []),
     `*VALOR:* R$ ${totalValue}`,
     `*PEDIDO:* ${orderCode}`,

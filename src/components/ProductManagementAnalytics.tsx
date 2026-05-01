@@ -140,6 +140,18 @@ function orderTotal(row: Row) {
   return parseNumber(row.total ?? row.valorTotal, 0) || parseNumber(row.price ?? row.preco, 0) * quantity;
 }
 
+function orderVariantLabel(row: Row) {
+  const data = asRecord(row.data);
+  const explicit = asString(data.varianteLabel ?? data.variantLabel);
+  if (explicit.trim()) return explicit.trim();
+  const size = asString(data.tamanhoSelecionado ?? data.variantSize).trim();
+  const color = asString(data.corVariante ?? data.variantColor).trim();
+  return [
+    size ? `Tamanho ${size}` : "",
+    color ? `Cor ${color}` : "",
+  ].filter(Boolean).join(" • ");
+}
+
 function rowDate(value: unknown) {
   const text = asString(value);
   const date = text ? new Date(text) : null;
@@ -389,6 +401,7 @@ export function ProductManagementAnalytics({
     });
 
     const byProduct = new Map<string, MetricRow>();
+    const byVariant = new Map<string, MetricRow>();
     const byLot = new Map<string, MetricRow>();
     const byCategory = new Map<string, MetricRow>();
     const byWeekday = new Map<string, MetricRow>();
@@ -406,6 +419,7 @@ export function ProductManagementAnalytics({
       const value = orderTotal(order);
       const metric = productMetrics.get(id);
       const productLabel = asString(order.productName) || productName(product ?? order);
+      const variantLabel = orderVariantLabel(order);
       const lot = asString(product?.lote) || "Sem lote";
       const category = asString(product?.categoria) || "Sem categoria";
       const orderData = asRecord(order.data);
@@ -418,6 +432,7 @@ export function ProductManagementAnalytics({
       if (hasDiscount) discountRevenue += value;
       buyers.set(buyer, (buyers.get(buyer) ?? 0) + 1);
       addMetric(byProduct, productLabel, qtd, value);
+      if (variantLabel) addMetric(byVariant, `${productLabel} • ${variantLabel}`, qtd, value);
       addMetric(byLot, lot, qtd, value);
       addMetric(byCategory, category, qtd, value);
       addMetric(byWeekday, weekdayLabel(order.createdAt ?? order.data), qtd, value);
@@ -512,6 +527,7 @@ export function ProductManagementAnalytics({
       repeatRate: safeDivide([...buyers.values()].filter((count) => count > 1).length, buyers.size) * 100,
       topFiveDependency: safeDivide(topFiveRevenue, revenue) * 100,
       byProduct: byProductRows,
+      byVariant: metricRows(byVariant, 14),
       byLot: metricRows(byLot),
       byCategory: metricRows(byCategory),
       byWeekday: WEEKDAYS.map((day) => byWeekday.get(day) ?? { name: day, qtd: 0, valor: 0 }),
@@ -568,6 +584,9 @@ export function ProductManagementAnalytics({
       <div className="grid gap-4 xl:grid-cols-2">
         <ChartPanel title="Receita por produto" subtitle="Qtd, receita e valor médio por item">
           <Bars data={analytics.byProduct} dataKey="valor" currency />
+        </ChartPanel>
+        <ChartPanel title="Vendas por variação" subtitle="Tamanho/cor vendidos e receita por item">
+          <BarsDual data={analytics.byVariant} />
         </ChartPanel>
         <ChartPanel title="Lotes por qtd e valor" subtitle="Venda do estoque e receita por lote padronizado">
           <BarsDual data={analytics.byLot} />

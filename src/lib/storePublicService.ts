@@ -1169,6 +1169,10 @@ export async function createStoreOrder(payload: {
   price: number;
   quantity?: number;
   color?: string;
+  variantId?: string;
+  variantLabel?: string;
+  variantSize?: string;
+  variantColor?: string;
   tenantId?: string | null;
   userPlanNames?: Array<string | null | undefined>;
   userPlanIds?: Array<string | null | undefined>;
@@ -1180,6 +1184,12 @@ export async function createStoreOrder(payload: {
   const fallbackUnitPrice = Math.max(0, asNum(payload.price, 0));
   const userPlanNames = collectUserPlanEntries(payload.userPlanNames);
   const userPlanIds = collectUserPlanEntries(payload.userPlanIds);
+  const orderData: Record<string, string> = {};
+  if (payload.color?.trim()) orderData.corSelecionada = payload.color.trim();
+  if (payload.variantId?.trim()) orderData.varianteId = payload.variantId.trim();
+  if (payload.variantLabel?.trim()) orderData.varianteLabel = payload.variantLabel.trim();
+  if (payload.variantSize?.trim()) orderData.tamanhoSelecionado = payload.variantSize.trim();
+  if (payload.variantColor?.trim()) orderData.corVariante = payload.variantColor.trim();
   const requestPayload = {
     userId: payload.userId.trim(),
     userName: payload.userName.trim() || "Aluno",
@@ -1188,14 +1198,12 @@ export async function createStoreOrder(payload: {
     price: 0,
     quantidade: quantity,
     total: 0,
-    data: payload.color?.trim()
-      ? { corSelecionada: payload.color.trim() }
-      : undefined,
+    data: Object.keys(orderData).length > 0 ? orderData : undefined,
   };
 
   let productLookup = supabase
     .from("produtos")
-    .select("id,preco,plan_prices,payment_config,seller_type,seller_id,seller_name,seller_logo_url")
+    .select("id,preco,plan_prices,payment_config,seller_type,seller_id,seller_name,seller_logo_url,variantes")
     .eq("id", requestPayload.productId);
   if (scopedTenantId) {
     productLookup = productLookup.eq("tenant_id", scopedTenantId);
@@ -1204,6 +1212,36 @@ export async function createStoreOrder(payload: {
   if (productError) throwSupabaseError(productError);
   if (!productRow) {
     throw new Error("Produto fora do tenant ativo.");
+  }
+  if (payload.variantId?.trim()) {
+    const variants = asArray(asObject(productRow)?.variantes)
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object");
+    const normalizedVariantId = payload.variantId.trim().toLowerCase();
+    const normalizedVariantLabel = payload.variantLabel?.trim().toLowerCase() || "";
+    const selectedVariant = variants.find((variant, index) => {
+      const explicitId = asString(variant.id).trim();
+      const size = asString(variant.tamanho).trim();
+      const color = asString(variant.cor).trim();
+      const generatedKey = `${size || "sem-tamanho"}-${color || "sem-cor"}-${index}`;
+      const label = [
+        size ? `tamanho ${size}` : "",
+        color ? `cor ${color}` : "",
+      ].filter(Boolean).join(" • ");
+      return (
+        explicitId.toLowerCase() === normalizedVariantId ||
+        generatedKey.toLowerCase() === normalizedVariantId ||
+        (normalizedVariantLabel.length > 0 && label.toLowerCase() === normalizedVariantLabel)
+      );
+    });
+
+    if (!selectedVariant) {
+      throw new Error("A variação escolhida não está mais disponível.");
+    }
+
+    const variantStock = asInt(selectedVariant.estoque) ?? 0;
+    if (variantStock < quantity) {
+      throw new Error("Estoque insuficiente para a variação escolhida.");
+    }
   }
 
   const resolvedUnitPrice = resolvePlanScopedPrice({

@@ -691,6 +691,11 @@ export function CollectivePublicDetailClient({
     String(storeCategory?.logo_url || "").trim() ||
     imageSrc;
   const heroImageSrc = activeTab === "loja" && storeEnabled ? storeCoverImage : imageSrc;
+  const leagueSiglaLabel = String(league.sigla || "").trim();
+  const leagueTurmaLabel = String(league.turmaId || "").trim();
+  const showTurmaChip =
+    leagueTurmaLabel.length > 0 &&
+    leagueTurmaLabel.toLowerCase() !== leagueSiglaLabel.toLowerCase();
 
   return (
     <div className="min-h-screen bg-[#050505] pb-20 font-sans text-white">
@@ -720,13 +725,13 @@ export function CollectivePublicDetailClient({
                   </Link>
                 ) : null}
                 <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{uiConfig.rotuloCard}</span>
-                {league.turmaId ? (
+                {showTurmaChip ? (
                   <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-cyan-200">
-                    {league.turmaId}
+                    {leagueTurmaLabel}
                   </span>
                 ) : null}
                 <span className="rounded-full border border-brand/30 bg-brand-soft px-3 py-1 text-brand-accent">
-                  {league.sigla || league.nome}
+                  {leagueSiglaLabel || league.nome}
                 </span>
               </div>
             </div>
@@ -743,9 +748,6 @@ export function CollectivePublicDetailClient({
                     {league.descricao || `${uiConfig.rotuloCard} oficial com página própria para mostrar membros, agenda e identidade visual.`}
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-brand/30 bg-brand-soft px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-brand-accent">
-                      {league.sigla || uiConfig.rotuloCard}
-                    </span>
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300">
                       {displayMembersCount} membros
                     </span>

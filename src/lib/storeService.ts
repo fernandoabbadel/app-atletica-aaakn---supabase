@@ -83,6 +83,31 @@ const asInt = (value: unknown): number | null => {
   return null;
 };
 
+const asRecord = (value: unknown): Row =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {};
+
+const asRowArray = (value: unknown): Row[] =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is Row => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    : [];
+
+const buildVariantKey = (variant: Row, index: number): string => {
+  const explicitId = asString(variant.id).trim();
+  if (explicitId) return explicitId;
+  const size = asString(variant.tamanho).trim();
+  const color = asString(variant.cor).trim();
+  return `${size || "sem-tamanho"}-${color || "sem-cor"}-${index}`;
+};
+
+const buildVariantLabel = (variant: Row): string => {
+  const size = asString(variant.tamanho).trim();
+  const color = asString(variant.cor).trim();
+  return [
+    size ? `Tamanho ${size}` : "",
+    color ? `Cor ${color}` : "",
+  ].filter(Boolean).join(" • ");
+};
+
 const boundedLimit = (requested: number, maxAllowed: number): number => {
   if (!Number.isFinite(requested)) return maxAllowed;
   if (requested < 1) return 1;
@@ -989,6 +1014,98 @@ export async function createStoreReview(payload: {
   return result;
 }
 
+async function syncApprovedOrderVariantStock(orderId: string, quantityFallback: number, productIdFallback = ""): Promise<void> {
+  const cleanOrderId = orderId.trim();
+  if (!cleanOrderId) return;
+
+  const supabase = getSupabaseClient();
+  const { data: orderRow, error: orderError } = await supabase
+    .from("orders")
+    .select("id,productId,quantidade,itens,data,status")
+    .eq("id", cleanOrderId)
+    .maybeSingle();
+
+  if (orderError) throwSupabaseError(orderError);
+  if (!orderRow) return;
+
+  const orderData = asRecord((orderRow as Row).data);
+  if (asString(orderData.variantStockAppliedAt).trim()) return;
+
+  const variantId = asString(orderData.varianteId ?? orderData.variantId).trim();
+  if (!variantId) return;
+
+  const productId = asString((orderRow as Row).productId).trim() || productIdFallback.trim();
+  if (!productId) return;
+
+  const quantity = Math.max(
+    1,
+    Math.floor(Number((orderRow as Row).quantidade ?? (orderRow as Row).itens ?? quantityFallback) || 1)
+  );
+
+  const { data: productRow, error: productError } = await supabase
+    .from("produtos")
+    .select("variantes")
+    .eq("id", productId)
+    .maybeSingle();
+
+  if (productError) throwSupabaseError(productError);
+
+  const variants = asRowArray(asRecord(productRow).variantes);
+  if (variants.length === 0) return;
+
+  const normalizedVariantId = variantId.toLowerCase();
+  const normalizedVariantLabel = asString(orderData.varianteLabel ?? orderData.variantLabel).trim().toLowerCase();
+  let matched = false;
+
+  const nextVariants = variants.map((variant, index) => {
+    const key = buildVariantKey(variant, index).toLowerCase();
+    const label = buildVariantLabel(variant).toLowerCase();
+    const matches =
+      key === normalizedVariantId ||
+      (normalizedVariantLabel.length > 0 && label === normalizedVariantLabel);
+
+    if (!matches) return variant;
+
+    matched = true;
+    const currentStock = asInt(variant.estoque) ?? 0;
+    const currentSold = asInt(variant.vendidos) ?? 0;
+    return {
+      ...variant,
+      estoque: Math.max(0, currentStock - quantity),
+      vendidos: currentSold + quantity,
+    };
+  });
+
+  if (!matched) return;
+
+  const nextStock = nextVariants.reduce((sum, variant) => sum + (asInt(variant.estoque) ?? 0), 0);
+  const appliedAt = nowIso();
+
+  const { error: productUpdateError } = await supabase
+    .from("produtos")
+    .update({
+      variantes: nextVariants,
+      estoque: nextStock,
+      updatedAt: appliedAt,
+    })
+    .eq("id", productId);
+
+  if (productUpdateError) throwSupabaseError(productUpdateError);
+
+  const { error: orderUpdateError } = await supabase
+    .from("orders")
+    .update({
+      data: {
+        ...orderData,
+        variantStockAppliedAt: appliedAt,
+      },
+      updatedAt: appliedAt,
+    })
+    .eq("id", cleanOrderId);
+
+  if (orderUpdateError) throwSupabaseError(orderUpdateError);
+}
+
 export async function approveStoreOrder(payload: {
   orderId: string;
   userId: string;
@@ -1136,6 +1253,16 @@ export async function approveStoreOrder(payload: {
       return { ok: true };
     }
   );
+
+  try {
+    await syncApprovedOrderVariantStock(
+      orderId,
+      Math.max(1, Math.floor(Number(payload.quantidade ?? payload.itens ?? 1) || 1)),
+      payload.productId || ""
+    );
+  } catch (variantStockError: unknown) {
+    console.warn("Loja: pedido aprovado, mas falhou ao sincronizar estoque da variação.", variantStockError);
+  }
 
   invalidateStoreCaches();
 }

@@ -227,7 +227,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
 
     return (
         <Link href={tenantSlug ? withTenantSlug(tenantSlug, `/treinos/${treino.id}`) : `/treinos/${treino.id}`} className="block w-full">
-            <div className="relative w-full min-h-[320px] rounded-[2.5rem] overflow-hidden border border-zinc-800 bg-[#09090b] group shadow-2xl hover:shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-all duration-500 hover:-translate-y-1">
+            <div className="relative min-h-[390px] w-full overflow-hidden rounded-[2rem] border border-zinc-800 bg-[#09090b] shadow-2xl transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_0_50px_rgba(0,0,0,0.5)] sm:min-h-[340px] sm:rounded-[2.5rem] group">
                 
                 {/* 1. IMAGEM DE CAPA (EXPANDIDA E VISÍVEL) */}
                 <div className="absolute inset-0 z-0 h-full w-full">
@@ -242,40 +242,40 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
                 </div>
 
                 {/* 2. CONTEÚDO SUPERIOR */}
-                <div className="absolute top-0 left-0 w-full p-6 z-10 flex justify-between items-start">
-                    <div className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest backdrop-blur-md border shadow-lg ${theme.badge}`}>
+                <div className="absolute left-0 top-0 z-10 flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:justify-between sm:p-6">
+                    <div className={`max-w-full truncate rounded-full border px-4 py-2 text-[10px] font-black uppercase tracking-widest shadow-lg backdrop-blur-md sm:px-5 ${theme.badge}`}>
                         {treino.modalidade}
                     </div>
                     
                     {/* Contador Flutuante */}
-                    <div className="flex flex-col gap-2">
-                        <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
+                    <div className="flex max-w-full flex-wrap gap-2 sm:flex-col sm:items-end">
+                        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3 py-1.5 backdrop-blur-md">
                             <Users size={14} className="text-white"/>
-                            <span className="text-xs font-bold text-white">{stats.confirmados} confirmados</span>
+                            <span className="text-[11px] font-bold text-white sm:text-xs">{stats.confirmados} confirmados</span>
                         </div>
-                        <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
+                        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3 py-1.5 backdrop-blur-md">
                             <CheckCircle size={14} className="text-emerald-400"/>
-                            <span className="text-xs font-bold text-white">{stats.presentes} presentes</span>
+                            <span className="text-[11px] font-bold text-white sm:text-xs">{stats.presentes} presentes</span>
                         </div>
                     </div>
                 </div>
 
                 {/* 3. CONTEÚDO INFERIOR */}
-                <div className="absolute bottom-0 left-0 w-full p-6 z-10 flex flex-col gap-6">
+                <div className="absolute bottom-0 left-0 z-10 flex w-full flex-col gap-4 p-4 sm:gap-6 sm:p-6">
                     
                     {/* Título e Info */}
                     <div>
-                        <h3 className="text-5xl font-black text-white italic uppercase tracking-tighter leading-[0.9] drop-shadow-xl mb-3">
+                        <h3 className="mb-3 break-words text-4xl font-black uppercase italic leading-[0.92] tracking-tight text-white drop-shadow-xl sm:text-5xl sm:tracking-tighter">
                             {treino.modalidade}
                         </h3>
-                        <div className="flex items-center gap-4 text-zinc-300 font-bold uppercase text-xs tracking-wider">
-                            <span className="flex items-center gap-1.5 bg-black/40 px-3 py-1 rounded-lg border border-white/5"><Clock size={14} className={theme.text}/> {treino.horario}</span>
-                            <span className="flex items-center gap-1.5 bg-black/40 px-3 py-1 rounded-lg border border-white/5"><MapPin size={14} className={theme.text}/> {treino.local}</span>
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wide text-zinc-300">
+                            <span className="flex items-center gap-1.5 rounded-lg border border-white/5 bg-black/40 px-3 py-1"><Clock size={14} className={theme.text}/> {treino.horario}</span>
+                            <span className="flex min-w-0 items-center gap-1.5 rounded-lg border border-white/5 bg-black/40 px-3 py-1"><MapPin size={14} className={`shrink-0 ${theme.text}`}/> <span className="line-clamp-1">{treino.local}</span></span>
                         </div>
                     </div>
 
                     {/* Área de Ação e Social Proof */}
-                    <div className="flex flex-col xl:flex-row items-end justify-between gap-4 pt-4 border-t border-white/10">
+                    <div className="flex flex-col items-stretch justify-between gap-4 border-t border-white/10 pt-4 xl:flex-row xl:items-end">
                         
                         {/* Esquerda: Quem vai + Turmas */}
                         <div className="flex flex-col gap-3 w-full xl:w-auto">
@@ -320,7 +320,7 @@ function TreinoCard({ treino }: { treino: TreinoData }) {
                         </div>
 
                         {/* Direita: Botões de Decisão */}
-                        <div className="flex gap-2 w-full xl:w-auto">
+                        <div className="flex w-full gap-2 xl:w-auto">
                             <button 
                                 onClick={(e) => handleRSVP(e, 'not_going')}
                                 className="flex-1 xl:flex-none h-12 px-5 rounded-2xl border border-red-500/20 text-red-500 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest transition-colors backdrop-blur-sm"
@@ -433,7 +433,7 @@ export default function TreinosPage() {
   const monthLabel = currentDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white font-sans pb-32 selection:bg-emerald-500/30">
+    <div className="min-h-screen bg-[#050505] pb-44 font-sans text-white selection:bg-emerald-500/30">
       
       <header className="fixed top-0 left-0 w-full z-30 bg-[#050505]/90 backdrop-blur-xl border-b border-white/5">
         <div className="p-4 flex items-center justify-between max-w-lg mx-auto">

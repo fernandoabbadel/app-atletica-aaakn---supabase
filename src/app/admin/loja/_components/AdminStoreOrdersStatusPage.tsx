@@ -42,6 +42,7 @@ type OrderRow = {
   total?: number;
   quantidade?: number;
   itens?: number;
+  data?: Record<string, unknown> | null;
   status?: string;
   approvedBy?: string;
   payment_config?: CommercePaymentConfig | null;
@@ -100,6 +101,20 @@ const formatDateTime = (value?: string): string => {
 
 const compactUserId = (value: string): string =>
   value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
+
+const resolveOrderVariantLabel = (row: OrderRow): string => {
+  const data = row.data && typeof row.data === "object" ? row.data : {};
+  const explicitLabel = data.varianteLabel ?? data.variantLabel;
+  if (typeof explicitLabel === "string" && explicitLabel.trim()) {
+    return explicitLabel.trim();
+  }
+  const size = data.tamanhoSelecionado ?? data.variantSize;
+  const color = data.corVariante ?? data.variantColor;
+  return [
+    typeof size === "string" && size.trim() ? `Tamanho ${size.trim()}` : "",
+    typeof color === "string" && color.trim() ? `Cor ${color.trim()}` : "",
+  ].filter(Boolean).join(" • ");
+};
 
 export function AdminStoreOrdersStatusPage({
   mode,
@@ -585,6 +600,7 @@ export function AdminStoreOrdersStatusPage({
             const isBusy = actionId === row.id;
             const totalValue = Number(row.total || row.price || 0);
             const receiverLabel = resolveReceiverLabel(row);
+            const variantLabel = resolveOrderVariantLabel(row);
 
             return (
               <article
@@ -609,6 +625,11 @@ export function AdminStoreOrdersStatusPage({
                     <p className="mt-1 text-[11px] text-zinc-500">
                       Quantidade: {Math.max(1, Number(row.quantidade || row.itens || 1) || 1)}
                     </p>
+                    {variantLabel ? (
+                      <p className="mt-1 text-[11px] font-bold uppercase text-zinc-400">
+                        {variantLabel}
+                      </p>
+                    ) : null}
                     <p className="mt-1 text-[11px] text-zinc-500">
                       Comprovante para: {receiverLabel}
                     </p>

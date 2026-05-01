@@ -172,12 +172,12 @@ const StatCard = ({ icon: Icon, value, label, color }: StatCardProps) => {
   };
 
   return (
-    <div className="flex flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 backdrop-blur-md transition-all hover:scale-105">
-      <div className={`mb-3 rounded-full p-3 ${colors[color]}`}>
-        <Icon className="h-6 w-6" />
+    <div className="flex min-w-0 flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3 backdrop-blur-md transition-all hover:scale-105 sm:p-4">
+      <div className={`mb-2 rounded-full p-2.5 sm:mb-3 sm:p-3 ${colors[color]}`}>
+        <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
       </div>
-      <span className="text-3xl font-black tracking-tight text-white">{count}</span>
-      <span className="mt-1 text-center text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+      <span className="text-2xl font-black tracking-tight text-white sm:text-3xl">{count}</span>
+      <span className="mt-1 text-center text-[9px] font-bold uppercase tracking-wide text-zinc-400 sm:text-[10px] sm:tracking-widest">
         {label}
       </span>
     </div>
@@ -334,9 +334,6 @@ export default function PublicLandingPage({
     if (user?.isAnonymous) {
       return "Abrir como visitante";
     }
-    if (isPlatformMaster(user)) {
-      return "Abrir painel master";
-    }
     if (normalizedActiveTenantSlug) {
       return "Abrir minha atlética";
     }
@@ -344,6 +341,7 @@ export default function PublicLandingPage({
   }, [isTenantLanding, normalizedActiveTenantSlug, user]);
 
   const canOpenAdmin = Boolean(user && !user.isAnonymous && hasAdminPanelAccess(user));
+  const shouldShowAuthenticatedAction = Boolean(user && (!isPlatformMaster(user) || isTenantLanding));
 
   useEffect(() => {
     let mounted = true;
@@ -554,8 +552,8 @@ export default function PublicLandingPage({
         <div className="absolute bottom-[-10%] right-[-20%] h-[80%] w-[80%] animate-pulse-slow rounded-full bg-brand-primary/10 blur-[120px] delay-700" />
       </div>
 
-      <header className="relative z-20 container mx-auto flex items-center justify-between px-4 pt-5">
-        <div className="flex items-center gap-2">
+      <header className="relative z-20 container mx-auto flex flex-col gap-4 px-4 pt-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2 self-start">
           <Image
             src={brand.logoUrl || "/logo.png"}
             alt={`Logo ${brand.sigla}`}
@@ -564,16 +562,16 @@ export default function PublicLandingPage({
             className="rounded-lg object-cover"
             unoptimized={brand.logoUrl.startsWith("http")}
           />
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-300">
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-black uppercase tracking-widest text-zinc-300">
               {brand.nome}
             </p>
-            <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+            <p className="truncate text-[10px] font-bold uppercase tracking-wide text-zinc-500">
               {brand.sigla}
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
           {isTenantLanding ? (
             <Link
               href="/"
@@ -585,13 +583,13 @@ export default function PublicLandingPage({
             <>
               <Link
                 href="/faq"
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-zinc-100 hover:bg-white/10"
+                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-center text-[10px] font-black uppercase tracking-wider text-zinc-100 hover:bg-white/10"
               >
                 Duvidas e como usar
               </Link>
               <Link
                 href="/nova-atletica"
-                className="rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
+                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-brand bg-brand-primary/15 px-3 py-2 text-center text-[10px] font-black uppercase tracking-wider text-brand-accent hover:bg-brand-primary/20"
               >
                 Cadastrar Atlética
               </Link>
@@ -602,7 +600,7 @@ export default function PublicLandingPage({
 
       <main className="relative z-10 container mx-auto px-4 pb-20 pt-8 lg:flex lg:items-center lg:gap-16 lg:pt-14">
         <div className="flex-1 space-y-8 text-center lg:text-left">
-          <div className="group relative mx-auto h-48 w-48 animate-float-slow lg:mx-0 lg:h-64 lg:w-64">
+          <div className="group relative mx-auto h-40 w-40 animate-float-slow sm:h-48 sm:w-48 lg:mx-0 lg:h-64 lg:w-64">
             <div className="absolute inset-0 scale-75 rounded-full bg-brand-primary/25 blur-[50px]" />
             <Image
               src={brand.logoUrl || "/logo.png"}
@@ -627,7 +625,7 @@ export default function PublicLandingPage({
             </div>
 
             <h1
-              className="text-5xl font-black leading-[0.9] tracking-tighter lg:text-7xl"
+              className="text-4xl font-black leading-[0.94] tracking-tight sm:text-5xl lg:text-7xl"
               style={{ color: config.titleColor }}
             >
               {config.heroTitle} <br className="hidden lg:block" />
@@ -646,7 +644,7 @@ export default function PublicLandingPage({
             </p>
           </div>
 
-          <div className="mx-auto grid w-full max-w-lg grid-cols-3 gap-4 lg:mx-0">
+          <div className="mx-auto grid w-full max-w-lg grid-cols-3 gap-2 sm:gap-4 lg:mx-0">
             <StatCard icon={Users} value={stats.first} label={stats.firstLabel} color="brand" />
             <StatCard
               icon={Building2}
@@ -663,8 +661,8 @@ export default function PublicLandingPage({
           </div>
         </div>
 
-        <div className="mx-auto mt-12 w-full max-w-md flex-1 lg:mt-0">
-          <div className="relative rounded-[2rem] border border-zinc-800 bg-zinc-900/40 p-8 shadow-2xl backdrop-blur-xl">
+        <div className="mx-auto mt-10 w-full max-w-md flex-1 lg:mt-0">
+          <div className="relative rounded-[2rem] border border-zinc-800 bg-zinc-900/40 p-5 shadow-2xl backdrop-blur-xl sm:p-8">
             <div className="mb-6 flex rounded-xl border border-zinc-800/50 bg-zinc-950/60 p-1.5">
               <button
                 onClick={() => setActiveTab("aluno")}
@@ -686,19 +684,21 @@ export default function PublicLandingPage({
 
             {user ? (
               <div className="space-y-4">
-                <button
-                  onClick={() => router.push(authenticatedPath)}
-                  className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-black text-zinc-900 transition-all hover:bg-zinc-200"
-                >
-                  <LayoutDashboard size={18} />
-                  {authenticatedActionLabel}
-                </button>
+                {shouldShowAuthenticatedAction ? (
+                  <button
+                    onClick={() => router.push(authenticatedPath)}
+                    className="flex w-full items-center justify-center gap-3 rounded-xl bg-white py-4 font-black text-zinc-900 transition-all hover:bg-zinc-200"
+                  >
+                    <LayoutDashboard size={18} />
+                    {authenticatedActionLabel}
+                  </button>
+                ) : null}
                 {!isTenantLanding && (
                   <button
                     onClick={() => router.push(publicEntryPath)}
                     className="brand-button-soft flex w-full"
                   >
-                    <Globe size={16} /> Abrir página pública
+                    <Globe size={16} /> Entrar na Atlética
                   </button>
                 )}
                 {canOpenAdmin && (

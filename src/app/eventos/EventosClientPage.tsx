@@ -173,7 +173,7 @@ function EventClassRanking({ event }: { event: Evento }) {
     );
 
   return (
-    <div className="flex items-center gap-3 bg-zinc-950/50 p-2 rounded-xl border border-zinc-800">
+    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-2">
       {rankingTurmas.length > 0 && (
         <div className="flex -space-x-2">
           {rankingTurmas.map((r, i) => (
@@ -344,7 +344,7 @@ function EventCard({
             <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-transparent to-transparent" />
             
             {/* Badges */}
-            <div className="absolute top-3 left-3 flex gap-2">
+            <div className="absolute left-3 right-3 top-3 flex flex-wrap gap-2">
                 <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase backdrop-blur-md shadow-lg ${ev.tipo === 'Liga' ? 'bg-blue-600 text-white' : 'bg-emerald-500 text-black'}`}>
                     {ev.tipo}
                 </span>
@@ -377,10 +377,10 @@ function EventCard({
                 <h2 className="text-xl font-black italic uppercase leading-tight text-white mb-2 line-clamp-2">
                     {ev.titulo}
                 </h2>
-                <div className="flex flex-wrap gap-3 text-xs font-bold text-zinc-400 uppercase">
+                <div className="flex flex-wrap gap-2 text-xs font-bold uppercase text-zinc-400">
                     <span className="flex items-center gap-1.5"><Calendar size={14} className="text-emerald-500"/> {ev.data}</span>
                     <span className="flex items-center gap-1.5"><Clock size={14} className="text-emerald-500"/> {ev.hora}</span>
-                    <span className="flex items-center gap-1.5"><MapPin size={14} className="text-emerald-500"/> {ev.local}</span>
+                    <span className="flex min-w-0 items-center gap-1.5"><MapPin size={14} className="shrink-0 text-emerald-500"/> <span className="line-clamp-1">{ev.local}</span></span>
                 </div>
             </div>
 
@@ -388,7 +388,7 @@ function EventCard({
             <EventClassRanking event={ev} />
 
             {/* Footer do Card */}
-            <div className="mt-auto pt-4 border-t border-zinc-800 flex items-center justify-between">
+            <div className="mt-auto flex items-center justify-between gap-3 border-t border-zinc-800 pt-4">
                 
                 {/* Preco */}
                 <div>
@@ -653,7 +653,7 @@ export default function EventosClientPage({
   );
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white p-6 font-sans pb-32">
+    <div className="min-h-screen bg-[#050505] p-4 pb-44 font-sans text-white sm:p-6">
       
       {/* HEADER */}
       <header className="flex justify-between items-center mb-8">

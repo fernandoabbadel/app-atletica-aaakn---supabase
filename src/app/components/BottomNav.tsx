@@ -475,9 +475,15 @@ export default function BottomNavbar() {
       const date = typeof tsObj.toDate === "function" ? tsObj.toDate() : new Date(ts as Date);
       if (Number.isNaN(date.getTime())) return "";
       const diff = Math.floor((new Date().getTime() - date.getTime()) / 60000);
-      if (diff < 1) return "agora"; if (diff < 60) return `${diff}min`;
-      const hours = Math.floor(diff / 60); if (hours < 24) return `${hours}h`;
-      return `${Math.floor(hours / 24)}d`;
+      if (diff < 1) return "agora";
+      if (diff < 60) return `${diff}min`;
+      const hours = Math.floor(diff / 60);
+      if (hours < 24) return `${hours}h`;
+      const days = Math.floor(hours / 24);
+      if (days >= 365) return "1a";
+      if (days >= 30) return "30d";
+      if (days >= 7) return "7d";
+      return `${days}d`;
   };
   const isItemBlocked = (item: NavItemProps): boolean =>
       Boolean(item.isComingSoon || item.isLocked);

@@ -893,10 +893,10 @@ export default function DetalhesEventoPage() {
   const firstActiveLote = evento.lotes?.find((lote) => lote.status === "ativo");
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white pb-32 font-sans">
+    <div className="min-h-screen bg-[#050505] pb-44 font-sans text-white">
       
       {/* HERO IMAGE NEXT.JS */}
-        <div className="relative w-full h-[56vh] min-h-[360px] max-h-[640px]">
+        <div className="relative h-[58vh] min-h-[420px] max-h-[640px] w-full sm:min-h-[360px]">
             <Image 
                 src={evento.imagem || "https://placehold.co/600x400/111/333"} 
                 alt={`Capa do evento ${evento.titulo}`}
@@ -909,7 +909,7 @@ export default function DetalhesEventoPage() {
             />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/20 to-transparent"></div>
         
-        <div className="absolute top-6 left-6 right-6 flex justify-between items-center z-20">
+        <div className="absolute left-4 right-4 top-4 z-20 flex items-center justify-between sm:left-6 sm:right-6 sm:top-6">
             <Link href={tenantPath("/eventos")} className="bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 text-white hover:bg-white hover:text-black transition">
                 <ArrowLeft size={20} />
             </Link>
@@ -922,7 +922,7 @@ export default function DetalhesEventoPage() {
             <EventCountdown dateStr={evento.data} timeStr={evento.hora} />
         </div>
 
-      <div className="absolute bottom-24 right-6 z-20 flex flex-col items-end gap-2">
+      <div className="absolute bottom-32 right-4 z-20 flex flex-col items-end gap-2 sm:bottom-24 sm:right-6">
             {rankingTurmas.map((t) => (
                 <div key={t.turma} className="flex items-center gap-2 bg-black/60 backdrop-blur-md pl-1 pr-3 py-1 rounded-full border border-white/10">
                     <Image 
@@ -937,23 +937,23 @@ export default function DetalhesEventoPage() {
             ))}
         </div>
 
-        <div className="absolute bottom-0 left-0 p-6 w-full z-20">
+        <div className="absolute bottom-0 left-0 z-20 w-full p-4 sm:p-6">
             <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="px-3 py-1 bg-emerald-500 text-black text-[10px] font-black uppercase rounded inline-block">{evento.tipo}</span>
                 <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase backdrop-blur-md ${getSaleStatusClass(eventoSaleStatus)}`}>
                     {getSaleStatusLabel(eventoSaleStatus)}
                 </span>
             </div>
-            <h1 className="text-3xl font-black italic uppercase leading-none text-white drop-shadow-xl mb-2">{evento.titulo}</h1>
-            <div className="flex gap-4 text-xs font-bold text-zinc-300 uppercase">
+            <h1 className="mb-2 break-words text-3xl font-black uppercase italic leading-none text-white drop-shadow-xl sm:text-4xl">{evento.titulo}</h1>
+            <div className="flex flex-wrap gap-2 text-xs font-bold uppercase text-zinc-300">
                 <span className="flex items-center gap-1"><Calendar size={12} className="text-emerald-500"/> {evento.data}</span>
-                <span className="flex items-center gap-1"><MapPin size={12} className="text-emerald-500"/> {evento.local}</span>
+                <span className="flex min-w-0 items-center gap-1"><MapPin size={12} className="shrink-0 text-emerald-500"/> <span className="line-clamp-1">{evento.local}</span></span>
             </div>
         </div>
       </div>
 
       {/* CONTEUDO */}
-      <div className="relative z-30 -mt-6 bg-[#050505] rounded-t-[30px] border-t border-white/10 p-6 space-y-8">
+      <div className="relative z-30 -mt-6 space-y-8 rounded-t-[30px] border-t border-white/10 bg-[#050505] p-4 sm:p-6">
         
         {evento.descricao && (
             <div className="space-y-2">
@@ -989,7 +989,7 @@ export default function DetalhesEventoPage() {
             </button>
         </div>
 
-        <div className="flex justify-center gap-6 text-[10px] font-bold uppercase text-zinc-500">
+        <div className="flex flex-wrap justify-center gap-4 text-[10px] font-bold uppercase text-zinc-500 sm:gap-6">
             <button onClick={() => setModalUsersType('going')} className="hover:text-emerald-500 transition underline decoration-dashed underline-offset-4 flex items-center gap-1">
                 <Users size={12}/> {evento.stats?.confirmados || 0} Confirmados
             </button>

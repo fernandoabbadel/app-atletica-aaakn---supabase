@@ -244,15 +244,15 @@ const SECTION_LABELS: Record<EventWorkspaceSection, string> = {
 };
 
 const SECTION_ORDER: EventWorkspaceSection[] = [
-  "extrato",
+  "edicao",
+  "enquetes",
+  "recebedores",
+  "checkins",
   "bi",
   "lotes",
   "ingressos",
   "cupons",
-  "checkins",
-  "edicao",
-  "enquetes",
-  "recebedores",
+  "extrato",
 ];
 
 const saleStatusTone: Record<EventSaleStatus, string> = {

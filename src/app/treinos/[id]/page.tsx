@@ -314,10 +314,10 @@ export default function TreinoDetalhesPage() {
   const presentesCount = chamadaAdmin.filter((row) => row.status === "presente").length;
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white font-sans pb-32 selection:bg-emerald-500/30">
+    <div className="min-h-screen bg-[#050505] pb-44 font-sans text-white selection:bg-emerald-500/30">
       
       {/* --- HERO SECTION --- */}
-      <div className="relative h-[65vh] w-full">
+      <div className="relative h-[68vh] min-h-[520px] w-full sm:h-[65vh] sm:min-h-[460px]">
         <div className="absolute inset-0 bg-black">
             {/* Imagem de capa do treino */}
             <Image 
@@ -330,23 +330,23 @@ export default function TreinoDetalhesPage() {
             <div className={`absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/30 to-transparent z-10`}></div>
         </div>
 
-        <Link href={tenantSlug ? withTenantSlug(tenantSlug, "/treinos") : "/treinos"} className="absolute top-6 left-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 hover:bg-white hover:text-black transition">
+        <Link href={tenantSlug ? withTenantSlug(tenantSlug, "/treinos") : "/treinos"} className="absolute left-4 top-4 z-20 rounded-full border border-white/10 bg-black/40 p-3 backdrop-blur-md transition hover:bg-white hover:text-black sm:left-6 sm:top-6">
             <ArrowLeft size={24} />
         </Link>
         <button
             type="button"
             onClick={() => void handleShareTreino()}
             aria-label="Compartilhar treino"
-            className="absolute top-6 right-6 z-20 bg-black/40 backdrop-blur-md p-3 rounded-full border border-white/10 hover:bg-emerald-500 transition"
+            className="absolute right-4 top-4 z-20 rounded-full border border-white/10 bg-black/40 p-3 backdrop-blur-md transition hover:bg-emerald-500 sm:right-6 sm:top-6"
         >
             <Share2 size={24} />
         </button>
 
         {/* RANKING FLUTUANTE */}
-        <div className="absolute bottom-40 right-6 z-20 flex flex-col gap-2 items-end">
+        <div className="absolute bottom-56 right-4 z-20 flex max-w-[48vw] flex-col items-end gap-2 sm:bottom-40 sm:right-6 sm:max-w-none">
             {rankingTurmas.map((t, i) => (
-                <div key={t.turma} className="flex items-center gap-3 bg-black/60 backdrop-blur-md pl-1.5 pr-4 py-1.5 rounded-full border border-white/10 animate-in slide-in-from-right duration-700 shadow-xl" style={{ animationDelay: `${i * 100}ms` }}>
-                    <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden border border-zinc-500 shrink-0 relative">
+                <div key={t.turma} className="flex items-center gap-2 rounded-full border border-white/10 bg-black/60 py-1 pl-1 pr-3 shadow-xl backdrop-blur-md animate-in slide-in-from-right duration-700 sm:gap-3 sm:py-1.5 sm:pl-1.5 sm:pr-4" style={{ animationDelay: `${i * 100}ms` }}>
+                    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-zinc-500 bg-zinc-800 sm:h-10 sm:w-10">
                         {t.imagem ? <Image src={t.imagem} alt={t.turma} fill className="object-cover" /> : <span className="text-xs font-black">{t.turma}</span>}
                     </div>
                     <div className="flex flex-col items-end leading-none">
@@ -358,9 +358,9 @@ export default function TreinoDetalhesPage() {
         </div>
 
         {/* INFO PRINCIPAL */}
-        <div className="absolute bottom-0 left-0 w-full p-6 z-20 flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-                <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest backdrop-blur-md border shadow-lg ${theme.badge}`}>
+        <div className="absolute bottom-0 left-0 z-20 flex w-full flex-col gap-3 p-4 sm:p-6">
+            <div className="flex flex-wrap items-center gap-2">
+                <span className={`max-w-full truncate rounded-full border px-4 py-1.5 text-[10px] font-black uppercase tracking-widest shadow-lg backdrop-blur-md ${theme.badge}`}>
                     {treino.modalidade}
                 </span>
                 <span className="bg-white/10 backdrop-blur-md text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
@@ -371,7 +371,7 @@ export default function TreinoDetalhesPage() {
                 </span>
             </div>
             
-            <h1 className="text-5xl md:text-6xl font-black italic uppercase tracking-tighter leading-none text-white drop-shadow-2xl">
+            <h1 className="break-words text-4xl font-black uppercase italic leading-none tracking-tight text-white drop-shadow-2xl sm:text-5xl md:text-6xl md:tracking-tighter">
                 {treino.modalidade}
             </h1>
             
@@ -387,10 +387,10 @@ export default function TreinoDetalhesPage() {
       </div>
 
       {/* --- CARD DE CONTEÚDO --- */}
-      <div className="relative z-30 -mt-8 bg-[#050505] rounded-t-[2.5rem] border-t border-white/10 shadow-[0_-10px_50px_rgba(0,0,0,0.5)] p-6 space-y-8 min-h-[50vh]">
+      <div className="relative z-30 -mt-8 min-h-[50vh] space-y-8 rounded-t-[2.5rem] border-t border-white/10 bg-[#050505] p-4 shadow-[0_-10px_50px_rgba(0,0,0,0.5)] sm:p-6">
         
         {/* 1. BOTÕES DE DECISÃO */}
-        <div className="bg-zinc-900/50 backdrop-blur-xl border border-white/5 p-2 rounded-2xl shadow-inner flex gap-2">
+        <div className="flex gap-2 rounded-2xl border border-white/5 bg-zinc-900/50 p-2 shadow-inner backdrop-blur-xl">
             <button 
                 onClick={() => handleRSVP('not_going')}
                 className="flex-1 py-4 rounded-xl border border-transparent hover:border-red-500/30 hover:bg-red-500/10 text-zinc-500 hover:text-red-500 font-bold text-xs uppercase transition-all"
@@ -400,7 +400,7 @@ export default function TreinoDetalhesPage() {
             <button 
                 onClick={() => handleRSVP('going')}
                 disabled={loadingAction}
-                className={`flex-[2] py-4 rounded-xl font-black text-sm uppercase tracking-widest shadow-lg flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${userRsvp === 'going' ? 'bg-emerald-500 text-black shadow-emerald-500/30' : 'bg-white text-black hover:bg-zinc-200'}`}
+                className={`flex-[2] rounded-xl py-4 text-center text-xs font-black uppercase tracking-wide shadow-lg transition-all active:scale-95 sm:text-sm sm:tracking-widest ${userRsvp === 'going' ? 'bg-emerald-500 text-black shadow-emerald-500/30' : 'bg-white text-black hover:bg-zinc-200'} flex flex-col items-center justify-center gap-1`}
             >
                 {loadingAction ? <span className="animate-spin">...</span> : userRsvp === 'going' ? <><CheckCircle size={24}/> Confirmado</> : "Confirmar Presença"}
             </button>

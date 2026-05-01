@@ -133,6 +133,31 @@ const parseColorLines = (value: unknown): string[] => {
   return [];
 };
 
+const buildVariantKey = (variant: ProdutoVariante, index: number): string => {
+  const explicitId = typeof variant.id === "string" ? variant.id.trim() : "";
+  if (explicitId) return explicitId;
+
+  const size = typeof variant.tamanho === "string" ? variant.tamanho.trim() : "";
+  const color = typeof variant.cor === "string" ? variant.cor.trim() : "";
+  return `${size || "sem-tamanho"}-${color || "sem-cor"}-${index}`;
+};
+
+const formatVariantLabel = (variant?: ProdutoVariante | null): string => {
+  if (!variant) return "";
+  const size = typeof variant.tamanho === "string" ? variant.tamanho.trim() : "";
+  const color = typeof variant.cor === "string" ? variant.cor.trim() : "";
+  const parts = [
+    size ? `Tamanho ${size}` : "",
+    color ? `Cor ${color}` : "",
+  ].filter(Boolean);
+  return parts.join(" • ") || "Variação";
+};
+
+const getVariantStock = (variant?: ProdutoVariante | null): number =>
+  typeof variant?.estoque === "number" && Number.isFinite(variant.estoque)
+    ? Math.max(0, Math.floor(variant.estoque))
+    : 0;
+
 const orderStatusLabel = (status: Order["status"]): string => {
   if (status === "approved") return "Aprovado";
   if (status === "rejected") return "Rejeitado";
@@ -198,6 +223,7 @@ export default function DetalheProdutoPage() {
   const [checkoutOrderId, setCheckoutOrderId] = useState<string | null>(null);
   const [checkoutQuantity, setCheckoutQuantity] = useState(1);
   const [checkoutColor, setCheckoutColor] = useState("");
+  const [selectedVariantId, setSelectedVariantId] = useState("");
   const [pixData, setPixData] = useState<PixData>({
     chave: "Carregando...",
     banco: "...",
@@ -220,6 +246,38 @@ export default function DetalheProdutoPage() {
     const selectedColor = rawData["corSelecionada"];
     return typeof selectedColor === "string" ? selectedColor.trim() : "";
   }, []);
+
+  const resolveOrderVariantLabel = useCallback((order?: Order | null): string => {
+    const rawData = order?.data;
+    if (!rawData || typeof rawData !== "object") return "";
+    const explicitLabel = rawData["varianteLabel"] ?? rawData["variantLabel"];
+    if (typeof explicitLabel === "string" && explicitLabel.trim()) {
+      return explicitLabel.trim();
+    }
+    const size = rawData["tamanhoSelecionado"] ?? rawData["variantSize"];
+    const color = rawData["corVariante"] ?? rawData["variantColor"];
+    return [
+      typeof size === "string" && size.trim() ? `Tamanho ${size.trim()}` : "",
+      typeof color === "string" && color.trim() ? `Cor ${color.trim()}` : "",
+    ].filter(Boolean).join(" • ");
+  }, []);
+
+  const variantOptions = useMemo(() => {
+    if (!produto || !Array.isArray(produto.variantes)) return [];
+    return produto.variantes.map((variant, index) => ({
+      key: buildVariantKey(variant, index),
+      label: formatVariantLabel(variant),
+      stock: getVariantStock(variant),
+      variant,
+    }));
+  }, [produto]);
+
+  const selectedVariantOption = useMemo(
+    () => variantOptions.find((option) => option.key === selectedVariantId) || null,
+    [selectedVariantId, variantOptions]
+  );
+  const selectedVariant = selectedVariantOption?.variant || null;
+  const selectedVariantLabel = selectedVariantOption?.label || "";
 
   const availableColors = useMemo(() => {
     if (!produto) return [] as string[];
@@ -269,8 +327,18 @@ export default function DetalheProdutoPage() {
     }, 0);
   }, [checkoutColor, produto]);
 
-  const effectiveCheckoutStock = selectedColorStock >= 0 ? selectedColorStock : totalStock;
-  const isSelectedColorUnavailable = checkoutColor.trim().length > 0 && selectedColorStock === 0;
+  const selectedVariantStock = selectedVariant ? getVariantStock(selectedVariant) : -1;
+  const hasVariantOptions = variantOptions.length > 0;
+  const effectiveCheckoutStock = hasVariantOptions
+    ? selectedVariantStock >= 0
+      ? selectedVariantStock
+      : totalStock
+    : selectedColorStock >= 0
+    ? selectedColorStock
+    : totalStock;
+  const isSelectedVariantMissing = hasVariantOptions && !selectedVariant;
+  const isSelectedVariantUnavailable = hasVariantOptions && Boolean(selectedVariant) && selectedVariantStock <= 0;
+  const isSelectedColorUnavailable = !hasVariantOptions && checkoutColor.trim().length > 0 && selectedColorStock === 0;
   const checkoutMaxQuantity = useMemo(() => Math.max(1, Math.min(10, effectiveCheckoutStock || 1)), [effectiveCheckoutStock]);
   const saleStatus = produto?.status || "ativo";
   const isOutOfStock = totalStock <= 0 || saleStatus === "esgotado";
@@ -585,14 +653,19 @@ export default function DetalheProdutoPage() {
     setCheckoutOrderId(null);
     setCheckoutQuantity(1);
     setCheckoutColor("");
+    setSelectedVariantId("");
     setCheckoutOpen(true);
     void loadStorePixData();
   };
 
   const handleCheckoutConfirmOrder = async () => {
     if (!user || !produto || creatingOrder) return;
-    if (isOutOfStock || isSelectedColorUnavailable) {
+    if (isOutOfStock || isSelectedColorUnavailable || isSelectedVariantUnavailable) {
       addToast("Produto esgotado no momento.", "error");
+      return;
+    }
+    if (isSelectedVariantMissing) {
+      addToast("Escolha o tamanho ou variação antes de confirmar.", "error");
       return;
     }
     if (checkoutQuantity < 1 || checkoutQuantity > checkoutMaxQuantity) {
@@ -609,7 +682,11 @@ export default function DetalheProdutoPage() {
         productName: produto.nome,
         price: produto.preco,
         quantity: checkoutQuantity,
-        color: checkoutColor,
+        color: checkoutColor || (typeof selectedVariant?.cor === "string" ? selectedVariant.cor : ""),
+        variantId: selectedVariantId,
+        variantLabel: selectedVariantLabel,
+        variantSize: typeof selectedVariant?.tamanho === "string" ? selectedVariant.tamanho : "",
+        variantColor: typeof selectedVariant?.cor === "string" ? selectedVariant.cor : "",
         tenantId: tenantId || undefined,
         userPlanNames,
         userPlanIds,
@@ -652,6 +729,7 @@ export default function DetalheProdutoPage() {
       buyerPhone,
       quantity: checkoutQuantity,
       color: checkoutColor.trim(),
+      variant: selectedVariantLabel,
       totalValue: checkoutTotal.toFixed(2),
       orderCode: checkoutOrderId.slice(0, 8).toUpperCase(),
       recipientName: checkoutRecipient.name,
@@ -695,6 +773,7 @@ export default function DetalheProdutoPage() {
     const quantity = Number(order.quantidade || order.itens || 1);
     const total = Number((order.total ?? order.price) || 0).toFixed(2);
     const selectedColor = resolveOrderColor(order);
+    const selectedVariant = resolveOrderVariantLabel(order);
     const buyerName = user?.nome?.trim() || order.userName || "Cliente";
     const buyerTurma = user?.turma?.trim() || order.userTurma || "Sem turma";
     const buyerPhone = user?.telefone?.trim() || "Não informado";
@@ -706,6 +785,7 @@ export default function DetalheProdutoPage() {
       buyerPhone,
       quantity,
       color: selectedColor,
+      variant: selectedVariant,
       totalValue: total,
       orderCode: order.id.slice(0, 8).toUpperCase(),
       recipientName: recipient.name,
@@ -970,6 +1050,7 @@ export default function DetalheProdutoPage() {
                       {(() => {
                         const payment = resolveOrderPaymentConfig(order);
                         const orderColor = resolveOrderColor(order);
+                        const orderVariant = resolveOrderVariantLabel(order);
                         const orderWhatsapp = (payment.whatsapp || financeFallback.whatsapp).replace(/\D/g, "");
                         return (
                           <div className="mt-3 rounded-xl border border-zinc-800 bg-black/30 p-3">
@@ -1000,6 +1081,12 @@ export default function DetalheProdutoPage() {
                                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
                                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Cor enviada</p>
                                   <p className="mt-1 font-bold text-zinc-200">{orderColor}</p>
+                                </div>
+                              ) : null}
+                              {orderVariant ? (
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Variação</p>
+                                  <p className="mt-1 font-bold text-zinc-200">{orderVariant}</p>
                                 </div>
                               ) : null}
                               <div className="flex flex-wrap gap-2 pt-1">
@@ -1049,6 +1136,11 @@ export default function DetalheProdutoPage() {
                       <div className="mt-3 text-xs text-zinc-300">
                         Qtd: {Number(order.quantidade || order.itens || 1)} • R$ {Number((order.total ?? order.price) || 0).toFixed(2)}
                       </div>
+                      {resolveOrderVariantLabel(order) ? (
+                        <p className="mt-2 text-[11px] font-bold uppercase text-zinc-500">
+                          {resolveOrderVariantLabel(order)}
+                        </p>
+                      ) : null}
                     </article>
                   ))}
                 </div>
@@ -1125,10 +1217,48 @@ export default function DetalheProdutoPage() {
                     <p className="text-[10px] text-zinc-500">
                       {isOutOfStock
                         ? "Sem estoque disponivel no momento."
+                        : isSelectedVariantMissing
+                        ? "Escolha um tamanho ou variação para confirmar o estoque."
+                        : isSelectedVariantUnavailable
+                        ? "Sem estoque para a variação selecionada."
                         : isSelectedColorUnavailable
                         ? "Sem estoque para a cor selecionada."
                         : "Estoque confirmado para este pedido."}
                     </p>
+                    {variantOptions.length > 0 && (
+                      <div className="space-y-1">
+                        <label className="text-xs text-zinc-400 font-bold uppercase">
+                          Tamanho / variação
+                        </label>
+                        <select
+                          value={selectedVariantId}
+                          onChange={(event) => {
+                            const nextId = event.target.value;
+                            setSelectedVariantId(nextId);
+                            const nextOption = variantOptions.find((option) => option.key === nextId);
+                            const nextColor =
+                              typeof nextOption?.variant.cor === "string"
+                                ? nextOption.variant.cor.trim()
+                                : "";
+                            if (nextColor) setCheckoutColor(nextColor);
+                            setCheckoutQuantity((previous) =>
+                              Math.min(
+                                previous,
+                                Math.max(1, nextOption ? Math.min(10, nextOption.stock || 1) : 1)
+                              )
+                            );
+                          }}
+                          className="w-full rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm font-bold text-white outline-none focus:border-emerald-500"
+                        >
+                          <option value="">Escolha o tamanho</option>
+                          {variantOptions.map((option) => (
+                            <option key={option.key} value={option.key} disabled={option.stock <= 0}>
+                              {option.label} - {option.stock > 0 ? `${option.stock} em estoque` : "esgotado"}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="space-y-1">
                       <label className="text-xs text-zinc-400 font-bold uppercase">Cor (opcional)</label>
                       <input
@@ -1196,7 +1326,13 @@ export default function DetalheProdutoPage() {
 
                   <button
                     onClick={() => void handleCheckoutConfirmOrder()}
-                    disabled={creatingOrder || isOutOfStock || isSelectedColorUnavailable}
+                    disabled={
+                      creatingOrder ||
+                      isOutOfStock ||
+                      isSelectedColorUnavailable ||
+                      isSelectedVariantMissing ||
+                      isSelectedVariantUnavailable
+                    }
                     className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase transition disabled:opacity-60 inline-flex items-center justify-center gap-2"
                   >
                     {creatingOrder ? <Loader2 size={14} className="animate-spin" /> : <ShoppingBag size={14} />}
@@ -1249,10 +1385,6 @@ export default function DetalheProdutoPage() {
                     disabled={!checkoutOrderId}
                     helperText="Depois de pagar o PIX, envie o comprovante para esse responsavel liberar manualmente o pedido."
                   />
-
-                  <p className="text-[11px] text-zinc-500 leading-relaxed">
-                    Depois de pagar o PIX, envie o comprovante para o contato financeiro para liberacao manual do pedido.
-                  </p>
                 </div>
               )}
 
